@@ -348,7 +348,7 @@ async function requestQaCompletion(
         });
     };
     try {
-        const streamRequest = buildProviderRequest(apiConfig, null, messages, { stream: true, maxTokens, promptCache: getQaPromptCache() });
+        const streamRequest = buildProviderRequest(apiConfig, null, messages, { stream: true, maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
         const result = await streamQaProviderRequest(streamRequest, { signal: options?.signal }, options?.callbacks);
         if (!result.content.trim()) throw new Error("LLM 返回了空内容");
         logQaCall({ model: apiConfig.defaultModel, messages: streamRequest.messagesForLog, rawResponse: result.content, reasoning: result.reasoning });
@@ -356,7 +356,7 @@ async function requestQaCompletion(
     } catch (streamError) {
         if (options?.signal?.aborted) throw streamError;
         await options?.callbacks?.onStreamFallback?.(formatQaErrorMessage(streamError));
-        const request = buildProviderRequest(apiConfig, null, messages, { maxTokens, promptCache: getQaPromptCache() });
+        const request = buildProviderRequest(apiConfig, null, messages, { maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
         const response = await fetchLlmPayload(request, { signal: options?.signal });
         if (!response.ok) throw new Error(`API ${response.status}: ${await response.text()}`);
         const parsed = parseProviderResponse(request.providerKind, await response.json());
@@ -714,7 +714,7 @@ async function callQaAgentNative(apiConfig: ApiConfig, history: QaEngineMessage[
                 tools,
                 [],
                 { characterName: "工坊", userName: "用户" },
-                { appId: "qa", signal: options?.signal, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: getQaPromptCache() },
+                { appId: "qa", signal: options?.signal, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" },
                 {
                     async onDelta(delta) {
                         await filter.push(delta);
@@ -727,7 +727,7 @@ async function callQaAgentNative(apiConfig: ApiConfig, history: QaEngineMessage[
         } catch (streamError) {
             if (options?.signal?.aborted) throw streamError;
             await callbacks?.onStreamFallback?.(formatQaErrorMessage(streamError));
-            const fallbackRequest = buildProviderRequest(apiConfig, null, messages, { tools, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: getQaPromptCache() });
+            const fallbackRequest = buildProviderRequest(apiConfig, null, messages, { tools, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
             const response = await fetchLlmPayload(fallbackRequest, { signal: options?.signal });
             if (!response.ok) throw new Error(`API ${response.status}: ${await response.text()}`);
             const parsed = parseProviderResponse(fallbackRequest.providerKind, await response.json());

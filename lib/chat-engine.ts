@@ -1094,8 +1094,10 @@ export async function sendLLMToolStreamRequest(
         signal?: AbortSignal;
         /** 单次最大输出 token：按调用覆盖预设值（工坊输出护栏用） */
         maxTokens?: number;
-        /** 提示缓存：只有前缀稳定、上下文很大的调用方（工坊）才开 */
+        /** 提示缓存：默认跟随 API 配置上的开关，传 false 可单独关掉这一路 */
         promptCache?: boolean;
+        /** 官方 OpenAI 路由分组 key，不填按聊天分组 */
+        promptCacheKey?: string;
     },
     callbacks?: ChatCompletionStreamCallbacks,
 ): Promise<LLMToolRequestResult> {
@@ -1103,7 +1105,7 @@ export async function sendLLMToolStreamRequest(
     const pluginPurpose = options?.appId ?? "chat";
     const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId);
     const effectivePreset = afterPlugins.preset;
-    const request = buildProviderRequest(config, effectivePreset, afterPlugins.messages, { tools, stream: true, maxTokens: options?.maxTokens, promptCache: options?.promptCache });
+    const request = buildProviderRequest(config, effectivePreset, afterPlugins.messages, { tools, stream: true, maxTokens: options?.maxTokens, promptCache: options?.promptCache, promptCacheKey: options?.promptCacheKey });
     publishDebugPromptSnapshot({ request, config, preset: effectivePreset, meta, options, requestKind: "native-tools-stream", tools });
     const llmAbort = new AbortController();
     const llmTimeout = setTimeout(() => llmAbort.abort(), 500_000);

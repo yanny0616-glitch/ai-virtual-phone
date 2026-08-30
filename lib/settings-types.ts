@@ -137,6 +137,9 @@ export type ApiConfig = {
     enableImageRecognition: boolean;
     enableImageGeneration: boolean;
     preventEmptyGenerateRambling?: boolean;
+    /** 提示缓存：Anthropic 打 cache_control 断点，官方 OpenAI 带 prompt_cache_key。
+     *  按配置开关，缺省关闭——缓存写入按 1.25 倍计费，短聊单发的场景反而更贵。 */
+    promptCache?: boolean;
 };
 
 // --- VoiceApiConfig (migrated from voice-settings.tsx) ---

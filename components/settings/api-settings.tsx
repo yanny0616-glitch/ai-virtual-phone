@@ -445,6 +445,22 @@ export function ApiSettings() {
                                             />
                                         </div>
 
+                                        <div
+                                            className="ui-toggle-row mt-2 overflow-visible"
+                                            style={{ display: "block", position: "relative", height: "auto", flexShrink: 0, padding: "14px 76px 14px 16px" }}
+                                        >
+                                            <span className="menu-label font-medium">提示词缓存</span>
+                                            <span className="menu-desc whitespace-normal break-words leading-[1.45]">
+                                                复用上一次请求的相同前缀，5 分钟内再发省钱又更快。Claude 效果最明显，官方 OpenAI 自动生效，中转站看上游是否支持。缓存写入按 1.25 倍计费，偶尔发一条就不划算。
+                                            </span>
+                                            <span style={{ position: "absolute", top: 0, bottom: 0, right: 16, display: "flex", alignItems: "center" }}>
+                                                <Toggle
+                                                    checked={config.promptCache === true}
+                                                    onChange={(v) => updateConfig(config.id, { promptCache: v })}
+                                                />
+                                            </span>
+                                        </div>
+
                                     </>
                                 )
                             })()}

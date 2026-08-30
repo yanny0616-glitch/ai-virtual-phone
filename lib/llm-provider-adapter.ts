@@ -71,9 +71,11 @@ type ProviderRequestOptions = {
     tools?: LlmToolDefinition[];
     /** 单次最大输出 token：按调用覆盖预设值（工坊输出护栏用）。不填则沿用预设/各家默认 */
     maxTokens?: number;
-    /** 提示缓存：Anthropic 打 cache_control 断点，官方 OpenAI 带 prompt_cache_key。
-     *  只给上下文大且前缀稳定的调用方开（工坊），聊天不默认走。 */
+    /** 提示缓存的调用方开关：默认跟随 API 配置上的 promptCache。
+     *  传 false 可以在配置开着的情况下单独关掉这一路调用（工坊自己的开关）。 */
     promptCache?: boolean;
+    /** 官方 OpenAI 的路由分组 key：前缀不同的调用方用不同 key，命中率更高。 */
+    promptCacheKey?: string;
 };
 
 /** Anthropic ephemeral 缓存断点。命中部分按 1/10 计费，写入按 1.25 倍，有效期 5 分钟。 */
@@ -81,7 +83,7 @@ const ANTHROPIC_CACHE_CONTROL = { type: "ephemeral" } as const;
 
 /** 官方 OpenAI 的缓存是服务端自动前缀匹配，这个 key 只影响路由：
  *  同 key 的请求打到同一台机器，命中率更高。中转站不一定认识这个参数，所以只给官方发。 */
-const OPENAI_PROMPT_CACHE_KEY = "ai-phone-qa";
+const OPENAI_PROMPT_CACHE_KEY = "ai-phone-chat";
 
 function withAnthropicCacheControl(block: unknown): unknown {
     if (!block || typeof block !== "object" || Array.isArray(block)) return block;
@@ -272,13 +274,19 @@ export function buildProviderRequest(
     const guardedMessages = config.enableImageRecognition === true ? messages : stripVisionParts(messages);
     const providerMessages = ensureProviderHasUserMessage(normalizeNativeToolMessageAdjacency(guardedMessages));
 
+    // 提示缓存以 API 配置上的开关为准；调用方显式传 false 时再关掉这一路。
+    const resolved: ProviderRequestOptions = {
+        ...options,
+        promptCache: config.promptCache === true && options.promptCache !== false,
+    };
+
     if (providerKind === "anthropic") {
-        return buildAnthropicRequest(config, preset, baseUrl, providerMessages, options);
+        return buildAnthropicRequest(config, preset, baseUrl, providerMessages, resolved);
     }
     if (providerKind === "gemini") {
-        return buildGeminiRequest(config, preset, baseUrl, providerMessages, options);
+        return buildGeminiRequest(config, preset, baseUrl, providerMessages, resolved);
     }
-    return buildOpenAICompatibleRequest(config, preset, baseUrl, providerMessages, options);
+    return buildOpenAICompatibleRequest(config, preset, baseUrl, providerMessages, resolved);
 }
 
 // 剥离逻辑收敛到 api-helpers（更底层，微信助手运行时也照抄同一份正则）；
@@ -540,7 +548,7 @@ function buildOpenAICompatibleRequest(
     // 官方 OpenAI 自动缓存 1024 token 以上的稳定前缀，不需要在请求里声明；
     // prompt_cache_key 只是把同类请求路由到同一台机器，提高命中率。
     if (options.promptCache && config.provider === "OpenAI" && !config.baseUrl) {
-        body.prompt_cache_key = OPENAI_PROMPT_CACHE_KEY;
+        body.prompt_cache_key = options.promptCacheKey || OPENAI_PROMPT_CACHE_KEY;
     }
     if (options.stream) body.stream = true;
     if (options.tools?.length) {
