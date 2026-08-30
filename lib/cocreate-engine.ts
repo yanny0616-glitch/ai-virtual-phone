@@ -352,7 +352,7 @@ async function runNativeCoCreateLoop(params: {
         requestMessages,
         nativeTools,
         runtime.regexes,
-        { characterName: runtime.character.name, userName: runtime.userName },
+        { characterName: runtime.character.name, characterId: runtime.character.id, userName: runtime.userName },
         { appId: COCREATE_APP_ID, appTags, signal: params.signal },
         {
           async onDelta(delta) {
@@ -372,7 +372,7 @@ async function runNativeCoCreateLoop(params: {
         requestMessages,
         nativeTools,
         runtime.regexes,
-        { characterName: runtime.character.name, userName: runtime.userName },
+        { characterName: runtime.character.name, characterId: runtime.character.id, userName: runtime.userName },
         { appId: COCREATE_APP_ID, appTags, signal: params.signal },
       );
     rawOutputs.push(result.rawResponse);
@@ -644,7 +644,7 @@ export async function generateCoCreateReply(
           runtime.preset,
           llmMessages,
           runtime.regexes,
-          { characterName: runtime.character.name, userName: runtime.userName },
+          { characterName: runtime.character.name, characterId: runtime.character.id, userName: runtime.userName },
           { appId: COCREATE_APP_ID, appTags, signal: options?.signal },
           {
             async onDelta(delta) {
@@ -673,7 +673,7 @@ export async function generateCoCreateReply(
         runtime.preset,
         llmMessages,
         runtime.regexes,
-        { characterName: runtime.character.name, userName: runtime.userName },
+        { characterName: runtime.character.name, characterId: runtime.character.id, userName: runtime.userName },
         { appId: COCREATE_APP_ID, appTags, signal: options?.signal },
       );
       const flow = parseCoCreateToolFlow(raw);

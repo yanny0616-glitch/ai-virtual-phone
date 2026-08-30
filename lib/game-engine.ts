@@ -138,6 +138,7 @@ export async function callGameLLM(input: {
     : "用户";
   const content = await sendLLMRequest(configs.apiConfig, configs.preset, input.messages, configs.regexes, {
     characterName,
+    characterId: input.characterId,
     userName,
   }, {
     appId: GAME_PROMPT_APP_ID,

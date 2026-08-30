@@ -372,7 +372,7 @@ export async function generateCheckPhoneManifest(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_manifest" },
     );
 
@@ -3692,7 +3692,7 @@ export async function generateCheckPhoneInstagram(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_instagram" },
     );
 
@@ -3952,7 +3952,7 @@ export async function generateCheckPhoneNotes(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_notes" },
     );
 
@@ -3989,7 +3989,7 @@ export async function generateCheckPhoneEmail(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_email" },
     );
 
@@ -4035,7 +4035,7 @@ export async function generateCheckPhoneTakeout(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_takeout" },
     );
 
@@ -4084,7 +4084,7 @@ export async function generateCheckPhoneTelegram(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_telegram" },
     );
 
@@ -4130,7 +4130,7 @@ export async function generateCheckPhoneSteam(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_steam" },
     );
 
@@ -4189,7 +4189,7 @@ export async function generateCheckPhoneReddit(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_reddit" },
     );
 
@@ -4308,7 +4308,7 @@ export async function generateCheckPhoneYoutube(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_youtube" },
     );
 
@@ -4367,7 +4367,7 @@ export async function generateCheckPhoneBilibili(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_bilibili" },
     );
 
@@ -4494,7 +4494,7 @@ export async function generateCheckPhoneMessages(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_messages" },
     );
 
@@ -4659,7 +4659,7 @@ export async function generateCheckPhoneBrowser(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_browser" },
     );
 
@@ -4911,7 +4911,7 @@ export async function generateCheckPhonePhotos(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_photos" },
     );
 
@@ -5242,7 +5242,7 @@ export async function generateCheckPhoneChat(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_chat" },
     );
 
@@ -5477,7 +5477,7 @@ export async function generateCheckPhoneAssets(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_assets" },
     );
 
@@ -5762,7 +5762,7 @@ export async function generateCheckPhonePhone(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_phone" },
     );
 
@@ -6162,7 +6162,7 @@ export async function generateCheckPhoneShopping(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_shopping" },
     );
 
@@ -6420,7 +6420,7 @@ export async function generateCheckPhoneMusic(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_music" },
     );
 
@@ -6846,7 +6846,7 @@ export async function generateCheckPhoneDouban(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_douban" },
     );
 
@@ -7971,7 +7971,7 @@ export async function generateCheckPhoneWeibo(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_weibo" },
     );
 
@@ -8059,7 +8059,7 @@ export async function generateCheckPhoneReading(
       preset,
       messages,
       regexes,
-      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name, characterId },
       { skipOutputRegex: true, appId: "checkphone_reading" },
     );
 

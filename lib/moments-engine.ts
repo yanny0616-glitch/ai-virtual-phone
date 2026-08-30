@@ -316,6 +316,7 @@ async function triggerAIPost(characterId: string): Promise<void> {
             preset,
             llmMessages,
             character.name,
+            character.id,
             input.regexes,
             input.appTags,
             input.userIdentity?.name,
@@ -431,6 +432,7 @@ async function callLLM(
     preset: PresetConfig | null,
     messages: LLMMessage[],
     characterName: string,
+    characterId?: string,
     regexes?: RegexConfig[],
     appTags?: string[],
     userName?: string,
@@ -441,7 +443,7 @@ async function callLLM(
             preset,
             messages,
             regexes ?? [],
-            { characterName, userName },
+            { characterName, characterId, userName },
             { appId: "moments", appTags },
         );
     } catch (err) {
@@ -461,7 +463,7 @@ async function generateNPCReactionsViaLLM(
     const { messages, apiConfig, preset, regexes, appTags, userName } = result;
     if (!apiConfig) return;
 
-    const responseText = await callLLM(apiConfig, preset, messages, `NPC-for-${character.name}`, regexes, appTags, userName);
+    const responseText = await callLLM(apiConfig, preset, messages, `NPC-for-${character.name}`, character.id, regexes, appTags, userName);
     if (!responseText) return;
 
     const chars = loadCharacters();
@@ -752,6 +754,7 @@ async function generateAIComment(post: MomentPost, character: Character): Promis
         preset,
         llmMessages,
         character.name,
+        character.id,
         input.regexes,
         input.appTags,
         input.userIdentity?.name,
@@ -875,6 +878,7 @@ async function generateTargetedNPCReply(
         preset,
         llmMessages,
         `NPCReply-${targetNpcName}`,
+        character.id,
         input.regexes,
         input.appTags,
         input.userIdentity?.name,
@@ -954,6 +958,7 @@ async function triggerCharacterReply(
         preset,
         llmMessages,
         character.name,
+        character.id,
         input.regexes,
         input.appTags,
         input.userIdentity?.name,

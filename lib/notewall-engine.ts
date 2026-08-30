@@ -174,7 +174,7 @@ export async function generateNoteWallCharacterNote(
     resolved.preset,
     resolved.messages,
     resolved.regexes,
-    { characterName: `便签墙:${resolved.character.name}`, userName: resolved.userName },
+    { characterName: `便签墙:${resolved.character.name}`, characterId: resolved.character.id, userName: resolved.userName },
     { appId: "diary", appTags: ["diary", "notewall"] },
   );
 
@@ -197,7 +197,7 @@ export async function generateNoteWallCharacterReplies(
     resolved.preset,
     resolved.messages,
     resolved.regexes,
-    { characterName: `便签墙:${resolved.character.name}`, userName: resolved.userName },
+    { characterName: `便签墙:${resolved.character.name}`, characterId: resolved.character.id, userName: resolved.userName },
     { appId: "diary", appTags: ["diary", "notewall_reply"] },
   );
 

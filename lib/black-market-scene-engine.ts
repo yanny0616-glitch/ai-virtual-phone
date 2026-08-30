@@ -181,6 +181,7 @@ export async function generateBlackMarketSceneReply(sessionId: string, userText:
   const userName = withUser.userName || resolveUserIdentity(withUser.characterId, BLACK_MARKET_BINDING_APP_ID)?.name || "用户";
   const reply = await sendLLMRequest(configs.apiConfig, configs.preset, messages, configs.regexes, {
     characterName: withUser.characterName,
+    characterId: withUser.characterId,
     userName,
   }, {
     appId: BLACK_MARKET_PROMPT_APP_ID,

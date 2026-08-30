@@ -142,7 +142,19 @@ export function getApiUsageDays(options?: { days?: number }): ApiUsageDay[] {
         const key = localDateKey(date);
         const day = stored.get(key);
         result.push(day
-            ? { ...emptyBucket(), ...day, byCharacter: day.byCharacter ?? {} }
+            ? {
+                ...emptyBucket(),
+                ...day,
+                byModel: Object.fromEntries(
+                    Object.entries(day.byModel ?? {}).map(([model, bucket]) => [model, { ...emptyBucket(), ...bucket }]),
+                ),
+                bySource: Object.fromEntries(
+                    Object.entries(day.bySource ?? {}).map(([source, bucket]) => [source, { ...emptyBucket(), ...bucket }]),
+                ),
+                byCharacter: Object.fromEntries(
+                    Object.entries(day.byCharacter ?? {}).map(([character, bucket]) => [character, { ...emptyBucket(), ...bucket }]),
+                ),
+            }
             : { date: key, ...emptyBucket(), byModel: {}, bySource: {}, byCharacter: {} });
     }
     return result;

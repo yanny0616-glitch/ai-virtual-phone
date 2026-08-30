@@ -837,7 +837,7 @@ export async function characterReact(
       ),
     });
 
-    const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, { characterName: character.name }, {
+    const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, { characterName: character.name, characterId: character.id }, {
       appId: "adventure",
       appTags: ["adventure"],
     });
@@ -952,7 +952,7 @@ export async function companionDeclare(
     // Debug: log the full prompt sent to character
     dmLog(`角色·${character.name}·发送`, llmMessages.map((m, i) => `[${i}] ${m.role}: ${typeof m.content === "string" ? m.content : "(multipart)"}`).join("\n\n"));
 
-    const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, { characterName: character.name }, {
+    const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, { characterName: character.name, characterId: character.id }, {
       appId: "adventure",
       appTags: ["adventure"],
     });
@@ -1383,7 +1383,7 @@ export function executeAgentAction(
 ): { agent: CharacterAgent; journalText: string; userMessage?: string } {
   const nodeName = (id: string) => allNodes.find(n => n.id === id)?.name || id;
   const now = formatGameTime(gameDay, gameTime);
-  let updated = { ...agent };
+  const updated = { ...agent };
   let journalText = "";
   let userMessage: string | undefined;
 

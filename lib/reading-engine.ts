@@ -138,6 +138,7 @@ async function callReadingLLM(
     preset: PresetConfig | null,
     messages: LLMMessage[],
     characterName: string,
+    characterId: string,
     regexes?: RegexConfig[],
     appTags?: string[],
     userName?: string,
@@ -147,7 +148,7 @@ async function callReadingLLM(
         preset,
         messages,
         regexes ?? [],
-        { characterName, userName },
+        { characterName, characterId, userName },
         { appId: "reading", appTags },
     );
 }
@@ -308,6 +309,7 @@ export async function generateAnnotationBatch(
         preset,
         llmMessages,
         character.name,
+        character.id,
         input.regexes,
         input.appTags,
         input.userIdentity?.name,
@@ -426,6 +428,7 @@ export async function generateReadingChat(
         preset,
         llmMessages,
         character.name,
+        character.id,
         input.regexes,
         input.appTags,
         input.userIdentity?.name,

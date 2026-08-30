@@ -880,7 +880,7 @@ async function sendWithOptionalVisionFallback(
   preset: PresetConfig | null,
   messages: LLMMessage[],
   regexes: RegexConfig[],
-  meta: { characterName?: string; userName?: string },
+  meta: { characterName?: string; characterId?: string; userName?: string },
   options: { appId: string; appTags?: string[]; skipOutputRegex?: boolean },
 ): Promise<string> {
   const attemptedVision = hasVisionParts(messages);
@@ -1192,7 +1192,7 @@ export async function generateXiaohongshuCharacterActivity(
     resolved.preset,
     messages,
     resolved.regexes,
-    { characterName: `小红书:${resolved.character.name}`, userName: resolved.input.userIdentity?.name },
+    { characterName: `小红书:${resolved.character.name}`, characterId: resolved.character.id, userName: resolved.input.userIdentity?.name },
     { appId: "xiaohongshu", appTags: ["xiaohongshu", "activity"] },
   );
   return parseWithDebug(raw, output => parseXiaohongshuCharacterActivity(output, notes.map(note => note.id)), "无法解析小红书角色互动内容");
@@ -1221,7 +1221,7 @@ export async function generateXiaohongshuCharacterReactionToUserPost(
     resolved.preset,
     messages,
     resolved.regexes,
-    { characterName: `小红书:${resolved.character.name}`, userName: resolved.input.userIdentity?.name },
+    { characterName: `小红书:${resolved.character.name}`, characterId: resolved.character.id, userName: resolved.input.userIdentity?.name },
     { appId: "xiaohongshu", appTags: ["xiaohongshu", "reaction"] },
   );
   return parseWithDebug(raw, parseXiaohongshuCharacterReaction, "无法解析小红书角色互动内容");
@@ -1358,7 +1358,7 @@ export async function generateXiaohongshuCharacterReplyToUserComment(
     resolved.preset,
     messages,
     resolved.regexes,
-    { characterName: `小红书:${resolved.character.name}`, userName: resolved.input.userIdentity?.name },
+    { characterName: `小红书:${resolved.character.name}`, characterId: resolved.character.id, userName: resolved.input.userIdentity?.name },
     { appId: "xiaohongshu", appTags: ["xiaohongshu", "comment"] },
   );
   return parseWithDebug(raw, parseXiaohongshuCharacterReaction, "无法解析小红书角色回复");
@@ -1396,7 +1396,7 @@ export async function generateXiaohongshuCharacterMentionReply(
     resolved.preset,
     messages,
     resolved.regexes,
-    { characterName: `小红书:${resolved.character.name}`, userName: resolved.input.userIdentity?.name },
+    { characterName: `小红书:${resolved.character.name}`, characterId: resolved.character.id, userName: resolved.input.userIdentity?.name },
     { appId: "xiaohongshu", appTags: ["xiaohongshu", "mention"] },
   );
   return parseWithDebug(raw, parseXiaohongshuCharacterMentionReply, "无法解析小红书@回复");

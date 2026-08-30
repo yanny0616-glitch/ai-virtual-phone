@@ -241,6 +241,7 @@ export async function generateDwellingLayout(
 
         const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, {
             characterName: loadCharacters().find(c => c.id === characterId)?.name,
+            characterId,
         }, {
             appId: "dwelling",
             appTags,
@@ -317,6 +318,7 @@ export async function generateItemHtml(
         );
         const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, {
             characterName: loadCharacters().find(c => c.id === characterId)?.name,
+            characterId,
         }, {
             appId: "dwelling",
             appTags,

@@ -112,6 +112,7 @@ export async function generateVnCompletion(
 
   const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, {
     characterName: character.name,
+    characterId: character.id,
   }, {
     appId: "vn",
     appTags: ["vn"],

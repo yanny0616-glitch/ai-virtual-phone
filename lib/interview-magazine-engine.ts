@@ -581,7 +581,7 @@ export async function generateCharacterInterviewAnswer(params: {
     guest.preset,
     llmMessages,
     guest.regexes,
-    { characterName: guest.character.name, userName: context.userName },
+    { characterName: guest.character.name, characterId: guest.character.id, userName: context.userName },
     { appId: INTERVIEW_MAGAZINE_APP_ID, appTags: ["interview_magazine", "answer"] },
   );
 

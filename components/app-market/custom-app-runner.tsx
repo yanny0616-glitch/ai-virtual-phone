@@ -1635,8 +1635,13 @@ export function CustomAppRunner({
       const wantCharacterName = record.characterName ? String(record.characterName) : "";
       const wantSource = record.source ? String(record.source) : "";
       const logs = [...getApiLogs()].reverse().filter(log => {
-        if (wantCharacterId && log.characterId !== wantCharacterId) return false;
-        if (wantCharacterName && log.characterName !== wantCharacterName) return false;
+        if (wantCharacterId) {
+          const matchesCurrentId = log.characterId === wantCharacterId;
+          const matchesLegacyName = !log.characterId && Boolean(wantCharacterName) && log.characterName === wantCharacterName;
+          if (!matchesCurrentId && !matchesLegacyName) return false;
+        } else if (wantCharacterName && log.characterName !== wantCharacterName) {
+          return false;
+        }
         if (wantSource && (log.source || "chat") !== wantSource) return false;
         return true;
       });
