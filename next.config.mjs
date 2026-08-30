@@ -27,9 +27,6 @@ const nextConfig = {
   output: "standalone",
   outputFileTracingRoot: projectRoot,
   distDir: resolveDistDir(),
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     // 项目有若干历史 TS 错误（chat-message-list 缺模块、weixin 路由 socket 字段、
     // world-builder SceneViewport prop 不匹配 等），不影响 dev 但 production build 会卡。

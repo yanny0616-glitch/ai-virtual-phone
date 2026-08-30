@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
+function serializeForInlineScript(value: unknown): string {
+    return JSON.stringify(value)
+        .replace(/</g, "\\u003c")
+        .replace(/\u2028/g, "\\u2028")
+        .replace(/\u2029/g, "\\u2029");
+}
+
 /**
  * OAuth callback endpoint.
  * Authorization server redirects here with ?code=xxx&state=xxx
@@ -15,11 +22,12 @@ export async function GET(req: NextRequest) {
         error,
         createdAt: Date.now(),
     };
+    const serializedPayload = serializeForInlineScript(callbackPayload);
 
     // Return a minimal HTML page that communicates back to the opener
     const html = `<!DOCTYPE html><html><head><title>授权完成</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
 <script>
-  var payload = ${JSON.stringify(callbackPayload)};
+  var payload = ${serializedPayload};
   try {
     window.localStorage.setItem("ai_phone_mcp_oauth_callback_v1", JSON.stringify(payload));
   } catch(e) {}
@@ -27,9 +35,9 @@ export async function GET(req: NextRequest) {
     if (window.opener) {
       window.opener.postMessage({
         type: "mcp-oauth-callback",
-        code: ${JSON.stringify(code)},
-        state: ${JSON.stringify(state)},
-        error: ${JSON.stringify(error)}
+        code: payload.code,
+        state: payload.state,
+        error: payload.error
       }, window.location.origin);
     }
   } catch(e) {}
@@ -47,6 +55,10 @@ export async function GET(req: NextRequest) {
 </body></html>`;
 
     return new NextResponse(html, {
-        headers: { "Content-Type": "text/html" },
+        headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     });
 }

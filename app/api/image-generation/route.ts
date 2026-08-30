@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ProxyAgent, type Dispatcher } from "undici";
 
+import { safeOutboundFetch } from "@/lib/server/safe-outbound-fetch";
+
 export const maxDuration = 120;
 
 type ImageGenerationRequest = {
@@ -100,10 +102,7 @@ function extractFromObject(data: unknown): ExtractedImage | null {
 }
 
 async function externalFetch(url: string, init: RequestInit): Promise<Response> {
-  const dispatcher = getProxyDispatcher();
-  return dispatcher
-    ? fetch(url, { ...init, dispatcher } as RequestInit & { dispatcher: Dispatcher })
-    : fetch(url, init);
+  return safeOutboundFetch(url, init, getProxyDispatcher());
 }
 
 async function fetchImageUrl(url: string): Promise<{ b64: string; mimeType: string }> {

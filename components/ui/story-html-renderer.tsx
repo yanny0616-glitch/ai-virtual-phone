@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { LanguageIcon } from "@heroicons/react/24/solid";
+import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { translateReasoningText } from "@/lib/reasoning-translate";
 
@@ -196,9 +197,14 @@ function MarkdownSegment({ content, scopeClass }: { content: string; scopeClass:
         // 1. Markdown → HTML
         const rawHtml = marked.parse(preprocessed, { async: false }) as string;
 
-        // 2. Strip only <script> tags (security), keep everything else as-is
-        //    No DOMPurify — regex-processed HTML is user-configured and trusted
-        let clean = rawHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+        // 2. 模型输出不是可信 HTML。保留排版、内联样式和 data-action，移除脚本、
+        //    事件属性、javascript: URL 以及能创建独立执行上下文/提交请求的标签。
+        let clean = DOMPurify.sanitize(rawHtml, {
+            USE_PROFILES: { html: true, svg: true, svgFilters: false },
+            ALLOW_DATA_ATTR: true,
+            FORBID_TAGS: ["script", "iframe", "object", "embed", "base", "form", "input", "textarea", "select", "option", "link", "meta"],
+            FORBID_ATTR: ["srcdoc"],
+        });
 
         // 2.5 单换行(<br>)后的行也做首行缩进：CSS text-indent 只作用于段落首行，
         //     标准的 each-line 关键字浏览器均未实现，这里在每个 <br> 后插入

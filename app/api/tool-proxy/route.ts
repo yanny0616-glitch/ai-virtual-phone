@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
+import { ProxyAgent, type Dispatcher } from "undici";
+
+import { safeOutboundFetch, UnsafeOutboundUrlError } from "@/lib/server/safe-outbound-fetch";
 
 export const maxDuration = 120;
 
@@ -16,44 +18,6 @@ type ProxyErrorPayload = {
     cause?: string;
     url?: string;
 };
-
-// 服务端 SSRF 防线：客户端 network.fetch 有同款校验，但绕过客户端直接 POST
-// 本路由时必须在这里再拦一次，禁止代理探测本机/内网/云元数据地址。
-function isPrivateIpv4(host: string): boolean {
-    const parts = host.split(".").map(part => Number(part));
-    if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-    const [a, b] = parts;
-    return a === 0
-        || a === 10
-        || a === 127
-        || (a === 169 && b === 254)
-        || (a === 172 && b >= 16 && b <= 31)
-        || (a === 192 && b === 168)
-        || (a === 100 && b >= 64 && b <= 127);
-}
-
-function blockedProxyUrlReason(rawUrl: string): string | null {
-    let url: URL;
-    try {
-        url = new URL(rawUrl);
-    } catch {
-        return "URL 格式不合法";
-    }
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-        return "只允许 http/https URL";
-    }
-    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-    const isIpv6Literal = host.includes(":");
-    const blocked = host === "localhost"
-        || host.endsWith(".localhost")
-        || host.endsWith(".local")
-        || host.endsWith(".internal")
-        || host === "::1"
-        || host === "0:0:0:0:0:0:0:1"
-        || (isIpv6Literal && (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80") || host.startsWith("::ffff:")))
-        || isPrivateIpv4(host);
-    return blocked ? "不允许代理访问本机或内网地址" : null;
-}
 
 /**
  * Server-side proxy for external tool/MCP requests.
@@ -72,11 +36,6 @@ export async function POST(req: NextRequest) {
         if (!url || typeof url !== "string") {
             return NextResponse.json({ error: "Missing url" }, { status: 400 });
         }
-        const blockedReason = blockedProxyUrlReason(url);
-        if (blockedReason) {
-            return NextResponse.json({ error: blockedReason }, { status: 400 });
-        }
-
         const fetchHeaders: Record<string, string> = {
             ...(headers || {}),
         };
@@ -118,16 +77,10 @@ export async function POST(req: NextRequest) {
         const timeout = setTimeout(() => controller.abort(), proxyTimeoutMs);
         const dispatcher = getProxyDispatcher();
 
-        const res = await (dispatcher
-            ? undiciFetch(fetchUrl, {
-                method: fetchOptions.method || "POST",
-                headers: fetchHeaders,
-                body: fetchOptions.body as string | undefined,
-                signal: controller.signal,
-                dispatcher,
-            }) as unknown as Response
-            : fetch(fetchUrl, { ...fetchOptions, signal: controller.signal })
-        );
+        const res = await safeOutboundFetch(fetchUrl, {
+            ...fetchOptions,
+            signal: controller.signal,
+        }, dispatcher);
         clearTimeout(timeout);
 
         // Forward response headers we care about
@@ -166,20 +119,13 @@ export async function POST(req: NextRequest) {
                 for (const [k, v] of baseUrl.searchParams.entries()) {
                     if (!msgUrl.searchParams.has(k)) msgUrl.searchParams.set(k, v);
                 }
-                // endpointPath 来自远端响应,可能是指向内网的绝对 URL,再拦一次
-                const msgBlockedReason = blockedProxyUrlReason(msgUrl.toString());
-                if (msgBlockedReason) {
-                    reader.cancel().catch(() => {});
-                    return NextResponse.json({ error: `SSE endpoint ${msgBlockedReason}` }, { status: 400 });
-                }
-
                 // POST the JSON-RPC body to the message endpoint
                 const postHeaders: Record<string, string> = { "Content-Type": "application/json", ...(headers || {}) };
-                const postRes = await fetch(msgUrl.toString(), {
+                const postRes = await safeOutboundFetch(msgUrl, {
                     method: "POST",
                     headers: postHeaders,
                     body: typeof body === "string" ? body : JSON.stringify(body),
-                });
+                }, dispatcher);
 
                 if (!postRes.ok && postRes.status !== 202) {
                     reader.cancel().catch(() => {});
@@ -215,7 +161,10 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: `SSE 流未返回响应。缓冲: ${sseBuffer.slice(0, 300)}` }, { status: 504 });
             } catch (sseErr) {
                 const msg = sseErr instanceof Error ? sseErr.message : String(sseErr);
-                return NextResponse.json({ error: `SSE 请求异常: ${msg}` }, { status: 502 });
+                return NextResponse.json(
+                    { error: `SSE 请求异常: ${msg}` },
+                    { status: sseErr instanceof UnsafeOutboundUrlError ? 400 : 502 },
+                );
             }
         }
 
@@ -244,7 +193,7 @@ export async function POST(req: NextRequest) {
         });
     } catch (err) {
         const payload = buildProxyErrorPayload(err, fetchUrlForDebug || requestUrlForDebug);
-        const status = payload.error.includes("超时") ? 504 : 502;
+        const status = err instanceof UnsafeOutboundUrlError ? 400 : payload.error.includes("超时") ? 504 : 502;
         return NextResponse.json(payload, { status });
     }
 }
