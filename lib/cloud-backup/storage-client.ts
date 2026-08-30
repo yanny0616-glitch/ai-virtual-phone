@@ -16,6 +16,10 @@ function resolveCreds(config: CloudBackupConfig): Creds | null {
 }
 
 function authHeaders(key: string): Record<string, string> {
+  // 新版 sb_secret_* 是不透明 API key 不是 JWT：放进 Authorization 会被网关判成
+  // 无效 token，只作为 apikey 发送时网关才会把它映射到 service_role。
+  // 旧项目的 service_role JWT 仍然需要 Bearer。
+  if (key.startsWith("sb_secret_")) return { apikey: key };
   return { apikey: key, Authorization: `Bearer ${key}` };
 }
 

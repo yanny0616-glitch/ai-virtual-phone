@@ -125,6 +125,10 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
         if (linkBusy || !url || !key) return;
         setLinkBusy(true);
         try {
+            // Publishable / anon key 没有写桶权限，等到 403 才报错用户很难看懂。
+            if (key.startsWith("sb_publishable_")) {
+                throw new Error("这是 Publishable key，没有写入权限。请用同一页的 Secret key（sb_secret_… 开头）。");
+            }
             const base = loadCloudBackupConfig();
             const probe = await testCloudBackupConnection({ ...base, url, key });
             if (!probe.ok) throw new Error(probe.error);
@@ -413,7 +417,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                 <div className="flex flex-col gap-2 rounded-[16px] bg-black/[0.03] px-3.5 py-3">
                     <span className="menu-label">接入已有个人云</span>
                     <span className="menu-desc !mt-0">
-                        填另一台设备上那个项目的地址和 service_role key（Supabase Dashboard → 该项目 → Settings → API），两台就共用同一份云备份。接入后本机别再点上面的部署，那会另建项目并顶掉这里的配置。
+                        填另一台设备上那个项目的地址和 Secret key（Supabase Dashboard → 该项目 → Settings → API Keys → Secret keys，`sb_secret_…` 开头；旧项目是 service_role）。<b>不是</b> Publishable key，那个没有写入权限。两台就共用同一份云备份。接入后本机别再点上面的部署，那会另建项目并顶掉这里的配置。
                     </span>
                     <Input
                         value={linkUrl}
@@ -425,7 +429,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                         type="password"
                         value={linkKey}
                         onChange={(e) => setLinkKey(e.target.value)}
-                        placeholder="service_role key"
+                        placeholder="sb_secret_… 或 service_role key"
                         spellCheck={false}
                     />
                     <div className="flex gap-2">
