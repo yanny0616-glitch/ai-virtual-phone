@@ -29,6 +29,28 @@ export function setQaPageChars(chars: number | null): void {
     }
 }
 
+// 提示缓存：工坊的 system 提示、工具定义和读进来的文件在多轮里一字不变，
+// 打上缓存断点后命中部分按 1/10 计费（Anthropic）。官方 OpenAI 是服务端自动
+// 缓存，这里只带一个路由用的 prompt_cache_key。
+// 默认开；极少数中转不认这些字段，关掉即可。localStorage 键 ai_phone_qa_prompt_cache。
+export function getQaPromptCache(): boolean {
+    try {
+        return localStorage.getItem("ai_phone_qa_prompt_cache") !== "0";
+    } catch {
+        return true;
+    }
+}
+
+/** null = 恢复默认（开） */
+export function setQaPromptCache(on: boolean | null): void {
+    try {
+        if (on == null) localStorage.removeItem("ai_phone_qa_prompt_cache");
+        else localStorage.setItem("ai_phone_qa_prompt_cache", on ? "1" : "0");
+    } catch {
+        // ignore
+    }
+}
+
 // 单次最大输出 token（物理护栏）：设置后工坊每次请求带 max_tokens，超长输出被服务端
 // 安全截断而不是把连接拖崩；引擎会把该预算写进系统提示，并在截断后自动续接。
 // 默认 16000；存 "0" 表示用户显式选择不传该参数（兼容不支持 max_tokens 的模型/中转）。

@@ -61,6 +61,8 @@ import {
   QA_MAX_ROUNDS_MIN,
   QA_MAX_ROUNDS_MAX,
   getQaMaxOutputTokens,
+  getQaPromptCache,
+  setQaPromptCache,
   setQaMaxOutputTokens,
   QA_DEFAULT_MAX_OUTPUT_TOKENS,
   QA_MAX_OUTPUT_TOKENS_MIN,
@@ -561,6 +563,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     const v = getQaMaxOutputTokens();
     return v == null ? "" : String(v);
   });
+  const [promptCache, setPromptCache] = useState(() => getQaPromptCache());
   const usedChars = getQaActiveContextChars();
   const pct = Math.round((usedChars / getQaContextBudgetChars()) * 100);
 
@@ -591,6 +594,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     setQaMaxRounds(parsedRounds);
     // 留空 = 显式不传 max_tokens（0 哨兵），与"没设置用默认值"区分开
     setQaMaxOutputTokens(trimmedTokens ? parsedTokens : 0);
+    setQaPromptCache(promptCache);
     onNotice?.("已保存工坊配置。");
     onClose();
   };
@@ -600,6 +604,8 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     setQaPageChars(null);
     setQaMaxRounds(null);
     setQaMaxOutputTokens(null);
+    setQaPromptCache(null);
+    setPromptCache(true);
     setBudget(String(QA_DEFAULT_CONTEXT_BUDGET_CHARS));
     setPageChars(String(QA_DEFAULT_PAGE_CHARS));
     setMaxRounds(String(QA_DEFAULT_MAX_ROUNDS));
@@ -672,6 +678,17 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
         </label>
         <div className="qa-settings-hint">
           输出长度护栏：每次请求带 max_tokens，小坊会按该预算分段写大文件，写超被安全截断后自动续接，不再整轮报废。默认 {QA_DEFAULT_MAX_OUTPUT_TOKENS.toLocaleString()}；留空 = 不传该参数（部分模型/中转不支持 max_tokens 时请留空）。
+        </div>
+        <label className="qa-settings-toggle">
+          <span>提示缓存</span>
+          <input
+            type="checkbox"
+            checked={promptCache}
+            onChange={(e) => setPromptCache(e.target.checked)}
+          />
+        </label>
+        <div className="qa-settings-hint">
+          把不变的部分（人设、工具定义、已经读进来的文件）交给服务端缓存，重复内容按折扣价计费：Claude 命中部分约 1/10，官方 OpenAI 自动半价。默认开；缓存 5 分钟不用就过期，连续对话省得最多。极少数中转不认这个参数，报错时关掉。
         </div>
         <div className="qa-devnotice-actions is-row">
           <button type="button" className="qa-devnotice-btn" onClick={reset}>恢复默认</button>

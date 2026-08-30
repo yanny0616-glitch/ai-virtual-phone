@@ -16,7 +16,7 @@ import { loadApiConfigs, loadBindingConfig } from "./settings-storage";
 import type { ApiConfig } from "./settings-types";
 import { buildQaSystemPrompt } from "./qa-knowledge";
 import { createSseJsonParser } from "./sse-json";
-import { getQaMaxOutputTokens, getQaMaxRounds } from "./qa-prefs";
+import { getQaMaxOutputTokens, getQaMaxRounds, getQaPromptCache } from "./qa-prefs";
 import { parseToolCalls } from "./tool-executor";
 import {
     buildQaNativeNameMap,
@@ -64,16 +64,6 @@ function requireQaApiConfig(): ApiConfig {
         throw new Error("还没有可用的 API 配置。请先到「设置 → API 设置」添加 LLM API（Base URL + API Key），再回来提问。");
     }
     return config;
-}
-
-// 提示缓存开关：工坊的 system 提示和工具定义又长又稳定，正是缓存最划算的形态。
-// 少数中转站可能不认 cache_control / prompt_cache_key，localStorage 置 "0" 可关掉。
-function qaPromptCacheEnabled(): boolean {
-    try {
-        return localStorage.getItem("ai_phone_qa_prompt_cache") !== "0";
-    } catch {
-        return true;
-    }
 }
 
 export function formatQaErrorMessage(error: unknown): string {
@@ -358,7 +348,7 @@ async function requestQaCompletion(
         });
     };
     try {
-        const streamRequest = buildProviderRequest(apiConfig, null, messages, { stream: true, maxTokens, promptCache: qaPromptCacheEnabled() });
+        const streamRequest = buildProviderRequest(apiConfig, null, messages, { stream: true, maxTokens, promptCache: getQaPromptCache() });
         const result = await streamQaProviderRequest(streamRequest, { signal: options?.signal }, options?.callbacks);
         if (!result.content.trim()) throw new Error("LLM 返回了空内容");
         logQaCall({ model: apiConfig.defaultModel, messages: streamRequest.messagesForLog, rawResponse: result.content, reasoning: result.reasoning });
@@ -366,7 +356,7 @@ async function requestQaCompletion(
     } catch (streamError) {
         if (options?.signal?.aborted) throw streamError;
         await options?.callbacks?.onStreamFallback?.(formatQaErrorMessage(streamError));
-        const request = buildProviderRequest(apiConfig, null, messages, { maxTokens, promptCache: qaPromptCacheEnabled() });
+        const request = buildProviderRequest(apiConfig, null, messages, { maxTokens, promptCache: getQaPromptCache() });
         const response = await fetchLlmPayload(request, { signal: options?.signal });
         if (!response.ok) throw new Error(`API ${response.status}: ${await response.text()}`);
         const parsed = parseProviderResponse(request.providerKind, await response.json());
@@ -724,7 +714,7 @@ async function callQaAgentNative(apiConfig: ApiConfig, history: QaEngineMessage[
                 tools,
                 [],
                 { characterName: "工坊", userName: "用户" },
-                { appId: "qa", signal: options?.signal, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: qaPromptCacheEnabled() },
+                { appId: "qa", signal: options?.signal, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: getQaPromptCache() },
                 {
                     async onDelta(delta) {
                         await filter.push(delta);
@@ -737,7 +727,7 @@ async function callQaAgentNative(apiConfig: ApiConfig, history: QaEngineMessage[
         } catch (streamError) {
             if (options?.signal?.aborted) throw streamError;
             await callbacks?.onStreamFallback?.(formatQaErrorMessage(streamError));
-            const fallbackRequest = buildProviderRequest(apiConfig, null, messages, { tools, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: qaPromptCacheEnabled() });
+            const fallbackRequest = buildProviderRequest(apiConfig, null, messages, { tools, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: getQaPromptCache() });
             const response = await fetchLlmPayload(fallbackRequest, { signal: options?.signal });
             if (!response.ok) throw new Error(`API ${response.status}: ${await response.text()}`);
             const parsed = parseProviderResponse(fallbackRequest.providerKind, await response.json());

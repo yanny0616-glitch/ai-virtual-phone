@@ -1754,6 +1754,26 @@
 .qa-settings-field input:focus {
   border-color: var(--qa-accent);
 }
+.qa-settings-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  text-align: left;
+}
+.qa-settings-toggle > span {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--qa-text-secondary);
+}
+.qa-settings-toggle input[type="checkbox"] {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--qa-accent);
+}
 .qa-settings-hint {
   margin-top: 8px;
   font-size: 11px;
