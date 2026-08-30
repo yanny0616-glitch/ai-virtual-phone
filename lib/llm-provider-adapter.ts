@@ -42,12 +42,24 @@ export type LlmRequestPayload = {
     serverProxy?: boolean;
 };
 
+/** 各家 usage 字段归一后的形状。缓存两项分开记：命中按 1/10 计费、写入按 1.25 倍计费，
+ *  合在一起就看不出这次到底省了还是亏了。 */
+export type LlmUsage = {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    /** 命中提示缓存的输入 token（已包含在 prompt_tokens 里，各家口径见 normalize*Usage） */
+    cache_read_tokens?: number;
+    /** 写入提示缓存的输入 token */
+    cache_write_tokens?: number;
+};
+
 export type LlmParsedResponse = {
     content: string;
     reasoning?: string;
     openRouterReasoningDetails?: unknown[];
     toolCalls: LlmToolCall[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    usage?: LlmUsage;
     raw: unknown;
 };
 
@@ -55,6 +67,8 @@ export type LlmStreamDelta = {
     content: string;
     reasoning: string;
     toolCallDeltas?: LlmToolCallDelta[];
+    /** 流末尾（或 Anthropic 的 message_start/message_delta）带来的用量片段，调用方自行合并 */
+    usage?: LlmUsage;
 };
 
 export type LlmToolCallDelta = {
@@ -550,7 +564,11 @@ function buildOpenAICompatibleRequest(
     if (options.promptCache && config.provider === "OpenAI" && !config.baseUrl) {
         body.prompt_cache_key = options.promptCacheKey || OPENAI_PROMPT_CACHE_KEY;
     }
-    if (options.stream) body.stream = true;
+    if (options.stream) {
+        body.stream = true;
+        // 不加这个字段，OpenAI 兼容端的流式响应从头到尾都不回 usage，用量统计只能是 0。
+        body.stream_options = { include_usage: true };
+    }
     if (options.tools?.length) {
         body.tools = options.tools.map((tool) => ({
             type: "function",
@@ -780,9 +798,73 @@ function parseOpenAICompatibleResponse(data: unknown): LlmParsedResponse {
         reasoning: String(message?.reasoning_content ?? message?.reasoning ?? message?.thinking ?? ""),
         openRouterReasoningDetails,
         toolCalls,
-        usage: d.usage,
+        usage: normalizeOpenAIUsage(d.usage),
         raw: data,
     };
+}
+
+function positiveInt(value: unknown): number | undefined {
+    const num = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(num) || num <= 0) return undefined;
+    return Math.floor(num);
+}
+
+/** OpenAI 兼容口径：命中数在 prompt_tokens_details.cached_tokens；
+ *  部分中转（Anthropic 转 OpenAI 壳）直接透出 cache_creation_input_tokens，一并认。 */
+function normalizeOpenAIUsage(usage: unknown): LlmUsage | undefined {
+    if (!usage || typeof usage !== "object") return undefined;
+    const u = usage as Record<string, unknown>;
+    const details = (u.prompt_tokens_details ?? u.promptTokensDetails) as Record<string, unknown> | undefined;
+    const result: LlmUsage = {
+        prompt_tokens: positiveInt(u.prompt_tokens),
+        completion_tokens: positiveInt(u.completion_tokens),
+        total_tokens: positiveInt(u.total_tokens),
+        cache_read_tokens: positiveInt(details?.cached_tokens ?? details?.cachedTokens ?? u.cache_read_input_tokens),
+        cache_write_tokens: positiveInt(u.cache_creation_input_tokens),
+    };
+    return result;
+}
+
+/** Anthropic 口径：input_tokens 不含缓存部分，缓存另计两项，所以输入总量要三项相加。 */
+function normalizeAnthropicUsage(usage: unknown): LlmUsage | undefined {
+    if (!usage || typeof usage !== "object") return undefined;
+    const u = usage as Record<string, unknown>;
+    const cacheRead = positiveInt(u.cache_read_input_tokens);
+    const cacheWrite = positiveInt(u.cache_creation_input_tokens);
+    const input = positiveInt(u.input_tokens);
+    const output = positiveInt(u.output_tokens);
+    const prompt = (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
+    return {
+        prompt_tokens: prompt || undefined,
+        completion_tokens: output,
+        total_tokens: (prompt + (output ?? 0)) || undefined,
+        cache_read_tokens: cacheRead,
+        cache_write_tokens: cacheWrite,
+    };
+}
+
+/** Gemini 口径：cachedContentTokenCount 已包含在 promptTokenCount 里，没有单独的写入计数。 */
+function normalizeGeminiUsage(usage: unknown): LlmUsage | undefined {
+    if (!usage || typeof usage !== "object") return undefined;
+    const u = usage as Record<string, unknown>;
+    return {
+        prompt_tokens: positiveInt(u.promptTokenCount),
+        completion_tokens: positiveInt(u.candidatesTokenCount),
+        total_tokens: positiveInt(u.totalTokenCount),
+        cache_read_tokens: positiveInt(u.cachedContentTokenCount),
+    };
+}
+
+/** 合并流式过程中陆续到达的用量片段：后到的非空值覆盖先到的。 */
+export function mergeLlmUsage(base: LlmUsage | undefined, next: LlmUsage | undefined): LlmUsage | undefined {
+    if (!next) return base;
+    if (!base) return { ...next };
+    const merged: LlmUsage = { ...base };
+    for (const key of Object.keys(next) as (keyof LlmUsage)[]) {
+        const value = next[key];
+        if (typeof value === "number" && value > 0) merged[key] = value;
+    }
+    return merged;
 }
 
 function extractOpenAICompatibleText(data: {
@@ -814,7 +896,7 @@ function parseOpenAIToolCall(value: unknown): LlmToolCall {
 }
 
 function parseAnthropicResponse(data: unknown): LlmParsedResponse {
-    const d = data as { content?: unknown[]; usage?: { input_tokens?: number; output_tokens?: number } };
+    const d = data as { content?: unknown[]; usage?: unknown };
     const blocks = Array.isArray(d.content) ? d.content : [];
     let content = "";
     let reasoning = "";
@@ -835,17 +917,13 @@ function parseAnthropicResponse(data: unknown): LlmParsedResponse {
         content,
         reasoning,
         toolCalls,
-        usage: d.usage ? {
-            prompt_tokens: d.usage.input_tokens,
-            completion_tokens: d.usage.output_tokens,
-            total_tokens: (d.usage.input_tokens ?? 0) + (d.usage.output_tokens ?? 0),
-        } : undefined,
+        usage: normalizeAnthropicUsage(d.usage),
         raw: data,
     };
 }
 
 function parseGeminiResponse(data: unknown): LlmParsedResponse {
-    const d = data as { candidates?: Array<{ content?: { parts?: unknown[] } }>; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } };
+    const d = data as { candidates?: Array<{ content?: { parts?: unknown[] } }>; usageMetadata?: unknown };
     const parts = d.candidates?.[0]?.content?.parts || [];
     let content = "";
     let reasoning = "";
@@ -870,11 +948,7 @@ function parseGeminiResponse(data: unknown): LlmParsedResponse {
         content,
         reasoning,
         toolCalls,
-        usage: d.usageMetadata ? {
-            prompt_tokens: d.usageMetadata.promptTokenCount,
-            completion_tokens: d.usageMetadata.candidatesTokenCount,
-            total_tokens: d.usageMetadata.totalTokenCount,
-        } : undefined,
+        usage: normalizeGeminiUsage(d.usageMetadata),
         raw: data,
     };
 }
@@ -891,6 +965,7 @@ function parseOpenAICompatibleStreamDelta(data: unknown): LlmStreamDelta {
             };
             text?: string;
         }>;
+        usage?: unknown;
     };
     const delta = d.choices?.[0]?.delta;
     const toolCallDeltas = Array.isArray(delta?.tool_calls)
@@ -908,6 +983,8 @@ function parseOpenAICompatibleStreamDelta(data: unknown): LlmStreamDelta {
         content: String(delta?.content ?? d.choices?.[0]?.text ?? ""),
         reasoning: String(delta?.reasoning_content ?? delta?.reasoning ?? delta?.thinking ?? ""),
         toolCallDeltas,
+        // include_usage 打开后，最后一个 chunk 的 choices 为空、只带 usage。
+        usage: normalizeOpenAIUsage(d.usage),
     };
 }
 
@@ -917,7 +994,16 @@ function parseAnthropicStreamDelta(data: unknown): LlmStreamDelta {
         index?: number;
         content_block?: { type?: string; id?: string; name?: string; input?: unknown };
         delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
+        message?: { usage?: unknown };
+        usage?: unknown;
     };
+    // 输入与缓存计数在 message_start，输出计数在结尾的 message_delta，两条都得收。
+    if (d.type === "message_start") {
+        return { content: "", reasoning: "", usage: normalizeAnthropicUsage(d.message?.usage) };
+    }
+    if (d.type === "message_delta" && d.usage) {
+        return { content: "", reasoning: "", usage: normalizeAnthropicUsage(d.usage) };
+    }
     if (d.type === "content_block_start" && d.content_block?.type === "tool_use") {
         return {
             content: "",
@@ -948,9 +1034,11 @@ function parseAnthropicStreamDelta(data: unknown): LlmStreamDelta {
 }
 
 function parseGeminiStreamDelta(data: unknown): LlmStreamDelta {
-    const d = data as { candidates?: Array<{ content?: { parts?: unknown[] } }> };
+    const d = data as { candidates?: Array<{ content?: { parts?: unknown[] } }>; usageMetadata?: unknown };
+    // Gemini 每个 chunk 都重复一份累计用量，合并时后到的覆盖先到的，取到的就是最终值。
+    const usage = normalizeGeminiUsage(d.usageMetadata);
     const parts = d.candidates?.[0]?.content?.parts;
-    if (!Array.isArray(parts)) return { content: "", reasoning: "" };
+    if (!Array.isArray(parts)) return { content: "", reasoning: "", usage };
     let content = "";
     let reasoning = "";
     const toolCallDeltas: LlmToolCallDelta[] = [];
@@ -970,7 +1058,7 @@ function parseGeminiStreamDelta(data: unknown): LlmStreamDelta {
         if (item.thought || item.type === "thinking" || item.type === "thought") reasoning += item.text ?? "";
         else content += item.text ?? "";
     }
-    return { content, reasoning, toolCallDeltas: toolCallDeltas.length > 0 ? toolCallDeltas : undefined };
+    return { content, reasoning, toolCallDeltas: toolCallDeltas.length > 0 ? toolCallDeltas : undefined, usage };
 }
 
 function parseStrictArgs(value: string): Record<string, unknown> {
