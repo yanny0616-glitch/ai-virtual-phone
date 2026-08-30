@@ -44,6 +44,7 @@ import {
     nativeToolProtocolForConfig,
     parseProviderResponse,
     parseProviderStreamDelta,
+    mergeLlmUsage,
     stripHallucinatedTimestamps,
     toLlmRequestMessages,
     type LlmProviderKind,
@@ -51,6 +52,7 @@ import {
     type LlmToolCall,
     type LlmToolCallDelta,
     type LlmToolDefinition,
+    type LlmUsage,
 } from "./llm-provider-adapter";
 import { setDebugPromptSnapshot, type DebugPromptSnapshot } from "./debug-store";
 import { extractFinishReason } from "./api-helpers";
@@ -521,7 +523,7 @@ export function publishDebugPromptSnapshot(params: {
     request: ReturnType<typeof buildProviderRequest>;
     config: ApiConfig;
     preset: PresetConfig | null;
-    meta?: { characterName?: string; userName?: string };
+    meta?: { characterName?: string; characterId?: string; userName?: string };
     options?: DebugPromptRequestOptions;
     requestKind: "completion" | "native-tools" | "native-tools-stream";
     tools?: LlmToolDefinition[];
@@ -719,13 +721,16 @@ async function readSseStream(
     providerKind: ChatCompletionStreamResult["providerKind"],
     callbacks?: ChatCompletionStreamCallbacks,
     stripTimestamps = true,
-): Promise<{ content: string; rawResponse: string }> {
+): Promise<{ content: string; rawResponse: string; usage?: LlmUsage }> {
     if (!response.body) throw new ChatEngineError("流式响应没有 body。");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let content = "";
     let rawResponse = "";
+    // 流里的用量分散在若干事件上（OpenAI 在末尾、Anthropic 分 message_start/message_delta、
+    // Gemini 每个 chunk 都带累计值），逐条合并才拿得到完整数字。
+    let usage: LlmUsage | undefined;
     // 时间戳剥离器会一直扣住流尾巴的 64 个字符等括号闭合，流结束才吐出来。
     // 要求"所见即模型所写"的调用方（独家特调）把它整个关掉：增量来一个字出一个字，
     // 否则模型在末尾写机括标记行（〔记〕这类）时，整行都压在扣留窗里，看起来像卡死。
@@ -737,6 +742,7 @@ async function readSseStream(
     const sseParser = createSseJsonParser();
     const handleParsed = async (parsed: unknown) => {
         const parts = parseProviderStreamDelta(providerKind, parsed);
+        usage = mergeLlmUsage(usage, parts.usage);
         if (parts.reasoning) {
             await callbacks?.onReasoningDelta?.(parts.reasoning);
         }
@@ -778,7 +784,7 @@ async function readSseStream(
         content += finalContent;
         await callbacks?.onDelta?.(finalContent);
     }
-    return { content, rawResponse };
+    return { content, rawResponse, usage };
 }
 
 export async function sendLLMStreamRequest(
@@ -786,7 +792,7 @@ export async function sendLLMStreamRequest(
     preset: PresetConfig | null,
     messages: LLMMessage[],
     regexes: RegexConfig[],
-    meta?: { characterName?: string; userName?: string },
+    meta?: { characterName?: string; characterId?: string; userName?: string },
     options?: {
         skipOutputRegex?: boolean;
         /** 不剥幻觉时间戳：流式增量原样直出（不扣尾巴），落库文本与流出的一字不差 */
@@ -835,7 +841,7 @@ export async function sendLLMStreamRequest(
                 await (pluginCallbacks ?? callbacks)?.onReasoningDelta?.(text);
             },
         };
-        const { content: streamedContent, rawResponse } = await readSseStream(response, request.providerKind, streamLogCallbacks, !options?.skipTimestampStrip);
+        const { content: streamedContent, rawResponse, usage: streamedUsage } = await readSseStream(response, request.providerKind, streamLogCallbacks, !options?.skipTimestampStrip);
         if (!streamedContent.trim()) {
             throw new ChatEngineError("流式响应没有解析到文本增量。");
         }
@@ -850,10 +856,12 @@ export async function sendLLMStreamRequest(
         }));
         pushApiLog({
             characterName: meta?.characterName,
+            characterId: meta?.characterId,
             ...apiLogChannelFor(options),
             model: config.defaultModel,
             messages: sanitizedMessages,
             rawResponse: rawOutput,
+            usage: streamedUsage,
             reasoning: streamedReasoning.trim() || undefined,
         });
 
@@ -889,7 +897,7 @@ export async function sendLLMRequest(
     preset: PresetConfig | null,
     messages: LLMMessage[],
     regexes: RegexConfig[],
-    meta?: { characterName?: string; userName?: string },
+    meta?: { characterName?: string; characterId?: string; userName?: string },
     options?: {
         skipOutputRegex?: boolean;
         includeReasoning?: boolean;
@@ -983,6 +991,7 @@ export async function sendLLMRequest(
         }));
         pushApiLog({
             characterName: meta?.characterName,
+            characterId: meta?.characterId,
             ...apiLogChannelFor(options),
             model: config.defaultModel,
             messages: sanitizedMessages,
@@ -1085,7 +1094,7 @@ export async function sendLLMToolStreamRequest(
     messages: LlmRequestMessage[],
     tools: LlmToolDefinition[],
     regexes: RegexConfig[],
-    meta?: { characterName?: string; userName?: string },
+    meta?: { characterName?: string; characterId?: string; userName?: string },
     options?: {
         appId?: string;
         appTags?: string[];
@@ -1113,6 +1122,7 @@ export async function sendLLMToolStreamRequest(
     let rawResponse = "";
     let content = "";
     let reasoning = "";
+    let streamedUsage: LlmUsage | undefined;
     const contentStripper = createStreamingTimestampStripper();
     const toolDrafts = new Map<number, StreamToolCallDraft>();
     const firedToolCallStarts = new Set<number>();
@@ -1135,6 +1145,7 @@ export async function sendLLMToolStreamRequest(
         const handleParsedDelta = async (data: unknown) => {
             {
                     const delta = parseProviderStreamDelta(request.providerKind, data);
+                    streamedUsage = mergeLlmUsage(streamedUsage, delta.usage);
                     if (delta.reasoning) {
                         reasoning += delta.reasoning;
                         await callbacks?.onReasoningDelta?.(delta.reasoning);
@@ -1205,10 +1216,12 @@ export async function sendLLMToolStreamRequest(
         const logEntryRaw = JSON.stringify({ content, reasoning, toolCalls, raw: rawResponse });
         pushApiLog({
             characterName: meta?.characterName,
+            characterId: meta?.characterId,
             ...apiLogChannelFor(options),
             model: config.defaultModel,
             messages: sanitizedMessages,
             rawResponse: logEntryRaw,
+            usage: streamedUsage,
             reasoning: reasoning || undefined,
         });
 
@@ -1245,7 +1258,7 @@ export async function sendLLMToolRequest(
     messages: LlmRequestMessage[],
     tools: LlmToolDefinition[],
     regexes: RegexConfig[],
-    meta?: { characterName?: string; userName?: string },
+    meta?: { characterName?: string; characterId?: string; userName?: string },
     options?: {
         skipOutputRegex?: boolean;
         includeReasoning?: boolean;
@@ -1307,6 +1320,7 @@ export async function sendLLMToolRequest(
         });
         pushApiLog({
             characterName: meta?.characterName,
+            characterId: meta?.characterId,
             ...apiLogChannelFor(options),
             model: config.defaultModel,
             messages: sanitizedMessages,
@@ -2020,7 +2034,7 @@ export async function generateOfflineChatCompletion(
     const thinkingTag = preset?.thinking_tag?.trim() || "thinking";
     const offlineTagEnabled = preset?.offline_thinking_enabled === true;
     let reasoning = "";
-    const meta = { characterName: character.name, userName: userIdentity?.name };
+    const meta = { characterName: character.name, characterId: character.id, userName: userIdentity?.name };
     const requestOptions = {
         appTags: ["chat", "offline"],
         debugSessionId: session.id,
@@ -2129,7 +2143,7 @@ async function generateNativeChatCompletion(
     let nativeBundle = buildNativeChatTools(enabledTools, expandedSourceIds, nativeToolBuildOptions);
     const requestMessages: LlmRequestMessage[] = toLlmRequestMessages(llmMessages);
     const parts: ChatCompletionPart[] = [];
-    const meta = { characterName: character.name, userName: userIdentity?.name };
+    const meta = { characterName: character.name, characterId: character.id, userName: userIdentity?.name };
     const actionContext = { characterId: session.contactId, sessionId: session.id, sourceEngine: "chat" as const, signal: options?.signal };
     const expandableSourceKeys = new Set(enabledTools.filter(tool => !isNativeSingleTool(tool)).map(nativeToolSourceKey));
 
@@ -2582,7 +2596,7 @@ async function generateChatCompletionCore(
 
     // ── Tool calling loop with real-time callbacks ──
     const parts: ChatCompletionPart[] = [];
-    const meta = { characterName: character.name, userName: userIdentity?.name };
+    const meta = { characterName: character.name, characterId: character.id, userName: userIdentity?.name };
     const actionContext = { characterId: session.contactId, sessionId: session.id, sourceEngine: "chat" as const, signal: options?.signal };
 
     const maxToolRounds = getMaxToolRounds();
@@ -3004,7 +3018,7 @@ export async function previewPromptRequestSnapshot(
     const { llmMessages, character, config, preset, userIdentity, toolsEnabled } = await buildChatPromptMessages(session, effectiveHistory, options);
     const requestMessages = toLlmRequestMessages(llmMessages);
     const enabledTools = toolsEnabled ? getEnabledTools(options?.appId ?? "chat") : [];
-    const meta = { characterName: character.name, userName: userIdentity?.name };
+    const meta = { characterName: character.name, characterId: character.id, userName: userIdentity?.name };
 
     if (nativeToolProtocolForConfig(config) && enabledTools.length > 0) {
         const persistedSession = loadChatSessions().find(item => item.id === session.id);

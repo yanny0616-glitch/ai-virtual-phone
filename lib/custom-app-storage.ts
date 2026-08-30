@@ -237,6 +237,7 @@ function normalizePermission(value: unknown): CustomAppPermission | null {
     "user.persona.read",
     "user.preferences.read",
     "usage.read",
+    "usage.logs",
     "chat.read",
     "chat.read.background",
     "chat.write",

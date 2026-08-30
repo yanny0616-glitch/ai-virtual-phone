@@ -16,6 +16,7 @@ import { registerCustomAppToolExecutor, type CustomAppToolExecutorPayload } from
 import { updateInstalledCustomAppFromMarket } from "@/lib/custom-app-market-update";
 import { loadCharacters } from "@/lib/character-storage";
 import { getApiUsageDays } from "@/lib/api-usage-stats";
+import { getApiLogs } from "@/lib/api-log-store";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { ensureSettingsStorageHydrated } from "@/lib/settings-storage";
 import { getPwaHostedSafeArea, PWA_DISPLAY_MODE_CHANGED_EVENT } from "@/lib/pwa-display-mode";
@@ -456,7 +457,9 @@ html, body { min-height: 100%; }
       unmute: function(characterId){ return request('chat.setContactState', { characterId: characterId, isMuted: false }); }
     },
     usage: {
-      readDaily: function(payload){ return request('usage.readDaily', payload || {}); }
+      readDaily: function(payload){ return request('usage.readDaily', payload || {}); },
+      readLogs: function(payload){ return request('usage.readLogs', payload || {}); },
+      readLogDetail: function(payload){ return request('usage.readLogDetail', payload || {}); }
     },
     characters: {
       list: function(){ return request('characters.list'); },
@@ -1092,7 +1095,7 @@ export function CustomAppRunner({
           world: ["read", "list", "get", "write", "create", "update", "delete", "activate"],
           media: ["pick", "save", "put", "get", "revoke", "delete"],
           characters: ["list", "get", "readState", "writeState", "readRelations"],
-          usage: ["readDaily"],
+          usage: ["readDaily", "readLogs", "readLogDetail"],
           chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState"],
           memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
           notifications: ["create", "list", "markRead", "markAllRead", "getBadge", "setBadge", "incrementBadge", "clearBadge"],
@@ -1622,6 +1625,40 @@ export function CustomAppRunner({
       requirePermission("usage.read");
       // 只给计数，不给提示词原文和回复原文——日志里那些比聊天记录还敏感。
       return { days: getApiUsageDays({ days: Number(record.days ?? 7) }) };
+    }
+    if (action === "usage.readLogs") {
+      requirePermission("usage.read");
+      // 列表只出元信息和一小段预览，提示词原文要另外申请 usage.logs 再逐条取。
+      const limit = Math.max(1, Math.min(200, Math.floor(Number(record.limit ?? 50)) || 50));
+      const wantCharacterId = record.characterId ? String(record.characterId) : "";
+      const wantSource = record.source ? String(record.source) : "";
+      const logs = [...getApiLogs()].reverse().filter(log => {
+        if (wantCharacterId && log.characterId !== wantCharacterId) return false;
+        if (wantSource && (log.source || "chat") !== wantSource) return false;
+        return true;
+      });
+      return {
+        total: logs.length,
+        logs: logs.slice(0, limit).map(log => ({
+          id: log.id,
+          timestamp: log.timestamp,
+          characterName: log.characterName,
+          characterId: log.characterId,
+          model: log.model,
+          source: log.source || "chat",
+          usage: log.usage,
+          messageCount: log.messages?.length ?? 0,
+          hasReasoning: Boolean(log.reasoning),
+          preview: (log.rawResponse || "").slice(0, 120),
+        })),
+      };
+    }
+    if (action === "usage.readLogDetail") {
+      requirePermission("usage.logs");
+      const id = String(record.id ?? "");
+      const log = getApiLogs().find(item => item.id === id);
+      if (!log) return null;
+      return log;
     }
 
     if (action === "characters.list") {

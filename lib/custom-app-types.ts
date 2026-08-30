@@ -59,7 +59,8 @@ export type CustomAppPermission =
   | "bridge.send"
   | "bridge.read"
   | "online.play"
-  | "usage.read";
+  | "usage.read"
+  | "usage.logs";
 
 export type CustomAppSdkVersion = "1.0" | string;
 

@@ -9,11 +9,21 @@ import { recordApiUsage } from "./api-usage-stats";
 export type DebugInfo = {
     id: string;
     characterName?: string;
+    /** 角色卡 id。改名后仍然指向同一张卡，按角色筛选/统计只认它；后台功能调用没有这个字段 */
+    characterId?: string;
     model?: string;
     messages: { role: string; content: string; marker?: string }[];
     rawResponse: string;
     timestamp: string;
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        /** 命中提示缓存的输入 token（按 1/10 计费） */
+        cache_read_tokens?: number;
+        /** 写入提示缓存的输入 token（按 1.25 倍计费） */
+        cache_write_tokens?: number;
+    };
     /** 模型思维链（reasoning/CoT）原文，独立于回复内容存储，避免被清洗吞掉 */
     reasoning?: string;
     /** 调用来源：chat=聊天引擎、background=simpleLLMCall 后台功能（具体功能名看 characterName 标签）、qa=工坊答疑引擎 */
@@ -99,6 +109,9 @@ function truncateEntryForLog(entry: Omit<DebugInfo, "id" | "timestamp">): Omit<D
         characterName: entry.characterName !== undefined
             ? truncateForLog(entry.characterName, MAX_LOG_METADATA_CHARS)
             : undefined,
+        characterId: entry.characterId !== undefined
+            ? truncateForLog(entry.characterId, MAX_LOG_METADATA_CHARS)
+            : undefined,
         model: entry.model !== undefined ? truncateForLog(entry.model, MAX_LOG_METADATA_CHARS) : undefined,
         messages: truncateMessagesForLog(entry.messages),
         rawResponse: truncateForLog(entry.rawResponse, MAX_LOG_RESPONSE_CHARS),
@@ -139,7 +152,13 @@ export function pushApiLog(entry: Omit<DebugInfo, "id" | "timestamp">): void {
     const maxCount = isQa ? MAX_QA_API_LOGS : MAX_API_LOGS;
     const maxSerializedChars = isQa ? MAX_QA_LOGS_SERIALIZED_CHARS : MAX_API_LOGS_SERIALIZED_CHARS;
     // 用量统计独立累加：日志环只留最近 150 条，按天的用量必须在写日志时就记下来。
-    recordApiUsage({ model: entry.model, source: entry.source, usage: entry.usage });
+    recordApiUsage({
+        model: entry.model,
+        source: entry.source,
+        usage: entry.usage,
+        characterId: entry.characterId,
+        characterName: entry.characterName,
+    });
     try {
         const logs = _loadLogs(key);
         logs.push({
