@@ -8,7 +8,7 @@
 // Token 与取回的 key 经站点代理透传，不存储不记录。
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { Check, CloudUpload, ExternalLink, Loader2, MessageSquare, Satellite } from "lucide-react";
+import { Check, CloudUpload, ExternalLink, Link2, Loader2, MessageSquare, Satellite } from "lucide-react";
 import {
     isCloudBackupConfigured,
     loadCloudBackupConfig,
@@ -89,6 +89,10 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
     const [busy, setBusy] = useState<"organizations" | "deploy" | null>(null);
     const [resultDialog, setResultDialog] = useState<{ title: string; text: string } | null>(null);
     const [progress, setProgress] = useState("");
+    const [linkOpen, setLinkOpen] = useState(false);
+    const [linkUrl, setLinkUrl] = useState("");
+    const [linkKey, setLinkKey] = useState("");
+    const [linkBusy, setLinkBusy] = useState(false);
 
     useEffect(() => {
         setCloudReady(isCloudBackupConfigured(loadCloudBackupConfig()));
@@ -103,6 +107,46 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
         setPushActive(isPersonalPushCloudActive());
         setWeixinDeployed(Boolean(getWeixinCloudDeployedAt()));
         onConfigChanged?.();
+    };
+
+    // 多端同步：把第二台设备指向第一台已经建好的个人云项目，两台共用同一个备份桶。
+    // 只写云备份配置，不打 managedProjectRef 标记 —— 带标记会让部署流程原地写入这个项目，
+    // 而手填的地址可能是用户自己的业务库，绝不能让建表建桶碰它。
+    const openLinkForm = () => {
+        setResultDialog(null);
+        setLinkUrl(loadCloudBackupConfig().url || "");
+        setLinkKey("");
+        setLinkOpen(true);
+    };
+
+    const runLink = async () => {
+        const url = normalizeBackupUrl(linkUrl);
+        const key = linkKey.trim();
+        if (linkBusy || !url || !key) return;
+        setLinkBusy(true);
+        try {
+            const base = loadCloudBackupConfig();
+            const probe = await testCloudBackupConnection({ ...base, url, key });
+            if (!probe.ok) throw new Error(probe.error);
+            saveCloudBackupConfig({
+                ...base,
+                url,
+                key,
+                managedProjectRef: undefined,
+                managedOrganizationSlug: undefined,
+            });
+            setLinkKey("");
+            setLinkOpen(false);
+            setResultDialog({
+                title: "接入成功",
+                text: `本机已连到 ${projectRefFromUrl(url)}。去「设置 → 数据管理 → 云端恢复」拉另一台的备份，恢复完必须彻底重启应用。`,
+            });
+        } catch (err) {
+            setResultDialog({ title: "接入失败", text: err instanceof Error ? err.message : String(err) });
+        } finally {
+            setLinkBusy(false);
+            refreshStatus();
+        }
     };
 
     const openScopeDialog = async () => {
@@ -354,6 +398,56 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                 {statusCard(<MessageSquare size={17} strokeWidth={1.9} />, "微信接入", weixinDeployed, "云函数与定时任务已部署")}
                 {statusCard(<Satellite size={17} strokeWidth={1.9} />, "离线推送", pushActive, "已部署到你的 Supabase")}
             </div>
+
+            {/* 多端同步：接入另一台设备已经建好的个人云 */}
+            {!linkOpen ? (
+                <button
+                    type="button"
+                    className="ui-btn ui-btn-outline"
+                    onClick={openLinkForm}
+                    disabled={Boolean(busy)}
+                >
+                    <Link2 size={15} /> 接入已有个人云（多端同步）
+                </button>
+            ) : (
+                <div className="flex flex-col gap-2 rounded-[16px] bg-black/[0.03] px-3.5 py-3">
+                    <span className="menu-label">接入已有个人云</span>
+                    <span className="menu-desc !mt-0">
+                        填另一台设备上那个项目的地址和 service_role key（Supabase Dashboard → 该项目 → Settings → API），两台就共用同一份云备份。接入后本机别再点上面的部署，那会另建项目并顶掉这里的配置。
+                    </span>
+                    <Input
+                        value={linkUrl}
+                        onChange={(e) => setLinkUrl(e.target.value)}
+                        placeholder="https://xxxx.supabase.co"
+                        spellCheck={false}
+                    />
+                    <Input
+                        type="password"
+                        value={linkKey}
+                        onChange={(e) => setLinkKey(e.target.value)}
+                        placeholder="service_role key"
+                        spellCheck={false}
+                    />
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline flex-1"
+                            onClick={() => setLinkOpen(false)}
+                            disabled={linkBusy}
+                        >
+                            取消
+                        </button>
+                        <button
+                            type="button"
+                            className={`ui-btn ui-btn-primary flex-1 ${linkBusy ? "is-busy" : ""}`}
+                            onClick={() => void runLink()}
+                            disabled={linkBusy || !linkUrl.trim() || !linkKey.trim()}
+                        >
+                            {linkBusy ? <><Loader2 size={15} className="animate-spin" /> 验证中…</> : "验证并接入"}
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* 结果弹窗（成功/失败统一） */}
             {resultDialog && (
