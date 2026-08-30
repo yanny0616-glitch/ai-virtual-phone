@@ -71,7 +71,22 @@ type ProviderRequestOptions = {
     tools?: LlmToolDefinition[];
     /** 单次最大输出 token：按调用覆盖预设值（工坊输出护栏用）。不填则沿用预设/各家默认 */
     maxTokens?: number;
+    /** 提示缓存：Anthropic 打 cache_control 断点，官方 OpenAI 带 prompt_cache_key。
+     *  只给上下文大且前缀稳定的调用方开（工坊），聊天不默认走。 */
+    promptCache?: boolean;
 };
+
+/** Anthropic ephemeral 缓存断点。命中部分按 1/10 计费，写入按 1.25 倍，有效期 5 分钟。 */
+const ANTHROPIC_CACHE_CONTROL = { type: "ephemeral" } as const;
+
+/** 官方 OpenAI 的缓存是服务端自动前缀匹配，这个 key 只影响路由：
+ *  同 key 的请求打到同一台机器，命中率更高。中转站不一定认识这个参数，所以只给官方发。 */
+const OPENAI_PROMPT_CACHE_KEY = "ai-phone-qa";
+
+function withAnthropicCacheControl(block: unknown): unknown {
+    if (!block || typeof block !== "object" || Array.isArray(block)) return block;
+    return { ...(block as Record<string, unknown>), cache_control: ANTHROPIC_CACHE_CONTROL };
+}
 
 const ANTHROPIC_AUTO_MAX_TOKENS = 8192;
 
@@ -522,6 +537,11 @@ function buildOpenAICompatibleRequest(
         ...buildSamplingBody(preset),
     };
     if (options.maxTokens && options.maxTokens > 0) body.max_tokens = Math.floor(options.maxTokens);
+    // 官方 OpenAI 自动缓存 1024 token 以上的稳定前缀，不需要在请求里声明；
+    // prompt_cache_key 只是把同类请求路由到同一台机器，提高命中率。
+    if (options.promptCache && config.provider === "OpenAI" && !config.baseUrl) {
+        body.prompt_cache_key = OPENAI_PROMPT_CACHE_KEY;
+    }
     if (options.stream) body.stream = true;
     if (options.tools?.length) {
         body.tools = options.tools.map((tool) => ({
@@ -571,14 +591,33 @@ function buildAnthropicRequest(
     };
     if (preset?.top_p !== undefined) body.top_p = preset.top_p;
     if (preset?.top_k && preset.top_k > 0) body.top_k = preset.top_k;
-    if (system) body.system = system;
+    if (system) {
+        // 开缓存时 system 必须写成内容块数组才能挂 cache_control。
+        body.system = options.promptCache
+            ? [{ type: "text", text: system, cache_control: ANTHROPIC_CACHE_CONTROL }]
+            : system;
+    }
     if (options.stream) body.stream = true;
     if (options.tools?.length) {
-        body.tools = options.tools.map((tool) => ({
+        const tools = options.tools.map((tool) => ({
             name: tool.name,
             description: tool.description,
             input_schema: tool.parameters,
         }));
+        // 缓存按 tools → system → messages 的顺序累积，断点打在最后一个工具上
+        // 就等于把整个工具定义块一起缓存下来。
+        if (options.promptCache && tools.length) {
+            tools[tools.length - 1] = withAnthropicCacheControl(tools[tools.length - 1]) as typeof tools[number];
+        }
+        body.tools = tools;
+    }
+    // 最后一条消息再打一个断点：多轮对话里每轮把上一轮的前缀续进缓存，
+    // 否则只有 system/tools 这段静态内容能命中。
+    if (options.promptCache && bodyMessages.length) {
+        const last = bodyMessages[bodyMessages.length - 1];
+        if (Array.isArray(last.content) && last.content.length) {
+            last.content[last.content.length - 1] = withAnthropicCacheControl(last.content[last.content.length - 1]);
+        }
     }
     return {
         url: `${baseUrl.replace(/\/$/, "")}/messages`,
