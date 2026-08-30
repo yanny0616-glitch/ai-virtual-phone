@@ -566,8 +566,11 @@ function buildOpenAICompatibleRequest(
     }
     if (options.stream) {
         body.stream = true;
-        // 不加这个字段，OpenAI 兼容端的流式响应从头到尾都不回 usage，用量统计只能是 0。
-        body.stream_options = { include_usage: true };
+        // stream_options 不是所有 OpenAI 兼容端都支持。只对官方 OpenAI 启用，
+        // 避免严格校验请求体的自定义 Base URL 因未知字段直接返回 400。
+        if (config.provider === "OpenAI" && !config.baseUrl) {
+            body.stream_options = { include_usage: true };
+        }
     }
     if (options.tools?.length) {
         body.tools = options.tools.map((tool) => ({
@@ -863,6 +866,11 @@ export function mergeLlmUsage(base: LlmUsage | undefined, next: LlmUsage | undef
     for (const key of Object.keys(next) as (keyof LlmUsage)[]) {
         const value = next[key];
         if (typeof value === "number" && value > 0) merged[key] = value;
+    }
+    // Anthropic 在 message_start 给输入量，在 message_delta 给输出量；后一个事件里的
+    // total 只是该事件可见的输出量，不能覆盖整次调用。字段合并后统一重算总量。
+    if (typeof merged.prompt_tokens === "number" && typeof merged.completion_tokens === "number") {
+        merged.total_tokens = merged.prompt_tokens + merged.completion_tokens;
     }
     return merged;
 }

@@ -1628,12 +1628,15 @@ export function CustomAppRunner({
     }
     if (action === "usage.readLogs") {
       requirePermission("usage.read");
-      // 列表只出元信息和一小段预览，提示词原文要另外申请 usage.logs 再逐条取。
+      // 列表只出元信息；提示词和回复原文要另外申请 usage.logs 再逐条取。
       const limit = Math.max(1, Math.min(200, Math.floor(Number(record.limit ?? 50)) || 50));
       const wantCharacterId = record.characterId ? String(record.characterId) : "";
+      // 按名字筛是给老日志兜底：characterId 是后加的字段，之前落库的记录只有名字。
+      const wantCharacterName = record.characterName ? String(record.characterName) : "";
       const wantSource = record.source ? String(record.source) : "";
       const logs = [...getApiLogs()].reverse().filter(log => {
         if (wantCharacterId && log.characterId !== wantCharacterId) return false;
+        if (wantCharacterName && log.characterName !== wantCharacterName) return false;
         if (wantSource && (log.source || "chat") !== wantSource) return false;
         return true;
       });
@@ -1649,7 +1652,6 @@ export function CustomAppRunner({
           usage: log.usage,
           messageCount: log.messages?.length ?? 0,
           hasReasoning: Boolean(log.reasoning),
-          preview: (log.rawResponse || "").slice(0, 120),
         })),
       };
     }
@@ -2026,14 +2028,25 @@ export function CustomAppRunner({
         .catch(err => postResponse(requestId, false, undefined, err instanceof Error ? err.message : String(err)));
     };
     window.addEventListener("message", handleMessage);
-    setBridgeReady(true);
+    // 监听器先注册，再在微任务中挂载 iframe，避免 iframe 首次脚本早于宿主监听器执行。
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setBridgeReady(true);
+    });
     return () => {
+      cancelled = true;
       window.removeEventListener("message", handleMessage);
     };
   }, [app, backgroundEvent, completeBackgroundEvent, frameId, handleBridgeRequest, isBackgroundRunner, postResponse]);
 
   // 换应用/重开 iframe 时清掉上一次的失败态
-  useEffect(() => { setFrameFailure(null); }, [srcDoc]);
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setFrameFailure(null);
+    });
+    return () => { cancelled = true; };
+  }, [srcDoc]);
 
   return (
     <div className={`custom-app-runner${embedded ? " custom-app-runner-embedded" : ""}`}>
