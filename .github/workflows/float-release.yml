@@ -39,8 +39,12 @@ jobs:
           set -euo pipefail
           mkdir -p release/.next
           cp -a .next/standalone/. release/
+          rm -rf release/.next/static
           cp -a .next/static release/.next/static
+          rm -rf release/public
           cp -a public release/public
+          test -f release/public/manifest.json
+          test ! -d release/public/public
           printf '%s\n' "$GITHUB_SHA" > release/VERSION
           tar -C release -czf float-standalone.tar.gz .
           sha256sum float-standalone.tar.gz > float-standalone.tar.gz.sha256
