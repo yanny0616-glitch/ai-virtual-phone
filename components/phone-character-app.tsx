@@ -1915,6 +1915,7 @@ function CharArchiveView({
       setShowTimeZonePicker(false);
       setTags(char.tags || []);
       setAvatar(char.avatar || null);
+      setPersonaExpanded(false);
     }
   }, [isEditing, char]);
 
@@ -2014,6 +2015,10 @@ function CharArchiveView({
 
   // Helper limits
   const personaText = persona || "NO DATA AVAILABLE.";
+  // 导入的角色卡人设动辄上千字，默认折起来，超长才给展开按钮
+  const PERSONA_CLAMP_LINES = 10;
+  const personaIsLong = personaText.length > 260 || personaText.split("\n").length > PERSONA_CLAMP_LINES;
+  const [personaExpanded, setPersonaExpanded] = useState(false);
   const timeZoneOptions = getCharacterTimeZoneOptions(timeZone || timeZoneSearch);
   const timeZoneQuery = timeZoneSearch.trim().toLowerCase();
   const matchedTimeZoneOptions = timeZoneQuery
@@ -2235,7 +2240,27 @@ function CharArchiveView({
                 }}
               />
             ) : (
-              <p className="char-archive-p whitespace-pre-wrap break-words">{personaText}</p>
+              <>
+                <p
+                  className="char-archive-p whitespace-pre-wrap break-words"
+                  style={personaIsLong && !personaExpanded ? {
+                    display: "-webkit-box",
+                    WebkitBoxOrient: "vertical",
+                    WebkitLineClamp: PERSONA_CLAMP_LINES,
+                    overflow: "hidden",
+                  } : undefined}
+                >
+                  {personaText}
+                </p>
+                {personaIsLong && (
+                  <button
+                    className="ts-10 mt-1 px-0 bg-none border-none cursor-pointer underline opacity-70 hover:opacity-100"
+                    onClick={() => setPersonaExpanded(v => !v)}
+                  >
+                    {personaExpanded ? "收起" : `展开全文（${personaText.length} 字）`}
+                  </button>
+                )}
+              </>
             )}
           </div>
 
