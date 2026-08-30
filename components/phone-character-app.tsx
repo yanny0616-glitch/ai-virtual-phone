@@ -14,6 +14,10 @@ import {
   saveBackgroundItems,
   type CharacterImportData,
 } from "@/lib/character-storage";
+import {
+  importCharacterWorldBook,
+  isCharacterWorldBookImported,
+} from "@/lib/character-world-book";
 import { generateBriefPersonaText, isBriefPersonaStale } from "@/lib/brief-persona";
 import { generateSupportingCharacters, materializeSupportingCharacter, type GeneratedSupportingCharacter } from "@/lib/npc-generator";
 import {
@@ -430,6 +434,13 @@ function FlipTransitionOverlay({ transit }: { transit: TransitionState }) {
 
 
 // ── 列表视图（照片墙） ─────────────────────────────────────────
+
+/** 导入角色卡后的落位提示：卡里带世界书时顺带说一声，免得用户不知道还能导。 */
+function placementNotice(char: Character): string {
+  const book = char.embeddedWorldBook;
+  if (!book) return "点击画布放置角色";
+  return `点击画布放置角色（卡内含世界书 ${book.entries.length} 条，可在角色卡中导入）`;
+}
 
 function CharListView({
   characters,
@@ -891,7 +902,7 @@ function CharListView({
         const c = createCharacter(data);
         c.polaroidStyle = styleIdx;
         onStartCharPlacement(c);
-        onNotice("点击画布放置角色");
+        onNotice(placementNotice(c));
       } else if (file.type === "image/png" || file.name.endsWith(".png")) {
         const buffer = await file.arrayBuffer();
         const data = parseCharacterFromPng(buffer);
@@ -908,7 +919,7 @@ function CharListView({
         const c = createCharacter({ ...data, avatar });
         c.polaroidStyle = styleIdx;
         onStartCharPlacement(c);
-        onNotice("点击画布放置角色");
+        onNotice(placementNotice(c));
       } else {
         onNotice("请选择 .json 或 .png 文件");
       }
@@ -1804,6 +1815,32 @@ function CharArchiveView({
   const [urlInput, setUrlInput] = useState("");
   const [avatarBusy, setAvatarBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const embeddedBook = char.embeddedWorldBook;
+  const [bookImported, setBookImported] = useState(false);
+  const [bookBusy, setBookBusy] = useState(false);
+
+  useEffect(() => {
+    setBookImported(embeddedBook ? isCharacterWorldBookImported(char.id) : false);
+  }, [char.id, embeddedBook]);
+
+  function handleImportWorldBook() {
+    if (!embeddedBook || bookBusy) return;
+    setBookBusy(true);
+    try {
+      const book = importCharacterWorldBook(char);
+      if (!book) {
+        onNotice("世界书导入失败，卡内没有可用条目");
+        return;
+      }
+      setBookImported(true);
+      onNotice(`已导入世界书「${book.name}」（${book.entries.length} 条），已绑定到该角色`);
+    } catch (e) {
+      console.error("Failed to import embedded world book", e);
+      onNotice("世界书导入失败");
+    } finally {
+      setBookBusy(false);
+    }
+  }
 
   // Send mascot page context (on mount + field changes)
   useEffect(() => {
@@ -2261,6 +2298,42 @@ function CharArchiveView({
               ) : (
                 <p className="char-archive-p whitespace-pre-wrap break-words">{briefPersona}</p>
               )}
+            </div>
+          )}
+
+          {/* 角色卡自带的世界书（SillyTavern character_book）——导入后写进世界书库并绑定到本角色 */}
+          {embeddedBook && (
+            <div className="char-log-entry mb-4 border-t border-dashed border-[#999] pt-3">
+              <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                <span className="char-log-entry-header !mb-0">WORLD BOOK / 卡内世界书</span>
+                {!isEditing && (
+                  <button
+                    className="ts-10 px-3 py-1 bg-[#111111] text-white border-none rounded-full cursor-pointer disabled:opacity-50 hover:bg-[#222222] transition-colors"
+                    disabled={bookBusy}
+                    onClick={handleImportWorldBook}
+                  >
+                    {bookBusy ? "导入中…" : bookImported ? "重新导入" : "导入世界书"}
+                  </button>
+                )}
+              </div>
+              <p className="ts-12 font-semibold">{embeddedBook.name}</p>
+              <p className="ts-10 opacity-60 mt-1">
+                {embeddedBook.entries.length} 条条目
+                {bookImported ? " · 已导入并绑定到该角色" : " · 尚未导入世界书库"}
+              </p>
+              {embeddedBook.description && (
+                <p className="ts-10 opacity-60 mt-1 whitespace-pre-wrap break-words">{embeddedBook.description}</p>
+              )}
+              <ul className="mt-2 flex flex-col gap-1">
+                {embeddedBook.entries.slice(0, 6).map((entry) => (
+                  <li key={entry.uid} className="ts-10 opacity-70 truncate">
+                    · {entry.comment || entry.key || "（无标题条目）"}
+                  </li>
+                ))}
+                {embeddedBook.entries.length > 6 && (
+                  <li className="ts-10 opacity-50">…… 其余 {embeddedBook.entries.length - 6} 条</li>
+                )}
+              </ul>
             </div>
           )}
 

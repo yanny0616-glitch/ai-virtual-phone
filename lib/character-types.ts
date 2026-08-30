@@ -1,3 +1,12 @@
+import type { WorldBookEntry } from "./settings-types";
+
+/** 角色卡自带的世界书（SillyTavern `character_book`），随角色存放，用户点了才进世界书库。 */
+export type EmbeddedWorldBook = {
+  name: string;
+  description?: string;
+  entries: WorldBookEntry[];
+};
+
 export type Character = {
   id: string;
   name: string;
@@ -9,6 +18,7 @@ export type Character = {
   personality?: string;    // 角色性格
   timeZone?: string;       // IANA 时区，例如 America/New_York；空值表示跟随系统时间
   tags?: string[];
+  embeddedWorldBook?: EmbeddedWorldBook; // 角色卡自带世界书，未导入前只挂在角色上
   createdAt: string;
   updatedAt: string;
 

@@ -1,4 +1,5 @@
-import type { Character, CanvasBgItem } from "./character-types";
+import type { Character, CanvasBgItem, EmbeddedWorldBook } from "./character-types";
+import { parseEmbeddedWorldBook } from "./character-world-book";
 import { normalizeTimeZone } from "./character-time";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 
@@ -47,6 +48,11 @@ export function loadCharacters(): Character[] {
       if (char.timeZone !== normalizedTimeZone) {
         if (normalizedTimeZone) char.timeZone = normalizedTimeZone;
         else delete char.timeZone;
+        needsSave = true;
+      }
+      // 内嵌世界书是外部文件带进来的，形状不对就丢掉，别让坏数据进渲染
+      if ("embeddedWorldBook" in char && !isValidEmbeddedWorldBook(char.embeddedWorldBook)) {
+        delete char.embeddedWorldBook;
         needsSave = true;
       }
       // Sanitize avatars: only keep data-URLs and http(s) URLs
@@ -102,6 +108,36 @@ function isValidBgItem(x: unknown): x is CanvasBgItem {
   );
 }
 
+function isValidEmbeddedWorldBook(x: unknown): x is EmbeddedWorldBook {
+  if (typeof x !== "object" || x === null) return false;
+  const book = x as EmbeddedWorldBook;
+  return typeof book.name === "string"
+    && Array.isArray(book.entries)
+    && book.entries.every(entry => typeof entry?.content === "string");
+}
+
+function toCharacterBook(book: EmbeddedWorldBook) {
+  return {
+    name: book.name,
+    description: book.description || "",
+    entries: book.entries.map((entry, index) => ({
+      keys: entry.key ? entry.key.split(",").map(k => k.trim()).filter(Boolean) : [],
+      content: entry.content,
+      comment: entry.comment || "",
+      enabled: !entry.disable,
+      constant: entry.constant,
+      insertion_order: entry.insertion_order ?? index,
+      extensions: {
+        position: entry.position,
+        depth: entry.depth ?? 0,
+        probability: entry.probability ?? 100,
+        useProbability: entry.useProbability ?? false,
+        role: entry.role ?? 0,
+      },
+    })),
+  };
+}
+
 function isValidCharacter(x: unknown): x is Character {
   return (
     typeof x === "object" &&
@@ -138,6 +174,8 @@ export function exportCharacterAsJson(char: Character): void {
     tags: char.tags || [],
     wechatID: char.wechatID || "",
     timeZone: char.timeZone || "",
+    // 按 SillyTavern 的 character_book 形状导出，导回本端或导进酒馆都认得。
+    ...(char.embeddedWorldBook ? { character_book: toCharacterBook(char.embeddedWorldBook) } : {}),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
@@ -190,11 +228,14 @@ export function parseCharacterFromJson(
     return {
       name,
       // Float's role library only needs the card's core persona. SillyTavern
-      // greetings, scenario, examples and embedded character_book stay out.
+      // greetings, scenario and examples stay out; character_book is kept
+      // separately so the card can offer it as a world book import.
       persona: nonEmptyText(src.description ?? src.persona),
       avatar: validAvatar(src.avatar),
       personality: typeof src.personality === "string" && src.personality.trim() ? src.personality : undefined,
       tags: Array.isArray(src.tags) ? src.tags.map(String) : [],
+      // 世界书不直接进世界书库，先挂在角色上，由用户在角色卡里点导入。
+      embeddedWorldBook: parseEmbeddedWorldBook(src, obj, name) ?? undefined,
       wechatID: typeof src.wechatID === "string" && src.wechatID.trim() ? src.wechatID : undefined,
       timeZone: normalizeTimeZone(src.timeZone ?? src.timezone ?? src.time_zone),
     };
