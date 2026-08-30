@@ -521,6 +521,13 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
     const sayRef = useRef<(text: string) => void>(() => {});
     const handlePanelSay = useCallback((text: string) => { sayRef.current(text); }, []);
 
+    /**
+     * 背景观感微调：蒙版提亮（0=原样，100=无蒙版）与封面模糊，按局保存。
+     * 同 sayRef，声明必须留在「对局不存在」的提前返回之前——原来写在下面，
+     * session 从无到有时 Hook 数量会变，React 直接抛错。
+     */
+    const [bgTuneOpen, setBgTuneOpen] = useState(false);
+
     if (!session) {
         return (
             <div className="mix-game">
@@ -831,8 +838,6 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
     const lastTurn = session.turns[session.turns.length - 1];
     const canReroll = !busy && lastTurn?.role === "assistant" && session.turns.length > 1;
 
-    /** 背景观感微调：蒙版提亮（0=原样，100=无蒙版）与封面模糊，按局保存 */
-    const [bgTuneOpen, setBgTuneOpen] = useState(false);
     const bgTune = session.bgTune ?? { mask: 0, blur: 0 };
     const setBgTune = (next: { mask: number; blur: number }) => {
         const updated: MixSession = { ...session, bgTune: next };
