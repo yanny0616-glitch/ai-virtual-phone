@@ -16,7 +16,9 @@ import {
 } from "@/lib/character-storage";
 import {
   importCharacterWorldBook,
+  isCharacterWorldBookBound,
   isCharacterWorldBookImported,
+  setCharacterWorldBookBound,
 } from "@/lib/character-world-book";
 import { generateBriefPersonaText, isBriefPersonaStale } from "@/lib/brief-persona";
 import { generateSupportingCharacters, materializeSupportingCharacter, type GeneratedSupportingCharacter } from "@/lib/npc-generator";
@@ -1817,13 +1819,16 @@ function CharArchiveView({
   const fileRef = useRef<HTMLInputElement>(null);
   const embeddedBook = char.embeddedWorldBook;
   const [bookImported, setBookImported] = useState(false);
+  const [bookBound, setBookBound] = useState(false);
   const [bookBusy, setBookBusy] = useState(false);
+  const [confirmReimport, setConfirmReimport] = useState(false);
 
   useEffect(() => {
     setBookImported(embeddedBook ? isCharacterWorldBookImported(char.id) : false);
+    setBookBound(embeddedBook ? isCharacterWorldBookBound(char.id) : false);
   }, [char.id, embeddedBook]);
 
-  function handleImportWorldBook() {
+  function runImportWorldBook() {
     if (!embeddedBook || bookBusy) return;
     setBookBusy(true);
     try {
@@ -1833,12 +1838,32 @@ function CharArchiveView({
         return;
       }
       setBookImported(true);
+      setBookBound(true);
       onNotice(`已导入世界书「${book.name}」（${book.entries.length} 条），已绑定到该角色`);
     } catch (e) {
       console.error("Failed to import embedded world book", e);
       onNotice("世界书导入失败");
     } finally {
       setBookBusy(false);
+    }
+  }
+
+  // 已导入过的重复导入是整本覆盖，用户在世界书管理里的修改会没，先问一句
+  function handleImportWorldBook() {
+    if (bookImported) setConfirmReimport(true);
+    else runImportWorldBook();
+  }
+
+  function handleToggleWorldBookBinding() {
+    if (bookBusy) return;
+    const next = !bookBound;
+    try {
+      setCharacterWorldBookBound(char.id, next);
+      setBookBound(next);
+      onNotice(next ? "已绑定到该角色" : "已解绑，世界书仍留在世界书库里");
+    } catch (e) {
+      console.error("Failed to toggle world book binding", e);
+      onNotice("操作失败");
     }
   }
 
@@ -2332,19 +2357,32 @@ function CharArchiveView({
               <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                 <span className="char-log-entry-header !mb-0">WORLD BOOK / 卡内世界书</span>
                 {!isEditing && (
-                  <button
-                    className="ts-10 px-3 py-1 bg-[#111111] text-white border-none rounded-full cursor-pointer disabled:opacity-50 hover:bg-[#222222] transition-colors"
-                    disabled={bookBusy}
-                    onClick={handleImportWorldBook}
-                  >
-                    {bookBusy ? "导入中…" : bookImported ? "重新导入" : "导入世界书"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {bookImported && (
+                      <button
+                        className="ts-10 px-3 py-1 bg-transparent text-[var(--c-text)] border border-[var(--c-panel-border)] rounded-full cursor-pointer disabled:opacity-50"
+                        disabled={bookBusy}
+                        onClick={handleToggleWorldBookBinding}
+                      >
+                        {bookBound ? "解绑" : "绑定"}
+                      </button>
+                    )}
+                    <button
+                      className="ts-10 px-3 py-1 bg-[#111111] text-white border-none rounded-full cursor-pointer disabled:opacity-50 hover:bg-[#222222] transition-colors"
+                      disabled={bookBusy}
+                      onClick={handleImportWorldBook}
+                    >
+                      {bookBusy ? "导入中…" : bookImported ? "重新导入" : "导入世界书"}
+                    </button>
+                  </div>
                 )}
               </div>
               <p className="ts-12 font-semibold">{embeddedBook.name}</p>
               <p className="ts-10 opacity-60 mt-1">
                 {embeddedBook.entries.length} 条条目
-                {bookImported ? " · 已导入并绑定到该角色" : " · 尚未导入世界书库"}
+                {!bookImported ? " · 尚未导入世界书库"
+                  : bookBound ? " · 已导入并绑定到该角色"
+                  : " · 已在世界书库，未绑定该角色"}
               </p>
               {embeddedBook.description && (
                 <p className="ts-10 opacity-60 mt-1 whitespace-pre-wrap break-words">{embeddedBook.description}</p>
@@ -2527,6 +2565,22 @@ function CharArchiveView({
             </div>
           </div>
         </div>
+      )}
+
+      {confirmReimport && (
+        <ConfirmDialog
+          title="重新导入世界书？"
+          message="会用角色卡里的原始内容整本覆盖，你在世界书管理里改过的条目、正文和开关都会丢失。"
+          icon={AlertCircle}
+          variant="danger"
+          confirmLabel="覆盖导入"
+          cancelLabel="取消"
+          onConfirm={() => {
+            setConfirmReimport(false);
+            runImportWorldBook();
+          }}
+          onCancel={() => setConfirmReimport(false)}
+        />
       )}
 
       {restoreTarget && (

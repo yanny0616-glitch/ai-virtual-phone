@@ -122,9 +122,34 @@ export function isCharacterWorldBookImported(characterId: string): boolean {
   return loadWorldBooks().some(book => book.id === id);
 }
 
+/** 这本卡内世界书当前是否绑在该角色名下（解绑只动绑定，书本身留在库里）。 */
+export function isCharacterWorldBookBound(characterId: string): boolean {
+  const id = characterWorldBookId(characterId);
+  const binding = getCharacterBinding(loadBindingConfig(), characterId);
+  return (binding.defaults.worldBookIds || []).includes(id);
+}
+
+/** 挂上 / 摘掉角色与卡内世界书的绑定。摘掉不删书，世界书库里原样保留。 */
+export function setCharacterWorldBookBound(characterId: string, bound: boolean): void {
+  const id = characterWorldBookId(characterId);
+  const config = loadBindingConfig();
+  const binding = getCharacterBinding(config, characterId);
+  const current = binding.defaults.worldBookIds || [];
+  const next = bound
+    ? (current.includes(id) ? current : [...current, id])
+    : current.filter(item => item !== id);
+  if (next.length === current.length && bound === current.includes(id)) return;
+  saveBindingConfig(setCharacterBinding(config, {
+    ...binding,
+    defaults: { ...binding.defaults, worldBookIds: next.length > 0 ? next : undefined },
+  }));
+}
+
 /**
  * 把角色卡自带的世界书写进世界书库，并绑定到这个角色。
  * 只导入不绑定的话，用户还得再去设置里挂一次，等于没导。
+ * 注意：重复导入是整本覆盖——用户在世界书管理里的修改会被卡里的原始内容盖掉，
+ * 所以 UI 侧对已导入的卡要先确认再调这里。
  */
 export function importCharacterWorldBook(char: Character): WorldBookConfig | null {
   const embedded = char.embeddedWorldBook;
@@ -150,15 +175,7 @@ export function importCharacterWorldBook(char: Character): WorldBookConfig | nul
     window.dispatchEvent(new CustomEvent("settings-worldbooks-updated"));
   }
 
-  const bindingConfig = loadBindingConfig();
-  const binding = getCharacterBinding(bindingConfig, char.id);
-  const bound = binding.defaults.worldBookIds || [];
-  if (!bound.includes(id)) {
-    saveBindingConfig(setCharacterBinding(bindingConfig, {
-      ...binding,
-      defaults: { ...binding.defaults, worldBookIds: [...bound, id] },
-    }));
-  }
+  setCharacterWorldBookBound(char.id, true);
 
   return config;
 }
