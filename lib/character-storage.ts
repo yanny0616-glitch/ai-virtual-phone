@@ -2,18 +2,8 @@ import type { Character, CanvasBgItem } from "./character-types";
 import { normalizeTimeZone } from "./character-time";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 
-/** Thrown when a character card contains fields unsupported by the current schema */
-export const CHAR_BLOCKED_FIELDS = "CHAR_BLOCKED_FIELDS";
-
 const STORAGE_KEY = "ai_phone_characters_v1";
 const BG_ITEMS_STORAGE_KEY = "ai_phone_bg_items_v1";
-const UNSUPPORTED_CHARACTER_IMPORT_FIELDS = [
-  "greeting",
-  "first_mes",
-  "alternate_greetings",
-  "mes_example",
-  "scenario",
-] as const;
 registerKvMigration(STORAGE_KEY);
 registerKvMigration(BG_ITEMS_STORAGE_KEY);
 
@@ -160,11 +150,22 @@ export type CharacterImportData = Omit<
   "id" | "createdAt" | "updatedAt"
 >;
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function nonEmptyText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function parseCharacterFromJson(
   text: string
 ): CharacterImportData | null {
   try {
     const obj = JSON.parse(text) as Record<string, unknown>;
+    if (!asRecord(obj)) return null;
 
     // Helper: validate avatar — only accept data-URLs and http(s) URLs
     function validAvatar(v: unknown): string | null {
@@ -175,25 +176,29 @@ export function parseCharacterFromJson(
       return null;
     }
 
-    const src = (obj.schema === "ai_phone_character" && typeof obj.data === "object" && obj.data !== null)
-      ? obj.data as Record<string, unknown>
-      : obj;
-
-    if (UNSUPPORTED_CHARACTER_IMPORT_FIELDS.some((field) => field in src || field in obj)) {
-      throw new Error(CHAR_BLOCKED_FIELDS);
-    }
+    // Float cards can be flat or wrapped in `data`; SillyTavern V2/V3 cards
+    // use the same `data` wrapper. V1 cards are flat and continue to work.
+    const nested = asRecord(obj.data);
+    const src = nested && (
+      obj.schema === "ai_phone_character" ||
+      /^chara_card_v[23]$/i.test(nonEmptyText(obj.spec)) ||
+      !nonEmptyText(obj.name)
+    ) ? nested : obj;
+    const name = nonEmptyText(src.name);
+    if (!name) return null;
 
     return {
-      name: String(src.name ?? ""),
-      persona: String(src.description ?? src.persona ?? ""),
+      name,
+      // Float's role library only needs the card's core persona. SillyTavern
+      // greetings, scenario, examples and embedded character_book stay out.
+      persona: nonEmptyText(src.description ?? src.persona),
       avatar: validAvatar(src.avatar),
       personality: typeof src.personality === "string" && src.personality.trim() ? src.personality : undefined,
       tags: Array.isArray(src.tags) ? src.tags.map(String) : [],
       wechatID: typeof src.wechatID === "string" && src.wechatID.trim() ? src.wechatID : undefined,
       timeZone: normalizeTimeZone(src.timeZone ?? src.timezone ?? src.time_zone),
     };
-  } catch (e) {
-    if (e instanceof Error && e.message === CHAR_BLOCKED_FIELDS) throw e;
+  } catch {
     return null;
   }
 }
@@ -201,6 +206,9 @@ export function parseCharacterFromJson(
 // ── PNG import/export ────────────────────────────────
 
 function readPngTextChunk(u8: Uint8Array, keyword: string): string | null {
+  // Reject malformed or unexpectedly large chunks before slicing them. Cards
+  // are user-supplied files, so declared PNG lengths cannot be trusted.
+  const MAX_TEXT_CHUNK_BYTES = 8 * 1024 * 1024;
   const sig = [137, 80, 78, 71, 13, 10, 26, 10];
   for (let i = 0; i < 8; i++) {
     if (u8[i] !== sig[i]) return null;
@@ -211,6 +219,7 @@ function readPngTextChunk(u8: Uint8Array, keyword: string): string | null {
 
   while (offset + 12 <= u8.length) {
     const length = dv.getUint32(offset);
+    if (length > MAX_TEXT_CHUNK_BYTES || length > u8.length - offset - 12) return null;
     const type = String.fromCharCode(
       u8[offset + 4],
       u8[offset + 5],
@@ -263,14 +272,24 @@ export function parseCharacterFromPng(
   buffer: ArrayBuffer
 ): CharacterImportData | null {
   const u8 = new Uint8Array(buffer);
-  const charaBase64 = readPngTextChunk(u8, "ai_phone_character");
-  if (!charaBase64) return null;
+  // CCv3 takes precedence when a card contains both modern and legacy data.
+  const payload = readPngTextChunk(u8, "ccv3")
+    ?? readPngTextChunk(u8, "chara")
+    ?? readPngTextChunk(u8, "ai_phone_character");
+  if (!payload) return null;
 
   try {
-    const jsonStr = decodeURIComponent(escape(atob(charaBase64)));
+    const trimmed = payload.trim();
+    let jsonStr = trimmed;
+    if (!trimmed.startsWith("{")) {
+      const normalized = trimmed.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+      const binary = atob(padded);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      jsonStr = new TextDecoder().decode(bytes);
+    }
     return parseCharacterFromJson(jsonStr);
-  } catch (e) {
-    if (e instanceof Error && e.message === CHAR_BLOCKED_FIELDS) throw e;
+  } catch {
     return null;
   }
 }

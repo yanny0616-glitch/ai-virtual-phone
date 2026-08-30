@@ -408,7 +408,7 @@ function bytesToPngDataUrl(buffer: ArrayBuffer): string {
 }
 
 /**
- * 解析器抛的是内部哨兵串（UNSUPPORTED_IMPORT_FORMAT / CHAR_BLOCKED_FIELDS），
+ * 解析器抛的是内部哨兵串（UNSUPPORTED_IMPORT_FORMAT），
  * 各管理页都会翻译成人话，集市原本直接甩给用户看，会显示成
  * 「导入失败：UNSUPPORTED_IMPORT_FORMAT」。
  */
@@ -418,7 +418,6 @@ function translateParseError<T>(run: () => T): T {
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message === "UNSUPPORTED_IMPORT_FORMAT") throw new Error("不支持该文件的格式，请确认它是本应用导出的");
-        if (message === "CHAR_BLOCKED_FIELDS") throw new Error("不支持包含开场白、场景或示例对话的角色卡");
         throw err;
     }
 }

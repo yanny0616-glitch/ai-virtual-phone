@@ -13,8 +13,6 @@ import {
   loadBackgroundItems,
   saveBackgroundItems,
   type CharacterImportData,
-
-  CHAR_BLOCKED_FIELDS,
 } from "@/lib/character-storage";
 import { generateBriefPersonaText, isBriefPersonaStale } from "@/lib/brief-persona";
 import { generateSupportingCharacters, materializeSupportingCharacter, type GeneratedSupportingCharacter } from "@/lib/npc-generator";
@@ -688,7 +686,6 @@ function CharListView({
   const pendingActionRef = useRef<'import' | 'create'>('import');
   const [pendingBgType, setPendingBgType] = useState<CanvasBgItem['type'] | null>(null);
   const [ghostPos, setGhostPos] = useState<{ x: number; y: number }>({ x: -9999, y: -9999 });
-  const [importError, setImportError] = useState<string | null>(null);
   const placementActive = !!(pendingPlacementChar || pendingBgType);
 
   useEffect(() => {
@@ -915,12 +912,8 @@ function CharListView({
       } else {
         onNotice("请选择 .json 或 .png 文件");
       }
-    } catch (e) {
-      if (e instanceof Error && e.message === CHAR_BLOCKED_FIELDS) {
-        setImportError("不支持包含开场白、场景或示例对话的角色卡");
-      } else {
-        onNotice("解析失败，请检查文件格式");
-      }
+    } catch {
+      onNotice("解析失败，请检查文件格式");
     }
   }
 
@@ -1347,19 +1340,6 @@ function CharListView({
             </div>
           </div>
         </div>
-      )}
-
-      {importError && (
-        <ConfirmDialog
-          title="导入失败"
-          message={importError}
-          icon={AlertCircle}
-          variant="danger"
-          confirmLabel="知道了"
-          cancelLabel=""
-          onConfirm={() => setImportError(null)}
-          onCancel={() => setImportError(null)}
-        />
       )}
 
       {/* NPC generator sheet — 目标角色限当前世界，生成的配角落在当前画布 */}
