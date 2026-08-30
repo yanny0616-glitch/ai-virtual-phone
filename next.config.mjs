@@ -22,6 +22,9 @@ function resolveDistDir() {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typedRoutes: true,
+  // CI produces a self-contained runtime bundle so production servers do not
+  // need to run `npm install` or `next build` during deployment.
+  output: "standalone",
   outputFileTracingRoot: projectRoot,
   distDir: resolveDistDir(),
   eslint: {

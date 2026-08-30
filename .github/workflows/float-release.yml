@@ -1,0 +1,68 @@
+name: Build Float release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: float-production-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_SELF_HOSTED_MODE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Package standalone runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/.next
+          cp -a .next/standalone/. release/
+          cp -a .next/static release/.next/static
+          cp -a public release/public
+          printf '%s\n' "$GITHUB_SHA" > release/VERSION
+          tar -C release -czf float-standalone.tar.gz .
+          sha256sum float-standalone.tar.gz > float-standalone.tar.gz.sha256
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="float-build-${GITHUB_SHA::12}"
+          gh release create "$tag" \
+            float-standalone.tar.gz \
+            float-standalone.tar.gz.sha256 \
+            --title "Float ${GITHUB_SHA::12}" \
+            --notes "Automated production build for $GITHUB_SHA" \
+            --latest
+
+          mapfile -t old_tags < <(
+            gh release list --limit 20 --json tagName,createdAt \
+              --jq 'map(select(.tagName | startswith("float-build-"))) | sort_by(.createdAt) | reverse | .[3:] | .[].tagName'
+          )
+          for old_tag in "${old_tags[@]}"; do
+            gh release delete "$old_tag" --cleanup-tag --yes
+          done

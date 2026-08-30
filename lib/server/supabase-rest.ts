@@ -14,6 +14,20 @@ export function getSupabaseServerConfig(): SupabaseConfig | null {
   return { url: url.replace(/\/$/, ""), key };
 }
 
+function buildSupabaseServiceHeaders(key: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    apikey: key,
+    "Content-Type": "application/json",
+  };
+  // New sb_secret_* keys are opaque API keys, not JWTs. Supabase rejects them
+  // in Authorization; when sent only as apikey, its gateway maps them to the
+  // service_role database role. Legacy service_role JWTs still need Bearer.
+  if (!key.startsWith("sb_secret_")) {
+    headers.Authorization = `Bearer ${key}`;
+  }
+  return headers;
+}
+
 export function formatSupabaseRestError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const cause = err instanceof Error && "cause" in err ? String((err as { cause?: unknown }).cause ?? "") : "";
@@ -37,9 +51,7 @@ export async function supabaseRestFetch<T>(
   const response = await fetch(`${config.url}/rest/v1/${path}`, {
     ...init,
     headers: {
-      apikey: config.key,
-      Authorization: `Bearer ${config.key}`,
-      "Content-Type": "application/json",
+      ...buildSupabaseServiceHeaders(config.key),
       ...(init?.headers ?? {}),
     },
     cache: "no-store",

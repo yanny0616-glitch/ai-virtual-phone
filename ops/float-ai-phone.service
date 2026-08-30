@@ -1,0 +1,21 @@
+[Unit]
+Description=Float AI Virtual Phone
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/float/current
+EnvironmentFile=/root/vibe-coding/ai-virtual-phone/.env.local
+Environment=NODE_ENV=production
+Environment=HOSTNAME=172.17.0.1
+Environment=PORT=3001
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/node /opt/float/current/server.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target
