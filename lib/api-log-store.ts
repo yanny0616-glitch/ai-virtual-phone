@@ -4,6 +4,7 @@
 // 通用 LLM 调用）共用这份日志，统一在「底层调用大模型日志」面板查看。
 
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
+import { recordApiUsage } from "./api-usage-stats";
 
 export type DebugInfo = {
     id: string;
@@ -137,6 +138,8 @@ export function pushApiLog(entry: Omit<DebugInfo, "id" | "timestamp">): void {
     const key = isQa ? QA_LOGS_KEY : API_LOGS_KEY;
     const maxCount = isQa ? MAX_QA_API_LOGS : MAX_API_LOGS;
     const maxSerializedChars = isQa ? MAX_QA_LOGS_SERIALIZED_CHARS : MAX_API_LOGS_SERIALIZED_CHARS;
+    // 用量统计独立累加：日志环只留最近 150 条，按天的用量必须在写日志时就记下来。
+    recordApiUsage({ model: entry.model, source: entry.source, usage: entry.usage });
     try {
         const logs = _loadLogs(key);
         logs.push({

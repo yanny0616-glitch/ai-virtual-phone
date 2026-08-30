@@ -100,6 +100,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "ai_phone_agent_computer_cfg_v1",
           "ai_phone_idle_reconnect_rules_v1",
           "ai_phone_qa_feedback_v1",
+          "ai_phone_api_usage_stats_v1",
           "ai_phone_qa_github_v1",
           "ai_phone_media_maintenance_config_v1",
         ],

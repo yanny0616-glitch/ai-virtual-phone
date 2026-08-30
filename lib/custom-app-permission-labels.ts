@@ -21,6 +21,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "user.profile.read": "读取用户昵称与头像",
   "user.persona.read": "读取用户人设",
   "user.preferences.read": "读取用户偏好设置",
+  "usage.read": "读取模型调用用量统计（模型、次数、token 数，不含提示词内容）",
   "chat.read": "读取聊天消息",
   "chat.read.background": "后台监听聊天消息",
   "chat.write": "写入聊天记录",

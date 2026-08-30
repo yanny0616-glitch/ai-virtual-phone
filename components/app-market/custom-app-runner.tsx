@@ -15,6 +15,7 @@ import { permissionLabelWithContext } from "@/lib/custom-app-permission-labels";
 import { registerCustomAppToolExecutor, type CustomAppToolExecutorPayload } from "@/lib/custom-app-tool-runtime";
 import { updateInstalledCustomAppFromMarket } from "@/lib/custom-app-market-update";
 import { loadCharacters } from "@/lib/character-storage";
+import { getApiUsageDays } from "@/lib/api-usage-stats";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { ensureSettingsStorageHydrated } from "@/lib/settings-storage";
 import { getPwaHostedSafeArea, PWA_DISPLAY_MODE_CHANGED_EVENT } from "@/lib/pwa-display-mode";
@@ -454,6 +455,9 @@ html, body { min-height: 100%; }
       mute: function(characterId){ return request('chat.setContactState', { characterId: characterId, isMuted: true }); },
       unmute: function(characterId){ return request('chat.setContactState', { characterId: characterId, isMuted: false }); }
     },
+    usage: {
+      readDaily: function(payload){ return request('usage.readDaily', payload || {}); }
+    },
     characters: {
       list: function(){ return request('characters.list'); },
       get: function(id){ return request('characters.get', { id: id }); },
@@ -652,6 +656,7 @@ function bridgeActionNeedsSettingsStorage(action: string): boolean {
 
 function bridgeActionNeedsKvStorage(action: string): boolean {
   return action.startsWith("db.")
+    || action.startsWith("usage.")
     || action.startsWith("bridge.")
     || action.startsWith("notifications.")
     || action.startsWith("tasks.")
@@ -1087,6 +1092,7 @@ export function CustomAppRunner({
           world: ["read", "list", "get", "write", "create", "update", "delete", "activate"],
           media: ["pick", "save", "put", "get", "revoke", "delete"],
           characters: ["list", "get", "readState", "writeState", "readRelations"],
+          usage: ["readDaily"],
           chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState"],
           memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
           notifications: ["create", "list", "markRead", "markAllRead", "getBadge", "setBadge", "incrementBadge", "clearBadge"],
@@ -1610,6 +1616,12 @@ export function CustomAppRunner({
       }
       geoWatchIdRef.current = null;
       return true;
+    }
+
+    if (action === "usage.readDaily") {
+      requirePermission("usage.read");
+      // 只给计数，不给提示词原文和回复原文——日志里那些比聊天记录还敏感。
+      return { days: getApiUsageDays({ days: Number(record.days ?? 7) }) };
     }
 
     if (action === "characters.list") {
