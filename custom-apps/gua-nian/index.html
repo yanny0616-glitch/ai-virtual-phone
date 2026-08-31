@@ -6,18 +6,18 @@
 <title>挂念</title>
 <style>
   :root {
-    --bg0: #171226;
-    --bg1: #251a35;
-    --card: rgba(255, 255, 255, .055);
-    --card-strong: rgba(255, 255, 255, .09);
-    --line: rgba(255, 255, 255, .10);
-    --tx: #f5f1fa;
-    --tx2: #b9adcf;
-    --tx3: #80749b;
+    --bg0: #fdf7f2;
+    --bg1: #fbeee8;
+    --card: #ffffff;
+    --card-strong: #fff6f1;
+    --line: rgba(160, 110, 100, .14);
+    --tx: #453038;
+    --tx2: #93777f;
+    --tx3: #bda6ad;
     --acc: #ff8f70;
-    --acc2: #ff6b9d;
-    --good: #7ee0b0;
-    --warn: #ffd166;
+    --acc2: #f56b9c;
+    --good: #2aa876;
+    --warn: #c08a1a;
     --r-lg: 22px;
     --r-md: 16px;
   }
@@ -26,8 +26,8 @@
   body {
     font-family: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
     background:
-      radial-gradient(120% 55% at 85% -5%, rgba(255, 122, 89, .16), transparent 60%),
-      radial-gradient(110% 60% at 0% 8%, rgba(150, 92, 255, .17), transparent 55%),
+      radial-gradient(120% 55% at 85% -5%, rgba(255, 143, 112, .18), transparent 60%),
+      radial-gradient(110% 60% at 0% 8%, rgba(245, 107, 156, .10), transparent 55%),
       linear-gradient(175deg, var(--bg1), var(--bg0) 55%);
     background-attachment: fixed;
     color: var(--tx);
@@ -77,8 +77,7 @@
     border-radius: var(--r-lg);
     padding: 18px;
     margin-bottom: 16px;
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 6px 24px rgba(180, 120, 110, .10);
   }
   .sec-head { display: flex; align-items: center; margin-bottom: 12px; }
   .sec-head .t { font-size: 13px; font-weight: 700; letter-spacing: 3px; color: var(--tx2); }
@@ -91,17 +90,17 @@
 
   /* 状态卡 */
   .mood-row { display: flex; align-items: center; gap: 14px; }
-  .mood-emoji { font-size: 44px; line-height: 1; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .35)); }
+  .mood-emoji { font-size: 44px; line-height: 1; filter: drop-shadow(0 4px 10px rgba(200, 130, 120, .35)); }
   .mood-body { flex: 1; min-width: 0; }
   .mood-text { font-size: 15px; font-weight: 600; line-height: 1.5; }
   .mood-sub { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .chip {
     font-size: 11px; color: var(--tx2); border: 1px solid var(--line);
-    padding: 3px 9px; border-radius: 999px; background: rgba(255, 255, 255, .04);
+    padding: 3px 9px; border-radius: 999px; background: var(--card-strong);
   }
   .energy { margin-top: 14px; }
   .energy .lab { display: flex; justify-content: space-between; font-size: 11px; color: var(--tx3); margin-bottom: 6px; }
-  .energy .bar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+  .energy .bar { height: 6px; border-radius: 999px; background: rgba(160, 110, 100, .12); overflow: hidden; }
   .energy .fill {
     height: 100%; border-radius: 999px; width: 0;
     background: linear-gradient(90deg, var(--acc), var(--acc2));
@@ -117,7 +116,7 @@
   .tl-item { position: relative; padding: 7px 0 7px 6px; animation: rise .4s ease both; }
   .tl-item .dot {
     position: absolute; left: -23px; top: 13px; width: 12px; height: 12px; border-radius: 50%;
-    background: var(--bg1); border: 2px solid var(--tx3);
+    background: #fff; border: 2px solid var(--tx3);
   }
   .tl-item.past { opacity: .45; }
   .tl-item .row1 { display: flex; align-items: baseline; gap: 8px; }
@@ -138,17 +137,17 @@
     display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px;
     margin-left: 6px; vertical-align: 1px; letter-spacing: .5px;
   }
-  .badge.push { background: rgba(126, 224, 176, .14); color: var(--good); border: 1px solid rgba(126, 224, 176, .3); }
-  .badge.local { background: rgba(255, 209, 102, .12); color: var(--warn); border: 1px solid rgba(255, 209, 102, .3); }
-  .badge.off { background: rgba(255, 255, 255, .05); color: var(--tx3); border: 1px solid var(--line); }
-  .badge.done { background: rgba(255, 107, 157, .13); color: var(--acc2); border: 1px solid rgba(255, 107, 157, .3); }
+  .badge.push { background: rgba(42, 168, 118, .10); color: var(--good); border: 1px solid rgba(42, 168, 118, .3); }
+  .badge.local { background: rgba(192, 138, 26, .10); color: var(--warn); border: 1px solid rgba(192, 138, 26, .3); }
+  .badge.off { background: rgba(160, 110, 100, .06); color: var(--tx3); border: 1px solid var(--line); }
+  .badge.done { background: rgba(245, 107, 156, .10); color: var(--acc2); border: 1px solid rgba(245, 107, 156, .3); }
 
   /* 预览气泡 */
   .preview-zone { min-height: 20px; }
   .bubble {
     position: relative; max-width: 88%;
-    background: linear-gradient(135deg, rgba(255, 143, 112, .22), rgba(255, 107, 157, .22));
-    border: 1px solid rgba(255, 130, 135, .3);
+    background: linear-gradient(135deg, rgba(255, 143, 112, .14), rgba(245, 107, 156, .12));
+    border: 1px solid rgba(245, 120, 130, .28);
     border-radius: 4px 18px 18px 18px;
     padding: 12px 14px; margin-top: 12px;
     font-size: 14px; line-height: 1.65;
@@ -193,15 +192,16 @@
 
   /* 底部弹层 */
   .sheet-mask {
-    position: fixed; inset: 0; background: rgba(10, 6, 20, .6);
+    position: fixed; inset: 0; background: rgba(80, 50, 60, .35);
     backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
     opacity: 0; pointer-events: none; transition: opacity .25s ease; z-index: 40;
   }
   .sheet {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
     max-width: 520px; margin: 0 auto;
-    background: linear-gradient(180deg, #2b2040, #1d1530);
+    background: linear-gradient(180deg, #fffdfb, #fdf4ef);
     border-radius: 24px 24px 0 0; border: 1px solid var(--line); border-bottom: none;
+    box-shadow: 0 -10px 40px rgba(150, 90, 90, .16);
     padding: 20px 20px calc(var(--ai-phone-app-safe-bottom, 0px) + 24px);
     transform: translateY(105%); transition: transform .3s cubic-bezier(.22, 1, .36, 1);
     max-height: 78vh; overflow-y: auto;
@@ -229,7 +229,7 @@
   .field-row input[type="time"] {
     flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     color: var(--tx); padding: 9px 10px; font-size: 14px; font-family: inherit;
-    color-scheme: dark;
+    color-scheme: light;
   }
   .stepper { display: flex; align-items: center; gap: 14px; }
   .stepper button {
@@ -242,8 +242,8 @@
   #toast {
     position: fixed; left: 50%; bottom: calc(var(--ai-phone-app-safe-bottom, 0px) + 70px);
     transform: translateX(-50%) translateY(16px); z-index: 60;
-    background: rgba(20, 14, 34, .92); border: 1px solid var(--line);
-    color: var(--tx); font-size: 13px; padding: 10px 18px; border-radius: 999px;
+    background: rgba(69, 48, 56, .92); border: 1px solid rgba(255, 255, 255, .15);
+    color: #fff; font-size: 13px; padding: 10px 18px; border-radius: 999px;
     opacity: 0; pointer-events: none; transition: all .25s ease; white-space: nowrap;
   }
   #toast.show { opacity: 1; transform: translateX(-50%); }
