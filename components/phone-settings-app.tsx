@@ -18,6 +18,7 @@ import { AboutDeclaration } from "./settings/about-declaration";
 import { BindingManager } from "./settings/binding-manager";
 import { WeixinSettings } from "./settings/weixin-settings";
 import { CloudServicesPage } from "./settings/cloud-services-setup";
+import { SelfHostUpdateCard } from "./settings/self-host-update";
 import { ToolboxSettings } from "./settings/toolbox-settings";
 import { ModerationCenter } from "./settings/moderation-center";
 import { AgentComputerSettings } from "./settings/agent-computer-settings";
@@ -441,6 +442,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                                 </div>
                                 <Toggle checked={keepAlive} onChange={handleKeepAliveChange} className="settings-toggle-control" />
                             </div>
+                            {selfHostedMode && <SelfHostUpdateCard onNotice={onNotice} />}
                         </div>
                         {isAdmin ? (
                             <div className="settings-moderation-section">
