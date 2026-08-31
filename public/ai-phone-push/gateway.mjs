@@ -234,6 +234,30 @@ async function encryptPayload(plain: string, secret: string): Promise<EncryptedP
   };
 }
 
+function b64ToBytes(value: string): Uint8Array {
+  const raw = atob(value);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+
+/** 与 encryptPayload / push-generate 同格式，jobs GET 诊断时解出非敏感字段用。 */
+async function decryptPayload(payload: EncryptedPayload, secret: string): Promise<string> {
+  const keyBytes = await crypto.subtle.digest("SHA-256", utf8(`${secret}:push-job-v1`));
+  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["decrypt"]);
+  const ct = b64ToBytes(payload.ct);
+  const tag = b64ToBytes(payload.tag);
+  const combined = new Uint8Array(ct.length + tag.length);
+  combined.set(ct);
+  combined.set(tag, ct.length);
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: b64ToBytes(payload.iv) as unknown as BufferSource },
+    key,
+    combined as unknown as BufferSource,
+  );
+  return new TextDecoder().decode(plain);
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
 
@@ -567,6 +591,8 @@ Deno.serve(async (request: Request) => {
         capabilities: [
           ...(schemaVersion >= 3 ? ["screen-chat-continuous"] : []),
           ...(schemaVersion >= 4 ? ["chat-mirror"] : []),
+          // 部署了本版网关即支持（纯代码能力，不依赖 schema）
+          "job-status",
         ],
       });
     }
@@ -617,6 +643,51 @@ Deno.serve(async (request: Request) => {
       }
     }
 
+    if (action === "jobs" && request.method === "GET") {
+      // 只读诊断（给挂念等应用的面板用）：回传预约状态与解密后的少量非敏感字段
+      // （sessionId / cooldownRounds / armAt），绝不回传冻结请求本体——里面有上游凭据。
+      const limit = Math.max(1, Math.min(20, Number(url.searchParams.get("limit")) || 10));
+      const kindFilter = cleanText(url.searchParams.get("kind"), 40);
+      const rows = await readJson<{
+        trigger_key: string; kind: string; execute_at: string; status: string;
+        result_note: string | null; updated_at: string; payload: EncryptedPayload;
+      }[]>(await rest(
+        `push_jobs?user_id=eq.${OWNER_ID}`
+        + (kindFilter ? `&kind=eq.${encodeURIComponent(kindFilter)}` : "")
+        + `&select=trigger_key,kind,execute_at,status,result_note,updated_at,payload&order=execute_at.desc&limit=${limit}`,
+      ));
+      const config = await loadConfig();
+      const jobs = [];
+      for (const row of Array.isArray(rows) ? rows : []) {
+        let sessionId = "";
+        let cooldownRounds = 0;
+        let armAt = 0;
+        try {
+          if (config.payload_key) {
+            const plain = JSON.parse(await decryptPayload(row.payload, config.payload_key)) as {
+              merge?: { sessionId?: unknown; cooldownRounds?: unknown; armAt?: unknown };
+            };
+            if (typeof plain.merge?.sessionId === "string") sessionId = plain.merge.sessionId;
+            const cd = Number(plain.merge?.cooldownRounds);
+            if (Number.isFinite(cd) && cd > 0) cooldownRounds = cd;
+            const arm = Number(plain.merge?.armAt);
+            if (Number.isFinite(arm) && arm > 0) armAt = arm;
+          }
+        } catch { /* 解不开（旧格式/密钥轮换）就只报状态字段 */ }
+        jobs.push({
+          triggerKey: row.trigger_key,
+          kind: row.kind,
+          executeAt: row.execute_at,
+          status: row.status,
+          resultNote: row.result_note || "",
+          updatedAt: row.updated_at,
+          sessionId,
+          cooldownRounds,
+          armAt,
+        });
+      }
+      return json({ ok: true, jobs });
+    }
     if (action === "jobs") {
       const body = await request.json().catch(() => ({})) as Record<string, unknown>;
       const triggerKey = cleanText(body.triggerKey, 200);

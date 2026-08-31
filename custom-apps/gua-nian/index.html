@@ -1519,6 +1519,12 @@
         : '<div class="archive-note">未配置云连接。到设置里填你的个人云地址与密钥后，这里会显示云端聊天镜像的状态。</div>') +
       "</div></div>";
 
+    html += '<div class="card"><div class="sec-head"><span class="t">云 端 预 约 · 降 速</span></div><div id="diag-jobs">' +
+      (cloudCfg()
+        ? '<div class="archive-note">正在查询云端…</div>'
+        : '<div class="archive-note">未配置云连接。配置后这里会显示云端定时预约带没带「未回轮数」阈值、到点后有没有被降速拦截。</div>') +
+      "</div></div>";
+
     html += '<div class="card"><div class="sec-head"><span class="t">运 行 日 志</span>' +
       (logItems.length ? '<button class="act" id="btn-clear-log">清空</button>' : "") + "</div>";
     if (!logItems.length) {
@@ -1539,13 +1545,14 @@
       renderDiag();
     };
 
-    // 云端镜像状态异步补上（不阻塞页面；期间切走则丢弃结果）
+    // 云端镜像/预约状态异步补上（不阻塞页面；期间切走则丢弃结果）
     if (cloudCfg()) {
       (async () => {
-        let mHtml;
+        let mHtml, caps = [], mySession = "";
         try {
           const h = await cloudFetch("health", { method: "GET" });
-          const mir = (h.capabilities || []).indexOf("chat-mirror") >= 0;
+          caps = h.capabilities || [];
+          const mir = caps.indexOf("chat-mirror") >= 0;
           mHtml = '<div class="diag-item"><b>连接</b> 正常 · 云函数 v' + esc(String(h.schemaVersion || "?")) + "</div>";
           if (!mir) {
             mHtml += '<div class="diag-item"><b>镜像</b> 云函数版本偏旧，还不支持聊天镜像。去小手机「设置 → 云服务部署」重新部署一次离线推送。</div>';
@@ -1553,6 +1560,7 @@
             const g = await cloudFetch("chat-mirror", { method: "GET" }, { characterId: S.character.id, limit: "1" });
             const last = g.entries && g.entries[0];
             if (last) {
+              mySession = last.session_id || "";
               mHtml += '<div class="diag-item"><b>镜像</b> 该角色最近一条：' + (last.role === "user" ? "你" : "TA") + " · " +
                 esc(new Date(last.message_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })) + "</div>";
             } else {
@@ -1570,6 +1578,43 @@
         }
         const el = $("#diag-cloud");
         if (el && S.tab === "diag" && req === S._diagReq) el.innerHTML = mHtml;
+
+        // 云端预约卡片：预约带没带降速阈值、到点后拦没拦
+        let jHtml;
+        try {
+          if (caps.indexOf("job-status") < 0) {
+            jHtml = '<div class="archive-note">云函数版本偏旧，还看不了预约状态。去小手机「设置 → 云服务部署」重新部署一次离线推送。</div>';
+          } else {
+            const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", limit: "8" });
+            const jobs = jr.jobs || [];
+            if (!jobs.length) {
+              jHtml = '<div class="archive-note">云端目前没有定时预约的记录。到「今天」页点「♥ 重新编排」挂一个再来看。</div>';
+            } else {
+              const stName = { pending: "待触发", running: "生成中", done: "已完成", cancelled: "已取消", failed: "失败" };
+              jHtml = jobs.map((j) => {
+                const t = new Date(j.executeAt);
+                const cooled = /^cooldown skip/.test(j.resultNote || "");
+                let line = '<div class="diag-item"><b>' +
+                  esc(t.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })) + "</b> " +
+                  esc(stName[j.status] || j.status) +
+                  (mySession && j.sessionId === mySession ? "" : (j.sessionId ? ' <span class="badge cool">其他角色</span>' : "")) +
+                  (j.cooldownRounds > 0
+                    ? " · 降速阈值 " + j.cooldownRounds + " 轮"
+                    : ' · <span class="badge cool">未带阈值</span>');
+                if (cooled) line += '<br><span class="badge cool">已降速拦截</span> ' + esc(j.resultNote || "");
+                else if (j.resultNote) line += "<br>" + esc(j.resultNote);
+                return line + "</div>";
+              }).join("");
+              if (jobs.some((j) => j.status === "pending" && !(j.cooldownRounds > 0)) && S.settings.maxUnanswered > 0) {
+                jHtml += '<div class="archive-note">有预约没带降速阈值（旧版挂的）。到「今天」页点「♥ 重新编排」重挂一次就带上了。</div>';
+              }
+            }
+          }
+        } catch (e) {
+          jHtml = '<div class="archive-note">预约查询失败：' + esc(String(e && e.message || e)) + "</div>";
+        }
+        const jel = $("#diag-jobs");
+        if (jel && S.tab === "diag" && req === S._diagReq) jel.innerHTML = jHtml;
       })();
     }
   }

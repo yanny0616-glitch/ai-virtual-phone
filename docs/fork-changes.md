@@ -178,3 +178,7 @@
   `push.wake` 带上 `cooldownRounds = 设置的未回轮数阈值`
 - 生效方式：站点更新后重新部署个人云（更新 push-generate），装 0.4.5 后
   在「今天」页重新编排一次，让新预约带上阈值
+- 面板可视化（同日，gua-nian 0.4.6）：网关 `jobs` 加只读 GET（解密 payload 只回传
+  sessionId / cooldownRounds / armAt 等非敏感字段，绝不回传冻结请求本体），health
+  报 `job-status` 能力；挂念诊断页新增「云端预约·降速」卡片——每条预约的触发时间/
+  状态/带没带阈值/`result_note`（含「已降速拦截」高亮），旧预约未带阈值时提示重新编排
