@@ -1816,6 +1816,11 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       void import("@/lib/push-bailout-client").then(m => m.installScheduledBailoutRefresher()).catch(() => undefined);
       // 聊天镜像：把新消息抄送到用户自己的个人云（默认关闭，云服务设置里开启）
       void import("@/lib/chat-mirror-client").then(m => m.installChatMirror()).catch(() => undefined);
+      // 通知头像缓存：把角色头像缩图写进 Cache Storage，SW 弹推送时取用。
+      // 延后跑，别抢启动窗口的解码/IO。
+      window.setTimeout(() => {
+        void import("@/lib/notification-avatar-cache").then(m => m.syncNotificationAvatarCache()).catch(() => undefined);
+      }, 8000);
     })();
 
     return () => {

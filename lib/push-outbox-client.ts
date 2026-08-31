@@ -11,6 +11,7 @@ import { loadChatMessages, loadChatSessions, reindexSessionMessageOrdersByTime }
 import { hasAccountPushSubscription } from "./push-client";
 import { isPersonalPushCloudActive, loadPersonalPushCloudState, personalPushFetch } from "./personal-push-cloud";
 import { removeTimedWakeSchedule } from "./timed-wake-storage";
+import { closeChatPushNotifications } from "./notification-avatar-cache";
 import { appendBridgeFeed } from "./reality-bridge/storage";
 import { loadScreenChatSettings, saveScreenChatAck } from "./reality-bridge/storage";
 
@@ -284,12 +285,18 @@ export function installServerOutboxConsumer(): void {
     };
 
     requestConsume(false);
+    // 人已经进 App 了，托盘里挂着的聊天通知就该收掉，别一直弹在那
+    if (!document.hidden) closeChatPushNotifications();
     document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) requestConsume(true);
+        if (!document.hidden) {
+            requestConsume(true);
+            closeChatPushNotifications();
+        }
     });
     navigator.serviceWorker?.addEventListener("message", (event) => {
         if (event.data?.type === "push_outbox_ready") {
             requestConsume(true);
+            if (!document.hidden) closeChatPushNotifications();
             return;
         }
         if (event.data?.type === "run_shortcut" && typeof event.data.url === "string") {

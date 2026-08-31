@@ -274,7 +274,7 @@ type JobPayload = {
     imageMarker?: string;
     style: "text" | "native";
   };
-  notify?: { title?: string; url?: string };
+  notify?: { title?: string; url?: string; characterId?: string };
   /** 角色绑定的微信 bot：force 用于真实微信快捷动作结果续跑，保证第二轮仍回到微信。 */
   weixin?: { botId?: string; force?: boolean };
   /** 离线快捷动作的结果续跑快照：客户端预挂，AI 调用需回传的动作时武装 shortcut_resume */
@@ -1217,6 +1217,8 @@ Deno.serve(async (req: Request) => {
         body: partBody,
         tag: `${job.id}-${index}`,
         url: targetUrl,
+        // SW 用它取本地缓存的角色头像当通知 icon；老 SW 不认识则忽略
+        ...(payload.notify?.characterId ? { characterId: payload.notify.characterId } : {}),
         ...(deliverAsCall ? { sessionId: callSessionId, callTs: Date.now() } : {}),
       });
       if (vapid) {

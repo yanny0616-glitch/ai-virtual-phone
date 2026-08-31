@@ -182,3 +182,21 @@
   sessionId / cooldownRounds / armAt 等非敏感字段，绝不回传冻结请求本体），health
   报 `job-status` 能力；挂念诊断页新增「云端预约·降速」卡片——每条预约的触发时间/
   状态/带没带阈值/`result_note`（含「已降速拦截」高亮），旧预约未带阈值时提示重新编排
+
+## K. 推送通知体验：角色头像 icon + 进 App 收弹窗（2026-08-31）
+
+- `lib/notification-avatar-cache.ts`（新）— 启动 8 秒后把每个角色头像居中裁方缩到
+  192px JPEG 写进 Cache Storage（`notif-avatar-v1`，SW activate 清缓存时豁免），
+  删角色后清残留；`closeChatPushNotifications()` 关掉托盘里聊天类系统通知
+- `lib/push-bailout-client.ts` — 五处预约（回复兜底/连发/闲时/定时唤醒/经期关怀）
+  的 `notify` 都带上 `characterId`
+- `supabase/functions/push-generate/index.ts`（同步 dist）— 推送 JSON 透传
+  `characterId`，老 SW 不认识则忽略
+- `public/sw.js` — 弹通知时若缓存里有该角色头像，转成小 data URL 当 icon
+  （icon 取图不保证走 SW fetch，内联最稳，>200KB 不内联）；点开一条聊天通知时
+  把托盘里其余聊天通知一并收掉
+- `lib/push-outbox-client.ts` — 启动/回前台/SW 告知有新消息且页面可见时，
+  调 `closeChatPushNotifications()`：人在 App 里就不留系统弹窗（快捷指令、
+  来电通知不动）
+- 生效方式：站点更新后刷新一次页面让新 SW 接管；重新部署个人云更新 push-generate；
+  已挂的预约在下次快照刷新/重新编排后才带 `characterId`

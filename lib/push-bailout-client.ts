@@ -137,6 +137,8 @@ export async function armReplyBailout(params: {
 
     const triggerKey = `reply:${params.sessionId}`;
     const armAt = new Date().toISOString();
+    // 通知头像用：本库 session.contactId 存的直接就是 characterId
+    const notifyCharacterId = loadChatSessions().find(s => s.id === params.sessionId)?.contactId || "";
     const response = await pushJobsFetch({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -151,7 +153,7 @@ export async function armReplyBailout(params: {
                     body: params.request.body,
                     providerKind: params.request.providerKind,
                 },
-                notify: { title: params.characterName, url: "/" },
+                notify: { title: params.characterName, url: "/", ...(notifyCharacterId ? { characterId: notifyCharacterId } : {}) },
                 merge: {
                     sessionId: params.sessionId,
                     prevCount: 0,
@@ -302,7 +304,7 @@ export async function armFollowUpBailout(
                         body: request.body,
                         providerKind: request.providerKind,
                     },
-                    notify: { title: character.name, url: "/" },
+                    notify: { title: character.name, url: "/", characterId: character.id },
                     ...(shortcutContinuation ? { shortcutContinuation } : {}),
                     merge: {
                         sessionId,
@@ -331,6 +333,8 @@ async function postBailoutJob(input: {
     executeAtMs: number;
     request: Pick<LlmRequestPayload, "url" | "headers" | "body" | "providerKind">;
     notifyTitle: string;
+    /** 通知弹窗取角色头像用；缺省不带，SW 用默认图标 */
+    notifyCharacterId?: string;
     merge: Record<string, unknown>;
     weixinBotId?: string;
     shortcutContinuation?: OfflineShortcutContinuation | null;
@@ -349,7 +353,7 @@ async function postBailoutJob(input: {
                     body: input.request.body,
                     providerKind: input.request.providerKind,
                 },
-                notify: { title: input.notifyTitle, url: "/" },
+                notify: { title: input.notifyTitle, url: "/", ...(input.notifyCharacterId ? { characterId: input.notifyCharacterId } : {}) },
                 ...(input.weixinBotId ? { weixin: { botId: input.weixinBotId } } : {}),
                 ...(input.shortcutContinuation ? { shortcutContinuation: input.shortcutContinuation } : {}),
                 // snapshotAt = 快照冻结时刻。push-generate 到点时据此把「预约之后
@@ -453,6 +457,7 @@ export async function armIdleReconnectBailout(rule: IdleReconnectRule): Promise<
             executeAtMs: fireAt + 15_000,
             request,
             notifyTitle: character.name,
+            notifyCharacterId: character.id,
             weixinBotId,
             shortcutContinuation,
             merge: {
@@ -514,6 +519,7 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
             executeAtMs: schedule.fireAt + 15_000,
             request,
             notifyTitle: character.name,
+            notifyCharacterId: character.id,
             weixinBotId,
             shortcutContinuation,
             merge: {
@@ -584,6 +590,7 @@ export async function armPeriodCareBailouts(): Promise<void> {
                     executeAtMs,
                     request,
                     notifyTitle: characterName,
+                    notifyCharacterId: session.contactId,
                     shortcutContinuation,
                     merge: {
                         sessionId: session.id,

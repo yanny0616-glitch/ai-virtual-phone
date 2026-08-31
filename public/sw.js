@@ -1,6 +1,10 @@
 const CACHE_VERSION = "ai-phone-pwa-v12";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+// 角色头像缓存：页面启动时写入（lib/notification-avatar-cache.ts），
+// 推送通知的 icon 从这里取，跨 SW 版本保留。
+const AVATAR_CACHE = "notif-avatar-v1";
+const AVATAR_PATH_PREFIX = "/notif-avatar/";
 
 const PRECACHE_URLS = [
   "/",
@@ -22,7 +26,7 @@ self.addEventListener("activate", (event) => {
     caches.keys()
       .then((keys) => Promise.all(
         keys
-          .filter((key) => !key.startsWith(CACHE_VERSION))
+          .filter((key) => !key.startsWith(CACHE_VERSION) && key !== AVATAR_CACHE)
           .map((key) => caches.delete(key))
       ))
       // 刷新预缓存的 "/" 快照：它是离线导航的最终兜底，若停留在旧部署版本，
@@ -108,9 +112,28 @@ self.addEventListener("push", (event) => {
         return;
       }
     }
+    // 聊天推送带 characterId 时优先用角色头像。页面启动时把缩过尺寸的头像写进
+    // AVATAR_CACHE；这里转成小 data URL 传给通知——icon 的取图不保证走 SW fetch，
+    // 内联最稳。
+    let icon = (declarative && declarative.icon) || data.icon || "/icon-192.png";
+    const characterId = notificationData.characterId || "";
+    if (characterId) {
+      try {
+        const cache = await caches.open(AVATAR_CACHE);
+        const hit = await cache.match(AVATAR_PATH_PREFIX + encodeURIComponent(characterId));
+        if (hit) {
+          const bytes = new Uint8Array(await hit.arrayBuffer());
+          if (bytes.length > 0 && bytes.length < 200 * 1024) {
+            let raw = "";
+            for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
+            icon = "data:" + (hit.headers.get("content-type") || "image/png") + ";base64," + btoa(raw);
+          }
+        }
+      } catch (error) { /* 头像缓存不可用就用默认图标 */ }
+    }
     await self.registration.showNotification(title, {
       body: (declarative && declarative.body) || data.body || "",
-      icon: (declarative && declarative.icon) || data.icon || "/icon-192.png",
+      icon: icon,
       badge: (declarative && declarative.badge) || "/icon-192.png",
       tag: (declarative && declarative.tag) || data.tag || `push-${Date.now()}`,
       data: {
@@ -128,6 +151,16 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const notificationData = event.notification.data || {};
   const targetUrl = notificationData.url || "/";
+  // 点开一条聊天通知 = 人要进 App 了，把托盘里其余聊天通知一起收掉，
+  // 不要进去以后旁边还挂着一串没读的弹窗。
+  if (!notificationData.type || notificationData.type === "chat_outbox") {
+    event.waitUntil(self.registration.getNotifications().then((list) => {
+      list.forEach((item) => {
+        const t = (item.data && item.data.type) || "";
+        if (!t || t === "chat_outbox") item.close();
+      });
+    }).catch(() => {}));
+  }
   if (notificationData.type === "shortcut_command") {
     // iOS silently ignores custom URL schemes passed to clients.openWindow().
     event.waitUntil((async () => {
@@ -173,6 +206,15 @@ self.addEventListener("notificationclick", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
+  if (request.method === "GET" && new URL(request.url).pathname.startsWith(AVATAR_PATH_PREFIX)) {
+    // 通知 icon 的取图请求：只存在于头像缓存里，不回源
+    event.respondWith(
+      caches.open(AVATAR_CACHE)
+        .then((cache) => cache.match(request))
+        .then((hit) => hit || new Response("", { status: 404 }))
+    );
+    return;
+  }
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request));
     return;
