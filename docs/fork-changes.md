@@ -112,3 +112,20 @@
 - `components/calendar-app.tsx` — `CALENDAR_THEMES` 增加 `{ id: "peach", name: "暖桃" }`
 - `styles/tokens.css` — `[data-calendar-theme="peach"]` 全量 token（含 hair/glass/scrim 与八色事件色板，整体偏暖降饱和）
 - `styles/calendar.css` — peach 缩略色块 + 主题专属珊瑚渐变 FAB、奶油色时间轴列头行
+
+## H. 离线推送·到点补上下文（2026-08-31）
+
+冻结请求快照的最大盲区：预约之后、触发之前，`push-generate` 可能已经替同一角色
+发过别的主动消息（同天多个定时唤醒、冷场连发），但快照是预约时冻结的——角色
+到点「失忆」，会重复自己或当作什么都没发生。修法不建新表：这些消息本来就都在
+`push_outbox` 里，触发时现查现补。
+
+- `lib/push-bailout-client.ts` — 主动类预约（followup / idle / timedwake / periodcare，
+  经 `postBailoutJob` 统一注入）的 `merge` 新增 `snapshotAt`（快照冻结时刻）
+- `supabase/functions/push-generate/index.ts` — `timed_task` / `followup` 任务触发时，
+  查同会话 `snapshotAt` 之后 `pushGenerated=true` 的 outbox 行（≤5 条、每条截 400 字），
+  以 user 角色追加一条系统备忘（「你已经发过这些、对方还没回，衔接勿重复」）再重放请求；
+  按 providerKind 适配 messages/contents 格式。补失败不阻塞生成，老快照无 `snapshotAt` 跳过。
+  `reply_bailout`（90 秒租约无此问题）与 `shortcut_resume`（续跑已代入首条回复）不补。
+- 部署：用户在「设置 → 云服务部署」重新部署个人云即可生效（部署包已由
+  `scripts/build-personal-push-dist.mjs` 同步进 `public/ai-phone-push/`）；新旧两端互相兼容。

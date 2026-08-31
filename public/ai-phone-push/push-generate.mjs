@@ -1,7 +1,7 @@
 // 离线推送·兜底生成执行器（Supabase Edge Function 版）
 // 部署：Dashboard → Edge Functions → 新建函数 push-generate → 粘贴本文件 →
 //      关闭 JWT 校验（Enforce JWT verification = off，本函数用 cron_secret 自校验）
-// 职责：认领预约 → 解密快照 → 原样重放 LLM 请求 → 原始输出写 push_outbox →
+// 职责：认领预约 → 解密快照 → 补齐快照之后本服务已发的消息 → 重放 LLM 请求 → 原始输出写 push_outbox →
 //      分条推送（800ms 节奏）→ 标记完成。逻辑与 netlify 版一致。
 // 注意：本文件为自包含移植，若改动 lib/llm-provider-adapter 的解析或
 //      lib/push-preview-split 的分条规则，需同步更新这里。
@@ -452,6 +452,24 @@ function injectShortcutImage(
   replaceMarker(body, marker, text);
 }
 
+/** 在冻结请求的消息列表末尾追加一条 user 角色的系统备忘（按 provider 格式）。 */
+function appendUserNote(body: Record<string, unknown>, providerKind: ProviderKind, note: string): boolean {
+  if (providerKind === "gemini") {
+    const contents = body.contents;
+    if (!Array.isArray(contents)) return false;
+    contents.push({ role: "user", parts: [{ text: note }] });
+    return true;
+  }
+  const messages = body.messages;
+  if (!Array.isArray(messages)) return false;
+  if (providerKind === "anthropic") {
+    messages.push({ role: "user", content: [{ type: "text", text: note }] });
+  } else {
+    messages.push({ role: "user", content: note });
+  }
+  return true;
+}
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const DAILY_GENERATION_CAP = 50;
 
@@ -593,6 +611,43 @@ Deno.serve(async (req: Request) => {
     if (todayRows.length >= DAILY_GENERATION_CAP) {
       await finish("done", `daily cap (${DAILY_GENERATION_CAP}) reached`);
       return;
+    }
+
+    // ── 到点补上下文：快照是预约时冻结的，但预约之后本服务可能已经替角色主动
+    // 发过消息（同一天多个定时唤醒 / 冷场连发）。这些消息全在 push_outbox 里——
+    // 把「你已经发过这些、对方还没回」补进冻结请求，角色才不会失忆重复自己。
+    // 只对主动类任务生效；reply_bailout 租约仅 90 秒无此问题，shortcut_resume
+    // 的续跑快照已代入首条回复，再补会双重提及。老快照没有 snapshotAt 则跳过。
+    if (job.kind === "timed_task" || job.kind === "followup") {
+      const contextSessionId = typeof payload.merge?.sessionId === "string" ? payload.merge.sessionId : "";
+      const snapshotAt = typeof payload.merge?.snapshotAt === "string" ? payload.merge.snapshotAt : "";
+      if (contextSessionId && snapshotAt && Number.isFinite(Date.parse(snapshotAt))) {
+        try {
+          const sinceResponse = await rest(
+            `push_outbox?user_id=eq.${encodeURIComponent(job.user_id)}`
+            + `&session_id=eq.${encodeURIComponent(contextSessionId)}`
+            + "&meta->>pushGenerated=eq.true"
+            + `&created_at=gt.${encodeURIComponent(new Date(Date.parse(snapshotAt)).toISOString())}`
+            + "&select=raw_text,created_at&order=created_at.asc&limit=5",
+          );
+          const sinceRows = sinceResponse.ok
+            ? await sinceResponse.json() as { raw_text: string; created_at: string }[]
+            : [];
+          if (sinceRows.length > 0) {
+            const lines = sinceRows.map((row, index) => {
+              const minutesAgo = Math.max(1, Math.round((Date.now() - Date.parse(row.created_at)) / 60000));
+              const text = String(row.raw_text || "").replace(/\s+/g, " ").trim().slice(0, 400);
+              return `${index + 1}.（约${minutesAgo}分钟前）${text}`;
+            });
+            const note = "[系统备忘：这不是对方发来的消息。在上面的对话之后，你已经又主动给对方发过下面这些消息，对方还没有回复：\n"
+              + lines.join("\n")
+              + "\n请自然衔接你已经说过的话——不要重复以上内容，不要把它们当成对方说的，也不要机械追问对方为什么不回。]";
+            if (appendUserNote(payload.request.body, payload.request.providerKind, note)) {
+              await progress(`context patched: +${sinceRows.length} sent since snapshot`);
+            }
+          }
+        } catch { /* 补上下文失败不阻塞生成，按原快照重放 */ }
+      }
     }
 
     await progress("llm request started");

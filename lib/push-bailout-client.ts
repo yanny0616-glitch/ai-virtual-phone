@@ -314,6 +314,7 @@ export async function armFollowUpBailout(
                         appId: "chat",
                         appTags: ["chat", "text", "followup"],
                         followUpCount: count,
+                        snapshotAt: new Date().toISOString(),
                     },
                 },
             }),
@@ -351,7 +352,9 @@ async function postBailoutJob(input: {
                 notify: { title: input.notifyTitle, url: "/" },
                 ...(input.weixinBotId ? { weixin: { botId: input.weixinBotId } } : {}),
                 ...(input.shortcutContinuation ? { shortcutContinuation: input.shortcutContinuation } : {}),
-                merge: input.merge,
+                // snapshotAt = 快照冻结时刻。push-generate 到点时据此把「预约之后
+                // 服务端已替角色发出的消息」补进请求，多任务同天不再互相失忆。
+                merge: { snapshotAt: new Date().toISOString(), ...input.merge },
             },
         }),
     }).catch(() => null);
