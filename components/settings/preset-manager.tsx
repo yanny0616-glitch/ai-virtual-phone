@@ -878,7 +878,10 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
             enabled: true,
         };
         const newPrompts = [...(preset.prompts || []), newPrompt];
-        const newOrder = newPrompts.map(p => ({
+        // 显示顺序存在 prompt_order 里，拖动排序不会动 prompts。
+        // 这里必须按显示顺序重建，否则新建一条就把用户拖好的顺序打回原始顺序。
+        const displayed = [...buildDisplayedPrompts(preset), newPrompt];
+        const newOrder = displayed.map(p => ({
             identifier: p.identifier,
             enabled: preset.prompt_order
                 ? (preset.prompt_order.find(o => o.identifier === p.identifier)?.enabled ?? p.enabled)
@@ -905,7 +908,9 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
             return { ...p, identifier: id };
         });
         const newPrompts = [...(preset.prompts || []), ...appended];
-        const newOrder = newPrompts.map(p => ({
+        // 同 createPromptAtEnd：按显示顺序重建，别用 prompts 的原始顺序覆盖拖动结果。
+        const displayed = [...buildDisplayedPrompts(preset), ...appended];
+        const newOrder = displayed.map(p => ({
             identifier: p.identifier,
             enabled: preset.prompt_order
                 ? (preset.prompt_order.find(o => o.identifier === p.identifier)?.enabled ?? p.enabled)
