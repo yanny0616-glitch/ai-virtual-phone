@@ -54,7 +54,7 @@ git push origin main
 
 ## 本地版本相对 upstream 的改动
 
-`git diff upstream/main...main` 共 6 个提交、10 个文件。分两类：
+`git diff upstream/main...main` 共 23 个提交、56 个文件（2026-08-30 核对）。分三类：
 
 ### A. 部署基础设施（upstream 没有，纯自建）
 
@@ -77,6 +77,48 @@ git push origin main
    - 旧的 service_role JWT 仍然走 `Bearer`
 
 3. **CI 修补**：`fix: package public assets at the correct path`（避免打出 `release/public/public`）、`ci: upgrade GitHub Actions runtime`（checkout/setup-node 升到 v7、Node 22）、`fix: use installed Node path for Float service`
+
+4. **预设条目顺序修复**（`components/settings/preset-manager.tsx`，`e860c92`）
+   - 拖动排序**只写 `prompt_order`**，`preset.prompts` 保持原始顺序——这是设计，别改
+   - 但 `createPromptAtEnd` / `appendImportedPrompts` 原来按 `preset.prompts` 数组顺序重建 `prompt_order`，等于新建或导入一条就把用户拖好的顺序整个打回原始顺序
+   - 改成和 `insertPromptAfter` 一致，用 `buildDisplayedPrompts(preset)` 做基准。**以后任何写 `prompt_order` 的地方都必须走 `buildDisplayedPrompts`**
+
+5. **角色卡人设折叠**（`components/phone-character-app.tsx`，`9872323`）：ST 卡人设动辄几千字，详情页默认折叠
+
+6. **个人云备份**（`components/settings/cloud-services-setup.tsx`、`lib/cloud-backup/storage-client.ts`）
+   - `232b863` 第二台设备可以直接接入已有的个人云，不用重新建
+   - `06122d1` 云备份这条路径也认 `sb_secret_*` 新版密钥（和上面第 2 条同一个坑，两处都要改）
+
+### C. 提示词缓存 + 用量统计（这一块最大，跨 10 个提交）
+
+背景：这是自建功能，upstream 完全没有。改动集中在 `lib/llm-provider-adapter.ts`、`lib/api-usage-stats.ts`、`lib/api-log-store.ts`、`components/app-market/custom-app-runner.tsx`。
+
+1. **提示词缓存开关**（`ca8c8e2` / `9c4c4eb` / `4f49453`）
+   - Anthropic 的 `cache_control: {type:"ephemeral"}` 打在 tools → system → 最后一个 message content block 上（`llm-provider-adapter.ts:96-105`、`:624`、`:645`）
+   - OpenAI 走官方自动前缀缓存 + `prompt_cache_key`（只影响路由）；Gemini 的 `cachedContentTokenCount` 本来就含在 `promptTokenCount` 里
+   - 两处开关：API 配置里逐条开（`settings-types.ts` 的 `promptCache`）、工坊单独开（`lib/qa-prefs.ts`）
+   - ⚠️ **已知问题**：`cache_control` 会让某些严格按 Anthropic 协议反序列化的中转报 500 `data did not match any variant of untagged enum MessageContent`。目前没有按 provider 收窄，撞上就手动关掉那条配置的缓存开关
+
+2. **用量归一化**（`3a13f7f`）
+   - `LlmUsage` 把三家字段拉平；缓存**命中**和**写入**分开记，因为计费不同（命中 ~1/10，写入 1.25×），合在一起看不出这次是省了还是亏了
+   - 流式用量分散在多个事件上（OpenAI 要 `stream_options:{include_usage:true}`；Anthropic 分 `message_start`/`message_delta`；Gemini 每块都发累计值），靠 `mergeLlmUsage` 逐条合并
+
+3. **按角色卡分桶**（`25c161a` / `6a20636` / `ef6de85`）
+   - 统计以 **`characterId`** 为键，改名后仍指向同一张卡；后台功能调用没有卡，退化成 `name:<功能名>`
+   - 各 `lib/*-engine.ts` 的 `callLLM` 都补了 `characterId` 参数往下传，加新引擎时别漏
+   - 老日志只有名字没有 id，所以日志筛选同时接受 `characterId` 和 `characterName`
+
+4. **自定义 APP SDK 两级权限**
+   - `usage.read` — 每日聚合 + 调用日志**元信息**（时间、模型、来源、token 数）
+   - `usage.logs` — 日志**原文**（完整提示词、角色人设、世界书、回复原文），因为比聊天记录本身还敏感，必须单独申请
+   - 动作：`usage.readDaily` / `usage.readLogs` / `usage.readLogDetail`，派发在 `custom-app-runner.tsx`
+   - 改了 SDK 就跑 `npm run check:sdk`（校验 SDK/派发/权限/文档四处一致）
+
+### D. 安全加固（`6962264`）
+
+- `lib/server/safe-outbound-fetch.ts` — **新增**。所有出站请求（图片生成、OAuth 回调、tool-proxy）走它：解析 DNS 后校验目标 IP，挡内网/回环/链路本地地址，限制重定向次数，防 SSRF
+- `components/ui/story-html-renderer.tsx` — 渲染模型输出的 HTML 前做清洗
+- ⚠️ 已知遗留：`safe-outbound-fetch.ts:135` 有个 `LookupFunction` 的 TS2322，`npx tsc --noEmit` 会报，不是新引入的
 
 ## 常用命令
 
@@ -104,3 +146,5 @@ git fetch upstream && git merge upstream/main
 - 静态大资源（字体/3D 模型/图片）在 `netlify.toml` 里设了一年 immutable 缓存，**更新这类文件必须改文件名**，否则老客户端一直吃缓存
 - 只保留最近 3 个 Release，回滚要用更旧版本的话得重新触发构建
 - commit 消息带 `[skip ci]` 可以跳过构建（改 ops/文档时用）
+- **可能有别的 agent（codex 等）在同一个仓库并行改代码**。动手前先 `git log --oneline -5` 看有没有你不认识的提交；改公共文件（`custom-app-runner.tsx`、`llm-provider-adapter.ts`、`api-usage-stats.ts`）之前尤其要看
+- 既有的 lint/tsc 报错：`safe-outbound-fetch.ts` 的 TS2322、`preset-manager.tsx` 的 `Date.now` purity 与 `custom-app-runner.tsx` 的 `set-state-in-effect`。**改动前后对比错误数量**，别把它们当成自己引入的
