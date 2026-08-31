@@ -137,7 +137,7 @@
     font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--acc2);
     background: var(--card); padding: 0 6px;
   }
-  .tl-item .row1 { display: flex; align-items: baseline; gap: 8px; }
+  .tl-item .row1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .tl-item .tm { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--tx2); font-weight: 700; }
   .tl-item .tt { font-size: 14px; font-weight: 600; }
   .tl-item .nt { font-size: 12px; color: var(--tx3); margin-top: 3px; line-height: 1.5; }
@@ -226,7 +226,14 @@
   }
   .sheet-open .sheet-mask { opacity: 1; pointer-events: auto; }
   .sheet-open .sheet { transform: none; }
-  .sheet h3 { font-size: 15px; letter-spacing: 3px; margin-bottom: 16px; }
+  .sheet-hd { display: flex; align-items: center; margin-bottom: 16px; }
+  .sheet h3 { font-size: 15px; letter-spacing: 3px; }
+  .sheet-x {
+    margin-left: auto; width: 30px; height: 30px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--card); color: var(--tx2);
+    font-size: 13px; cursor: pointer;
+  }
+  .sheet .big-btn { position: sticky; bottom: 0; margin-top: 4px; box-shadow: 0 -10px 18px rgba(253, 244, 239, .92), 0 8px 24px rgba(255, 107, 157, .3); }
   .sheet .grp { margin-bottom: 18px; }
   .sheet .grp-t { font-size: 11px; color: var(--tx3); letter-spacing: 2px; margin-bottom: 9px; }
   .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; }
@@ -256,10 +263,11 @@
   }
   .stepper .val { font-size: 18px; font-weight: 700; min-width: 30px; text-align: center; }
   .stepper .unit { font-size: 12px; color: var(--tx3); }
-  .seg { display: flex; gap: 6px; }
+  .seg { display: flex; gap: 5px; }
   .seg button {
-    flex: 1; padding: 9px 0; border-radius: 10px; border: 1px solid var(--line);
-    background: var(--card); color: var(--tx2); font-size: 12px; cursor: pointer; font-family: inherit;
+    flex: 1; min-width: 0; padding: 9px 2px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--card); color: var(--tx2); font-size: 11.5px; cursor: pointer; font-family: inherit;
+    white-space: nowrap;
   }
   .seg button.on {
     background: linear-gradient(135deg, var(--acc), var(--acc2));
@@ -272,8 +280,11 @@
   }
   .tgl.on { color: var(--acc2); border-color: rgba(245, 107, 156, .5); background: rgba(255, 107, 157, .08); font-weight: 600; }
   .tgl.on::before { content: "✓ "; }
-  .grp-hint { font-size: 11px; color: var(--tx3); line-height: 1.6; margin-top: 7px; }
+  .grp-hint { font-size: 11.5px; color: var(--tx2); line-height: 1.6; margin-top: 7px; }
   .badge.cool { background: rgba(100, 140, 200, .10); color: #6b8cba; border: 1px solid rgba(100, 140, 200, .3); }
+  /* 定时刷新时不重播入场动画，避免整页每分钟闪一次（打字点/转圈不受影响） */
+  .no-anim .tl-item, .no-anim .stat, .no-anim details.day-card, .no-anim .bubble { animation: none !important; }
+  .no-anim .fill { transition: none !important; }
 
   /* ── 页签 ─────────────────────────── */
   .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
@@ -375,13 +386,17 @@
   <div class="tabs" id="tabs" hidden>
     <button class="tab on" data-tab="today">今 天</button>
     <button class="tab" data-tab="archive">记 录</button>
+    <button class="tab" data-tab="diag">诊 断</button>
   </div>
 
   <div id="view"></div>
 
   <div class="sheet-mask" id="sheet-mask"></div>
   <div class="sheet" id="sheet">
-    <h3>设 置</h3>
+    <div class="sheet-hd">
+      <h3>设 置</h3>
+      <button class="sheet-x" id="sheet-close" title="关闭">✕</button>
+    </div>
     <div class="grp">
       <div class="grp-t">挂念的人</div>
       <div class="char-grid" id="char-grid"></div>
@@ -489,7 +504,7 @@
         const rows = await AiPhone.db.list("logs", { limit: 5 });
         S.logs = (rows && rows[0]) || await AiPhone.db.create("logs", { items: [] });
       }
-      const items = (S.logs.items || []).slice(-39);
+      const items = (S.logs.items || []).slice(-119);
       items.push({ at: Date.now(), text: String(text).slice(0, 300) });
       S.logs = await AiPhone.db.update("logs", S.logs.id, { items });
     } catch (e) { /* 日志失败不打断主流程 */ }
@@ -1009,18 +1024,20 @@
     } else { who.hidden = true; }
 
     const v = $("#view");
+    v.classList.toggle("no-anim", !!S._still); // 定时刷新不重播动画
     $("#tabs").hidden = !S.character;
     if (!S.character) {
       v.innerHTML = '<div class="card empty"><div class="art">🕊️</div><p>还没有可挂念的人。<br>先去创建一个角色，再回来打开这里。</p></div>';
       return;
     }
     if (S.tab === "archive") { renderArchive(); return; }
+    if (S.tab === "diag") { renderDiag(); return; }
     if (!S.day) {
       v.innerHTML =
         '<div class="card empty"><div class="art">🌅</div>' +
         '<p>TA的今天还是一张白纸。<br>生成TA今天的状态与日程，<br>再看看TA会在哪些时刻想起你。</p>' +
         '<button class="big-btn" id="btn-gen"' + (S.busy ? " disabled" : "") + ">" +
-        (S.busy ? '<span class="spin"></span>正在展开TA的一天…' : "开始TA的今天") + "</button></div>" + previewCard() + diagCard();
+        (S.busy ? '<span class="spin"></span>正在展开TA的一天…' : "开始TA的今天") + "</button></div>" + previewCard();
       bindCommon(); return;
     }
 
@@ -1068,7 +1085,7 @@
       '<button class="act" id="btn-replan"' + (S.busy ? " disabled" : "") + ">" + (S.busy ? "编排中…" : "♥ 重新编排") + "</button></div>" +
       '<div class="tl">' + (tl || '<div class="nt" style="padding:8px 0;color:var(--tx3)">暂无日程</div>') + "</div></div>";
 
-    html += previewCard() + diagCard();
+    html += previewCard();
     v.innerHTML = html;
     requestAnimationFrame(() => { document.querySelectorAll(".fill").forEach((el) => { el.style.width = el.dataset.w + "%"; }); });
     bindCommon();
@@ -1230,11 +1247,64 @@
       '<button class="ghost-btn" id="btn-preview">听听TA此刻会说什么</button>' +
       '<div class="preview-zone" id="preview-zone"></div></div>';
   }
-  function diagCard() {
-    const items = (S.logs && S.logs.items || []).slice().reverse().slice(0, 20);
-    if (!items.length) return "";
-    return '<details class="diag"><summary>为什么发 / 为什么没发 · 诊断</summary>' +
-      items.map((l) => '<div class="diag-item"><b>' + fmtHM(l.at) + "</b> " + esc(l.text) + "</div>").join("") + "</details>";
+  /* ================= 诊断页 ================= */
+  async function renderDiag() {
+    const v = $("#view");
+    const req = (S._diagReq = (S._diagReq || 0) + 1);
+    // 系统里真实挂着的今日唤醒（和计划对照，是排查「为什么没推」的关键）
+    let wakes = null;
+    try {
+      const all = await AiPhone.push.listWakes();
+      const d0 = timeToMs("00:00"), d1 = d0 + 86400000;
+      wakes = (all || [])
+        .filter((w) => w.characterId === S.character.id && w.fireAt >= d0 && w.fireAt < d1)
+        .sort((a, b) => a.fireAt - b.fireAt);
+    } catch (e) { /* wakes 保持 null = 读取失败 */ }
+    if (req !== S._diagReq || S.tab !== "diag") return; // 期间切走了就不画
+
+    const logItems = (S.logs && S.logs.items || []).slice().reverse();
+    const planItems = (S.plan && S.plan.items) || [];
+    let html =
+      '<div class="stats">' +
+      '<div class="stat"><div class="num">' + (wakes ? wakes.length : "?") + '</div><div class="cap">今日挂着的唤醒</div></div>' +
+      '<div class="stat" style="animation-delay:60ms"><div class="num" style="font-size:19px;line-height:1.55">' +
+        (S.plan && S.plan.recheckAt ? fmtHM(S.plan.recheckAt) : "—") + '</div><div class="cap">上次复核</div></div>' +
+      '<div class="stat" style="animation-delay:120ms"><div class="num">' + logItems.length + '</div><div class="cap">日志条数</div></div>' +
+      "</div>";
+
+    html += '<div class="card"><div class="sec-head"><span class="t">系 统 唤 醒 对 照</span></div>';
+    if (wakes === null) {
+      html += '<div class="archive-note">读取系统唤醒列表失败。</div>';
+    } else if (!wakes.length) {
+      html += '<div class="archive-note">系统里今天没有挂着的离线唤醒。<br>计划里显示「待发」但这里是空的，说明预约没挂上或已被取消。</div>';
+    } else {
+      html += wakes.map((w) => {
+        const inPlan = planItems.some((it) => it.wakeId === w.id);
+        return '<div class="diag-item"><b>' + fmtHM(w.fireAt) + "</b> " + esc(w.intent || "") +
+          (inPlan ? "" : ' <span class="badge cool">计划外</span>') + "</div>";
+      }).join("");
+    }
+    html += "</div>";
+
+    html += '<div class="card"><div class="sec-head"><span class="t">运 行 日 志</span>' +
+      (logItems.length ? '<button class="act" id="btn-clear-log">清空</button>' : "") + "</div>";
+    if (!logItems.length) {
+      html += '<div class="archive-note">还没有日志。生成、编排、复核、预约的每一步都会记在这里。</div>';
+    } else {
+      const today = todayStr();
+      html += logItems.map((l) => {
+        const d = new Date(l.at);
+        const ds = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+        return '<div class="diag-item"><b>' + (ds === today ? "" : ds.slice(5).replace("-", "/") + " ") + fmtHM(l.at) + "</b> " + esc(l.text) + "</div>";
+      }).join("");
+    }
+    html += '</div><div class="archive-note">日志最多保留 120 条，只存在本地，不上传。</div>';
+    v.innerHTML = html;
+    const clr = $("#btn-clear-log");
+    if (clr) clr.onclick = async () => {
+      try { if (S.logs) S.logs = await AiPhone.db.update("logs", S.logs.id, { items: [] }); } catch (e) { toast("清空失败：" + (e && e.message || e)); }
+      renderDiag();
+    };
   }
 
   function bindCommon() {
@@ -1300,6 +1370,7 @@
   async function init() {
     $("#btn-settings").onclick = openSheet;
     $("#sheet-mask").onclick = closeSheet;
+    $("#sheet-close").onclick = closeSheet;
     $("#btn-save-settings").onclick = () => { saveSettings().catch((e) => toast("保存失败：" + (e && e.message || e))); };
     const step = (valSel, minusSel, plusSel, min, max, inc) => {
       $(minusSel).onclick = () => { const el = $(valSel); el.textContent = Math.max(min, (+el.textContent || 0) - inc); };
@@ -1346,7 +1417,7 @@
       // 每分钟刷新「正在做」与过去/未来分界；在页期间按设置的间隔定时复核
       setInterval(() => {
         if (S.busy) return;
-        render();
+        S._still = true; render(); S._still = false;
         if (S.settings && S.settings.recheckMin > 0 && Date.now() - (S._rcTry || 0) >= S.settings.recheckMin * 60000) {
           S._rcTry = Date.now();
           recheck("定时").catch(() => { /* 已在函数内记日志 */ });
