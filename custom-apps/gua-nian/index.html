@@ -224,8 +224,9 @@
     transform: translateY(105%); transition: transform .3s cubic-bezier(.22, 1, .36, 1);
     max-height: 78vh; overflow-y: auto;
   }
-  .sheet-open .sheet-mask { opacity: 1; pointer-events: auto; }
-  .sheet-open .sheet { transform: none; }
+  .sheet-open .sheet-mask, .dsheet-open .sheet-mask { opacity: 1; pointer-events: auto; }
+  .sheet-open #sheet { transform: none; }
+  .dsheet-open #dsheet { transform: none; }
   .sheet-hd { display: flex; align-items: center; margin-bottom: 16px; }
   .sheet h3 { font-size: 15px; letter-spacing: 3px; }
   .sheet-x {
@@ -282,6 +283,28 @@
   .tgl.on::before { content: "✓ "; }
   .grp-hint { font-size: 11.5px; color: var(--tx2); line-height: 1.6; margin-top: 7px; }
   .badge.cool { background: rgba(100, 140, 200, .10); color: #6b8cba; border: 1px solid rgba(100, 140, 200, .3); }
+  /* 详情弹层 */
+  .tl-item.wake, .dec { cursor: pointer; }
+  .d-hd { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+  .d-hd .tm { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .d-hd .tt { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+  .d-sec { margin-top: 16px; }
+  .d-sec .d-t { font-size: 11px; color: var(--tx3); letter-spacing: 2px; margin-bottom: 8px; }
+  .d-intent { font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+  .d-why { font-size: 12px; color: var(--tx2); line-height: 1.6; margin-top: 5px; overflow-wrap: anywhere; }
+  .sc-row { margin-bottom: 11px; }
+  .sc-lab { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--tx2); margin-bottom: 5px; }
+  .sc-row .bar { height: 6px; border-radius: 999px; background: rgba(160, 110, 100, .12); overflow: hidden; }
+  .sc-row .fill2 { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--acc), var(--acc2)); }
+  .sc-expl { font-size: 10.5px; color: var(--tx3); margin-top: 4px; line-height: 1.5; }
+  .hist-it { font-size: 12px; color: var(--tx2); line-height: 1.7; padding: 5px 0 5px 12px; border-left: 2px solid var(--line); margin: 4px 0; overflow-wrap: anywhere; }
+  .hist-it b { color: var(--tx); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .d-msg {
+    background: var(--card-strong); border: 1px solid var(--line); border-radius: 12px;
+    padding: 11px 13px; font-size: 13px; line-height: 1.7; margin-top: 8px; overflow-wrap: anywhere;
+  }
+  .d-meta { font-size: 11px; color: var(--tx3); margin-top: 14px; line-height: 1.8; }
+
   /* 定时刷新时不重播入场动画，避免整页每分钟闪一次（打字点/转圈不受影响） */
   .no-anim .tl-item, .no-anim .stat, .no-anim details.day-card, .no-anim .bubble { animation: none !important; }
   .no-anim .fill { transition: none !important; }
@@ -467,6 +490,13 @@
     </div>
     <div class="grp-hint" style="margin:-6px 0 14px">改了额度 / 间隔 / 倾向 / 锚点后，回「今天」页点「♥ 重新编排」立刻生效；降速和复核保存即生效。</div>
     <button class="big-btn" id="btn-save-settings">保 存</button>
+  </div>
+  <div class="sheet" id="dsheet">
+    <div class="sheet-hd">
+      <h3>时 刻 详 情</h3>
+      <button class="sheet-x" id="dsheet-close" title="关闭">✕</button>
+    </div>
+    <div id="dsheet-body"></div>
   </div>
 </div>
 <div id="toast"></div>
@@ -766,6 +796,28 @@
       "2": "TA现在非常想念用户，明显更愿意主动，额度内尽量多陪。",
     })[String(S.settings.bias || 0)] || "";
   }
+  /* 数值层：全部规则计算、可解释，不让模型编数 */
+  // 时段贴合：以 13 点和 21 点两个聊天高峰做高斯衰减
+  function fitScore(fireAt) {
+    const d = new Date(fireAt);
+    const h = d.getHours() + d.getMinutes() / 60;
+    const g = (peak, sigma) => Math.exp(-Math.pow(h - peak, 2) / (2 * sigma * sigma));
+    return Math.round(100 * Math.min(1, g(13, 3) * 0.75 + g(21, 2.5)));
+  }
+  // 判断那一刻的约束压力快照（armedBefore=此前已起念数，streak=连续未回条数，lastArmedAt=上一个起念时间）
+  function calcScore(fireAt, armedBefore, streak, lastArmedAt) {
+    const pq = Math.round(Math.min(100, armedBefore / Math.max(1, S.settings.quota) * 100));
+    const mu = S.settings.maxUnanswered;
+    const pr = Math.round(Math.min(100, mu > 0 ? streak / mu * 100 : streak * 25));
+    let pg = 0;
+    const gapMin = S.settings.minGapMin;
+    if (gapMin > 0 && lastArmedAt) {
+      const dist = (fireAt - lastArmedAt) / 60000;
+      if (dist < gapMin * 2) pg = Math.round(Math.max(0, Math.min(100, (1 - dist / (gapMin * 2)) * 100)));
+    }
+    return { fit: fitScore(fireAt), pq, pr, pg, press: Math.round(pq * 0.4 + pr * 0.4 + pg * 0.2) };
+  }
+
   // 连续多少条TA发出的消息用户还没回（消息需按时间升序）
   function unansweredStreak(msgs) {
     let n = 0;
@@ -800,15 +852,17 @@
       }
       await log("候选时刻：" + cands.map((c) => c.time + "·" + c.source).join("，"));
       const chat = await readRecentChat(60);
+      chat.sort((a, b) => a.t - b.t);
+      const streak0 = unansweredStreak(chat);
       const lines = chatExcerpt(chat, 20);
-      if (lines.length) await log("已读入最近 " + lines.length + " 句聊天作为判断上下文");
+      if (lines.length) await log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 条未回）" : ""));
       const parsed = await generateJson({
         characterId: S.character.id,
         appTags: ["companion", "impulse"],
         instruction: [
           "【后台系统任务，不是聊天：不要以角色口吻说话、不要直接写消息内容，只输出判断 JSON】",
           "你是当前角色的内心。逐个判断：在下面每个候选时刻、做完那件事之后，TA会不会真的想给用户发消息？不是每个都要发——按TA的性格克制判断。",
-          '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"why":"判断理由（20字内）","intent":"act为true时TA当时的第一人称心理动机（40字内，不写台词），否则空字符串"}]}。decisions 与候选时刻一一对应、顺序一致。',
+          '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"这次接触的类型，从 问候/关心/追话题/分享/惦记 里选一个","topic":"这次想聊的话题（8字内）","why":"判断理由（20字内）","intent":"act为true时TA当时的第一人称心理动机（40字内，不写台词），否则空字符串"}]}。decisions 与候选时刻一一对应、顺序一致。',
           "TA今天的生活面：", JSON.stringify({ mood: S.day.mood, energy: S.day.energy, schedule: S.day.schedule }),
           lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
           lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
@@ -827,7 +881,12 @@
       for (let i = 0; i < cands.length; i++) {
         const c = cands[i];
         const d = decisions[i] || {};
-        const item = { time: c.time, fireAt: c.fireAt, source: c.source, act: !!d.act, why: String(d.why || ""), intent: String(d.intent || ""), delivery: "", reason: "", wakeId: "" };
+        const item = {
+          time: c.time, fireAt: c.fireAt, source: c.source, act: !!d.act,
+          why: String(d.why || ""), intent: String(d.intent || ""), delivery: "", reason: "", wakeId: "",
+          sem: String(d.sem || ""), topic: String(d.topic || ""),
+          score: calcScore(c.fireAt, armedCount, streak0, lastArmedAt),
+        };
         if (item.act && armedCount >= S.settings.quota) { item.act = false; item.why = "超出今日额度"; }
         if (item.act && lastArmedAt && S.settings.minGapMin > 0 && c.fireAt - lastArmedAt < S.settings.minGapMin * 60000) { item.act = false; item.why = "离上一个起念太近"; }
         if (item.act) {
@@ -846,6 +905,7 @@
         } else {
           await log(c.time + " 未起念：" + (item.why || "TA这会儿不想"));
         }
+        item.hist = [{ at: Date.now(), kind: item.act ? "plan" : "skip", note: item.act ? item.intent : (item.why || "TA这会儿不想") }];
         items.push(item);
       }
       S.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === S.character.id,
@@ -888,6 +948,7 @@
             if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
             w.act = false; w.adj = "cooled"; w.wakeId = ""; w.delivery = "";
             w.why = "你还有 " + streak + " 条没回，TA不想追着发";
+            (w.hist = w.hist || []).push({ at: nowMs, kind: "cooled", note: "连续 " + streak + " 条未回，触发降速" });
             changed++;
           }
         }
@@ -908,7 +969,7 @@
             biasText() || null,
             "还没到点的时刻（act 是之前的判断）：",
             JSON.stringify(remaining.map((w) => ({ time: w.time, source: w.source, act: !!w.act, intent: w.intent || "" }))),
-            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）"}],"extra":[{"time":"HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念"}]}',
+            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）"}],"extra":[{"time":"HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念"}]}',
             "decisions 与上面时刻一一对应、顺序一致；没有变化就原样回传。extra 最多 1 条：只有聊天里确实有没聊完的话头、约好的事、或明显被勾起的牵挂才加，没有就给空数组。"
               + (S.settings.chatCandidates ? "" : "（临时起念已被用户关闭，extra 必须是空数组）"),
             "约束：今天最多 " + S.settings.quota + " 条（已占 " + usedQuota + "）；免打扰 " + S.settings.quietStart + "–" + S.settings.quietEnd
@@ -921,12 +982,15 @@
         decs.forEach((d) => { const hm = normHM(d && d.time); if (hm) byTime[hm] = d; });
         for (const w of remaining) {
           const d = byTime[w.time]; if (!d) continue;
+          if (d.sem) w.sem = String(d.sem);
+          if (d.topic) w.topic = String(d.topic);
           const wantAct = !!d.act;
           if (wantAct === !!w.act) { if (wantAct && d.intent) w.intent = String(d.intent); continue; }
           if (!wantAct) {
             if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 忽略 */ } }
             w.act = false; w.adj = "recheck"; w.wakeId = ""; w.delivery = "";
             w.why = String(d.why || "聊过之后TA改了主意");
+            (w.hist = w.hist || []).push({ at: nowMs, kind: "recheck", note: "取消——" + w.why });
             changed++;
             await log("复核：" + w.time + " 取消起念——" + w.why);
           } else {
@@ -935,6 +999,8 @@
               const res = await AiPhone.push.wake({ characterId: S.character.id, fireAt: w.fireAt, intent: String(d.intent || ("刚" + w.source + "，想到用户")), source: "tool" });
               w.act = true; w.adj = "recheck"; w.intent = String(d.intent || ""); w.why = String(d.why || "");
               w.wakeId = res.id; w.delivery = res.armed ? "push" : "local"; w.reason = res.reason || "";
+              w.score = calcScore(w.fireAt, items.filter((x) => x.act && x !== w).length, streak, 0);
+              (w.hist = w.hist || []).push({ at: nowMs, kind: "lit", note: "复核点亮——" + (w.intent || w.why) });
               changed++;
               await log("复核：" + w.time + " 新点亮 ✓ " + w.intent);
             } catch (e) { await log("复核点亮失败 " + w.time + "：" + (e && e.message || e)); }
@@ -955,6 +1021,9 @@
               time: hm, fireAt: ms, source: "临时·" + String(x.about || "未完话题").slice(0, 10),
               act: true, adj: "extra", why: String(x.why || ""), intent: String(x.intent || ""),
               delivery: res.armed ? "push" : "local", reason: res.reason || "", wakeId: res.id,
+              sem: "追话题", topic: String(x.about || "").slice(0, 10),
+              score: calcScore(ms, items.filter((w) => w.act).length, streak, 0),
+              hist: [{ at: nowMs, kind: "extra", note: "聊天里冒出来的：" + String(x.why || x.intent || "") }],
             });
             items.sort((a, b) => a.fireAt - b.fireAt);
             added++;
@@ -1088,6 +1157,12 @@
     html += previewCard();
     v.innerHTML = html;
     requestAnimationFrame(() => { document.querySelectorAll(".fill").forEach((el) => { el.style.width = el.dataset.w + "%"; }); });
+    v.querySelectorAll(".tl-item.wake").forEach((el) => {
+      el.onclick = () => {
+        const w = S.plan && (S.plan.items || []).find((x) => x.time === el.dataset.t);
+        if (w) openDetail(w, S.plan, null);
+      };
+    });
     bindCommon();
   }
 
@@ -1112,7 +1187,7 @@
       badge = '<span class="badge off">未起念</span>';
       intent = '<div class="intent">' + esc(w.why || "TA这会儿不想") + "</div>";
     }
-    return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + '" ' + delay + '><span class="dot"></span>' +
+    return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + '" data-t="' + esc(w.time) + '" ' + delay + '><span class="dot"></span>' +
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
   }
 
@@ -1153,9 +1228,103 @@
       : { cls: "on", heart: "♥", badge: '<span class="badge sent">已发出</span>', sent };
   }
 
+  /* ================= 时刻详情弹层 ================= */
+  const HIST_KIND = { plan: "首次编排 · 起念", skip: "首次编排 · 未起念", recheck: "复核取消", lit: "复核点亮", cooled: "未回应降速", extra: "临时起念" };
+
+  function detailHtml(w, plan, msgs) {
+    let h = '<div class="d-hd"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" +
+      (msgs ? decStatus(w, msgs).badge : '<span class="badge off">查记录中…</span>') + adjBadge(w) + "</div>";
+
+    // 判断
+    h += '<div class="d-sec"><div class="d-t">判 断</div>';
+    if (w.sem || w.topic) {
+      h += '<div class="mood-sub" style="margin:0 0 8px">' +
+        (w.sem ? '<span class="chip">' + esc(w.sem) + "</span>" : "") +
+        (w.topic ? '<span class="chip">话题 · ' + esc(w.topic) + "</span>" : "") + "</div>";
+    }
+    h += w.act
+      ? '<div class="d-intent">「' + esc(w.intent || "") + '」</div>' + (w.why ? '<div class="d-why">' + esc(w.why) + "</div>" : "")
+      : '<div class="d-intent" style="color:var(--tx3)">' + esc(w.why || "TA这会儿不想") + "</div>";
+    h += "</div>";
+
+    // 数值层（判断那一刻的规则计算快照）
+    if (w.score) {
+      const s = w.score;
+      const bar = (lab, val, expl) =>
+        '<div class="sc-row"><div class="sc-lab"><span>' + lab + "</span><span>" + val + '%</span></div>' +
+        '<div class="bar"><div class="fill2" style="width:' + val + '%"></div></div>' +
+        '<div class="sc-expl">' + esc(expl) + "</div></div>";
+      h += '<div class="d-sec"><div class="d-t">数 值 层（判断那一刻的规则计算，不是模型报的）</div>' +
+        bar("时段贴合", s.fit, "按 13 点 / 21 点两个聊天高峰做距离衰减，离高峰越近越贴合") +
+        bar("额度压力", s.pq, "判断时今天已起念的数量占每日上限的比例") +
+        bar("未回压力", s.pr, "判断时TA连续未被回复的条数相对降速阈值的比例") +
+        bar("间隔压力", s.pg, "离上一个已起念时刻越近压力越大，超过最小间隔的两倍则为 0") +
+        '<div class="sc-expl" style="margin-top:2px">综合压力 ' + s.press + "%（额度 40% + 未回 40% + 间隔 20% 加权）。压力只影响判断倾向，最终起不起念由TA的性格判断决定。</div></div>";
+    } else {
+      h += '<div class="d-sec"><div class="d-t">数 值 层</div><div class="archive-note" style="text-align:left;padding:0">旧版本编排的记录，没有留数值快照。重新编排后就有了。</div></div>';
+    }
+
+    // 调整轨迹
+    h += '<div class="d-sec"><div class="d-t">轨 迹</div>';
+    if (w.hist && w.hist.length) {
+      const today = todayStr();
+      h += w.hist.map((e) => {
+        const d = new Date(e.at);
+        const ds = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+        return '<div class="hist-it"><b>' + (ds === today ? "" : ds.slice(5).replace("-", "/") + " ") + fmtHM(e.at) + "</b> " +
+          (HIST_KIND[e.kind] || e.kind) + (e.note ? " · " + esc(e.note) : "") + "</div>";
+      }).join("");
+    } else {
+      h += '<div class="archive-note" style="text-align:left;padding:0">旧版本记录，没有留判断轨迹。</div>';
+    }
+    h += "</div>";
+
+    // 执行
+    h += '<div class="d-sec"><div class="d-t">执 行</div>';
+    if (!w.act) {
+      h += '<div class="d-why">没有起念，不会发送。</div>';
+    } else if (w.fireAt > Date.now()) {
+      h += '<div class="d-why">待发 · ' + (w.delivery === "push" ? "已预约离线推送，浏览器关着也会送达。" : "仅在线路径" + (w.reason ? "（" + esc(w.reason) + "）" : "") + "，到点时页面要开着才发。") + "</div>";
+    } else if (!msgs) {
+      h += '<div class="d-why">正在对照聊天记录…</div>';
+    } else {
+      const st = decStatus(w, msgs);
+      if (st.sent) {
+        h += '<div class="d-why">' + fmtHM(st.sent.t) + " 发出：</div><div class=\"d-msg\">" + esc(st.sent.c) + "</div>";
+        const rep = msgs.find((m) => m.role === "user" && m.t > st.sent.t);
+        h += rep
+          ? '<div class="d-why">你在 ' + fmtHM(rep.t) + " 回了TA。</div>"
+          : '<div class="d-why">你还没回这条。</div>';
+      } else {
+        h += '<div class="d-why">已到时刻，但最近 200 条聊天里没找到对应消息：可能没发成，也可能已超出可读范围。</div>';
+      }
+    }
+    h += "</div>";
+
+    h += '<div class="d-meta">' +
+      (plan && plan.plannedAt ? "编排于 " + fmtHM(plan.plannedAt) : "") +
+      (plan && plan.recheckAt ? " · 上次复核 " + fmtHM(plan.recheckAt) : "") + "</div>";
+    return h;
+  }
+
+  function openDetail(w, plan, msgs) {
+    S._detailW = w;
+    $("#dsheet-body").innerHTML = detailHtml(w, plan, msgs || null);
+    document.body.classList.add("dsheet-open");
+    if (!msgs) {
+      readRecentChat(200).then((m) => {
+        m.sort((a, b) => a.t - b.t);
+        if (S._detailW === w && document.body.classList.contains("dsheet-open")) {
+          $("#dsheet-body").innerHTML = detailHtml(w, plan, m);
+        }
+      }).catch(() => { /* 详情页缺聊天对照不算错误 */ });
+    }
+  }
+  function closeDetail() { document.body.classList.remove("dsheet-open"); S._detailW = null; }
+
   function decRow(w, msgs) {
     const st = decStatus(w, msgs);
-    return '<div class="dec ' + st.cls + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
+    return '<div class="dec ' + st.cls + '" data-t="' + esc(w.time) + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + adjBadge(w) + "</div>" +
       '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
       (st.sent ? '<div class="why" style="color:var(--tx3)">' + fmtHM(st.sent.t) + " · " + esc(st.sent.c.length > 46 ? st.sent.c.slice(0, 46) + "…" : st.sent.c) + "</div>" : "") +
@@ -1230,7 +1399,7 @@
       } else {
         body += '<div class="archive-note">这天没有编排记录' + (day ? "（只生成了生活面）" : "") + "</div>";
       }
-      html += '<details class="day-card"' + (isToday || (di === 0 && !arc.byDate[todayStr()]) ? " open" : "") + ' style="animation-delay:' + Math.min(di * 50, 400) + 'ms">' +
+      html += '<details class="day-card" data-d="' + esc(date) + '"' + (isToday || (di === 0 && !arc.byDate[todayStr()]) ? " open" : "") + ' style="animation-delay:' + Math.min(di * 50, 400) + 'ms">' +
         '<summary class="day-sum"><span class="emo">' + esc(day && day.moodEmoji || "🗓️") + "</span>" +
         '<span class="mid"><span class="d1">' + esc(date.slice(5).replace("-", " / ")) + '<span class="wd">周' + wd + (isToday ? " · 今天" : "") + "</span>" +
         (acted ? '<span class="hearts">♥×' + acted + "</span>" : '<span class="hearts" style="color:var(--tx3)">安静的一天</span>') + "</span>" +
@@ -1238,8 +1407,16 @@
         '<span class="arr">▶</span></summary>' +
         '<div class="day-body">' + body + "</div></details>";
     });
-    html += '<div class="archive-note">发出 / 回复状态是对照最近 200 条聊天记录推断的，更早的日子可能显示「已到时刻」。</div>';
+    html += '<div class="archive-note">发出 / 回复状态是对照最近 200 条聊天记录推断的，更早的日子可能显示「已到时刻」。点任意时刻看详情。</div>';
     v.innerHTML = html;
+    v.querySelectorAll(".dec").forEach((el) => {
+      el.onclick = () => {
+        const card = el.closest(".day-card");
+        const rec = card && arc.byDate[card.dataset.d];
+        const w = rec && rec.plan && (rec.plan.items || []).find((x) => x.time === el.dataset.t);
+        if (w) openDetail(w, rec.plan, arc.msgs);
+      };
+    });
   }
 
   function previewCard() {
@@ -1369,8 +1546,9 @@
   /* ================= 启动 ================= */
   async function init() {
     $("#btn-settings").onclick = openSheet;
-    $("#sheet-mask").onclick = closeSheet;
+    $("#sheet-mask").onclick = () => { closeSheet(); closeDetail(); };
     $("#sheet-close").onclick = closeSheet;
+    $("#dsheet-close").onclick = closeDetail;
     $("#btn-save-settings").onclick = () => { saveSettings().catch((e) => toast("保存失败：" + (e && e.message || e))); };
     const step = (valSel, minusSel, plusSel, min, max, inc) => {
       $(minusSel).onclick = () => { const el = $(valSel); el.textContent = Math.max(min, (+el.textContent || 0) - inc); };
