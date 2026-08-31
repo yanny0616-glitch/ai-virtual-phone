@@ -69,8 +69,13 @@ export function getChatMirrorQueueSize(): number {
 function characterIdForSession(sessionId: string): string {
     const session = loadChatSessions().find(item => item.id === sessionId);
     if (!session || session.isGroup) return "";
-    const contact = loadChatContacts().find(item => item.id === session.contactId);
-    return contact?.characterId || "";
+    // 本代码库里 session.contactId 存的直接就是 characterId（createOrGetSession 的调用方
+    // 全部传角色 ID，contact.id 是另一套 contact_ 前缀 ID）。按两种口径查通讯录做兼容，
+    // 都查不到时把 contactId 本身当角色 ID 用，避免整条会话被静默丢弃。
+    const cid = session.contactId || "";
+    if (!cid) return "";
+    const contact = loadChatContacts().find(item => item.characterId === cid || item.id === cid);
+    return contact?.characterId || cid;
 }
 
 function toMirrorEntry(msg: ChatMessage): ChatMirrorEntry | null {
