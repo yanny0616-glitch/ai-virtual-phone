@@ -359,22 +359,12 @@
     // 把模型实际说了什么带进错误里，日志可查
     throw new Error("模型没回 JSON，它说的是：「" + t.slice(0, 100) + (t.length > 100 ? "…" : "") + "」");
   }
-  // 网络层抖动（超时/连接断/切后台被杀）自动等 2 秒重发一次
-  async function genOnce(req) {
-    try { return await AiPhone.ai.generate(req); } catch (e) {
-      const msg = String(e && e.message || e);
-      if (!/network|load failed|fetch|timeout|abort|连接|网络/i.test(msg)) throw e;
-      await log("网络请求失败（" + msg.slice(0, 80) + "），2 秒后重试");
-      await new Promise((r) => setTimeout(r, 2000));
-      return await AiPhone.ai.generate(req);
-    }
-  }
   // 模型没按要求回 JSON 时（比如回了一段普通话），带更严的指令重试一次
   async function generateJson(req) {
-    const r = await genOnce(req);
+    const r = await AiPhone.ai.generate(req);
     try { return parseModelJson(r.text); } catch (e) {
       await log("首次生成未得到 JSON（" + (e && e.message || e) + "），追加严格指令重试");
-      const r2 = await genOnce({
+      const r2 = await AiPhone.ai.generate({
         ...req,
         instruction: req.instruction + "\n\n重要：只输出 JSON 本身，第一个字符必须是 {，最后一个字符必须是 }，不要任何解释、前言、思考过程或代码块标记。",
       });
@@ -600,7 +590,7 @@
     zone.innerHTML = '<div class="bubble"><div class="from">' + esc(S.character.name) + ' · 此刻</div><span class="typing"><i></i><i></i><i></i></span></div>';
     try {
       const ctx = S.day ? ("TA此刻的状态：" + S.day.mood + "；正在" + (currentDoing() || S.day.doing) + "；在" + S.day.location + "。") : "";
-      const r = await genOnce({
+      const r = await AiPhone.ai.generate({
         characterId: S.character.id,
         appTags: ["companion", "preview"],
         instruction: "现在时刻 " + fmtHM(Date.now()) + "。" + ctx + " 请以TA的身份，此刻主动给用户发一条消息。",
