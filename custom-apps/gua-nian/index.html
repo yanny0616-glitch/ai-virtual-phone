@@ -119,6 +119,22 @@
     background: #fff; border: 2px solid var(--tx3);
   }
   .tl-item.past { opacity: .45; }
+  .tl-item.cur .dot { border-color: var(--acc2); box-shadow: 0 0 0 4px rgba(245, 107, 156, .15); }
+  .tl-item.cur .tt::after {
+    content: "正在"; font-size: 10px; color: #fff; font-weight: 600;
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    border-radius: 999px; padding: 1px 7px; margin-left: 7px; vertical-align: 2px;
+  }
+  .tl-now { position: relative; height: 16px; margin: 3px 0; }
+  .tl-now::before {
+    content: ""; position: absolute; left: -18px; right: 0; top: 50%;
+    border-top: 1.5px dashed rgba(245, 107, 156, .5);
+  }
+  .tl-now .lbl {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--acc2);
+    background: var(--card); padding: 0 6px;
+  }
   .tl-item .row1 { display: flex; align-items: baseline; gap: 8px; }
   .tl-item .tm { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--tx2); font-weight: 700; }
   .tl-item .tt { font-size: 14px; font-weight: 600; }
@@ -691,18 +707,25 @@
     for (const it of S.day.schedule) { merged.push({ kind: "sched", time: it.time, it }); times.add(it.time); }
     if (S.plan) for (const w of S.plan.items || []) if (!times.has(w.time)) merged.push({ kind: "wakeOnly", time: w.time, w });
     merged.sort((a, b) => String(a.time).localeCompare(String(b.time)));
-    let idx = 0;
-    for (const m of merged) {
-      const past = m.time < now;
+    let idx = 0, nowInserted = false;
+    const nowLine = '<div class="tl-now"><span class="lbl">现在 ' + now + "</span></div>";
+    let curIdx = -1; // 最后一条已开始的日程 = 正在进行
+    merged.forEach((m, i) => { if (m.time <= now) curIdx = i; });
+    for (let i = 0; i < merged.length; i++) {
+      const m = merged[i];
+      const cur = i === curIdx;
+      const past = m.time < now && !cur;
+      if (m.time >= now && !nowInserted) { tl += nowLine; nowInserted = true; }
       const delay = 'style="animation-delay:' + (idx++ * 40) + 'ms"';
       if (m.kind === "sched") {
         const w = wakeByTime[m.time];
         if (w) tl += wakeRow(w, past, m.it.title, delay);
-        else tl += '<div class="tl-item' + (past ? " past" : "") + '" ' + delay + '><span class="dot"></span><div class="row1"><span class="tm">' + esc(m.time) + '</span><span class="tt">' + esc(m.it.title) + '</span></div>' + (m.it.note ? '<div class="nt">' + esc(m.it.note) + "</div>" : "") + "</div>";
+        else tl += '<div class="tl-item' + (past ? " past" : "") + (cur ? " cur" : "") + '" ' + delay + '><span class="dot"></span><div class="row1"><span class="tm">' + esc(m.time) + '</span><span class="tt">' + esc(m.it.title) + '</span></div>' + (m.it.note ? '<div class="nt">' + esc(m.it.note) + "</div>" : "") + "</div>";
       } else {
         tl += wakeRow(m.w, past, m.w.source, delay);
       }
     }
+    if (merged.length && !nowInserted) tl += nowLine; // 一天已全部过完
     const armedN = S.plan ? (S.plan.items || []).filter((w) => w.act).length : 0;
     html +=
       '<div class="card"><div class="sec-head"><span class="t">TA 的 一 天' + (armedN ? " · ♥×" + armedN : "") + "</span>" +
