@@ -309,6 +309,11 @@
   .dec .tm { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--tx2); font-weight: 700; }
   .dec .tt { font-size: 13px; font-weight: 600; }
   .dec .why { font-size: 12px; color: var(--tx2); line-height: 1.6; margin-top: 3px; }
+  .skip-fold { margin-top: 6px; border-top: 1px dashed rgba(160, 110, 100, .10); }
+  .skip-fold > summary { list-style: none; cursor: pointer; font-size: 11.5px; color: var(--tx3); padding: 8px 0 4px; user-select: none; }
+  .skip-fold > summary::-webkit-details-marker { display: none; }
+  .skip-fold[open] > summary { color: var(--tx2); }
+  .skip-fold .dec { opacity: .75; }
   .dec.no .why, .dec.no .tt { color: var(--tx3); }
   .badge.sent { background: rgba(245, 107, 156, .10); color: var(--acc2); border: 1px solid rgba(245, 107, 156, .3); }
   .badge.replied { background: rgba(42, 168, 118, .10); color: var(--good); border: 1px solid rgba(42, 168, 118, .3); }
@@ -888,6 +893,15 @@
       : { cls: "on", heart: "♥", badge: '<span class="badge sent">已发出</span>', sent };
   }
 
+  function decRow(w, msgs) {
+    const st = decStatus(w, msgs);
+    return '<div class="dec ' + st.cls + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
+      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + "</div>" +
+      '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
+      (st.sent ? '<div class="why" style="color:var(--tx3)">' + fmtHM(st.sent.t) + " · " + esc(st.sent.c.length > 46 ? st.sent.c.slice(0, 46) + "…" : st.sent.c) + "</div>" : "") +
+      "</div>";
+  }
+
   async function renderArchive() {
     const v = $("#view");
     const req = (S._arcReq = (S._arcReq || 0) + 1);
@@ -943,14 +957,16 @@
           "</div>";
       }
       if (items.length) {
-        body += items.map((w) => {
-          const st = decStatus(w, arc.msgs);
-          return '<div class="dec ' + st.cls + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
-            '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + "</div>" +
-            '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
-            (st.sent ? '<div class="why" style="color:var(--tx3)">' + fmtHM(st.sent.t) + " · " + esc(st.sent.c.length > 46 ? st.sent.c.slice(0, 46) + "…" : st.sent.c) + "</div>" : "") +
-            "</div>";
-        }).join("");
+        // 起念的时刻是主角，逐条展开讲；未起念的只是「日程里没被选中的时刻」，
+        // 折叠成一行，免得整张卡片读起来像把日程复读一遍
+        const actedItems = items.filter((w) => w.act);
+        const skippedItems = items.filter((w) => !w.act);
+        body += actedItems.map((w) => decRow(w, arc.msgs)).join("");
+        if (!actedItems.length) body += '<div class="archive-note">这天TA一个时刻都没起念，想安静地过。</div>';
+        if (skippedItems.length) {
+          body += '<details class="skip-fold"><summary>♡ 还有 ' + skippedItems.length + ' 个时刻没起念 · 看看为什么</summary>' +
+            skippedItems.map((w) => decRow(w, arc.msgs)).join("") + "</details>";
+        }
       } else {
         body += '<div class="archive-note">这天没有编排记录' + (day ? "（只生成了生活面）" : "") + "</div>";
       }
