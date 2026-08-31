@@ -255,6 +255,25 @@
     background: var(--card); color: var(--tx); font-size: 18px; cursor: pointer;
   }
   .stepper .val { font-size: 18px; font-weight: 700; min-width: 30px; text-align: center; }
+  .stepper .unit { font-size: 12px; color: var(--tx3); }
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1; padding: 9px 0; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--card); color: var(--tx2); font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .seg button.on {
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    color: #fff; border-color: transparent; font-weight: 700;
+  }
+  .tgl-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tgl {
+    padding: 8px 13px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--card); color: var(--tx3); font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .tgl.on { color: var(--acc2); border-color: rgba(245, 107, 156, .5); background: rgba(255, 107, 157, .08); font-weight: 600; }
+  .tgl.on::before { content: "✓ "; }
+  .grp-hint { font-size: 11px; color: var(--tx3); line-height: 1.6; margin-top: 7px; }
+  .badge.cool { background: rgba(100, 140, 200, .10); color: #6b8cba; border: 1px solid rgba(100, 140, 200, .3); }
 
   /* ── 页签 ─────────────────────────── */
   .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
@@ -383,6 +402,55 @@
         <button id="q-plus">＋</button>
       </div>
     </div>
+    <div class="grp">
+      <div class="grp-t">主动倾向（TA有多想黏着你）</div>
+      <div class="seg" id="seg-bias">
+        <button data-v="-2">很克制</button>
+        <button data-v="-1">克制</button>
+        <button data-v="0">自然</button>
+        <button data-v="1">热络</button>
+        <button data-v="2">黏人</button>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="grp-t">两次起念至少间隔</div>
+      <div class="stepper">
+        <button id="gap-minus">−</button>
+        <div class="val" id="gap-val">60</div>
+        <button id="gap-plus">＋</button>
+        <span class="unit">分钟 · 0 = 不限制</span>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="grp-t">未回应降速</div>
+      <div class="stepper">
+        <button id="cool-minus">−</button>
+        <div class="val" id="cool-val">2</div>
+        <button id="cool-plus">＋</button>
+        <span class="unit">条 · 0 = 关闭</span>
+      </div>
+      <div class="grp-hint">你连续这么多条没回后，TA今天剩下的时刻全部取消，不追着发。</div>
+    </div>
+    <div class="grp">
+      <div class="grp-t">动态复核</div>
+      <div class="stepper">
+        <button id="rc-minus">−</button>
+        <div class="val" id="rc-val">15</div>
+        <button id="rc-plus">＋</button>
+        <span class="unit">分钟 · 0 = 关闭</span>
+      </div>
+      <div class="grp-hint">打开小手机时、以及停留期间每隔这么久，TA会按你们最新的聊天重新审一遍今天还没到点的时刻：聊崩了会取消，聊出没完的话头会临时加。</div>
+    </div>
+    <div class="grp">
+      <div class="grp-t">起念来源与克制</div>
+      <div class="tgl-row">
+        <button class="tgl" id="tg-sleep">睡前锚点</button>
+        <button class="tgl" id="tg-morning">早安锚点</button>
+        <button class="tgl" id="tg-chat">聊天临时起念</button>
+        <button class="tgl" id="tg-mood">状态低落时更安静</button>
+      </div>
+    </div>
+    <div class="grp-hint" style="margin:-6px 0 14px">改了额度 / 间隔 / 倾向 / 锚点后，回「今天」页点「♥ 重新编排」立刻生效；降速和复核保存即生效。</div>
     <button class="big-btn" id="btn-save-settings">保 存</button>
   </div>
 </div>
@@ -518,11 +586,25 @@
     return AiPhone.db.create(coll, data);
   }
 
+  // 所有可调参数的默认值；旧版本存的 settings 缺哪个补哪个
+  const SET_DEF = {
+    quietStart: "23:30", quietEnd: "08:00",
+    quota: 3,            // 每天最多主动几次
+    minGapMin: 60,       // 相邻两次起念最小间隔（分钟，0=不限制）
+    maxUnanswered: 2,    // 未回应降速：连续 N 条没回后今天不再主动（0=关闭）
+    bias: 0,             // 主动倾向 -2很克制 … 2黏人
+    anchorSleep: true,   // 睡前锚点
+    anchorMorning: false,// 早安锚点
+    chatCandidates: true,// 复核时允许因聊天临时起念
+    recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开app时也会复核一次）
+    moodGate: true,      // 精力低/心情差时更克制
+  };
   async function loadSettings() {
     const rows = await AiPhone.db.list("settings", { limit: 5 });
-    S.settings = (rows && rows[0]) || await AiPhone.db.create("settings", {
-      characterId: "", quietStart: "23:30", quietEnd: "08:00", quota: 3,
-    });
+    S.settings = (rows && rows[0]) || await AiPhone.db.create("settings", { characterId: "", ...SET_DEF });
+    const missing = {};
+    for (const k in SET_DEF) if (S.settings[k] == null) missing[k] = SET_DEF[k];
+    if (Object.keys(missing).length) S.settings = await AiPhone.db.update("settings", S.settings.id, missing);
   }
   async function loadDayAndPlan() {
     const date = todayStr(), cid = S.character.id;
@@ -637,9 +719,18 @@
       seen.add(it.time);
       cands.push({ time: it.time, source: it.title, fireAt: ms });
     }
-    // 晚安时刻：免打扰开始前 20 分钟
+    // 早安锚点：免打扰结束后 40 分钟
+    if (S.settings.anchorMorning) {
+      const ms = timeToMs(S.settings.quietEnd) || timeToMs("08:00");
+      const gm = ms ? ms + 40 * 60000 : null;
+      if (gm && gm > now) {
+        const hm = fmtHM(gm);
+        if (!seen.has(hm) && !inQuiet(hm)) { seen.add(hm); cands.push({ time: hm, source: "早安", fireAt: gm }); }
+      }
+    }
+    // 睡前锚点：免打扰开始前 20 分钟
     const qs = S.settings.quietStart;
-    if (qs) {
+    if (S.settings.anchorSleep && qs) {
       const ms = timeToMs(qs);
       const gm = ms ? ms - 20 * 60000 : null;
       if (gm && gm > now) {
@@ -648,7 +739,25 @@
       }
     }
     cands.sort((a, b) => a.fireAt - b.fireAt);
-    return cands.slice(0, 6);
+    return cands.slice(0, 8);
+  }
+
+  // 主动倾向 → 给模型的一句话（0=自然，不加话）
+  function biasText() {
+    return ({
+      "-2": "TA的主动倾向被设为「很克制」：只有非常强烈的理由才起念，宁缺毋滥。",
+      "-1": "TA的主动倾向偏克制，起念要有充分理由。",
+      "1": "TA最近比较想黏着用户，遇到合适的时刻更愿意主动。",
+      "2": "TA现在非常想念用户，明显更愿意主动，额度内尽量多陪。",
+    })[String(S.settings.bias || 0)] || "";
+  }
+  // 连续多少条TA发出的消息用户还没回（消息需按时间升序）
+  function unansweredStreak(msgs) {
+    let n = 0;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "assistant") n++; else break;
+    }
+    return n;
   }
 
   async function cancelTodayWakes() {
@@ -690,18 +799,22 @@
           lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
           "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
           JSON.stringify(cands.map((c) => ({ time: c.time, justFinished: c.source }))),
-          "", "约束：今天最多真的发 " + S.settings.quota + " 条；免打扰时段 " + S.settings.quietStart + "–" + S.settings.quietEnd + "。",
+          "", "约束：今天最多真的发 " + S.settings.quota + " 条；免打扰时段 " + S.settings.quietStart + "–" + S.settings.quietEnd
+            + (S.settings.minGapMin > 0 ? "；相邻两次起念至少隔 " + S.settings.minGapMin + " 分钟" : "") + "。",
+          (S.settings.moodGate && S.day.energy < 30) ? "TA今天精力只有 " + S.day.energy + "%，很低。这种时候TA更想缩着，明显减少主动。" : null,
+          biasText() || null,
         ].filter((s) => s !== null).join("\n"),
       });
       const decisions = Array.isArray(parsed.decisions) ? parsed.decisions : [];
       await cancelTodayWakes();
 
-      const items = []; let armedCount = 0;
+      const items = []; let armedCount = 0, lastArmedAt = 0;
       for (let i = 0; i < cands.length; i++) {
         const c = cands[i];
         const d = decisions[i] || {};
         const item = { time: c.time, fireAt: c.fireAt, source: c.source, act: !!d.act, why: String(d.why || ""), intent: String(d.intent || ""), delivery: "", reason: "", wakeId: "" };
         if (item.act && armedCount >= S.settings.quota) { item.act = false; item.why = "超出今日额度"; }
+        if (item.act && lastArmedAt && S.settings.minGapMin > 0 && c.fireAt - lastArmedAt < S.settings.minGapMin * 60000) { item.act = false; item.why = "离上一个起念太近"; }
         if (item.act) {
           try {
             const res = await AiPhone.push.wake({
@@ -709,7 +822,7 @@
               intent: item.intent || ("刚" + c.source + "，忽然想到用户"), source: "tool",
             });
             item.wakeId = res.id; item.delivery = res.armed ? "push" : "local"; item.reason = res.reason || "";
-            armedCount++;
+            armedCount++; lastArmedAt = c.fireAt;
             await log(c.time + " 起念 ✓ " + (res.armed ? "已预约离线推送" : "仅本地（" + (res.reason || "未知") + "）") + "：" + item.intent);
           } catch (e) {
             item.act = false; item.why = "预约失败：" + (e && e.message || e);
@@ -729,6 +842,124 @@
       await log("编排失败：" + (e && e.message || e));
     }
     S.busy = false; render();
+  }
+
+  /* ================= 核心：动态复核 ================= */
+  // 官方陪伴插件式的「判断随状态刷新」：打开小手机时（以及在页时每隔 recheckMin 分钟），
+  // 按最新聊天重审今天还没到点的时刻——未回应降速是硬规则，聊崩了会取消，
+  // 聊出没聊完的话头时可以临时起一个新念头。
+  async function recheck(trigger) {
+    if (S.busy || S._rechecking) return;
+    if (!S.settings || !(S.settings.recheckMin > 0)) return;
+    if (!S.character || !S.day || !S.plan || !Array.isArray(S.plan.items)) return;
+    const nowMs = Date.now();
+    if (!S.plan.items.some((w) => w.fireAt > nowMs + 2 * 60000)) return; // 今天没有还没到点的时刻
+    S._rechecking = true;
+    try {
+      const since = S.plan.recheckAt || S.plan.plannedAt || 0;
+      const chat = await readRecentChat(60);
+      chat.sort((a, b) => a.t - b.t);
+      const fresh = chat.filter((m) => m.t > since);
+      const streak = unansweredStreak(chat);
+      const cooling = S.settings.maxUnanswered > 0 && streak >= S.settings.maxUnanswered;
+      if (!fresh.length && !cooling) { S._rechecking = false; return; } // 没有新信息，维持原判断
+      const items = S.plan.items.slice();
+      let changed = 0, added = 0;
+
+      if (cooling) {
+        // 硬规则：你一直没回，TA不追着发
+        for (const w of items) {
+          if (w.act && w.fireAt > nowMs) {
+            if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
+            w.act = false; w.adj = "cooled"; w.wakeId = ""; w.delivery = "";
+            w.why = "你还有 " + streak + " 条没回，TA不想追着发";
+            changed++;
+          }
+        }
+        if (changed) await log("复核（" + trigger + "）：连续 " + streak + " 条未回 ≥ 降速阈值 " + S.settings.maxUnanswered + "，取消 " + changed + " 个待发时刻");
+      } else {
+        const lines = chatExcerpt(chat, 24);
+        const remaining = items.filter((w) => w.fireAt > nowMs + 2 * 60000);
+        const usedQuota = items.filter((w) => w.act).length;
+        const parsed = await generateJson({
+          characterId: S.character.id,
+          appTags: ["companion", "impulse"],
+          instruction: [
+            "【后台系统任务，不是聊天：不要以角色口吻说话、不要写消息内容，只输出 JSON】",
+            "你是当前角色的内心。之前TA为今天定过一批想不想给用户发消息的判断；现在聊天有了新进展，请只对下面「还没到点」的时刻重新判断，并允许临时起最多一个新念头。",
+            "TA今天的生活面：" + JSON.stringify({ mood: S.day.mood, energy: S.day.energy }),
+            "最近聊天（「我」=用户，从旧到新，越靠后越新）：", lines.join("\n"),
+            streak ? "注意：TA最近连发了 " + streak + " 条用户还没回。没回就少发、缓发，别显得追着人跑。" : null,
+            biasText() || null,
+            "还没到点的时刻（act 是之前的判断）：",
+            JSON.stringify(remaining.map((w) => ({ time: w.time, source: w.source, act: !!w.act, intent: w.intent || "" }))),
+            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）"}],"extra":[{"time":"HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念"}]}',
+            "decisions 与上面时刻一一对应、顺序一致；没有变化就原样回传。extra 最多 1 条：只有聊天里确实有没聊完的话头、约好的事、或明显被勾起的牵挂才加，没有就给空数组。"
+              + (S.settings.chatCandidates ? "" : "（临时起念已被用户关闭，extra 必须是空数组）"),
+            "约束：今天最多 " + S.settings.quota + " 条（已占 " + usedQuota + "）；免打扰 " + S.settings.quietStart + "–" + S.settings.quietEnd
+              + (S.settings.minGapMin > 0 ? "；相邻起念至少隔 " + S.settings.minGapMin + " 分钟" : "")
+              + "；extra 的时间必须晚于现在（" + fmtHM(nowMs) + "）。",
+          ].filter((s) => s !== null).join("\n"),
+        });
+        const decs = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+        const byTime = {};
+        decs.forEach((d) => { const hm = normHM(d && d.time); if (hm) byTime[hm] = d; });
+        for (const w of remaining) {
+          const d = byTime[w.time]; if (!d) continue;
+          const wantAct = !!d.act;
+          if (wantAct === !!w.act) { if (wantAct && d.intent) w.intent = String(d.intent); continue; }
+          if (!wantAct) {
+            if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 忽略 */ } }
+            w.act = false; w.adj = "recheck"; w.wakeId = ""; w.delivery = "";
+            w.why = String(d.why || "聊过之后TA改了主意");
+            changed++;
+            await log("复核：" + w.time + " 取消起念——" + w.why);
+          } else {
+            if (items.filter((x) => x.act).length >= S.settings.quota) { await log("复核：" + w.time + " 想点亮但额度已满"); continue; }
+            try {
+              const res = await AiPhone.push.wake({ characterId: S.character.id, fireAt: w.fireAt, intent: String(d.intent || ("刚" + w.source + "，想到用户")), source: "tool" });
+              w.act = true; w.adj = "recheck"; w.intent = String(d.intent || ""); w.why = String(d.why || "");
+              w.wakeId = res.id; w.delivery = res.armed ? "push" : "local"; w.reason = res.reason || "";
+              changed++;
+              await log("复核：" + w.time + " 新点亮 ✓ " + w.intent);
+            } catch (e) { await log("复核点亮失败 " + w.time + "：" + (e && e.message || e)); }
+          }
+        }
+        // 聊天衍生的临时起念（未完话题/约定）
+        const extras = (S.settings.chatCandidates && Array.isArray(parsed.extra)) ? parsed.extra.slice(0, 1) : [];
+        for (const x of extras) {
+          const hm = normHM(x && x.time); const ms = hm ? timeToMs(hm) : null;
+          if (!ms || ms <= nowMs + 2 * 60000 || inQuiet(hm)) continue;
+          if (items.some((w) => w.time === hm)) continue;
+          if (items.filter((w) => w.act).length >= S.settings.quota) { await log("复核：临时起念 " + hm + " 被今日额度挡下"); continue; }
+          const gap = (S.settings.minGapMin || 0) * 60000;
+          if (gap && items.some((w) => w.act && Math.abs(w.fireAt - ms) < gap)) { await log("复核：临时起念 " + hm + " 离已有起念太近，放弃"); continue; }
+          try {
+            const res = await AiPhone.push.wake({ characterId: S.character.id, fireAt: ms, intent: String(x.intent || "有句话没说完，想找用户"), source: "tool" });
+            items.push({
+              time: hm, fireAt: ms, source: "临时·" + String(x.about || "未完话题").slice(0, 10),
+              act: true, adj: "extra", why: String(x.why || ""), intent: String(x.intent || ""),
+              delivery: res.armed ? "push" : "local", reason: res.reason || "", wakeId: res.id,
+            });
+            items.sort((a, b) => a.fireAt - b.fireAt);
+            added++;
+            await log("复核：临时起念 ✓ " + hm + "「" + String(x.about || "") + "」" + String(x.intent || ""));
+          } catch (e) { await log("复核临时起念预约失败：" + (e && e.message || e)); }
+        }
+      }
+
+      S.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === S.character.id,
+        { date: todayStr(), characterId: S.character.id, items, chatUsed: S.plan.chatUsed || 0, plannedAt: S.plan.plannedAt || nowMs, recheckAt: nowMs });
+      if (changed || added) {
+        S.archive = null;
+        if (added) toast("TA临时多了一个想找你的时刻");
+        else toast(cooling ? "你没回TA，TA今天不追着发了" : "TA按最近的聊天调整了心意");
+        render();
+      }
+    } catch (e) {
+      await log("复核失败（原计划不受影响）：" + (e && e.message || e));
+    }
+    S._rechecking = false;
   }
 
   /* ================= 预览 ================= */
@@ -843,6 +1074,14 @@
     bindCommon();
   }
 
+  // 复核留下的调整痕迹 → 小标签
+  function adjBadge(w) {
+    if (w.adj === "cooled") return '<span class="badge cool">降温</span>';
+    if (w.adj === "extra") return '<span class="badge cool">临时起念</span>';
+    if (w.adj === "recheck") return '<span class="badge cool">复核调整</span>';
+    return "";
+  }
+
   function wakeRow(w, past, title, delay) {
     let badge = "", intent = "";
     if (w.act) {
@@ -857,7 +1096,7 @@
       intent = '<div class="intent">' + esc(w.why || "TA这会儿不想") + "</div>";
     }
     return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + '" ' + delay + '><span class="dot"></span>' +
-      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + "</div>" + intent + "</div>";
+      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
   }
 
   /* ================= 记录页 ================= */
@@ -900,7 +1139,7 @@
   function decRow(w, msgs) {
     const st = decStatus(w, msgs);
     return '<div class="dec ' + st.cls + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
-      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + "</div>" +
+      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + adjBadge(w) + "</div>" +
       '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
       (st.sent ? '<div class="why" style="color:var(--tx3)">' + fmtHM(st.sent.t) + " · " + esc(st.sent.c.length > 46 ? st.sent.c.slice(0, 46) + "…" : st.sent.c) + "</div>" : "") +
       "</div>";
@@ -1018,6 +1257,14 @@
     $("#in-quiet-start").value = S.settings.quietStart;
     $("#in-quiet-end").value = S.settings.quietEnd;
     $("#q-val").textContent = S.settings.quota;
+    $("#gap-val").textContent = S.settings.minGapMin;
+    $("#cool-val").textContent = S.settings.maxUnanswered;
+    $("#rc-val").textContent = S.settings.recheckMin;
+    document.querySelectorAll("#seg-bias button").forEach((b) => b.classList.toggle("on", +b.dataset.v === (+S.settings.bias || 0)));
+    $("#tg-sleep").classList.toggle("on", !!S.settings.anchorSleep);
+    $("#tg-morning").classList.toggle("on", !!S.settings.anchorMorning);
+    $("#tg-chat").classList.toggle("on", !!S.settings.chatCandidates);
+    $("#tg-mood").classList.toggle("on", !!S.settings.moodGate);
     document.body.classList.add("sheet-open");
   }
   function closeSheet() { document.body.classList.remove("sheet-open"); }
@@ -1025,12 +1272,21 @@
   async function saveSettings() {
     const sel = document.querySelector(".char-cell.sel");
     const cid = sel ? sel.dataset.id : (S.character && S.character.id) || "";
-    const quota = Math.max(1, Math.min(6, +($("#q-val").textContent) || 3));
+    const num = (sel, min, max, dflt) => { const n = +($(sel).textContent); return isFinite(n) ? Math.max(min, Math.min(max, n)) : dflt; };
+    const biasBtn = document.querySelector("#seg-bias button.on");
     S.settings = await AiPhone.db.update("settings", S.settings.id, {
       characterId: cid,
       quietStart: $("#in-quiet-start").value || "23:30",
       quietEnd: $("#in-quiet-end").value || "08:00",
-      quota,
+      quota: num("#q-val", 1, 6, 3),
+      minGapMin: num("#gap-val", 0, 240, 60),
+      maxUnanswered: num("#cool-val", 0, 6, 2),
+      recheckMin: num("#rc-val", 0, 120, 15),
+      bias: biasBtn ? +biasBtn.dataset.v : 0,
+      anchorSleep: $("#tg-sleep").classList.contains("on"),
+      anchorMorning: $("#tg-morning").classList.contains("on"),
+      chatCandidates: $("#tg-chat").classList.contains("on"),
+      moodGate: $("#tg-mood").classList.contains("on"),
     });
     const changed = !S.character || S.character.id !== cid;
     S.character = S.characters.find((c) => c.id === cid) || S.character;
@@ -1045,8 +1301,18 @@
     $("#btn-settings").onclick = openSheet;
     $("#sheet-mask").onclick = closeSheet;
     $("#btn-save-settings").onclick = () => { saveSettings().catch((e) => toast("保存失败：" + (e && e.message || e))); };
-    $("#q-minus").onclick = () => { const el = $("#q-val"); el.textContent = Math.max(1, +el.textContent - 1); };
-    $("#q-plus").onclick = () => { const el = $("#q-val"); el.textContent = Math.min(6, +el.textContent + 1); };
+    const step = (valSel, minusSel, plusSel, min, max, inc) => {
+      $(minusSel).onclick = () => { const el = $(valSel); el.textContent = Math.max(min, (+el.textContent || 0) - inc); };
+      $(plusSel).onclick = () => { const el = $(valSel); el.textContent = Math.min(max, (+el.textContent || 0) + inc); };
+    };
+    step("#q-val", "#q-minus", "#q-plus", 1, 6, 1);
+    step("#gap-val", "#gap-minus", "#gap-plus", 0, 240, 30);
+    step("#cool-val", "#cool-minus", "#cool-plus", 0, 6, 1);
+    step("#rc-val", "#rc-minus", "#rc-plus", 0, 120, 5);
+    document.querySelectorAll("#seg-bias button").forEach((b) => {
+      b.onclick = () => { document.querySelectorAll("#seg-bias button").forEach((x) => x.classList.toggle("on", x === b)); };
+    });
+    document.querySelectorAll(".tgl").forEach((b) => { b.onclick = () => b.classList.toggle("on"); });
     document.querySelectorAll("#tabs .tab").forEach((b) => {
       b.onclick = () => {
         if (S.tab === b.dataset.tab) return;
@@ -1074,8 +1340,18 @@
       } catch (e) { /* 无日志可读 */ }
       if (S.character) await loadDayAndPlan();
       render();
-      // 每分钟刷新「正在做」与过去/未来分界
-      setInterval(() => { if (!S.busy) render(); }, 60000);
+      // 打开小手机本身就是一次复核时机：按你们最新的聊天，让TA重新想想今天
+      S._rcTry = Date.now();
+      setTimeout(() => { recheck("打开").catch(() => { /* 已在函数内记日志 */ }); }, 1500);
+      // 每分钟刷新「正在做」与过去/未来分界；在页期间按设置的间隔定时复核
+      setInterval(() => {
+        if (S.busy) return;
+        render();
+        if (S.settings && S.settings.recheckMin > 0 && Date.now() - (S._rcTry || 0) >= S.settings.recheckMin * 60000) {
+          S._rcTry = Date.now();
+          recheck("定时").catch(() => { /* 已在函数内记日志 */ });
+        }
+      }, 60000);
     } catch (e) {
       $("#view").innerHTML = '<div class="card empty"><div class="art">🌫️</div><p>初始化失败：' + esc(e && e.message || e) + "</p></div>";
     }
