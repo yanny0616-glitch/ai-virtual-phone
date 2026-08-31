@@ -97,7 +97,9 @@
   .chip {
     font-size: 11px; color: var(--tx2); border: 1px solid var(--line);
     padding: 3px 9px; border-radius: 999px; background: var(--card-strong);
+    overflow-wrap: anywhere;
   }
+  .tl-item.wake .intent, .tl-item .tt, .mood-text { overflow-wrap: anywhere; }
   .energy { margin-top: 14px; }
   .energy .lab { display: flex; justify-content: space-between; font-size: 11px; color: var(--tx3); margin-bottom: 6px; }
   .energy .bar { height: 6px; border-radius: 999px; background: rgba(160, 110, 100, .12); overflow: hidden; }
@@ -295,7 +297,7 @@
   .day-sum .d1 { font-size: 13px; font-weight: 700; display: flex; align-items: baseline; gap: 7px; }
   .day-sum .d1 .wd { font-size: 11px; color: var(--tx3); font-weight: 600; }
   .day-sum .d1 .hearts { margin-left: auto; font-size: 11px; color: var(--acc2); font-weight: 700; letter-spacing: 1px; }
-  .day-sum .d2 { font-size: 11.5px; color: var(--tx2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .day-sum .d2 { display: block; font-size: 11.5px; color: var(--tx2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .day-sum .arr { flex: none; color: var(--tx3); font-size: 11px; transition: transform .25s ease; }
   details.day-card[open] .day-sum .arr { transform: rotate(90deg); }
   .day-body { padding: 2px 16px 15px; border-top: 1px dashed var(--line); }
@@ -308,7 +310,9 @@
   .dec .row1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .dec .tm { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--tx2); font-weight: 700; }
   .dec .tt { font-size: 13px; font-weight: 600; }
-  .dec .why { font-size: 12px; color: var(--tx2); line-height: 1.6; margin-top: 3px; }
+  .dec .why { font-size: 12px; color: var(--tx2); line-height: 1.6; margin-top: 3px; overflow-wrap: anywhere; }
+  .dec .tt { overflow-wrap: anywhere; }
+  .day-sum .d1 { flex-wrap: wrap; }
   .skip-fold { margin-top: 6px; border-top: 1px dashed rgba(160, 110, 100, .10); }
   .skip-fold > summary { list-style: none; cursor: pointer; font-size: 11.5px; color: var(--tx3); padding: 8px 0 4px; user-select: none; }
   .skip-fold > summary::-webkit-details-marker { display: none; }
