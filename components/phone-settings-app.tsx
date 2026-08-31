@@ -442,7 +442,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                                 </div>
                                 <Toggle checked={keepAlive} onChange={handleKeepAliveChange} className="settings-toggle-control" />
                             </div>
-                            {selfHostedMode && <SelfHostUpdateCard onNotice={onNotice} />}
+                            <SelfHostUpdateCard onNotice={onNotice} />
                         </div>
                         {isAdmin ? (
                             <div className="settings-moderation-section">

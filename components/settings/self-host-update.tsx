@@ -93,17 +93,16 @@ export function SelfHostUpdateCard({ onNotice }: { onNotice: (msg: string) => vo
         }, 5000);
     };
 
-    const desc = !info
-        ? "读取版本中…"
-        : !info.ok
-            ? (info.error || "版本信息读取失败")
-            : updated
-                ? `已更新到 ${info.current}，刷新页面生效`
-                : updating
-                    ? "更新中…下载、切换、重启服务，约 1 分钟"
-                    : info.updateAvailable && info.latest
-                        ? `当前 ${info.current || "未知"} → 最新构建 ${info.latest.sha}`
-                        : `当前 ${info.current || "未知"}${info.building ? " · GitHub 有新提交在构建" : " · 已是最新"}`;
+    // 接口不可用（非 float-deploy 部署）时整卡隐藏；首个响应回来前也先不占位
+    if (!info?.ok) return null;
+
+    const desc = updated
+        ? `已更新到 ${info.current}，刷新页面生效`
+        : updating
+            ? "更新中…下载、切换、重启服务，约 1 分钟"
+            : info.updateAvailable && info.latest
+                ? `当前 ${info.current || "未知"} → 最新构建 ${info.latest.sha}`
+                : `当前 ${info.current || "未知"}${info.building ? " · GitHub 有新提交在构建" : " · 已是最新"}`;
 
     return (
         <div className="app-card card-featured settings-toggle-card">
@@ -116,7 +115,7 @@ export function SelfHostUpdateCard({ onNotice }: { onNotice: (msg: string) => vo
             </div>
             {updated ? (
                 <button className="ui-btn ui-btn-primary py-1 px-3 ts-12" style={{ whiteSpace: "nowrap" }} onClick={() => window.location.reload()}>刷新页面</button>
-            ) : info?.ok && info.updateAvailable ? (
+            ) : info.updateAvailable ? (
                 <button className="ui-btn ui-btn-primary py-1 px-3 ts-12" style={{ whiteSpace: "nowrap" }} disabled={updating} onClick={() => void handleUpdate()}>
                     {updating ? <Loader2 size={14} className="animate-spin" /> : "立即更新"}
                 </button>

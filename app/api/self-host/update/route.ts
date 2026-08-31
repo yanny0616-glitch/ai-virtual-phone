@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
-import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
+import { getCurrentAccount } from "@/lib/server/account-auth";
 
 // 自部署实例的版本检查与一键更新：
 // GET 对比 /opt/float/current/VERSION 与 GitHub 最新 Release；
@@ -36,9 +36,6 @@ async function fetchGithubJson(url: string): Promise<Record<string, unknown> | n
 }
 
 export async function GET() {
-  if (!isSelfHostedModeEnabled()) {
-    return NextResponse.json({ ok: false, error: "仅自部署模式可用。" }, { status: 403 });
-  }
   const [current, release, head] = await Promise.all([
     readCurrentSha(),
     fetchGithubJson(`https://api.github.com/repos/${REPO}/releases/latest`),
@@ -48,6 +45,10 @@ export async function GET() {
   const releaseSha = /^float-build-([0-9a-f]{12})$/.exec(tag)?.[1] ?? "";
   const publishedAt = typeof release?.published_at === "string" ? release.published_at : "";
   const mainSha = typeof head?.sha === "string" ? head.sha.slice(0, 12) : "";
+  // VERSION 读不到说明本机不是 float-deploy 布局（或权限异常）——卡片据此隐藏
+  if (!current) {
+    return NextResponse.json({ ok: false, error: "此实例不是 float-deploy 部署。" }, { status: 501 });
+  }
   return NextResponse.json({
     ok: true,
     current: current.slice(0, 12),
@@ -58,9 +59,13 @@ export async function GET() {
   });
 }
 
-export async function POST() {
-  if (!isSelfHostedModeEnabled()) {
-    return NextResponse.json({ ok: false, error: "仅自部署模式可用。" }, { status: 403 });
+export async function POST(request: Request) {
+  if (!(await readCurrentSha())) {
+    return NextResponse.json({ ok: false, error: "此实例不是 float-deploy 部署。" }, { status: 501 });
+  }
+  const account = await getCurrentAccount(request).catch(() => null);
+  if (!account) {
+    return NextResponse.json({ ok: false, error: "请先登录。" }, { status: 401 });
   }
   return await new Promise<NextResponse>(resolve => {
     execFile("systemctl", ["start", "--no-block", "float-deploy.service"], { timeout: 10_000 }, error => {
