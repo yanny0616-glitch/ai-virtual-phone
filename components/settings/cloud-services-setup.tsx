@@ -165,10 +165,24 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
             const config = loadCloudBackupConfig();
             const configuredRef = projectRefFromUrl(config.url);
             const managedRef = config.managedProjectRef === configuredRef ? configuredRef : "";
-            if (managedRef) {
-                // 本应用创建过的专用项目允许原地重新部署；旧版手填/误选项目没有标记，
-                // 一律走新建流程，绝不把这次发布写回已有业务库。
-                setSelectedRef(managedRef);
+            let inPlaceRef = managedRef;
+            if (!inPlaceRef && configuredRef) {
+                // 「接入已有个人云」和老版本会清掉/缺失 managedProjectRef 标记，导致重新部署
+                // 走新建流程撞免费项目上限。这里用服务器守卫复核当前项目：只有确认是
+                // 专用个人云（存在 ai_phone_cloud_meta 标记或仅含已知推送表）才原地重部署；
+                // 业务库或不属于该令牌的项目会复核失败，仍走新建流程。
+                try {
+                    await callSupabaseAdmin({ action: "assert_dedicated_project", token, projectRef: configuredRef });
+                    inPlaceRef = configuredRef;
+                    saveCloudBackupConfig({ ...config, managedProjectRef: configuredRef });
+                } catch {
+                    inPlaceRef = "";
+                }
+            }
+            if (inPlaceRef) {
+                // 本应用创建过（或刚被守卫确认）的专用项目允许原地重新部署；
+                // 其余一律走新建流程，绝不把这次发布写回已有业务库。
+                setSelectedRef(inPlaceRef);
                 setOrganizations([]);
                 setSelectedOrganizationSlug(config.managedOrganizationSlug || "");
             } else {
