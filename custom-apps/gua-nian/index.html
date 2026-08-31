@@ -336,19 +336,37 @@
 
   /* ================= 工具 ================= */
   function parseModelJson(text) {
-    let t = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-    const a = t.indexOf("{"), b = t.lastIndexOf("}");
-    if (a >= 0 && b > a) t = t.slice(a, b + 1);
-    return JSON.parse(t);
+    let t = String(text || "")
+      .replace(/<think>[\s\S]*?<\/think>/gi, "") // 思考型模型的思维链段落
+      .replace(/```(?:json)?/gi, "")
+      .trim();
+    try { return JSON.parse(t); } catch (e) { /* 继续尝试截取 */ }
+    // 从每一个 { 开始试着配平括号截取（模型前后夹了废话时也能捞出 JSON）
+    for (let a = t.indexOf("{"); a >= 0; a = t.indexOf("{", a + 1)) {
+      let depth = 0, inStr = false, escaped = false;
+      for (let i = a; i < t.length; i++) {
+        const ch = t[i];
+        if (escaped) { escaped = false; continue; }
+        if (ch === "\\") { escaped = true; continue; }
+        if (ch === '"') { inStr = !inStr; continue; }
+        if (inStr) continue;
+        if (ch === "{") depth++;
+        else if (ch === "}" && --depth === 0) {
+          try { return JSON.parse(t.slice(a, i + 1)); } catch (e) { break; }
+        }
+      }
+    }
+    // 把模型实际说了什么带进错误里，日志可查
+    throw new Error("模型没回 JSON，它说的是：「" + t.slice(0, 100) + (t.length > 100 ? "…" : "") + "」");
   }
   // 模型没按要求回 JSON 时（比如回了一段普通话），带更严的指令重试一次
   async function generateJson(req) {
     const r = await AiPhone.ai.generate(req);
     try { return parseModelJson(r.text); } catch (e) {
-      await log("模型未输出合法 JSON，追加严格指令重试一次");
+      await log("首次生成未得到 JSON（" + (e && e.message || e) + "），追加严格指令重试");
       const r2 = await AiPhone.ai.generate({
         ...req,
-        instruction: req.instruction + "\n\n重要：只输出 JSON 本身，第一个字符必须是 {，最后一个字符必须是 }，不要任何解释、前言或代码块标记。",
+        instruction: req.instruction + "\n\n重要：只输出 JSON 本身，第一个字符必须是 {，最后一个字符必须是 }，不要任何解释、前言、思考过程或代码块标记。",
       });
       return parseModelJson(r2.text);
     }
