@@ -1066,11 +1066,21 @@ export function loadCustomAppTimelineEntries(
 export async function loadCustomAppPackage(file: File): Promise<InstalledCustomApp> {
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const manifestFile = zip.file("manifest.json");
+  // 兼容「zip 里套一层文件夹」的打包习惯：根目录找不到 manifest.json 时，
+  // 取路径最浅的 */manifest.json 所在目录当作包根（跳过 __MACOSX 等打包垃圾）
+  let packageRoot = "";
+  if (!zip.file("manifest.json")) {
+    const candidate = Object.keys(zip.files)
+      .filter(path => !zip.files[path].dir && path.endsWith("/manifest.json") && !path.includes("__MACOSX/"))
+      .sort((a, b) => a.length - b.length)[0];
+    if (candidate) packageRoot = candidate.slice(0, -"manifest.json".length);
+  }
+  const zipFile = (path: string) => zip.file(packageRoot + path);
+  const manifestFile = zipFile("manifest.json");
   if (!manifestFile) throw new Error("应用包缺少 manifest.json。");
   const manifest = normalizeCustomAppManifest(JSON.parse(await manifestFile.async("text")));
   const entryPath = normalizeAssetPath(manifest.entry || "index.html");
-  const entryFile = zip.file(entryPath);
+  const entryFile = zipFile(entryPath);
   if (!entryFile) throw new Error(`应用包缺少入口文件：${entryPath}`);
   const entryHtml = cleanText(await entryFile.async("text"), MAX_TEXT_LENGTH);
   if (!entryHtml) throw new Error("入口文件为空。");
@@ -1081,7 +1091,9 @@ export async function loadCustomAppPackage(file: File): Promise<InstalledCustomA
 
   for (const [path, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
-    const normalizedPath = normalizeAssetPath(path);
+    if (packageRoot && !path.startsWith(packageRoot)) continue;
+    if (path.includes("__MACOSX/")) continue;
+    const normalizedPath = normalizeAssetPath(path.slice(packageRoot.length));
     if (!normalizedPath || normalizedPath === "manifest.json" || normalizedPath === entryPath) continue;
     const asset = await readZipAsset(entry as unknown as { async: (type: "uint8array") => Promise<Uint8Array> }, normalizedPath);
     if (!asset) continue;
