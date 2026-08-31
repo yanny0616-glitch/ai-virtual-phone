@@ -371,6 +371,19 @@
       return parseModelJson(r2.text);
     }
   }
+  // 模型字段名跑偏（中文键名/别名）时按候选键顺序捞
+  function pickField(o, keys) {
+    for (const k of keys) {
+      if (o && o[k] != null && String(o[k]).trim() !== "") return o[k];
+    }
+    return "";
+  }
+  // 「8:30」「08：30」「8点30」「14时」等都归一成 HH:MM；认不出返回空串
+  function normHM(v) {
+    const m = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(String(v || ""));
+    if (!m) return "";
+    return String(Math.min(23, +m[1])).padStart(2, "0") + ":" + String(Math.min(59, +(m[2] || 0))).padStart(2, "0");
+  }
   function timeToMs(hm, base) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim());
     if (!m) return null;
@@ -427,11 +440,11 @@
       }
     }
     const keep = existing.filter((it) => !/^guanian_/.test(it.id));
-    let wrote = 0;
+    let wrote = 0, firstErr = "";
     const sched = S.day.schedule;
     for (let i = 0; i < sched.length; i++) {
       const it = sched[i];
-      if (!/^\d{1,2}:\d{2}$/.test(it.time)) continue;
+      if (!/^\d{1,2}:\d{2}$/.test(it.time)) { if (!firstErr) firstErr = "时间格式不认识：「" + it.time + "」"; continue; }
       if (keep.some((k) => k.startTime === it.time)) continue; // 日程表里已有的安排不重复写
       const end = (i + 1 < sched.length && sched[i + 1].time > it.time) ? sched[i + 1].time : addMin(it.time, 60);
       try {
@@ -441,8 +454,9 @@
           startTime: it.time, endTime: end, title: it.title, location: "", source: "generated",
         });
         wrote++;
-      } catch (e) { /* 单条失败不影响整体 */ }
+      } catch (e) { if (!firstErr) firstErr = String(e && e.message || e); }
     }
+    if (!wrote && sched.length && firstErr) await log("写回系统日程 0 条，首个原因：" + firstErr);
     return wrote;
   }
 
@@ -451,7 +465,7 @@
     if (S.busy) return; S.busy = true; render();
     try {
       const existing = await readTodayCalendar(); // 日程 app 里TA今天已定的安排
-      let inst = "今天是 " + todayStr() + "，周" + "日一二三四五六"[new Date().getDay()] + "。现在时刻 " + fmtHM(Date.now()) + "。请生成TA今天的生活面 JSON。";
+      let inst = "【后台系统任务，不是聊天：不要以角色口吻说话，只输出 JSON】今天是 " + todayStr() + "，周" + "日一二三四五六"[new Date().getDay()] + "。现在时刻 " + fmtHM(Date.now()) + "。请生成TA今天的生活面 JSON。";
       if (existing.length) {
         inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，围绕它们补全其余的一天）：\n" +
           JSON.stringify(existing.map((it) => ({ time: it.startTime, title: it.title, note: it.location || "" })));
@@ -461,21 +475,29 @@
         appTags: ["companion", "daily"],
         instruction: inst,
       });
-      if (!Array.isArray(d.schedule)) throw new Error("日程缺失");
-      const sched = d.schedule.slice(0, 10).map((it) => ({ time: String(it.time || ""), title: String(it.title || ""), note: String(it.note || "") }));
+      const schedRaw = pickField(d, ["schedule", "日程", "日程表"]);
+      if (!Array.isArray(schedRaw)) throw new Error("日程缺失（模型返回的字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）");
+      const sched = schedRaw.slice(0, 10).map((it) => ({
+        time: normHM(pickField(it, ["time", "时间", "at"])),
+        title: String(pickField(it, ["title", "标题", "事项", "name"]) || ""),
+        note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
+      }));
       for (const it of existing) { // 模型漏掉的已定安排补回来
         if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: it.startTime, title: it.title, note: it.location || "日程表上的安排" });
       }
       sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
       S.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === S.character.id, {
         date: todayStr(), characterId: S.character.id,
-        mood: String(d.mood || ""), moodEmoji: String(d.moodEmoji || "🌙").slice(0, 4),
-        energy: Math.max(0, Math.min(100, +d.energy || 60)),
-        doing: String(d.doing || ""), location: String(d.location || ""),
+        mood: String(pickField(d, ["mood", "心情", "情绪"]) || ""),
+        moodEmoji: String(pickField(d, ["moodEmoji", "emoji", "表情"]) || "🌙").slice(0, 4),
+        energy: Math.max(0, Math.min(100, +pickField(d, ["energy", "精力", "体力"]) || 60)),
+        doing: String(pickField(d, ["doing", "正在做", "当前"]) || ""),
+        location: String(pickField(d, ["location", "位置", "地点"]) || ""),
         schedule: sched,
       });
       const wrote = await syncCalendar(existing);
-      await log("生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），心情「" + S.day.mood + "」");
+      await log("生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），心情「" + S.day.mood + "」"
+        + (S.day.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）"));
       S.busy = false;
       await orchestrate(); // 生活面就绪后立即编排心动时刻
     } catch (e) {
@@ -540,6 +562,7 @@
         characterId: S.character.id,
         appTags: ["companion", "impulse"],
         instruction: [
+          "【后台系统任务，不是聊天：不要以角色口吻说话、不要直接写消息内容，只输出判断 JSON】",
           "TA今天的生活面：", JSON.stringify({ mood: S.day.mood, energy: S.day.energy, schedule: S.day.schedule }),
           "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
           JSON.stringify(cands.map((c) => ({ time: c.time, justFinished: c.source }))),
