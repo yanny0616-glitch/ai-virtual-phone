@@ -18,7 +18,7 @@ begin
         'ai_phone_cloud_meta',
         'push_server_config', 'push_subscriptions', 'push_jobs', 'push_outbox',
         'push_shortcut_commands', 'push_bridge_config', 'push_bridge_snapshots',
-        'push_screen_sessions', 'push_screen_threads'
+        'push_screen_sessions', 'push_screen_threads', 'push_chat_mirror'
       ])
   ) into has_unknown_public_table;
 
@@ -34,7 +34,7 @@ create table if not exists public.ai_phone_cloud_meta (
   updated_at timestamptz not null default now()
 );
 insert into public.ai_phone_cloud_meta (id, schema_version, updated_at)
-values ('personal-cloud', 3, now())
+values ('personal-cloud', 4, now())
 on conflict (id) do update set schema_version = excluded.schema_version, updated_at = excluded.updated_at;
 
 create table if not exists public.push_server_config (
@@ -180,6 +180,23 @@ create table if not exists public.push_screen_threads (
   constraint push_screen_threads_pending_array check (jsonb_typeof(pending_turns) = 'array')
 );
 
+-- 聊天镜像：客户端把新消息抄送到用户自己的项目（追加为主，按 id 幂等）。
+-- 供云端离线判断（未回应降速、动态复核）与挂念面板读取；60 天自动清理。
+create table if not exists public.push_chat_mirror (
+  id text primary key,
+  user_id text not null,
+  session_id text not null default '',
+  character_id text not null default '',
+  role text not null,
+  content text not null default '',
+  media_type text,
+  message_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  constraint push_chat_mirror_role_check check (role in ('user', 'assistant'))
+);
+create index if not exists push_chat_mirror_char_idx
+  on public.push_chat_mirror (user_id, character_id, message_at desc);
+
 -- 原子取得每个角色的生成锁并扣减日额度。不同悬浮球请求不会同时覆盖上下文。
 create or replace function public.ai_phone_screen_chat_begin(
   p_user_id text,
@@ -299,6 +316,10 @@ alter table public.push_shortcut_commands enable row level security;
 alter table public.push_bridge_config enable row level security;
 alter table public.push_bridge_snapshots enable row level security;
 alter table public.push_screen_threads enable row level security;
+alter table public.push_chat_mirror enable row level security;
+
+-- 聊天镜像只由网关的 service_role 读写；anon/authenticated 无任何权限。
+revoke all on table public.push_chat_mirror from public, anon, authenticated;
 
 -- 屏幕速聊表和 RPC 只由 Edge Function 的 service_role 使用；客户端角色没有表级权限。
 revoke all on table public.push_screen_threads from public, anon, authenticated;
@@ -315,7 +336,8 @@ grant select, insert, update, delete on table
   public.push_shortcut_commands,
   public.push_bridge_config,
   public.push_bridge_snapshots,
-  public.push_screen_threads
+  public.push_screen_threads,
+  public.push_chat_mirror
 to service_role;
 
 revoke all on function public.ai_phone_screen_chat_begin(text, text, text, text, integer) from public, anon, authenticated;
@@ -382,4 +404,5 @@ select cron.unschedule(jobid)
 
 select cron.schedule('ai-phone-personal-push-cron-cleanup', '0 3 * * *', $CRON$
   delete from cron.job_run_details where end_time < now() - interval '3 days';
+  delete from public.push_chat_mirror where message_at < now() - interval '60 days';
 $CRON$);

@@ -129,3 +129,29 @@
   `reply_bailout`（90 秒租约无此问题）与 `shortcut_resume`（续跑已代入首条回复）不补。
 - 部署：用户在「设置 → 云服务部署」重新部署个人云即可生效（部署包已由
   `scripts/build-personal-push-dist.mjs` 同步进 `public/ai-phone-push/`）；新旧两端互相兼容。
+
+## I. 聊天镜像 · 个人云后端阶段①（2026-08-31）
+
+「挂念」离线判断的地基：把新聊天消息抄送一份到用户自己的 Supabase 个人云，
+本地 IndexedDB 仍是唯一事实来源（纯加法，镜像失败不影响任何聊天功能）。默认关闭。
+
+- `lib/chat-mirror-client.ts`（新）— 监听 `chat-message-pushed` 事件排队抄送
+  （仅单聊 user/assistant，正文截 4000 字），kv 持久化队列（上限 800、批量 50、
+  失败留队 60 秒重试）；开启时回填最近 10 个会话各 60 条；`health` 能力探测
+  （旧版云函数静默停发）；`clearChatMirrorCloud()` 一键清空云端副本
+- `supabase/functions/ai-phone-push/index.ts`（同步 `public/ai-phone-push/gateway.mjs`）—
+  新增 `chat-mirror` 动作（service key 门卫之后）：POST 批量追加（按 id 幂等、逐条校验）、
+  GET 按角色/时间查询（≤200 条）、DELETE 清空（可按角色）；`health` 在 schemaVersion≥4
+  时报告 `chat-mirror` 能力；在线开关 cron 的清理任务加镜像 60 天保留
+- `docs/personal-push-supabase.sql`（同步 `public/ai-phone-push/schema.sql`）—
+  新表 `push_chat_mirror`（RLS 开启、仅 service_role、role 约束、角色+时间索引），
+  部署守卫白名单收录，cleanup cron 加 60 天保留；`ai_phone_cloud_meta` 升 schema_version 4
+- `components/settings/cloud-services-setup.tsx` — 「聊天镜像」开关（需离线推送已部署）+
+  「清空云端镜像」按钮；部署时 meta 写 4
+- `components/desktop-shell.tsx` — 启动挂载 `installChatMirror()`
+- `components/settings/about-declaration.tsx` — 隐私声明补充镜像说明（自愿开启、
+  自有项目、60 天、可清空）
+- `custom-apps/gua-nian/`（0.4.3）— 设置页新增「云连接」（个人云地址 + Secret key，
+  只存应用本地数据）+ 测试连接；诊断页新增「云端镜像」卡片（连接/能力/该角色最近一条）
+- 生效方式：站点更新后，在「设置 → 云服务部署」重新部署离线推送（云函数 + SQL），
+  再打开「聊天镜像」开关

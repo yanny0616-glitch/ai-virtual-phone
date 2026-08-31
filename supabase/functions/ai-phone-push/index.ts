@@ -564,7 +564,10 @@ Deno.serve(async (request: Request) => {
         service: "ai-phone-personal-push",
         version: 2,
         schemaVersion,
-        capabilities: schemaVersion >= 3 ? ["screen-chat-continuous"] : [],
+        capabilities: [
+          ...(schemaVersion >= 3 ? ["screen-chat-continuous"] : []),
+          ...(schemaVersion >= 4 ? ["chat-mirror"] : []),
+        ],
       });
     }
 
@@ -703,6 +706,71 @@ Deno.serve(async (request: Request) => {
       }
     }
 
+    if (action === "chat-mirror") {
+      // 聊天镜像：客户端把新消息抄送到这里，云端判断（降速/复核）与面板按需读取。
+      // 只做三件事：批量追加（按 id 幂等）、按角色/时间查询、一键清空。不提供改写。
+      if (request.method === "POST") {
+        const body = await request.json().catch(() => ({})) as { entries?: unknown };
+        const list = Array.isArray(body.entries) ? body.entries.slice(0, 50) : [];
+        if (list.length === 0) return json({ ok: false, error: "缺少 entries。" }, 400);
+        const rows: Record<string, unknown>[] = [];
+        for (const item of list) {
+          const entry = item && typeof item === "object" ? item as Record<string, unknown> : {};
+          const id = cleanText(entry.id, 80);
+          const role = cleanText(entry.role, 20);
+          const messageAt = new Date(cleanText(entry.createdAt, 60));
+          if (!id || (role !== "user" && role !== "assistant") || Number.isNaN(messageAt.getTime())) continue;
+          rows.push({
+            id,
+            user_id: OWNER_ID,
+            session_id: cleanText(entry.sessionId, 80),
+            character_id: cleanText(entry.characterId, 80),
+            role,
+            content: cleanText(entry.content, 4000),
+            media_type: cleanText(entry.mediaType, 40) || null,
+            message_at: messageAt.toISOString(),
+          });
+        }
+        if (rows.length === 0) return json({ ok: false, error: "没有有效条目。" }, 400);
+        const insert = await rest("push_chat_mirror?on_conflict=id", {
+          method: "POST",
+          headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+          body: JSON.stringify(rows),
+        });
+        if (!insert.ok) {
+          const detail = await insert.text().catch(() => "");
+          return json({ ok: false, error: detail.slice(0, 300) || `数据库返回 HTTP ${insert.status}` }, 500);
+        }
+        return json({ ok: true, saved: rows.length });
+      }
+      if (request.method === "GET") {
+        const characterId = cleanText(url.searchParams.get("characterId"), 80);
+        const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50));
+        const sinceRaw = cleanText(url.searchParams.get("since"), 60);
+        const since = sinceRaw ? new Date(sinceRaw) : null;
+        let query = `push_chat_mirror?user_id=eq.${OWNER_ID}`
+          + "&select=id,session_id,character_id,role,content,media_type,message_at"
+          + `&order=message_at.desc&limit=${limit}`;
+        if (characterId) query += `&character_id=eq.${encodeURIComponent(characterId)}`;
+        if (since && !Number.isNaN(since.getTime())) {
+          query += `&message_at=gte.${encodeURIComponent(since.toISOString())}`;
+        }
+        const entries = await readJson(await rest(query));
+        return json({ ok: true, entries });
+      }
+      if (request.method === "DELETE") {
+        const body = await request.json().catch(() => ({})) as { characterId?: unknown };
+        const characterId = cleanText(body.characterId, 80);
+        const filter = characterId ? `&character_id=eq.${encodeURIComponent(characterId)}` : "";
+        const del = await rest(`push_chat_mirror?user_id=eq.${OWNER_ID}${filter}`, {
+          method: "DELETE",
+          headers: { Prefer: "return=minimal" },
+        });
+        if (!del.ok) return json({ ok: false, error: `数据库返回 HTTP ${del.status}` }, 500);
+        return json({ ok: true });
+      }
+    }
+
     if (action === "schedule" && request.method === "POST") {
       // 在线开关每分钟到期任务扫描（与微信云函数的在线开关同一套做法）。
       const body = await request.json().catch(() => ({})) as { enable?: unknown };
@@ -759,6 +827,7 @@ Deno.serve(async (request: Request) => {
 $CRON$)`);
           await sql.unsafe(`select cron.schedule('ai-phone-personal-push-cron-cleanup', '0 3 * * *', $CRON$
   delete from cron.job_run_details where end_time < now() - interval '3 days';
+  delete from public.push_chat_mirror where message_at < now() - interval '60 days';
 $CRON$)`);
           return json({ ok: true, scheduled: true });
         }

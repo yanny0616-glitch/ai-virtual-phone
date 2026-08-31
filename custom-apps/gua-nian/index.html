@@ -257,6 +257,14 @@
     color: var(--tx); padding: 9px 10px; font-size: 14px; font-family: inherit;
     color-scheme: light;
   }
+  .txt-in {
+    width: 100%; box-sizing: border-box; background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; color: var(--tx); padding: 9px 10px; font-size: 13px; font-family: inherit;
+    margin-bottom: 8px; color-scheme: light;
+  }
+  .cloud-row { display: flex; align-items: center; gap: 10px; }
+  .cloud-row .tgl { flex-shrink: 0; }
+  #cloud-test-r { font-size: 11.5px; color: var(--tx2); line-height: 1.5; min-width: 0; }
   .stepper { display: flex; align-items: center; gap: 14px; }
   .stepper button {
     width: 36px; height: 36px; border-radius: 12px; border: 1px solid var(--line);
@@ -488,6 +496,16 @@
         <button class="tgl" id="tg-mood">状态低落时更安静</button>
       </div>
     </div>
+    <div class="grp">
+      <div class="grp-t">云连接（个人云后端，选填）</div>
+      <input type="text" class="txt-in" id="in-cloud-url" placeholder="https://xxxx.supabase.co" spellcheck="false" autocomplete="off">
+      <input type="password" class="txt-in" id="in-cloud-key" placeholder="sb_secret_… 或 service_role key" spellcheck="false" autocomplete="off">
+      <div class="cloud-row">
+        <button class="tgl" id="btn-cloud-test">测试连接</button>
+        <span id="cloud-test-r"></span>
+      </div>
+      <div class="grp-hint">填你在小手机「云服务部署」建的那个 Supabase 项目的地址和 Secret key。密钥只保存在本机这个应用的数据里，只会发往你填的这个地址（HTTPS）。连上后「诊断」页能看到云端聊天镜像的状态，是后续离线判断与面板的地基。</div>
+    </div>
     <div class="grp-hint" style="margin:-6px 0 14px">改了额度 / 间隔 / 倾向 / 锚点后，回「今天」页点「♥ 重新编排」立刻生效；降速和复核保存即生效。</div>
     <button class="big-btn" id="btn-save-settings">保 存</button>
   </div>
@@ -643,7 +661,30 @@
     chatCandidates: true,// 复核时允许因聊天临时起念
     recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开app时也会复核一次）
     moodGate: true,      // 精力低/心情差时更克制
+    cloudUrl: "",        // 个人云（Supabase）项目地址，选填
+    cloudKey: "",        // 个人云 Secret / service_role key，只存本机应用数据
   };
+
+  /* ================= 云连接（个人云后端） ================= */
+  function cloudCfg() {
+    const u = (S.settings && S.settings.cloudUrl || "").trim().replace(/\/+$/, "");
+    const k = (S.settings && S.settings.cloudKey || "").trim();
+    return /^https:\/\//.test(u) && k ? { url: u, key: k } : null;
+  }
+  async function cloudFetch(action, init, params) {
+    const c = cloudCfg();
+    if (!c) throw new Error("未配置云连接");
+    const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
+    const headers = { "x-ai-phone-service-key": c.key };
+    if (init && init.body) headers["Content-Type"] = "application/json";
+    const r = await fetch(c.url + "/functions/v1/ai-phone-push?" + q.toString(),
+      Object.assign({ cache: "no-store" }, init || {}, { headers: headers }));
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data || data.ok !== true) {
+      throw new Error((data && data.error) || ("云函数返回 HTTP " + r.status));
+    }
+    return data;
+  }
   async function loadSettings() {
     const rows = await AiPhone.db.list("settings", { limit: 5 });
     S.settings = (rows && rows[0]) || await AiPhone.db.create("settings", { characterId: "", ...SET_DEF });
@@ -1463,6 +1504,12 @@
     }
     html += "</div>";
 
+    html += '<div class="card"><div class="sec-head"><span class="t">云 端 镜 像</span></div><div id="diag-cloud">' +
+      (cloudCfg()
+        ? '<div class="archive-note">正在查询云端…</div>'
+        : '<div class="archive-note">未配置云连接。到设置里填你的个人云地址与密钥后，这里会显示云端聊天镜像的状态。</div>') +
+      "</div></div>";
+
     html += '<div class="card"><div class="sec-head"><span class="t">运 行 日 志</span>' +
       (logItems.length ? '<button class="act" id="btn-clear-log">清空</button>' : "") + "</div>";
     if (!logItems.length) {
@@ -1482,6 +1529,32 @@
       try { if (S.logs) S.logs = await AiPhone.db.update("logs", S.logs.id, { items: [] }); } catch (e) { toast("清空失败：" + (e && e.message || e)); }
       renderDiag();
     };
+
+    // 云端镜像状态异步补上（不阻塞页面；期间切走则丢弃结果）
+    if (cloudCfg()) {
+      (async () => {
+        let mHtml;
+        try {
+          const h = await cloudFetch("health", { method: "GET" });
+          const mir = (h.capabilities || []).indexOf("chat-mirror") >= 0;
+          mHtml = '<div class="diag-item"><b>连接</b> 正常 · 云函数 v' + esc(String(h.schemaVersion || "?")) + "</div>";
+          if (!mir) {
+            mHtml += '<div class="diag-item"><b>镜像</b> 云函数版本偏旧，还不支持聊天镜像。去小手机「设置 → 云服务部署」重新部署一次离线推送。</div>';
+          } else {
+            const g = await cloudFetch("chat-mirror", { method: "GET" }, { characterId: S.character.id, limit: "1" });
+            const last = g.entries && g.entries[0];
+            mHtml += last
+              ? '<div class="diag-item"><b>镜像</b> 该角色最近一条：' + (last.role === "user" ? "你" : "TA") + " · " +
+                esc(new Date(last.message_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })) + "</div>"
+              : '<div class="diag-item"><b>镜像</b> 云端还没有该角色的镜像消息。到小手机「设置 → 云服务部署」里开启「聊天镜像」。</div>';
+          }
+        } catch (e) {
+          mHtml = '<div class="archive-note">云端查询失败：' + esc(String(e && e.message || e)) + "</div>";
+        }
+        const el = $("#diag-cloud");
+        if (el && S.tab === "diag" && req === S._diagReq) el.innerHTML = mHtml;
+      })();
+    }
   }
 
   function bindCommon() {
@@ -1512,6 +1585,9 @@
     $("#tg-morning").classList.toggle("on", !!S.settings.anchorMorning);
     $("#tg-chat").classList.toggle("on", !!S.settings.chatCandidates);
     $("#tg-mood").classList.toggle("on", !!S.settings.moodGate);
+    $("#in-cloud-url").value = S.settings.cloudUrl || "";
+    $("#in-cloud-key").value = S.settings.cloudKey || "";
+    $("#cloud-test-r").textContent = "";
     document.body.classList.add("sheet-open");
   }
   function closeSheet() { document.body.classList.remove("sheet-open"); }
@@ -1534,6 +1610,8 @@
       anchorMorning: $("#tg-morning").classList.contains("on"),
       chatCandidates: $("#tg-chat").classList.contains("on"),
       moodGate: $("#tg-mood").classList.contains("on"),
+      cloudUrl: ($("#in-cloud-url").value || "").trim().replace(/\/+$/, ""),
+      cloudKey: ($("#in-cloud-key").value || "").trim(),
     });
     const changed = !S.character || S.character.id !== cid;
     S.character = S.characters.find((c) => c.id === cid) || S.character;
@@ -1550,6 +1628,21 @@
     $("#sheet-close").onclick = closeSheet;
     $("#dsheet-close").onclick = closeDetail;
     $("#btn-save-settings").onclick = () => { saveSettings().catch((e) => toast("保存失败：" + (e && e.message || e))); };
+    $("#btn-cloud-test").onclick = async () => {
+      const r = $("#cloud-test-r");
+      const u = ($("#in-cloud-url").value || "").trim().replace(/\/+$/, "");
+      const k = ($("#in-cloud-key").value || "").trim();
+      if (!/^https:\/\//.test(u) || !k) { r.textContent = "先填完整地址和密钥"; return; }
+      r.textContent = "测试中…";
+      try {
+        const res = await fetch(u + "/functions/v1/ai-phone-push?action=health", { cache: "no-store", headers: { "x-ai-phone-service-key": k } });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || data.ok !== true) throw new Error((data && data.error) || ("HTTP " + res.status));
+        const mir = (data.capabilities || []).indexOf("chat-mirror") >= 0;
+        r.textContent = "✓ 已连通 · 云函数 v" + (data.schemaVersion || "?") +
+          (mir ? " · 支持聊天镜像" : " · 版本偏旧：去小手机「设置→云服务部署」重新部署离线推送");
+      } catch (e) { r.textContent = "✗ " + (e && e.message || e); }
+    };
     const step = (valSel, minusSel, plusSel, min, max, inc) => {
       $(minusSel).onclick = () => { const el = $(valSel); el.textContent = Math.max(min, (+el.textContent || 0) - inc); };
       $(plusSel).onclick = () => { const el = $(valSel); el.textContent = Math.min(max, (+el.textContent || 0) + inc); };

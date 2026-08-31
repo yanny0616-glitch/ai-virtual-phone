@@ -1814,6 +1814,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       void import("@/lib/push-bridge-sync").then(m => m.installBridgeServerSync()).catch(() => undefined);
       // 定时唤醒/经期关怀兜底：切后台时刷新快照预约
       void import("@/lib/push-bailout-client").then(m => m.installScheduledBailoutRefresher()).catch(() => undefined);
+      // 聊天镜像：把新消息抄送到用户自己的个人云（默认关闭，云服务设置里开启）
+      void import("@/lib/chat-mirror-client").then(m => m.installChatMirror()).catch(() => undefined);
     })();
 
     return () => {

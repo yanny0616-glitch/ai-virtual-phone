@@ -23,6 +23,7 @@ import {
     syncAllWeixinBotRuntimesToCloud,
 } from "@/lib/weixin-cloud-sync";
 import { deployPersonalPushCloud, isPersonalPushCloudActive } from "@/lib/personal-push-cloud";
+import { clearChatMirrorCloud, isChatMirrorEnabled, setChatMirrorEnabled } from "@/lib/chat-mirror-client";
 import { ensurePersonalPushSubscription, getOfflinePushState, markAccountPushSubscribed } from "@/lib/push-client";
 import { getWeixinCloudDeployedAt, markWeixinCloudDeployed, savePushCloudScheduled, saveWeixinCloudScheduled } from "@/lib/cloud-deploy-status";
 import { Input, Select } from "@/components/ui/form";
@@ -93,11 +94,14 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
     const [linkUrl, setLinkUrl] = useState("");
     const [linkKey, setLinkKey] = useState("");
     const [linkBusy, setLinkBusy] = useState(false);
+    const [mirrorEnabled, setMirrorEnabled] = useState(false);
+    const [mirrorBusy, setMirrorBusy] = useState(false);
 
     useEffect(() => {
         setCloudReady(isCloudBackupConfigured(loadCloudBackupConfig()));
         setPushActive(isPersonalPushCloudActive());
         setWeixinDeployed(Boolean(getWeixinCloudDeployedAt()));
+        setMirrorEnabled(isChatMirrorEnabled());
     }, []);
 
     const configuredUrl = normalizeBackupUrl(loadCloudBackupConfig().url);
@@ -257,7 +261,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                     updated_at timestamptz not null default now()
                 );
                 insert into public.ai_phone_cloud_meta (id, schema_version, updated_at)
-                values ('personal-cloud', 3, now())
+                values ('personal-cloud', 4, now())
                 on conflict (id) do update set schema_version = excluded.schema_version, updated_at = excluded.updated_at;`,
             });
 
@@ -401,6 +405,49 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                 {statusCard(<CloudUpload size={17} strokeWidth={1.9} />, "云备份", cloudReady, `已部署 · ${configuredUrl.replace(/^https?:\/\//, "").replace(/\.supabase\.co$/, "")}`)}
                 {statusCard(<MessageSquare size={17} strokeWidth={1.9} />, "微信接入", weixinDeployed, "云函数与定时任务已部署")}
                 {statusCard(<Satellite size={17} strokeWidth={1.9} />, "离线推送", pushActive, "已部署到你的 Supabase")}
+            </div>
+
+            {/* 聊天镜像：默认关闭；开启后新消息抄送到个人云，供离线判断与面板读取 */}
+            <div className="flex flex-col gap-2 rounded-[16px] bg-black/[0.03] px-3.5 py-3">
+                <label className="flex items-center gap-3">
+                    <input
+                        type="checkbox"
+                        checked={mirrorEnabled}
+                        disabled={!pushActive}
+                        onChange={(e) => {
+                            const next = e.target.checked;
+                            setChatMirrorEnabled(next);
+                            setMirrorEnabled(next);
+                            if (next) {
+                                setResultDialog({
+                                    title: "聊天镜像已开启",
+                                    text: "新消息会自动抄送到你自己的 Supabase，最近的单聊记录正在后台回填。如果之前没部署过最新版离线推送云函数，请先在上方重新部署一次，否则镜像会一直排队。",
+                                });
+                            }
+                        }}
+                    />
+                    <span className="menu-label flex-1">聊天镜像</span>
+                </label>
+                <span className="menu-desc !mt-0">
+                    开启后，新聊天消息（仅单聊）会抄送一份到你自己的 Supabase 项目，保留 60 天，供离线未回应降速、云端复核与挂念面板使用。本地聊天记录不受影响，云端副本可随时清空。
+                    {!pushActive && "需要先部署离线推送。"}
+                </span>
+                {mirrorEnabled && (
+                    <button
+                        type="button"
+                        className="ui-btn ui-btn-outline"
+                        disabled={mirrorBusy}
+                        onClick={() => {
+                            setMirrorBusy(true);
+                            clearChatMirrorCloud()
+                                .then(() => setResultDialog({ title: "已清空", text: "云端聊天镜像已全部删除，本地记录不受影响。" }))
+                                .catch(err => setResultDialog({ title: "清空失败", text: err instanceof Error ? err.message : String(err) }))
+                                .finally(() => setMirrorBusy(false));
+                        }}
+                    >
+                        {mirrorBusy ? <><Loader2 size={15} className="animate-spin" /> 清空中…</> : "清空云端镜像"}
+                    </button>
+                )}
             </div>
 
             {/* 多端同步：接入另一台设备已经建好的个人云 */}

@@ -26,7 +26,7 @@ export function AboutDeclaration({ onNotice }: { onNotice?: (msg: string) => voi
                     <div className="flex flex-col gap-2">
                         <span className="menu-label font-semibold">隐私与数据安全</span>
                         <span className="menu-desc ts-13 leading-relaxed !mt-0">
-                            您的日记、聊天记录及身份预设等敏感数据默认保存在本地浏览器中（LocalStorage/IndexedDB）。清理浏览器缓存可能会导致数据丢失，请注意妥善备份。
+                            您的日记、聊天记录及身份预设等敏感数据默认保存在本地浏览器中（LocalStorage/IndexedDB）。清理浏览器缓存可能会导致数据丢失，请注意妥善备份。若您在云服务设置中主动开启「聊天镜像」，新的单聊消息会抄送一份到您自己的 Supabase 项目（仅您本人可访问，保留 60 天，可随时清空），用于离线主动消息的云端判断。
                         </span>
                     </div>
                 </div>
