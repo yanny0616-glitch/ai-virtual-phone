@@ -465,7 +465,11 @@
     if (S.busy) return; S.busy = true; render();
     try {
       const existing = await readTodayCalendar(); // 日程 app 里TA今天已定的安排
-      let inst = "【后台系统任务，不是聊天：不要以角色口吻说话，只输出 JSON】今天是 " + todayStr() + "，周" + "日一二三四五六"[new Date().getDay()] + "。现在时刻 " + fmtHM(Date.now()) + "。请生成TA今天的生活面 JSON。";
+      let inst = "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】"
+        + "以当前角色的人设、作息、职业和近期经历为依据，想象TA今天真实会过的一天。状态要具体可感（不要「心情不错」这种空话），日程像真人的一天（有主线也有琐碎，时间不均匀）。"
+        + "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些："
+        + '{"mood":"一句具体的心情描述","moodEmoji":"一个最贴切的emoji","energy":0到100的整数,"doing":"此刻正在做的事","location":"此刻所在的地点","schedule":[{"time":"HH:MM","title":"日程标题（8字内）","note":"一句具体的细节"}]}'
+        + "。schedule 给 6 到 9 条，覆盖从起床到睡前。今天是 " + todayStr() + "，周" + "日一二三四五六"[new Date().getDay()] + "，现在时刻 " + fmtHM(Date.now()) + "。";
       if (existing.length) {
         inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，围绕它们补全其余的一天）：\n" +
           JSON.stringify(existing.map((it) => ({ time: it.startTime, title: it.title, note: it.location || "" })));
@@ -563,6 +567,8 @@
         appTags: ["companion", "impulse"],
         instruction: [
           "【后台系统任务，不是聊天：不要以角色口吻说话、不要直接写消息内容，只输出判断 JSON】",
+          "你是当前角色的内心。逐个判断：在下面每个候选时刻、做完那件事之后，TA会不会真的想给用户发消息？不是每个都要发——按TA的性格克制判断。",
+          '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"why":"判断理由（20字内）","intent":"act为true时TA当时的第一人称心理动机（40字内，不写台词），否则空字符串"}]}。decisions 与候选时刻一一对应、顺序一致。',
           "TA今天的生活面：", JSON.stringify({ mood: S.day.mood, energy: S.day.energy, schedule: S.day.schedule }),
           "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
           JSON.stringify(cands.map((c) => ({ time: c.time, justFinished: c.source }))),
