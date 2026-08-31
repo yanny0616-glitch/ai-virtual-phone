@@ -23,7 +23,7 @@ import {
     syncAllWeixinBotRuntimesToCloud,
 } from "@/lib/weixin-cloud-sync";
 import { deployPersonalPushCloud, isPersonalPushCloudActive } from "@/lib/personal-push-cloud";
-import { clearChatMirrorCloud, isChatMirrorEnabled, setChatMirrorEnabled } from "@/lib/chat-mirror-client";
+import { clearChatMirrorCloud, flushChatMirrorNow, getChatMirrorQueueSize, isChatMirrorEnabled, setChatMirrorEnabled } from "@/lib/chat-mirror-client";
 import { ensurePersonalPushSubscription, getOfflinePushState, markAccountPushSubscribed } from "@/lib/push-client";
 import { getWeixinCloudDeployedAt, markWeixinCloudDeployed, savePushCloudScheduled, saveWeixinCloudScheduled } from "@/lib/cloud-deploy-status";
 import { Input, Select } from "@/components/ui/form";
@@ -447,20 +447,41 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                     {!pushActive && "需要先部署离线推送。"}
                 </span>
                 {mirrorEnabled && (
-                    <button
-                        type="button"
-                        className="ui-btn ui-btn-outline"
-                        disabled={mirrorBusy}
-                        onClick={() => {
-                            setMirrorBusy(true);
-                            clearChatMirrorCloud()
-                                .then(() => setResultDialog({ title: "已清空", text: "云端聊天镜像已全部删除，本地记录不受影响。" }))
-                                .catch(err => setResultDialog({ title: "清空失败", text: err instanceof Error ? err.message : String(err) }))
-                                .finally(() => setMirrorBusy(false));
-                        }}
-                    >
-                        {mirrorBusy ? <><Loader2 size={15} className="animate-spin" /> 清空中…</> : "清空云端镜像"}
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline flex-1"
+                            disabled={mirrorBusy}
+                            onClick={() => {
+                                setMirrorBusy(true);
+                                flushChatMirrorNow()
+                                    .then(r => setResultDialog({
+                                        title: "上传完成",
+                                        text: r.sent > 0
+                                            ? `本次上传 ${r.sent} 条，队列剩余 ${r.queued} 条。`
+                                            : "队列是空的，没有待传消息。若聊过天仍显示空，说明消息没进队列，请反馈。",
+                                    }))
+                                    .catch(err => setResultDialog({ title: "上传失败", text: err instanceof Error ? err.message : String(err) }))
+                                    .finally(() => setMirrorBusy(false));
+                            }}
+                        >
+                            {mirrorBusy ? <><Loader2 size={15} className="animate-spin" /> 处理中…</> : `立即上传（待传 ${getChatMirrorQueueSize()} 条）`}
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline flex-1"
+                            disabled={mirrorBusy}
+                            onClick={() => {
+                                setMirrorBusy(true);
+                                clearChatMirrorCloud()
+                                    .then(() => setResultDialog({ title: "已清空", text: "云端聊天镜像已全部删除，本地记录不受影响。" }))
+                                    .catch(err => setResultDialog({ title: "清空失败", text: err instanceof Error ? err.message : String(err) }))
+                                    .finally(() => setMirrorBusy(false));
+                            }}
+                        >
+                            清空云端镜像
+                        </button>
+                    </div>
                 )}
             </div>
 

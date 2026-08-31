@@ -178,6 +178,38 @@ function backfillRecentChat(): void {
     }
 }
 
+/** 手动触发一次上传并暴露真实错误（设置页排障用；自动流程仍走静默的 flushQueue）。 */
+export async function flushChatMirrorNow(): Promise<{ sent: number; queued: number }> {
+    if (!isChatMirrorEnabled()) throw new Error("聊天镜像开关未开启。");
+    if (!isPersonalPushCloudActive()) throw new Error("个人云离线推送未部署或未激活。");
+    mirrorCapable = null; // 可能刚重新部署过，重新探测
+    const res = await personalPushFetch("health", { method: "GET" });
+    const health = await res.json().catch(() => null) as { ok?: boolean; capabilities?: string[]; error?: string } | null;
+    if (!res.ok || !health?.ok) throw new Error(health?.error || `健康检查失败：HTTP ${res.status}`);
+    if (!health.capabilities?.includes("chat-mirror")) {
+        throw new Error("云函数版本偏旧，不支持聊天镜像。请重新部署离线推送。");
+    }
+    mirrorCapable = true;
+    if (loadQueue().length === 0) backfillRecentChat();
+    let sent = 0;
+    for (;;) {
+        const queue = loadQueue();
+        if (queue.length === 0) break;
+        const batch = queue.slice(0, FLUSH_BATCH);
+        const post = await personalPushFetch("chat-mirror", {
+            method: "POST",
+            body: JSON.stringify({ entries: batch }),
+        });
+        const data = await post.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+        if (!post.ok || !data?.ok) {
+            throw new Error(data?.error || `上传失败：HTTP ${post.status}（已传 ${sent} 条，剩 ${queue.length} 条）`);
+        }
+        sent += batch.length;
+        saveQueue(loadQueue().slice(batch.length));
+    }
+    return { sent, queued: getChatMirrorQueueSize() };
+}
+
 /** 清空云端镜像（全部或指定角色）。本地聊天记录不受影响。 */
 export async function clearChatMirrorCloud(characterId?: string): Promise<void> {
     const res = await personalPushFetch("chat-mirror", {
