@@ -473,9 +473,9 @@
         <button id="cool-minus">−</button>
         <div class="val" id="cool-val">2</div>
         <button id="cool-plus">＋</button>
-        <span class="unit">条 · 0 = 关闭</span>
+        <span class="unit">轮 · 0 = 关闭</span>
       </div>
-      <div class="grp-hint">你连续这么多条没回后，TA今天剩下的时刻全部取消，不追着发。</div>
+      <div class="grp-hint">TA连续主动这么多轮（一次回复的多条气泡算一轮，且晾满30分钟才计）你都没回后，今天剩下的时刻全部取消，不追着发。</div>
     </div>
     <div class="grp">
       <div class="grp-t">动态复核</div>
@@ -654,7 +654,7 @@
     quietStart: "23:30", quietEnd: "08:00",
     quota: 3,            // 每天最多主动几次
     minGapMin: 60,       // 相邻两次起念最小间隔（分钟，0=不限制）
-    maxUnanswered: 2,    // 未回应降速：连续 N 条没回后今天不再主动（0=关闭）
+    maxUnanswered: 2,    // 未回应降速：TA连续 N 轮主动未被回后今天不再主动（0=关闭）
     bias: 0,             // 主动倾向 -2很克制 … 2黏人
     anchorSleep: true,   // 睡前锚点
     anchorMorning: false,// 早安锚点
@@ -845,7 +845,7 @@
     const g = (peak, sigma) => Math.exp(-Math.pow(h - peak, 2) / (2 * sigma * sigma));
     return Math.round(100 * Math.min(1, g(13, 3) * 0.75 + g(21, 2.5)));
   }
-  // 判断那一刻的约束压力快照（armedBefore=此前已起念数，streak=连续未回条数，lastArmedAt=上一个起念时间）
+  // 判断那一刻的约束压力快照（armedBefore=此前已起念数，streak=连续未回轮数，lastArmedAt=上一个起念时间）
   function calcScore(fireAt, armedBefore, streak, lastArmedAt) {
     const pq = Math.round(Math.min(100, armedBefore / Math.max(1, S.settings.quota) * 100));
     const mu = S.settings.maxUnanswered;
@@ -859,13 +859,21 @@
     return { fit: fitScore(fireAt), pq, pr, pg, press: Math.round(pq * 0.4 + pr * 0.4 + pg * 0.2) };
   }
 
-  // 连续多少条TA发出的消息用户还没回（消息需按时间升序）
+  // 你最后一条之后TA发了几「轮」没被回（消息需按时间升序）。
+  // TA一次回复常拆成多条气泡：相邻 3 分钟内归为一轮，不逐条计数；
+  // 且一轮要晾满 30 分钟才算「没回」——TA刚回复完、你还没来得及回的不算。
   function unansweredStreak(msgs) {
-    let n = 0;
+    const nowMs = Date.now();
+    let prevT = null, rounds = 0;
     for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === "assistant") n++; else break;
+      const m = msgs[i];
+      if (m.role !== "assistant") break;
+      if (prevT === null || prevT - m.t > 3 * 60000) {
+        if (nowMs - m.t >= 30 * 60000) rounds++;
+      }
+      prevT = m.t;
     }
-    return n;
+    return rounds;
   }
 
   async function cancelTodayWakes() {
@@ -896,7 +904,7 @@
       chat.sort((a, b) => a.t - b.t);
       const streak0 = unansweredStreak(chat);
       const lines = chatExcerpt(chat, 20);
-      if (lines.length) await log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 条未回）" : ""));
+      if (lines.length) await log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
       const parsed = await generateJson({
         characterId: S.character.id,
         appTags: ["companion", "impulse"],
@@ -935,6 +943,7 @@
             const res = await AiPhone.push.wake({
               characterId: S.character.id, fireAt: c.fireAt,
               intent: item.intent || ("刚" + c.source + "，忽然想到用户"), source: "tool",
+              cooldownRounds: S.settings.maxUnanswered,
             });
             item.wakeId = res.id; item.delivery = res.armed ? "push" : "local"; item.reason = res.reason || "";
             armedCount++; lastArmedAt = c.fireAt;
@@ -988,12 +997,12 @@
           if (w.act && w.fireAt > nowMs) {
             if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
             w.act = false; w.adj = "cooled"; w.wakeId = ""; w.delivery = "";
-            w.why = "你还有 " + streak + " 条没回，TA不想追着发";
-            (w.hist = w.hist || []).push({ at: nowMs, kind: "cooled", note: "连续 " + streak + " 条未回，触发降速" });
+            w.why = "你有 " + streak + " 轮消息没回，TA不想追着发";
+            (w.hist = w.hist || []).push({ at: nowMs, kind: "cooled", note: "连续 " + streak + " 轮未回，触发降速" });
             changed++;
           }
         }
-        if (changed) await log("复核（" + trigger + "）：连续 " + streak + " 条未回 ≥ 降速阈值 " + S.settings.maxUnanswered + "，取消 " + changed + " 个待发时刻");
+        if (changed) await log("复核（" + trigger + "）：连续 " + streak + " 轮未回 ≥ 降速阈值 " + S.settings.maxUnanswered + "，取消 " + changed + " 个待发时刻");
       } else {
         const lines = chatExcerpt(chat, 24);
         const remaining = items.filter((w) => w.fireAt > nowMs + 2 * 60000);
@@ -1037,7 +1046,7 @@
           } else {
             if (items.filter((x) => x.act).length >= S.settings.quota) { await log("复核：" + w.time + " 想点亮但额度已满"); continue; }
             try {
-              const res = await AiPhone.push.wake({ characterId: S.character.id, fireAt: w.fireAt, intent: String(d.intent || ("刚" + w.source + "，想到用户")), source: "tool" });
+              const res = await AiPhone.push.wake({ characterId: S.character.id, fireAt: w.fireAt, intent: String(d.intent || ("刚" + w.source + "，想到用户")), source: "tool", cooldownRounds: S.settings.maxUnanswered });
               w.act = true; w.adj = "recheck"; w.intent = String(d.intent || ""); w.why = String(d.why || "");
               w.wakeId = res.id; w.delivery = res.armed ? "push" : "local"; w.reason = res.reason || "";
               w.score = calcScore(w.fireAt, items.filter((x) => x.act && x !== w).length, streak, 0);
@@ -1057,7 +1066,7 @@
           const gap = (S.settings.minGapMin || 0) * 60000;
           if (gap && items.some((w) => w.act && Math.abs(w.fireAt - ms) < gap)) { await log("复核：临时起念 " + hm + " 离已有起念太近，放弃"); continue; }
           try {
-            const res = await AiPhone.push.wake({ characterId: S.character.id, fireAt: ms, intent: String(x.intent || "有句话没说完，想找用户"), source: "tool" });
+            const res = await AiPhone.push.wake({ characterId: S.character.id, fireAt: ms, intent: String(x.intent || "有句话没说完，想找用户"), source: "tool", cooldownRounds: S.settings.maxUnanswered });
             items.push({
               time: hm, fireAt: ms, source: "临时·" + String(x.about || "未完话题").slice(0, 10),
               act: true, adj: "extra", why: String(x.why || ""), intent: String(x.intent || ""),
@@ -1298,7 +1307,7 @@
       h += '<div class="d-sec"><div class="d-t">数 值 层（判断那一刻的规则计算，不是模型报的）</div>' +
         bar("时段贴合", s.fit, "按 13 点 / 21 点两个聊天高峰做距离衰减，离高峰越近越贴合") +
         bar("额度压力", s.pq, "判断时今天已起念的数量占每日上限的比例") +
-        bar("未回压力", s.pr, "判断时TA连续未被回复的条数相对降速阈值的比例") +
+        bar("未回压力", s.pr, "判断时TA连续未被回复的轮数相对降速阈值的比例") +
         bar("间隔压力", s.pg, "离上一个已起念时刻越近压力越大，超过最小间隔的两倍则为 0") +
         '<div class="sc-expl" style="margin-top:2px">综合压力 ' + s.press + "%（额度 40% + 未回 40% + 间隔 20% 加权）。压力只影响判断倾向，最终起不起念由TA的性格判断决定。</div></div>";
     } else {
@@ -1543,10 +1552,18 @@
           } else {
             const g = await cloudFetch("chat-mirror", { method: "GET" }, { characterId: S.character.id, limit: "1" });
             const last = g.entries && g.entries[0];
-            mHtml += last
-              ? '<div class="diag-item"><b>镜像</b> 该角色最近一条：' + (last.role === "user" ? "你" : "TA") + " · " +
-                esc(new Date(last.message_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })) + "</div>"
-              : '<div class="diag-item"><b>镜像</b> 云端还没有该角色的镜像消息。到小手机「设置 → 云服务部署」里开启「聊天镜像」。</div>';
+            if (last) {
+              mHtml += '<div class="diag-item"><b>镜像</b> 该角色最近一条：' + (last.role === "user" ? "你" : "TA") + " · " +
+                esc(new Date(last.message_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })) + "</div>";
+            } else {
+              // 该角色查不到时再查全表最新一条，分清是「云端整个是空的」还是「角色ID对不上」
+              const any = await cloudFetch("chat-mirror", { method: "GET" }, { limit: "1" });
+              const a = any.entries && any.entries[0];
+              mHtml += a
+                ? '<div class="diag-item"><b>镜像</b> 云端有镜像消息，但和当前角色对不上号。云端最新一条的角色ID：<br>' + esc(a.character_id || "（空）") +
+                  "<br>当前角色ID：<br>" + esc(String(S.character.id)) + "<br>把这两个ID截图反馈。</div>"
+                : '<div class="diag-item"><b>镜像</b> 云端一条镜像都没有。到小手机「设置 → 云服务部署」确认「聊天镜像」已勾选（勾选动作本身会补传最近聊天），然后随便发一条消息，等半分钟再回这页看。</div>';
+            }
           }
         } catch (e) {
           mHtml = '<div class="archive-note">云端查询失败：' + esc(String(e && e.message || e)) + "</div>";

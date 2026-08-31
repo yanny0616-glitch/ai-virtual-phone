@@ -525,6 +525,8 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
                 appId: "chat",
                 appTags: ["chat", "text", wakeTag],
                 armAt: new Date(schedule.fireAt).toISOString(),
+                // 未回应降速：>0 时 push-generate 到点先查聊天镜像，连续未回达阈值就取消生成
+                ...(schedule.cooldownRounds && schedule.cooldownRounds > 0 ? { cooldownRounds: schedule.cooldownRounds } : {}),
             },
         });
         return posted ? { ok: true } : { ok: false, reason: "服务端预约接口没有确认成功" };

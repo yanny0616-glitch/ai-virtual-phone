@@ -650,6 +650,64 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // ── 未回应降速：预约带 cooldownRounds（>0）时，到点先看用户回没回。
+    // 数据源两处：聊天镜像（push_chat_mirror，App 在线时抄送）+ 离线期间本服务
+    // 已代发还没被浏览器取走的 push_outbox。规则与挂念本地一致：用户最后一条
+    // 之后角色的连续主动按「轮」数（相邻 3 分钟归一轮），最新一轮要晾满 30 分钟
+    // 才计数；达到阈值就取消这次生成。镜像没开（查不到该会话记录）则不拦。
+    if (job.kind === "timed_task") {
+      const cooldownRounds = Number(payload.merge?.cooldownRounds);
+      const mirrorSessionId = typeof payload.merge?.sessionId === "string" ? payload.merge.sessionId : "";
+      if (Number.isFinite(cooldownRounds) && cooldownRounds > 0 && mirrorSessionId) {
+        try {
+          const mirrorResponse = await rest(
+            `push_chat_mirror?user_id=eq.${encodeURIComponent(job.user_id)}`
+            + `&session_id=eq.${encodeURIComponent(mirrorSessionId)}`
+            + "&select=role,message_at&order=message_at.desc&limit=40",
+          );
+          const mirrorRows = mirrorResponse.ok
+            ? await mirrorResponse.json() as { role: string; message_at: string }[]
+            : [];
+          if (mirrorRows.length > 0) {
+            const nowMs = Date.now();
+            const graceMs = 30 * 60_000;
+            let rounds = 0;
+            let prevT: number | null = null;
+            for (const row of mirrorRows) {
+              if (row.role !== "assistant") break;
+              const t = Date.parse(row.message_at);
+              if (!Number.isFinite(t)) break;
+              if (prevT === null || prevT - t > 3 * 60_000) {
+                if (nowMs - t >= graceMs) rounds += 1;
+              }
+              prevT = t;
+            }
+            const newestMirrorAt = Date.parse(mirrorRows[0].message_at);
+            if (Number.isFinite(newestMirrorAt)) {
+              const outboxResponse = await rest(
+                `push_outbox?user_id=eq.${encodeURIComponent(job.user_id)}`
+                + `&session_id=eq.${encodeURIComponent(mirrorSessionId)}`
+                + "&meta->>pushGenerated=eq.true"
+                + `&created_at=gt.${encodeURIComponent(new Date(newestMirrorAt).toISOString())}`
+                + "&select=created_at&order=created_at.desc&limit=10",
+              );
+              const outboxRows = outboxResponse.ok
+                ? await outboxResponse.json() as { created_at: string }[]
+                : [];
+              for (const row of outboxRows) {
+                const t = Date.parse(row.created_at);
+                if (Number.isFinite(t) && nowMs - t >= graceMs) rounds += 1;
+              }
+            }
+            if (rounds >= cooldownRounds) {
+              await finish("done", `cooldown skip: ${rounds} unanswered rounds >= ${cooldownRounds}`);
+              return new Response("cooldown skip", { status: 200 });
+            }
+          }
+        } catch { /* 降速查询失败不阻塞生成，按原计划发 */ }
+      }
+    }
+
     await progress("llm request started");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 300_000);

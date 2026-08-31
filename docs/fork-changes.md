@@ -155,3 +155,26 @@
   只存应用本地数据）+ 测试连接；诊断页新增「云端镜像」卡片（连接/能力/该角色最近一条）
 - 生效方式：站点更新后，在「设置 → 云服务部署」重新部署离线推送（云函数 + SQL），
   再打开「聊天镜像」开关
+- 后续修补（同日）：`assert_dedicated_project` 复核无标记的已配置项目，重部署改为
+  原地更新而不是新建项目（免撞免费版 2 项目上限）；`characterIdForSession` 修正
+  `session.contactId` 即角色 ID 的口径（此前镜像整条静默丢弃）；设置页加
+  「立即上传」按钮（手动冲队列、报真实错误）
+
+## J. 离线未回应降速 · 个人云后端阶段②（2026-08-31）
+
+用户没回消息时，云端定时生成也要「收手」：预约唤醒可带 `cooldownRounds` 阈值，
+到点先查聊天镜像 + 离线期间已代发的 outbox，用户连续这么多轮没回就取消这次生成。
+逐任务可选（不带阈值 = 原行为），无 schema 变更，旧云函数忽略该字段。
+
+- `lib/timed-wake-storage.ts` — `TimedWakeSchedule` 加 `cooldownRounds?`
+- `lib/custom-app-host-api.ts` — `push.wake` 解析并夹取 `cooldownRounds`（0–9）存进预约
+- `lib/push-bailout-client.ts` — 冻结请求时把 `cooldownRounds` 并入 push_jobs 的 merge
+- `supabase/functions/push-generate/index.ts`（同步 `push-generate.mjs`）— `timed_task`
+  生成前查 `push_chat_mirror` 该会话末尾连续 assistant 按轮计数（相邻 3 分钟归一轮、
+  最新一轮晾满 30 分钟才计，与挂念本地口径一致），再加镜像之后 `pushGenerated` 的
+  outbox 行；达阈值 `finish("done", "cooldown skip…")`。镜像空/查询失败不拦
+- `custom-apps/gua-nian/`（0.4.4→0.4.5）— 0.4.4 修「他刚回完就说未回复降温」
+  （连发多条气泡按轮数 + 30 分钟晾置口径重写 `unansweredStreak`）；0.4.5 三处
+  `push.wake` 带上 `cooldownRounds = 设置的未回轮数阈值`
+- 生效方式：站点更新后重新部署个人云（更新 push-generate），装 0.4.5 后
+  在「今天」页重新编排一次，让新预约带上阈值

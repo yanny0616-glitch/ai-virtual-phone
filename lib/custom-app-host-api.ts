@@ -2374,6 +2374,8 @@ export async function scheduleCustomAppTimedWake(
   if (!loadChatContacts().some(contact => contact.characterId === characterId)) addChatContact(characterId);
   const session = createOrGetSession(characterId);
   if (session.isGroup) throw new Error("push.wake 只支持单聊角色。");
+  const rawCooldown = Number(record.cooldownRounds);
+  const cooldownRounds = Number.isFinite(rawCooldown) ? Math.max(0, Math.min(9, Math.round(rawCooldown))) : 0;
   const schedule: TimedWakeSchedule = {
     id: `${prefix}${now}_${Math.random().toString(36).slice(2, 8)}`,
     sessionId: session.id,
@@ -2383,6 +2385,7 @@ export async function scheduleCustomAppTimedWake(
     delayMinutes: Math.max(1, Math.round((fireAt - now) / 60_000)),
     intent,
     source: record.source === "user" ? "user" : "tool",
+    ...(cooldownRounds > 0 ? { cooldownRounds } : {}),
   };
   saveTimedWakeSchedule(schedule);
   const armResult = await armTimedWakeBailout(schedule);

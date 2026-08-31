@@ -14,6 +14,8 @@ export type TimedWakeSchedule = {
     intent: string;
     /** 创建来源：tool=角色自己约的（"你当时想着"视角）/ user=用户预约（"TA拜托你"视角）。缺省按 tool。 */
     source?: "tool" | "user";
+    /** 未回应降速阈值（轮）：>0 时云端到点先查聊天镜像，用户连续这么多轮没回就取消生成。 */
+    cooldownRounds?: number;
 };
 
 export function makeTimedWakeId(sessionId: string): string {
