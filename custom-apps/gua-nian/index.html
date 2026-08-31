@@ -277,7 +277,7 @@
       <div class="char-grid" id="char-grid"></div>
     </div>
     <div class="grp">
-      <div class="grp-t">免打扰时段（这段时间她不会来找你）</div>
+      <div class="grp-t">免打扰时段（这段时间TA不会来找你）</div>
       <div class="field-row">
         <input type="time" id="in-quiet-start">
         <span style="color:var(--tx3)">—</span>
@@ -340,6 +340,18 @@
     const a = t.indexOf("{"), b = t.lastIndexOf("}");
     if (a >= 0 && b > a) t = t.slice(a, b + 1);
     return JSON.parse(t);
+  }
+  // 模型没按要求回 JSON 时（比如回了一段普通话），带更严的指令重试一次
+  async function generateJson(req) {
+    const r = await AiPhone.ai.generate(req);
+    try { return parseModelJson(r.text); } catch (e) {
+      await log("模型未输出合法 JSON，追加严格指令重试一次");
+      const r2 = await AiPhone.ai.generate({
+        ...req,
+        instruction: req.instruction + "\n\n重要：只输出 JSON 本身，第一个字符必须是 {，最后一个字符必须是 }，不要任何解释、前言或代码块标记。",
+      });
+      return parseModelJson(r2.text);
+    }
   }
   function timeToMs(hm, base) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim());
@@ -420,18 +432,17 @@
   async function generateDay() {
     if (S.busy) return; S.busy = true; render();
     try {
-      const existing = await readTodayCalendar(); // 日程 app 里她今天已定的安排
-      let inst = "今天是 " + todayStr() + "，周" + "日一二三四五六"[new Date().getDay()] + "。现在时刻 " + fmtHM(Date.now()) + "。请生成她今天的生活面 JSON。";
+      const existing = await readTodayCalendar(); // 日程 app 里TA今天已定的安排
+      let inst = "今天是 " + todayStr() + "，周" + "日一二三四五六"[new Date().getDay()] + "。现在时刻 " + fmtHM(Date.now()) + "。请生成TA今天的生活面 JSON。";
       if (existing.length) {
-        inst += "\n她的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，围绕它们补全其余的一天）：\n" +
+        inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，围绕它们补全其余的一天）：\n" +
           JSON.stringify(existing.map((it) => ({ time: it.startTime, title: it.title, note: it.location || "" })));
       }
-      const r = await AiPhone.ai.generate({
+      const d = await generateJson({
         characterId: S.character.id,
         appTags: ["companion", "daily"],
         instruction: inst,
       });
-      const d = parseModelJson(r.text);
       if (!Array.isArray(d.schedule)) throw new Error("日程缺失");
       const sched = d.schedule.slice(0, 10).map((it) => ({ time: String(it.time || ""), title: String(it.title || ""), note: String(it.note || "") }));
       for (const it of existing) { // 模型漏掉的已定安排补回来
@@ -507,17 +518,16 @@
         S.busy = false; render(); return;
       }
       await log("候选时刻：" + cands.map((c) => c.time + "·" + c.source).join("，"));
-      const r = await AiPhone.ai.generate({
+      const parsed = await generateJson({
         characterId: S.character.id,
         appTags: ["companion", "impulse"],
         instruction: [
-          "她今天的生活面：", JSON.stringify({ mood: S.day.mood, energy: S.day.energy, schedule: S.day.schedule }),
-          "", "候选时刻（判断每个时刻做完这件事后，她会不会想给用户发消息）：",
+          "TA今天的生活面：", JSON.stringify({ mood: S.day.mood, energy: S.day.energy, schedule: S.day.schedule }),
+          "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
           JSON.stringify(cands.map((c) => ({ time: c.time, justFinished: c.source }))),
           "", "约束：今天最多真的发 " + S.settings.quota + " 条；免打扰时段 " + S.settings.quietStart + "–" + S.settings.quietEnd + "。",
         ].join("\n"),
       });
-      const parsed = parseModelJson(r.text);
       const decisions = Array.isArray(parsed.decisions) ? parsed.decisions : [];
       await cancelTodayWakes();
 
@@ -541,13 +551,13 @@
             await log(c.time + " 预约失败：" + (e && e.message || e));
           }
         } else {
-          await log(c.time + " 未起念：" + (item.why || "她这会儿不想"));
+          await log(c.time + " 未起念：" + (item.why || "TA这会儿不想"));
         }
         items.push(item);
       }
       S.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === S.character.id,
         { date: todayStr(), characterId: S.character.id, items });
-      toast(armedCount ? "她今天有 " + armedCount + " 个想起你的时刻" : "她今天想安静地过");
+      toast(armedCount ? "TA今天有 " + armedCount + " 个想起你的时刻" : "TA今天想安静地过");
     } catch (e) {
       toast("编排失败：" + (e && e.message || e));
       await log("编排失败：" + (e && e.message || e));
@@ -561,13 +571,13 @@
     const zone = $("#preview-zone");
     zone.innerHTML = '<div class="bubble"><div class="from">' + esc(S.character.name) + ' · 此刻</div><span class="typing"><i></i><i></i><i></i></span></div>';
     try {
-      const ctx = S.day ? ("她此刻的状态：" + S.day.mood + "；正在" + (currentDoing() || S.day.doing) + "；在" + S.day.location + "。") : "";
+      const ctx = S.day ? ("TA此刻的状态：" + S.day.mood + "；正在" + (currentDoing() || S.day.doing) + "；在" + S.day.location + "。") : "";
       const r = await AiPhone.ai.generate({
         characterId: S.character.id,
         appTags: ["companion", "preview"],
-        instruction: "现在时刻 " + fmtHM(Date.now()) + "。" + ctx + " 请以她的身份，此刻主动给用户发一条消息。",
+        instruction: "现在时刻 " + fmtHM(Date.now()) + "。" + ctx + " 请以TA的身份，此刻主动给用户发一条消息。",
       });
-      zone.innerHTML = '<div class="bubble"><div class="from">' + esc(S.character.name) + ' · 此刻</div>' + esc((r.text || "").trim()) + '</div><div class="preview-note">仅预览，没有发进聊天室，也不消耗她今天的主动额度。</div>';
+      zone.innerHTML = '<div class="bubble"><div class="from">' + esc(S.character.name) + ' · 此刻</div>' + esc((r.text || "").trim()) + '</div><div class="preview-note">仅预览，没有发进聊天室，也不消耗TA今天的主动额度。</div>';
     } catch (e) {
       zone.innerHTML = "";
       toast("预览失败：" + (e && e.message || e));
@@ -609,9 +619,9 @@
     if (!S.day) {
       v.innerHTML =
         '<div class="card empty"><div class="art">🌅</div>' +
-        '<p>她的今天还是一张白纸。<br>生成她今天的状态与日程，<br>再看看她会在哪些时刻想起你。</p>' +
+        '<p>TA的今天还是一张白纸。<br>生成TA今天的状态与日程，<br>再看看TA会在哪些时刻想起你。</p>' +
         '<button class="big-btn" id="btn-gen"' + (S.busy ? " disabled" : "") + ">" +
-        (S.busy ? '<span class="spin"></span>正在展开她的一天…' : "开始她的今天") + "</button></div>" + previewCard() + diagCard();
+        (S.busy ? '<span class="spin"></span>正在展开TA的一天…' : "开始TA的今天") + "</button></div>" + previewCard() + diagCard();
       bindCommon(); return;
     }
 
@@ -648,7 +658,7 @@
     }
     const armedN = S.plan ? (S.plan.items || []).filter((w) => w.act).length : 0;
     html +=
-      '<div class="card"><div class="sec-head"><span class="t">她 的 一 天' + (armedN ? " · ♥×" + armedN : "") + "</span>" +
+      '<div class="card"><div class="sec-head"><span class="t">TA 的 一 天' + (armedN ? " · ♥×" + armedN : "") + "</span>" +
       '<button class="act" id="btn-replan"' + (S.busy ? " disabled" : "") + ">" + (S.busy ? "编排中…" : "♥ 重新编排") + "</button></div>" +
       '<div class="tl">' + (tl || '<div class="nt" style="padding:8px 0;color:var(--tx3)">暂无日程</div>') + "</div></div>";
 
@@ -669,7 +679,7 @@
       if (!fired && w.delivery === "local" && w.reason) intent += '<div class="nt">未挂上离线推送：' + esc(w.reason) + "</div>";
     } else {
       badge = '<span class="badge off">未起念</span>';
-      intent = '<div class="intent">' + esc(w.why || "她这会儿不想") + "</div>";
+      intent = '<div class="intent">' + esc(w.why || "TA这会儿不想") + "</div>";
     }
     return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + '" ' + delay + '><span class="dot"></span>' +
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + "</div>" + intent + "</div>";
@@ -677,7 +687,7 @@
 
   function previewCard() {
     return '<div class="card"><div class="sec-head"><span class="t">此 刻</span></div>' +
-      '<button class="ghost-btn" id="btn-preview">听听她此刻会说什么</button>' +
+      '<button class="ghost-btn" id="btn-preview">听听TA此刻会说什么</button>' +
       '<div class="preview-zone" id="preview-zone"></div></div>';
   }
   function diagCard() {
