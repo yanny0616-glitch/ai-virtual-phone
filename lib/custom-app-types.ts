@@ -50,6 +50,7 @@ export type CustomAppPermission =
   | "notifications.read"
   | "notifications.write"
   | "tasks.schedule"
+  | "push.wake"
   | "ui.toast"
   | "ui.notification"
   | "ui.sms"

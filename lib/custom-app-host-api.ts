@@ -83,6 +83,8 @@ import {
   readBridgeStateSnapshot,
   sanitizeBridgeDataKey,
 } from "./reality-bridge/storage";
+import { loadTimedWakeSchedules, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
+import { armTimedWakeBailout, cancelBailoutKey } from "./push-bailout-client";
 
 const CUSTOM_APP_NOTIFICATIONS_KEY = "ai_phone_custom_app_notifications_v1";
 const CUSTOM_APP_BADGES_KEY = "ai_phone_custom_app_badges_v1";
@@ -177,6 +179,7 @@ const HOST_ACTION_PERMISSIONS: Record<string, CustomAppPermission[]> = {
   "world.write": ["world.write"],
   "world.activate": ["world.activate"],
   "bridge.send": ["bridge.send"],
+  "push.wake": ["push.wake"],
 };
 
 function emitHostStateUpdated(): void {
@@ -2331,6 +2334,79 @@ export async function readCustomAppBridgeState(record: Record<string, unknown>):
   return readAllBridgeStateSnapshots(config, limit);
 }
 
+/* ---------- 离线主动消息（timed wake 预约，走主程序的 push-bailout 链路） ---------- */
+
+const CUSTOM_APP_TIMED_WAKE_MIN_DELAY_MS = 60_000;
+const CUSTOM_APP_TIMED_WAKE_MAX_DELAY_MS = 7 * 24 * 60 * 60_000;
+const CUSTOM_APP_TIMED_WAKE_MAX_PENDING = 24;
+
+function customAppTimedWakePrefix(appId: string): string {
+  return `timed_wake_capp_${appId}_`;
+}
+
+/**
+ * APP 预约一条「角色离线主动消息」：到点后由角色以自己的人设开口。
+ * 浏览器开着走 follow-up-service 本地轮询；被杀则由服务端 cron 接管生成并 Web Push。
+ * armed=false 表示服务端预约没挂上（未开离线推送/安静时段等），本地路径仍然有效。
+ */
+export async function scheduleCustomAppTimedWake(
+  app: InstalledCustomApp,
+  record: Record<string, unknown>,
+): Promise<{ id: string; fireAt: number; armed: boolean; reason?: string }> {
+  const characterId = cleanText(record.characterId, 120);
+  if (!characterId) throw new Error("push.wake 缺少 characterId。");
+  const intent = cleanText(record.intent, 500);
+  if (!intent) throw new Error("push.wake 缺少 intent（角色为什么想起用户、想说什么）。");
+  const now = Date.now();
+  const rawFireAt = Number(record.fireAt);
+  const rawDelayMs = Number(record.delayMs);
+  const fireAt = Number.isFinite(rawFireAt) && rawFireAt > 0 ? Math.round(rawFireAt)
+    : Number.isFinite(rawDelayMs) && rawDelayMs > 0 ? now + Math.round(rawDelayMs)
+    : 0;
+  if (!fireAt) throw new Error("push.wake 需要 fireAt（毫秒时间戳）或 delayMs。");
+  if (fireAt < now + CUSTOM_APP_TIMED_WAKE_MIN_DELAY_MS) throw new Error("push.wake 触发时间至少要在 1 分钟之后。");
+  if (fireAt > now + CUSTOM_APP_TIMED_WAKE_MAX_DELAY_MS) throw new Error("push.wake 最多提前 7 天预约。");
+  if (!loadCharacters().some(item => item.id === characterId)) throw new Error("找不到对应角色。");
+  const prefix = customAppTimedWakePrefix(app.id);
+  if (loadTimedWakeSchedules().filter(item => item.id.startsWith(prefix)).length >= CUSTOM_APP_TIMED_WAKE_MAX_PENDING) {
+    throw new Error(`同一 APP 最多同时挂 ${CUSTOM_APP_TIMED_WAKE_MAX_PENDING} 条预约，请先取消旧的。`);
+  }
+  if (!loadChatContacts().some(contact => contact.characterId === characterId)) addChatContact(characterId);
+  const session = createOrGetSession(characterId);
+  if (session.isGroup) throw new Error("push.wake 只支持单聊角色。");
+  const schedule: TimedWakeSchedule = {
+    id: `${prefix}${now}_${Math.random().toString(36).slice(2, 8)}`,
+    sessionId: session.id,
+    characterId,
+    fireAt,
+    createdAt: now,
+    delayMinutes: Math.max(1, Math.round((fireAt - now) / 60_000)),
+    intent,
+    source: record.source === "user" ? "user" : "tool",
+  };
+  saveTimedWakeSchedule(schedule);
+  const armResult = await armTimedWakeBailout(schedule);
+  emitHostStateUpdated();
+  return { id: schedule.id, fireAt, armed: armResult.ok, reason: armResult.ok ? undefined : armResult.reason };
+}
+
+export function listCustomAppTimedWakes(appId: string): Array<Pick<TimedWakeSchedule, "id" | "characterId" | "fireAt" | "intent" | "createdAt" | "source">> {
+  const prefix = customAppTimedWakePrefix(appId);
+  return loadTimedWakeSchedules()
+    .filter(item => item.id.startsWith(prefix))
+    .map(({ id, characterId, fireAt, intent, createdAt, source }) => ({ id, characterId, fireAt, intent, createdAt, source }));
+}
+
+export function cancelCustomAppTimedWake(appId: string, rawId: string): { ok: boolean } {
+  const id = cleanText(rawId, 200);
+  if (!id.startsWith(customAppTimedWakePrefix(appId))) throw new Error("只能取消本 APP 预约的主动消息。");
+  const exists = loadTimedWakeSchedules().some(item => item.id === id);
+  removeTimedWakeSchedule(id);
+  cancelBailoutKey(`timedwake:${id}`);
+  emitHostStateUpdated();
+  return { ok: exists };
+}
+
 export async function executeCustomAppHostAction(
   app: InstalledCustomApp,
   rawAction: CustomAppHostAction,
@@ -2390,6 +2466,8 @@ export async function executeCustomAppHostAction(
       return activateCustomAppWorld(app, payload);
     case "bridge.send":
       return sendCustomAppBridgeOutbox(payload);
+    case "push.wake":
+      return scheduleCustomAppTimedWake(app, payload);
     default:
       throw new Error(`未知后台动作：${actionType}`);
   }
@@ -2402,7 +2480,8 @@ function customAppHostActionNeedsChatStorage(actionType: string): boolean {
     || actionType === "chat.message"
     || actionType === "chat.sendMessage"
     || actionType === "chat.reply"
-    || actionType === "chat.contact";
+    || actionType === "chat.contact"
+    || actionType === "push.wake";
 }
 
 function customAppHostActionNeedsSettingsStorage(actionType: string): boolean {

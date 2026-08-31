@@ -74,6 +74,9 @@ import {
   sendCustomAppBridgeOutbox,
   sendCustomAppTextMessage,
   scheduleCustomAppTask,
+  scheduleCustomAppTimedWake,
+  listCustomAppTimedWakes,
+  cancelCustomAppTimedWake,
   sendCustomAppCard,
   saveCustomAppMedia,
   setCustomAppBadge,
@@ -490,6 +493,11 @@ html, body { min-height: 100%; }
       list: function(){ return request('tasks.list'); },
       cancel: function(id){ return request('tasks.cancel', { id: id }); }
     },
+    push: {
+      wake: function(payload){ return request('push.wake', payload || {}); },
+      listWakes: function(){ return request('push.listWakes'); },
+      cancelWake: function(id){ return request('push.cancelWake', { id: id }); }
+    },
     wallet: {
       get: function(){ return request('wallet.get'); },
       pay: function(payload){ return request('wallet.pay', payload || {}); }
@@ -649,7 +657,8 @@ function bridgeActionNeedsChatStorage(action: string): boolean {
     || action === "chat.updateCard"
     || action === "chat.openConversation"
     || action === "chat.requestReply"
-    || action === "chat.setContactState";
+    || action === "chat.setContactState"
+    || action === "push.wake";
 }
 
 function bridgeActionNeedsSettingsStorage(action: string): boolean {
@@ -663,6 +672,7 @@ function bridgeActionNeedsKvStorage(action: string): boolean {
     || action.startsWith("bridge.")
     || action.startsWith("notifications.")
     || action.startsWith("tasks.")
+    || action.startsWith("push.")
     || action.startsWith("wallet.")
     || action.startsWith("memory.")
     || action.startsWith("calendar.")
@@ -1100,6 +1110,7 @@ export function CustomAppRunner({
           memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
           notifications: ["create", "list", "markRead", "markAllRead", "getBadge", "setBadge", "incrementBadge", "clearBadge"],
           tasks: ["schedule", "list", "cancel"],
+          push: ["wake", "listWakes", "cancelWake"],
           wallet: ["get", "pay"],
           bridge: ["send", "readState"],
           geo: ["get", "watch", "clearWatch"],
@@ -1884,6 +1895,19 @@ export function CustomAppRunner({
     if (action === "tasks.cancel") {
       requirePermission("tasks.schedule");
       return cancelCustomAppTask(app.id, String(record.id ?? ""));
+    }
+
+    if (action === "push.wake") {
+      requirePermission("push.wake");
+      return scheduleCustomAppTimedWake(app, record);
+    }
+    if (action === "push.listWakes") {
+      requirePermission("push.wake");
+      return listCustomAppTimedWakes(app.id);
+    }
+    if (action === "push.cancelWake") {
+      requirePermission("push.wake");
+      return cancelCustomAppTimedWake(app.id, String(record.id ?? ""));
     }
 
     if (action === "bridge.send") {

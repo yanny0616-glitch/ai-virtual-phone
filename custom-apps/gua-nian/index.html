@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>挂念</title>
+<style>
+  :root {
+    --bg0: #171226;
+    --bg1: #251a35;
+    --card: rgba(255, 255, 255, .055);
+    --card-strong: rgba(255, 255, 255, .09);
+    --line: rgba(255, 255, 255, .10);
+    --tx: #f5f1fa;
+    --tx2: #b9adcf;
+    --tx3: #80749b;
+    --acc: #ff8f70;
+    --acc2: #ff6b9d;
+    --good: #7ee0b0;
+    --warn: #ffd166;
+    --r-lg: 22px;
+    --r-md: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background:
+      radial-gradient(120% 55% at 85% -5%, rgba(255, 122, 89, .16), transparent 60%),
+      radial-gradient(110% 60% at 0% 8%, rgba(150, 92, 255, .17), transparent 55%),
+      linear-gradient(175deg, var(--bg1), var(--bg0) 55%);
+    background-attachment: fixed;
+    color: var(--tx);
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+  #app {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: calc(var(--ai-phone-app-safe-top, 0px) + 18px) 18px calc(var(--ai-phone-app-safe-bottom, 0px) + 40px);
+  }
+
+  /* ── 头部 ─────────────────────────── */
+  header { display: flex; align-items: flex-end; gap: 10px; margin: 4px 2px 18px; }
+  header .title { font-size: 30px; font-weight: 800; letter-spacing: 6px; }
+  header .title .dot { color: var(--acc2); }
+  header .date { font-size: 12px; color: var(--tx3); padding-bottom: 5px; letter-spacing: 1px; }
+  header .gear {
+    margin-left: auto; margin-bottom: 2px;
+    width: 34px; height: 34px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--tx2); font-size: 16px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+
+  /* ── 角色条 ───────────────────────── */
+  .who { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; cursor: pointer; }
+  .who .ava {
+    width: 52px; height: 52px; border-radius: 50%; flex: none;
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; color: #fff;
+    border: 2px solid rgba(255, 255, 255, .25);
+    box-shadow: 0 4px 18px rgba(255, 107, 157, .28);
+    overflow: hidden;
+  }
+  .who .ava img { width: 100%; height: 100%; object-fit: cover; }
+  .who .meta { min-width: 0; }
+  .who .name { font-size: 17px; font-weight: 700; }
+  .who .now { font-size: 12px; color: var(--tx2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .who .now .live { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--good); margin-right: 6px; vertical-align: 1px; animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
+
+  /* ── 卡片 ─────────────────────────── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    padding: 18px;
+    margin-bottom: 16px;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .sec-head { display: flex; align-items: center; margin-bottom: 12px; }
+  .sec-head .t { font-size: 13px; font-weight: 700; letter-spacing: 3px; color: var(--tx2); }
+  .sec-head .act {
+    margin-left: auto; font-size: 12px; color: var(--acc);
+    background: none; border: none; cursor: pointer; padding: 4px 2px;
+    font-family: inherit;
+  }
+  .sec-head .act:disabled { color: var(--tx3); }
+
+  /* 状态卡 */
+  .mood-row { display: flex; align-items: center; gap: 14px; }
+  .mood-emoji { font-size: 44px; line-height: 1; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .35)); }
+  .mood-body { flex: 1; min-width: 0; }
+  .mood-text { font-size: 15px; font-weight: 600; line-height: 1.5; }
+  .mood-sub { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 11px; color: var(--tx2); border: 1px solid var(--line);
+    padding: 3px 9px; border-radius: 999px; background: rgba(255, 255, 255, .04);
+  }
+  .energy { margin-top: 14px; }
+  .energy .lab { display: flex; justify-content: space-between; font-size: 11px; color: var(--tx3); margin-bottom: 6px; }
+  .energy .bar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+  .energy .fill {
+    height: 100%; border-radius: 999px; width: 0;
+    background: linear-gradient(90deg, var(--acc), var(--acc2));
+    transition: width .9s cubic-bezier(.22, 1, .36, 1);
+  }
+
+  /* 时间轴 */
+  .tl { position: relative; padding-left: 26px; }
+  .tl::before {
+    content: ""; position: absolute; left: 8px; top: 6px; bottom: 6px; width: 2px;
+    background: linear-gradient(180deg, transparent, var(--line) 8%, var(--line) 92%, transparent);
+  }
+  .tl-item { position: relative; padding: 7px 0 7px 6px; animation: rise .4s ease both; }
+  .tl-item .dot {
+    position: absolute; left: -23px; top: 13px; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--bg1); border: 2px solid var(--tx3);
+  }
+  .tl-item.past { opacity: .45; }
+  .tl-item .row1 { display: flex; align-items: baseline; gap: 8px; }
+  .tl-item .tm { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--tx2); font-weight: 700; }
+  .tl-item .tt { font-size: 14px; font-weight: 600; }
+  .tl-item .nt { font-size: 12px; color: var(--tx3); margin-top: 3px; line-height: 1.5; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+
+  /* 心动时刻 */
+  .tl-item.wake .dot { border: none; background: none; top: 9px; left: -26px; width: 18px; height: 18px; font-size: 14px; text-align: center; line-height: 18px; }
+  .tl-item.wake .dot::before { content: "♥"; color: var(--acc2); }
+  .tl-item.wake.armed .dot::before { animation: pulse 1.8s ease-in-out infinite; display: inline-block; }
+  .tl-item.wake.skipped .dot::before { content: "♡"; color: var(--tx3); }
+  @keyframes pulse { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.35) } }
+  .tl-item.wake .intent { font-size: 13px; color: var(--tx); line-height: 1.55; margin-top: 3px; }
+  .tl-item.wake.skipped .intent { color: var(--tx3); }
+  .badge {
+    display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px;
+    margin-left: 6px; vertical-align: 1px; letter-spacing: .5px;
+  }
+  .badge.push { background: rgba(126, 224, 176, .14); color: var(--good); border: 1px solid rgba(126, 224, 176, .3); }
+  .badge.local { background: rgba(255, 209, 102, .12); color: var(--warn); border: 1px solid rgba(255, 209, 102, .3); }
+  .badge.off { background: rgba(255, 255, 255, .05); color: var(--tx3); border: 1px solid var(--line); }
+  .badge.done { background: rgba(255, 107, 157, .13); color: var(--acc2); border: 1px solid rgba(255, 107, 157, .3); }
+
+  /* 预览气泡 */
+  .preview-zone { min-height: 20px; }
+  .bubble {
+    position: relative; max-width: 88%;
+    background: linear-gradient(135deg, rgba(255, 143, 112, .22), rgba(255, 107, 157, .22));
+    border: 1px solid rgba(255, 130, 135, .3);
+    border-radius: 4px 18px 18px 18px;
+    padding: 12px 14px; margin-top: 12px;
+    font-size: 14px; line-height: 1.65;
+    animation: rise .4s ease both;
+  }
+  .bubble .from { font-size: 10px; color: var(--tx3); margin-bottom: 5px; letter-spacing: 1px; }
+  .typing { display: inline-flex; gap: 5px; padding: 6px 2px 2px; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--tx2); animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s } .typing i:nth-child(3) { animation-delay: .4s }
+  @keyframes blink { 0%, 60%, 100% { opacity: .25 } 30% { opacity: 1 } }
+  .preview-note { font-size: 11px; color: var(--tx3); margin-top: 10px; }
+
+  /* 大按钮 / 空态 */
+  .big-btn {
+    width: 100%; padding: 15px; border: none; border-radius: var(--r-md);
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    color: #fff; font-size: 15px; font-weight: 700; letter-spacing: 2px;
+    cursor: pointer; font-family: inherit;
+    box-shadow: 0 8px 24px rgba(255, 107, 157, .3);
+    transition: transform .15s ease, opacity .15s ease;
+  }
+  .big-btn:active { transform: scale(.98); }
+  .big-btn:disabled { opacity: .55; }
+  .ghost-btn {
+    width: 100%; padding: 13px; border-radius: var(--r-md);
+    background: var(--card); border: 1px solid var(--line);
+    color: var(--tx); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .empty { text-align: center; padding: 34px 10px 30px; }
+  .empty .art { font-size: 46px; margin-bottom: 14px; animation: breathe 3s ease-in-out infinite; }
+  .empty p { font-size: 13px; color: var(--tx2); line-height: 1.8; margin-bottom: 20px; }
+
+  /* 诊断 */
+  details.diag { margin-top: 4px; }
+  details.diag summary {
+    list-style: none; cursor: pointer; font-size: 12px; color: var(--tx3);
+    text-align: center; padding: 6px; letter-spacing: 2px;
+  }
+  details.diag summary::-webkit-details-marker { display: none; }
+  .diag-item { font-size: 11px; color: var(--tx3); line-height: 1.7; padding: 7px 10px; border-left: 2px solid var(--line); margin: 6px 0; }
+  .diag-item b { color: var(--tx2); font-weight: 600; }
+
+  /* 底部弹层 */
+  .sheet-mask {
+    position: fixed; inset: 0; background: rgba(10, 6, 20, .6);
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    opacity: 0; pointer-events: none; transition: opacity .25s ease; z-index: 40;
+  }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
+    max-width: 520px; margin: 0 auto;
+    background: linear-gradient(180deg, #2b2040, #1d1530);
+    border-radius: 24px 24px 0 0; border: 1px solid var(--line); border-bottom: none;
+    padding: 20px 20px calc(var(--ai-phone-app-safe-bottom, 0px) + 24px);
+    transform: translateY(105%); transition: transform .3s cubic-bezier(.22, 1, .36, 1);
+    max-height: 78vh; overflow-y: auto;
+  }
+  .sheet-open .sheet-mask { opacity: 1; pointer-events: auto; }
+  .sheet-open .sheet { transform: none; }
+  .sheet h3 { font-size: 15px; letter-spacing: 3px; margin-bottom: 16px; }
+  .sheet .grp { margin-bottom: 18px; }
+  .sheet .grp-t { font-size: 11px; color: var(--tx3); letter-spacing: 2px; margin-bottom: 9px; }
+  .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; }
+  .char-cell {
+    text-align: center; padding: 10px 4px; border-radius: 14px; cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .char-cell.sel { border-color: rgba(255, 107, 157, .5); background: rgba(255, 107, 157, .08); }
+  .char-cell .ava {
+    width: 44px; height: 44px; border-radius: 50%; margin: 0 auto 6px;
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; overflow: hidden;
+  }
+  .char-cell .ava img { width: 100%; height: 100%; object-fit: cover; }
+  .char-cell .nm { font-size: 11px; color: var(--tx2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .field-row { display: flex; align-items: center; gap: 10px; }
+  .field-row input[type="time"] {
+    flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    color: var(--tx); padding: 9px 10px; font-size: 14px; font-family: inherit;
+    color-scheme: dark;
+  }
+  .stepper { display: flex; align-items: center; gap: 14px; }
+  .stepper button {
+    width: 36px; height: 36px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--tx); font-size: 18px; cursor: pointer;
+  }
+  .stepper .val { font-size: 18px; font-weight: 700; min-width: 30px; text-align: center; }
+
+  /* toast（本地兜底） */
+  #toast {
+    position: fixed; left: 50%; bottom: calc(var(--ai-phone-app-safe-bottom, 0px) + 70px);
+    transform: translateX(-50%) translateY(16px); z-index: 60;
+    background: rgba(20, 14, 34, .92); border: 1px solid var(--line);
+    color: var(--tx); font-size: 13px; padding: 10px 18px; border-radius: 999px;
+    opacity: 0; pointer-events: none; transition: all .25s ease; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%); }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.25); border-top-color: #fff; border-radius: 50%; animation: rot .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes rot { to { transform: rotate(360deg) } }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">挂<span class="dot">·</span>念</div>
+    <div class="date" id="hdr-date"></div>
+    <button class="gear" id="btn-settings" title="设置">⚙</button>
+  </header>
+
+  <div class="who" id="who" hidden>
+    <div class="ava" id="who-ava"></div>
+    <div class="meta">
+      <div class="name" id="who-name"></div>
+      <div class="now" id="who-now"></div>
+    </div>
+  </div>
+
+  <div id="view"></div>
+
+  <div class="sheet-mask" id="sheet-mask"></div>
+  <div class="sheet" id="sheet">
+    <h3>设 置</h3>
+    <div class="grp">
+      <div class="grp-t">挂念的人</div>
+      <div class="char-grid" id="char-grid"></div>
+    </div>
+    <div class="grp">
+      <div class="grp-t">免打扰时段（这段时间她不会来找你）</div>
+      <div class="field-row">
+        <input type="time" id="in-quiet-start">
+        <span style="color:var(--tx3)">—</span>
+        <input type="time" id="in-quiet-end">
+      </div>
+    </div>
+    <div class="grp">
+      <div class="grp-t">每天最多主动几次</div>
+      <div class="stepper">
+        <button id="q-minus">−</button>
+        <div class="val" id="q-val">3</div>
+        <button id="q-plus">＋</button>
+      </div>
+    </div>
+    <button class="big-btn" id="btn-save-settings">保 存</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  /* ================= 状态 ================= */
+  const S = {
+    characters: [],
+    character: null,       // 当前角色 {id,name,avatar}
+    settings: null,        // db 记录 {id, characterId, quietStart, quietEnd, quota}
+    day: null,             // db 记录 {id, date, characterId, mood, moodEmoji, energy, doing, location, schedule[]}
+    plan: null,            // db 记录 {id, date, characterId, items:[{time,fireAt,act,why,intent,delivery,reason,wakeId}]}
+    logs: null,            // db 记录 {id, items:[{at,text}]}
+    busy: false,
+  };
+  const $ = (s) => document.querySelector(s);
+  const pad = (n) => String(n).padStart(2, "0");
+  const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
+  const fmtHM = (ms) => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function toast(msg) {
+    try { AiPhone.ui.toast(msg); return; } catch (e) { /* 沙箱内兜底 */ }
+    const el = $("#toast"); el.textContent = msg; el.classList.add("show");
+    clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 2400);
+  }
+
+  async function log(text) {
+    try {
+      if (!S.logs) {
+        const rows = await AiPhone.db.list("logs", { limit: 5 });
+        S.logs = (rows && rows[0]) || await AiPhone.db.create("logs", { items: [] });
+      }
+      const items = (S.logs.items || []).slice(-39);
+      items.push({ at: Date.now(), text: String(text).slice(0, 300) });
+      S.logs = await AiPhone.db.update("logs", S.logs.id, { items });
+    } catch (e) { /* 日志失败不打断主流程 */ }
+  }
+
+  /* ================= 工具 ================= */
+  function parseModelJson(text) {
+    let t = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const a = t.indexOf("{"), b = t.lastIndexOf("}");
+    if (a >= 0 && b > a) t = t.slice(a, b + 1);
+    return JSON.parse(t);
+  }
+  function timeToMs(hm, base) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim());
+    if (!m) return null;
+    const d = base ? new Date(base) : new Date();
+    d.setHours(+m[1], +m[2], 0, 0);
+    return d.getTime();
+  }
+  function inQuiet(hm) {
+    const qs = S.settings.quietStart, qe = S.settings.quietEnd;
+    if (!qs || !qe || qs === qe) return false;
+    return qs < qe ? (hm >= qs && hm < qe) : (hm >= qs || hm < qe); // 跨零点
+  }
+
+  /* ================= 数据 ================= */
+  async function upsert(coll, match, data) {
+    const rows = await AiPhone.db.list(coll, { limit: 100 });
+    const hit = (rows || []).find(match);
+    if (hit) return AiPhone.db.update(coll, hit.id, data);
+    return AiPhone.db.create(coll, data);
+  }
+
+  async function loadSettings() {
+    const rows = await AiPhone.db.list("settings", { limit: 5 });
+    S.settings = (rows && rows[0]) || await AiPhone.db.create("settings", {
+      characterId: "", quietStart: "23:30", quietEnd: "08:00", quota: 3,
+    });
+  }
+  async function loadDayAndPlan() {
+    const date = todayStr(), cid = S.character.id;
+    const days = await AiPhone.db.list("days", { limit: 60 });
+    S.day = (days || []).find((r) => r.date === date && r.characterId === cid) || null;
+    const plans = await AiPhone.db.list("plans", { limit: 60 });
+    S.plan = (plans || []).find((r) => r.date === date && r.characterId === cid) || null;
+  }
+
+  /* ================= 系统日程互通 ================= */
+  async function readTodayCalendar() {
+    try {
+      const r = await AiPhone.calendar.read({ ownerType: "character", ownerId: S.character.id, date: todayStr() });
+      const items = (r && r.plan && r.plan.items) || [];
+      return items.filter((it) => it.date === todayStr())
+        .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+    } catch (e) { return []; }
+  }
+  function addMin(hm, n) {
+    const ms = timeToMs(hm); if (!ms) return hm;
+    return fmtHM(Math.min(ms + n * 60000, timeToMs("23:59")));
+  }
+  async function syncCalendar(existing) {
+    // 先清掉本 app 之前写入的今日条目，再把新生成的一天写回系统日程
+    for (const it of existing) {
+      if (/^guanian_/.test(it.id)) {
+        try { await AiPhone.calendar.write({ operation: "delete", ownerType: "character", ownerId: S.character.id, date: todayStr(), itemId: it.id }); } catch (e) { /* 忽略 */ }
+      }
+    }
+    const keep = existing.filter((it) => !/^guanian_/.test(it.id));
+    let wrote = 0;
+    const sched = S.day.schedule;
+    for (let i = 0; i < sched.length; i++) {
+      const it = sched[i];
+      if (!/^\d{1,2}:\d{2}$/.test(it.time)) continue;
+      if (keep.some((k) => k.startTime === it.time)) continue; // 日程表里已有的安排不重复写
+      const end = (i + 1 < sched.length && sched[i + 1].time > it.time) ? sched[i + 1].time : addMin(it.time, 60);
+      try {
+        await AiPhone.calendar.write({
+          ownerType: "character", ownerId: S.character.id, date: todayStr(),
+          id: "guanian_" + todayStr().replace(/-/g, "") + "_" + i,
+          startTime: it.time, endTime: end, title: it.title, location: "", source: "generated",
+        });
+        wrote++;
+      } catch (e) { /* 单条失败不影响整体 */ }
+    }
+    return wrote;
+  }
+
+  /* ================= 核心：生成今天 ================= */
+  async function generateDay() {
+    if (S.busy) return; S.busy = true; render();
+    try {
+      const existing = await readTodayCalendar(); // 日程 app 里她今天已定的安排
+      let inst = "今天是 " + todayStr() + "，周" + "日一二三四五六"[new Date().getDay()] + "。现在时刻 " + fmtHM(Date.now()) + "。请生成她今天的生活面 JSON。";
+      if (existing.length) {
+        inst += "\n她的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，围绕它们补全其余的一天）：\n" +
+          JSON.stringify(existing.map((it) => ({ time: it.startTime, title: it.title, note: it.location || "" })));
+      }
+      const r = await AiPhone.ai.generate({
+        characterId: S.character.id,
+        appTags: ["companion", "daily"],
+        instruction: inst,
+      });
+      const d = parseModelJson(r.text);
+      if (!Array.isArray(d.schedule)) throw new Error("日程缺失");
+      const sched = d.schedule.slice(0, 10).map((it) => ({ time: String(it.time || ""), title: String(it.title || ""), note: String(it.note || "") }));
+      for (const it of existing) { // 模型漏掉的已定安排补回来
+        if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: it.startTime, title: it.title, note: it.location || "日程表上的安排" });
+      }
+      sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+      S.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === S.character.id, {
+        date: todayStr(), characterId: S.character.id,
+        mood: String(d.mood || ""), moodEmoji: String(d.moodEmoji || "🌙").slice(0, 4),
+        energy: Math.max(0, Math.min(100, +d.energy || 60)),
+        doing: String(d.doing || ""), location: String(d.location || ""),
+        schedule: sched,
+      });
+      const wrote = await syncCalendar(existing);
+      await log("生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），心情「" + S.day.mood + "」");
+      S.busy = false;
+      await orchestrate(); // 生活面就绪后立即编排心动时刻
+    } catch (e) {
+      S.busy = false;
+      toast("生成失败：" + (e && e.message || e));
+      await log("生成今日失败：" + (e && e.message || e));
+      render();
+    }
+  }
+
+  /* ================= 核心：编排心动时刻 ================= */
+  function buildCandidates() {
+    const now = Date.now() + 3 * 60000;
+    const seen = new Set();
+    const cands = [];
+    for (const it of S.day.schedule) {
+      const ms = timeToMs(it.time);
+      if (!ms || ms < now || seen.has(it.time)) continue;
+      if (inQuiet(it.time)) continue;
+      seen.add(it.time);
+      cands.push({ time: it.time, source: it.title, fireAt: ms });
+    }
+    // 晚安时刻：免打扰开始前 20 分钟
+    const qs = S.settings.quietStart;
+    if (qs) {
+      const ms = timeToMs(qs);
+      const gm = ms ? ms - 20 * 60000 : null;
+      if (gm && gm > now) {
+        const hm = fmtHM(gm);
+        if (!seen.has(hm) && !inQuiet(hm)) cands.push({ time: hm, source: "睡前", fireAt: gm });
+      }
+    }
+    cands.sort((a, b) => a.fireAt - b.fireAt);
+    return cands.slice(0, 6);
+  }
+
+  async function cancelTodayWakes() {
+    try {
+      const wakes = await AiPhone.push.listWakes();
+      const d0 = timeToMs("00:00"), d1 = d0 + 86400000;
+      for (const w of wakes || []) {
+        if (w.characterId === S.character.id && w.fireAt >= d0 && w.fireAt < d1) {
+          try { await AiPhone.push.cancelWake(w.id); } catch (e) { /* 已触发的取消失败可忽略 */ }
+        }
+      }
+    } catch (e) { /* listWakes 失败不阻塞重排 */ }
+  }
+
+  async function orchestrate() {
+    if (S.busy || !S.day) return; S.busy = true; render();
+    try {
+      const cands = buildCandidates();
+      if (!cands.length) {
+        S.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === S.character.id,
+          { date: todayStr(), characterId: S.character.id, items: (S.plan && S.plan.items) || [] });
+        toast("今天剩下的时间没有合适的时刻了");
+        await log("编排：无未来候选时刻（已过时段或全部落在免打扰内）");
+        S.busy = false; render(); return;
+      }
+      await log("候选时刻：" + cands.map((c) => c.time + "·" + c.source).join("，"));
+      const r = await AiPhone.ai.generate({
+        characterId: S.character.id,
+        appTags: ["companion", "impulse"],
+        instruction: [
+          "她今天的生活面：", JSON.stringify({ mood: S.day.mood, energy: S.day.energy, schedule: S.day.schedule }),
+          "", "候选时刻（判断每个时刻做完这件事后，她会不会想给用户发消息）：",
+          JSON.stringify(cands.map((c) => ({ time: c.time, justFinished: c.source }))),
+          "", "约束：今天最多真的发 " + S.settings.quota + " 条；免打扰时段 " + S.settings.quietStart + "–" + S.settings.quietEnd + "。",
+        ].join("\n"),
+      });
+      const parsed = parseModelJson(r.text);
+      const decisions = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+      await cancelTodayWakes();
+
+      const items = []; let armedCount = 0;
+      for (let i = 0; i < cands.length; i++) {
+        const c = cands[i];
+        const d = decisions[i] || {};
+        const item = { time: c.time, fireAt: c.fireAt, source: c.source, act: !!d.act, why: String(d.why || ""), intent: String(d.intent || ""), delivery: "", reason: "", wakeId: "" };
+        if (item.act && armedCount >= S.settings.quota) { item.act = false; item.why = "超出今日额度"; }
+        if (item.act) {
+          try {
+            const res = await AiPhone.push.wake({
+              characterId: S.character.id, fireAt: c.fireAt,
+              intent: item.intent || ("刚" + c.source + "，忽然想到用户"), source: "tool",
+            });
+            item.wakeId = res.id; item.delivery = res.armed ? "push" : "local"; item.reason = res.reason || "";
+            armedCount++;
+            await log(c.time + " 起念 ✓ " + (res.armed ? "已预约离线推送" : "仅本地（" + (res.reason || "未知") + "）") + "：" + item.intent);
+          } catch (e) {
+            item.act = false; item.why = "预约失败：" + (e && e.message || e);
+            await log(c.time + " 预约失败：" + (e && e.message || e));
+          }
+        } else {
+          await log(c.time + " 未起念：" + (item.why || "她这会儿不想"));
+        }
+        items.push(item);
+      }
+      S.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === S.character.id,
+        { date: todayStr(), characterId: S.character.id, items });
+      toast(armedCount ? "她今天有 " + armedCount + " 个想起你的时刻" : "她今天想安静地过");
+    } catch (e) {
+      toast("编排失败：" + (e && e.message || e));
+      await log("编排失败：" + (e && e.message || e));
+    }
+    S.busy = false; render();
+  }
+
+  /* ================= 预览 ================= */
+  async function preview() {
+    if (S._previewing) return; S._previewing = true;
+    const zone = $("#preview-zone");
+    zone.innerHTML = '<div class="bubble"><div class="from">' + esc(S.character.name) + ' · 此刻</div><span class="typing"><i></i><i></i><i></i></span></div>';
+    try {
+      const ctx = S.day ? ("她此刻的状态：" + S.day.mood + "；正在" + (currentDoing() || S.day.doing) + "；在" + S.day.location + "。") : "";
+      const r = await AiPhone.ai.generate({
+        characterId: S.character.id,
+        appTags: ["companion", "preview"],
+        instruction: "现在时刻 " + fmtHM(Date.now()) + "。" + ctx + " 请以她的身份，此刻主动给用户发一条消息。",
+      });
+      zone.innerHTML = '<div class="bubble"><div class="from">' + esc(S.character.name) + ' · 此刻</div>' + esc((r.text || "").trim()) + '</div><div class="preview-note">仅预览，没有发进聊天室，也不消耗她今天的主动额度。</div>';
+    } catch (e) {
+      zone.innerHTML = "";
+      toast("预览失败：" + (e && e.message || e));
+    }
+    S._previewing = false;
+  }
+
+  function currentDoing() {
+    if (!S.day || !Array.isArray(S.day.schedule)) return "";
+    const now = fmtHM(Date.now());
+    let cur = "";
+    for (const it of S.day.schedule) { if (it.time && it.time <= now) cur = it.title; }
+    return cur;
+  }
+
+  /* ================= 渲染 ================= */
+  function render() {
+    $("#hdr-date").textContent = todayStr().slice(5).replace("-", " / ") + " · 周" + "日一二三四五六"[new Date().getDay()];
+    // 角色条
+    const who = $("#who");
+    if (S.character) {
+      who.hidden = false;
+      const ava = $("#who-ava");
+      ava.innerHTML = S.character.avatar
+        ? '<img src="' + esc(S.character.avatar) + '" alt="">'
+        : esc((S.character.name || "?").slice(0, 1));
+      $("#who-name").textContent = S.character.name;
+      const doing = currentDoing();
+      $("#who-now").innerHTML = S.day
+        ? '<span class="live"></span>' + esc((doing ? "正在" + doing : S.day.doing) + " · " + S.day.location)
+        : '<span class="live"></span>今天还没开始';
+    } else { who.hidden = true; }
+
+    const v = $("#view");
+    if (!S.character) {
+      v.innerHTML = '<div class="card empty"><div class="art">🕊️</div><p>还没有可挂念的人。<br>先去创建一个角色，再回来打开这里。</p></div>';
+      return;
+    }
+    if (!S.day) {
+      v.innerHTML =
+        '<div class="card empty"><div class="art">🌅</div>' +
+        '<p>她的今天还是一张白纸。<br>生成她今天的状态与日程，<br>再看看她会在哪些时刻想起你。</p>' +
+        '<button class="big-btn" id="btn-gen"' + (S.busy ? " disabled" : "") + ">" +
+        (S.busy ? '<span class="spin"></span>正在展开她的一天…' : "开始她的今天") + "</button></div>" + previewCard() + diagCard();
+      bindCommon(); return;
+    }
+
+    // 状态卡
+    let html =
+      '<div class="card"><div class="sec-head"><span class="t">今 日 状 态</span>' +
+      '<button class="act" id="btn-regen"' + (S.busy ? " disabled" : "") + ">" + (S.busy ? "生成中…" : "↻ 重新生成") + "</button></div>" +
+      '<div class="mood-row"><div class="mood-emoji">' + esc(S.day.moodEmoji || "🌙") + "</div>" +
+      '<div class="mood-body"><div class="mood-text">' + esc(S.day.mood) + "</div>" +
+      '<div class="mood-sub"><span class="chip">📍 ' + esc(S.day.location) + '</span><span class="chip">' + esc(S.day.doing) + "</span></div></div></div>" +
+      '<div class="energy"><div class="lab"><span>精力</span><span>' + S.day.energy + '%</span></div><div class="bar"><div class="fill" data-w="' + S.day.energy + '"></div></div></div></div>';
+
+    // 心动时刻 + 日程合并时间轴
+    const now = fmtHM(Date.now());
+    const wakeByTime = {};
+    if (S.plan) for (const w of S.plan.items || []) wakeByTime[w.time] = w;
+    let tl = "";
+    const times = new Set();
+    const merged = [];
+    for (const it of S.day.schedule) { merged.push({ kind: "sched", time: it.time, it }); times.add(it.time); }
+    if (S.plan) for (const w of S.plan.items || []) if (!times.has(w.time)) merged.push({ kind: "wakeOnly", time: w.time, w });
+    merged.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    let idx = 0;
+    for (const m of merged) {
+      const past = m.time < now;
+      const delay = 'style="animation-delay:' + (idx++ * 40) + 'ms"';
+      if (m.kind === "sched") {
+        const w = wakeByTime[m.time];
+        if (w) tl += wakeRow(w, past, m.it.title, delay);
+        else tl += '<div class="tl-item' + (past ? " past" : "") + '" ' + delay + '><span class="dot"></span><div class="row1"><span class="tm">' + esc(m.time) + '</span><span class="tt">' + esc(m.it.title) + '</span></div>' + (m.it.note ? '<div class="nt">' + esc(m.it.note) + "</div>" : "") + "</div>";
+      } else {
+        tl += wakeRow(m.w, past, m.w.source, delay);
+      }
+    }
+    const armedN = S.plan ? (S.plan.items || []).filter((w) => w.act).length : 0;
+    html +=
+      '<div class="card"><div class="sec-head"><span class="t">她 的 一 天' + (armedN ? " · ♥×" + armedN : "") + "</span>" +
+      '<button class="act" id="btn-replan"' + (S.busy ? " disabled" : "") + ">" + (S.busy ? "编排中…" : "♥ 重新编排") + "</button></div>" +
+      '<div class="tl">' + (tl || '<div class="nt" style="padding:8px 0;color:var(--tx3)">暂无日程</div>') + "</div></div>";
+
+    html += previewCard() + diagCard();
+    v.innerHTML = html;
+    requestAnimationFrame(() => { document.querySelectorAll(".fill").forEach((el) => { el.style.width = el.dataset.w + "%"; }); });
+    bindCommon();
+  }
+
+  function wakeRow(w, past, title, delay) {
+    let badge = "", intent = "";
+    if (w.act) {
+      const fired = w.fireAt < Date.now();
+      badge = fired ? '<span class="badge done">已想起你</span>'
+        : w.delivery === "push" ? '<span class="badge push">离线可达</span>'
+        : '<span class="badge local" title="' + esc(w.reason) + '">仅在线</span>';
+      intent = '<div class="intent">「' + esc(w.intent) + '」</div>';
+      if (!fired && w.delivery === "local" && w.reason) intent += '<div class="nt">未挂上离线推送：' + esc(w.reason) + "</div>";
+    } else {
+      badge = '<span class="badge off">未起念</span>';
+      intent = '<div class="intent">' + esc(w.why || "她这会儿不想") + "</div>";
+    }
+    return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + '" ' + delay + '><span class="dot"></span>' +
+      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + "</div>" + intent + "</div>";
+  }
+
+  function previewCard() {
+    return '<div class="card"><div class="sec-head"><span class="t">此 刻</span></div>' +
+      '<button class="ghost-btn" id="btn-preview">听听她此刻会说什么</button>' +
+      '<div class="preview-zone" id="preview-zone"></div></div>';
+  }
+  function diagCard() {
+    const items = (S.logs && S.logs.items || []).slice().reverse().slice(0, 20);
+    if (!items.length) return "";
+    return '<details class="diag"><summary>为什么发 / 为什么没发 · 诊断</summary>' +
+      items.map((l) => '<div class="diag-item"><b>' + fmtHM(l.at) + "</b> " + esc(l.text) + "</div>").join("") + "</details>";
+  }
+
+  function bindCommon() {
+    const gen = $("#btn-gen"); if (gen) gen.onclick = generateDay;
+    const rg = $("#btn-regen"); if (rg) rg.onclick = generateDay;
+    const rp = $("#btn-replan"); if (rp) rp.onclick = orchestrate;
+    const pv = $("#btn-preview"); if (pv) pv.onclick = preview;
+  }
+
+  /* ================= 设置弹层 ================= */
+  function openSheet() {
+    const grid = $("#char-grid");
+    grid.innerHTML = S.characters.map((c) =>
+      '<div class="char-cell' + (S.character && c.id === S.character.id ? " sel" : "") + '" data-id="' + esc(c.id) + '">' +
+      '<div class="ava">' + (c.avatar ? '<img src="' + esc(c.avatar) + '" alt="">' : esc((c.name || "?").slice(0, 1))) + "</div>" +
+      '<div class="nm">' + esc(c.name) + "</div></div>").join("") || '<div class="nt" style="color:var(--tx3);font-size:12px">暂无角色</div>';
+    grid.querySelectorAll(".char-cell").forEach((el) => {
+      el.onclick = () => { grid.querySelectorAll(".char-cell").forEach((x) => x.classList.remove("sel")); el.classList.add("sel"); };
+    });
+    $("#in-quiet-start").value = S.settings.quietStart;
+    $("#in-quiet-end").value = S.settings.quietEnd;
+    $("#q-val").textContent = S.settings.quota;
+    document.body.classList.add("sheet-open");
+  }
+  function closeSheet() { document.body.classList.remove("sheet-open"); }
+
+  async function saveSettings() {
+    const sel = document.querySelector(".char-cell.sel");
+    const cid = sel ? sel.dataset.id : (S.character && S.character.id) || "";
+    const quota = Math.max(1, Math.min(6, +($("#q-val").textContent) || 3));
+    S.settings = await AiPhone.db.update("settings", S.settings.id, {
+      characterId: cid,
+      quietStart: $("#in-quiet-start").value || "23:30",
+      quietEnd: $("#in-quiet-end").value || "08:00",
+      quota,
+    });
+    const changed = !S.character || S.character.id !== cid;
+    S.character = S.characters.find((c) => c.id === cid) || S.character;
+    closeSheet();
+    if (changed) { S.day = null; S.plan = null; await loadDayAndPlan(); }
+    render();
+    toast("已保存");
+  }
+
+  /* ================= 启动 ================= */
+  async function init() {
+    $("#btn-settings").onclick = openSheet;
+    $("#sheet-mask").onclick = closeSheet;
+    $("#btn-save-settings").onclick = () => { saveSettings().catch((e) => toast("保存失败：" + (e && e.message || e))); };
+    $("#q-minus").onclick = () => { const el = $("#q-val"); el.textContent = Math.max(1, +el.textContent - 1); };
+    $("#q-plus").onclick = () => { const el = $("#q-val"); el.textContent = Math.min(6, +el.textContent + 1); };
+
+    try {
+      const [launch, chars] = await Promise.all([
+        AiPhone.app.getLaunchContext().catch(() => null),
+        AiPhone.characters.list(),
+      ]);
+      S.characters = chars || [];
+      await loadSettings();
+      const preferId = (launch && launch.characterId) || S.settings.characterId;
+      S.character = S.characters.find((c) => c.id === preferId) || S.characters[0] || null;
+      if (S.character && S.settings.characterId !== S.character.id) {
+        S.settings = await AiPhone.db.update("settings", S.settings.id, { characterId: S.character.id });
+      }
+      try {
+        const rows = await AiPhone.db.list("logs", { limit: 5 });
+        S.logs = (rows && rows[0]) || null;
+      } catch (e) { /* 无日志可读 */ }
+      if (S.character) await loadDayAndPlan();
+      render();
+      // 每分钟刷新「正在做」与过去/未来分界
+      setInterval(() => { if (!S.busy) render(); }, 60000);
+    } catch (e) {
+      $("#view").innerHTML = '<div class="card empty"><div class="art">🌫️</div><p>初始化失败：' + esc(e && e.message || e) + "</p></div>";
+    }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
