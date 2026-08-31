@@ -102,3 +102,13 @@
 `custom-apps/gua-nian/`（挂念）— 首个用这条链路的 APP，灵感来自 AstrBot 私人陪伴类插件：
 生成角色今日生活面（与系统日程 `calendar.read/write` 互通，写回条目 id 带 `guanian_` 前缀）
 → 候选时刻 → AI 动机复核 → `push.wake` 预约 → 面板可预览「她此刻会说什么」+ 全量诊断日志。
+
+## G. 日历内置「暖桃」主题（2026-08-31）
+
+日历主题弹窗加了第 7 个内置主题 `peach`（暖桃），与「挂念」APP 同一暖桃色系，
+免去用户手动粘自定义 CSS：
+
+- `lib/calendar-storage.ts` — `CALENDAR_THEME_IDS` 增加 `"peach"`
+- `components/calendar-app.tsx` — `CALENDAR_THEMES` 增加 `{ id: "peach", name: "暖桃" }`
+- `styles/tokens.css` — `[data-calendar-theme="peach"]` 全量 token（含 hair/glass/scrim 与八色事件色板，整体偏暖降饱和）
+- `styles/calendar.css` — peach 缩略色块 + 主题专属珊瑚渐变 FAB、奶油色时间轴列头行

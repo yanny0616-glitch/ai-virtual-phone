@@ -63,6 +63,7 @@ const CALENDAR_THEMES: Array<{ id: (typeof CALENDAR_THEME_IDS)[number]; name: st
   { id: "mint", name: "薄荷" },
   { id: "mist", name: "雾紫" },
   { id: "sakura", name: "樱粉" },
+  { id: "peach", name: "暖桃" },
 ];
 
 function buildOwnerOptions(): OwnerOption[] {

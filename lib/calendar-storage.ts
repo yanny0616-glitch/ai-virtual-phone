@@ -54,7 +54,7 @@ const LEGACY_THEME_MAP: Record<string, string> = {
   melon: "mint",
 };
 
-export const CALENDAR_THEME_IDS = ["light", "dark", "cream", "mint", "mist", "sakura"] as const;
+export const CALENDAR_THEME_IDS = ["light", "dark", "cream", "mint", "mist", "sakura", "peach"] as const;
 
 export function normalizeCalendarTheme(theme: unknown): string {
   if (typeof theme !== "string" || !theme) return DEFAULT_CALENDAR_CONFIG.theme;
