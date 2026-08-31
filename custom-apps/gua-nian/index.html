@@ -254,6 +254,67 @@
   }
   .stepper .val { font-size: 18px; font-weight: 700; min-width: 30px; text-align: center; }
 
+  /* ── 页签 ─────────────────────────── */
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab {
+    flex: 1; padding: 9px 0; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--card); color: var(--tx2);
+    font-size: 13px; font-weight: 700; letter-spacing: 4px; text-indent: 4px;
+    cursor: pointer; font-family: inherit; transition: all .2s ease;
+  }
+  .tab.on {
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    color: #fff; border-color: transparent;
+    box-shadow: 0 6px 18px rgba(255, 107, 157, .28);
+  }
+
+  /* ── 记录页 ───────────────────────── */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md);
+    padding: 13px 6px 11px; text-align: center;
+    box-shadow: 0 4px 16px rgba(180, 120, 110, .08);
+    animation: rise .4s ease both;
+  }
+  .stat .num {
+    font-size: 24px; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums;
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .stat .cap { font-size: 10px; color: var(--tx3); letter-spacing: 2px; margin-top: 4px; }
+
+  details.day-card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
+    margin-bottom: 12px; box-shadow: 0 6px 24px rgba(180, 120, 110, .10);
+    animation: rise .4s ease both; overflow: hidden;
+  }
+  .day-sum { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 11px; padding: 15px 16px; }
+  .day-sum::-webkit-details-marker { display: none; }
+  .day-sum .emo { font-size: 26px; line-height: 1; flex: none; filter: drop-shadow(0 3px 8px rgba(200, 130, 120, .3)); }
+  .day-sum .mid { flex: 1; min-width: 0; }
+  .day-sum .d1 { font-size: 13px; font-weight: 700; display: flex; align-items: baseline; gap: 7px; }
+  .day-sum .d1 .wd { font-size: 11px; color: var(--tx3); font-weight: 600; }
+  .day-sum .d1 .hearts { margin-left: auto; font-size: 11px; color: var(--acc2); font-weight: 700; letter-spacing: 1px; }
+  .day-sum .d2 { font-size: 11.5px; color: var(--tx2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .day-sum .arr { flex: none; color: var(--tx3); font-size: 11px; transition: transform .25s ease; }
+  details.day-card[open] .day-sum .arr { transform: rotate(90deg); }
+  .day-body { padding: 2px 16px 15px; border-top: 1px dashed var(--line); }
+  .day-meta { display: flex; gap: 8px; flex-wrap: wrap; padding: 11px 0 4px; }
+  .dec { position: relative; padding: 9px 0 9px 26px; }
+  .dec + .dec { border-top: 1px dashed rgba(160, 110, 100, .10); }
+  .dec .hh { position: absolute; left: 2px; top: 11px; font-size: 13px; }
+  .dec .hh.on { color: var(--acc2); }
+  .dec .hh.no { color: var(--tx3); }
+  .dec .row1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .dec .tm { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--tx2); font-weight: 700; }
+  .dec .tt { font-size: 13px; font-weight: 600; }
+  .dec .why { font-size: 12px; color: var(--tx2); line-height: 1.6; margin-top: 3px; }
+  .dec.no .why, .dec.no .tt { color: var(--tx3); }
+  .badge.sent { background: rgba(245, 107, 156, .10); color: var(--acc2); border: 1px solid rgba(245, 107, 156, .3); }
+  .badge.replied { background: rgba(42, 168, 118, .10); color: var(--good); border: 1px solid rgba(42, 168, 118, .3); }
+  .badge.wait { background: rgba(255, 143, 112, .10); color: var(--acc); border: 1px solid rgba(255, 143, 112, .35); }
+  .archive-note { font-size: 11px; color: var(--tx3); text-align: center; padding: 4px 0 2px; line-height: 1.7; }
+
   /* toast（本地兜底） */
   #toast {
     position: fixed; left: 50%; bottom: calc(var(--ai-phone-app-safe-bottom, 0px) + 70px);
@@ -281,6 +342,11 @@
       <div class="name" id="who-name"></div>
       <div class="now" id="who-now"></div>
     </div>
+  </div>
+
+  <div class="tabs" id="tabs" hidden>
+    <button class="tab on" data-tab="today">今 天</button>
+    <button class="tab" data-tab="archive">记 录</button>
   </div>
 
   <div id="view"></div>
@@ -325,6 +391,8 @@
     plan: null,            // db 记录 {id, date, characterId, items:[{time,fireAt,act,why,intent,delivery,reason,wakeId}]}
     logs: null,            // db 记录 {id, items:[{at,text}]}
     busy: false,
+    tab: "today",          // today | archive
+    archive: null,         // 记录页缓存 {at, dates[], byDate:{date:{day,plan}}, msgs[]}
   };
   const $ = (s) => document.querySelector(s);
   const pad = (n) => String(n).padStart(2, "0");
@@ -411,6 +479,26 @@
     const qs = S.settings.quietStart, qe = S.settings.quietEnd;
     if (!qs || !qe || qs === qe) return false;
     return qs < qe ? (hm >= qs && hm < qe) : (hm >= qs || hm < qe); // 跨零点
+  }
+
+  /* ================= 聊天上下文 ================= */
+  // 读最近的聊天记录（chat.read 权限）；未授权/无会话时返回空数组，不打断主流程
+  async function readRecentChat(limit) {
+    try {
+      const r = await AiPhone.chat.readHistory({ characterId: S.character.id, limit: limit || 60 });
+      return (r && r.messages || [])
+        .filter((m) => !m.isRetracted && (m.role === "user" || m.role === "assistant"))
+        .map((m) => ({ role: m.role, t: new Date(m.createdAt).getTime() || 0, c: String(m.content || "").replace(/\s+/g, " ").trim() }))
+        .filter((m) => m.c);
+    } catch (e) {
+      await log("读聊天记录失败（不影响编排，只是少了聊天上下文）：" + (e && e.message || e));
+      return [];
+    }
+  }
+  // 把最近聊天压成给模型看的几行摘录
+  function chatExcerpt(msgs, maxLines) {
+    return msgs.slice(-(maxLines || 20)).map((m) =>
+      (m.role === "user" ? "我：" : "TA：") + (m.c.length > 60 ? m.c.slice(0, 60) + "…" : m.c));
   }
 
   /* ================= 数据 ================= */
@@ -578,6 +666,9 @@
         S.busy = false; render(); return;
       }
       await log("候选时刻：" + cands.map((c) => c.time + "·" + c.source).join("，"));
+      const chat = await readRecentChat(60);
+      const lines = chatExcerpt(chat, 20);
+      if (lines.length) await log("已读入最近 " + lines.length + " 句聊天作为判断上下文");
       const parsed = await generateJson({
         characterId: S.character.id,
         appTags: ["companion", "impulse"],
@@ -586,10 +677,12 @@
           "你是当前角色的内心。逐个判断：在下面每个候选时刻、做完那件事之后，TA会不会真的想给用户发消息？不是每个都要发——按TA的性格克制判断。",
           '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"why":"判断理由（20字内）","intent":"act为true时TA当时的第一人称心理动机（40字内，不写台词），否则空字符串"}]}。decisions 与候选时刻一一对应、顺序一致。',
           "TA今天的生活面：", JSON.stringify({ mood: S.day.mood, energy: S.day.energy, schedule: S.day.schedule }),
+          lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
+          lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
           "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
           JSON.stringify(cands.map((c) => ({ time: c.time, justFinished: c.source }))),
           "", "约束：今天最多真的发 " + S.settings.quota + " 条；免打扰时段 " + S.settings.quietStart + "–" + S.settings.quietEnd + "。",
-        ].join("\n"),
+        ].filter((s) => s !== null).join("\n"),
       });
       const decisions = Array.isArray(parsed.decisions) ? parsed.decisions : [];
       await cancelTodayWakes();
@@ -619,7 +712,8 @@
         items.push(item);
       }
       S.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === S.character.id,
-        { date: todayStr(), characterId: S.character.id, items });
+        { date: todayStr(), characterId: S.character.id, items, chatUsed: lines.length, plannedAt: Date.now() });
+      S.archive = null; // 记录页缓存失效
       toast(armedCount ? "TA今天有 " + armedCount + " 个想起你的时刻" : "TA今天想安静地过");
     } catch (e) {
       toast("编排失败：" + (e && e.message || e));
@@ -675,10 +769,12 @@
     } else { who.hidden = true; }
 
     const v = $("#view");
+    $("#tabs").hidden = !S.character;
     if (!S.character) {
       v.innerHTML = '<div class="card empty"><div class="art">🕊️</div><p>还没有可挂念的人。<br>先去创建一个角色，再回来打开这里。</p></div>';
       return;
     }
+    if (S.tab === "archive") { renderArchive(); return; }
     if (!S.day) {
       v.innerHTML =
         '<div class="card empty"><div class="art">🌅</div>' +
@@ -755,6 +851,121 @@
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + "</div>" + intent + "</div>";
   }
 
+  /* ================= 记录页 ================= */
+  async function loadArchive() {
+    if (S.archive && Date.now() - S.archive.at < 60000) return S.archive;
+    const cid = S.character.id;
+    const [days, plans, msgs] = await Promise.all([
+      AiPhone.db.list("days", { limit: 100 }),
+      AiPhone.db.list("plans", { limit: 100 }),
+      readRecentChat(200),
+    ]);
+    const byDate = {};
+    for (const d of days || []) if (d.characterId === cid) byDate[d.date] = { day: d, plan: null };
+    for (const p of plans || []) if (p.characterId === cid) {
+      if (!byDate[p.date]) byDate[p.date] = { day: null, plan: null };
+      byDate[p.date].plan = p;
+    }
+    msgs.sort((a, b) => a.t - b.t);
+    S.archive = { at: Date.now(), dates: Object.keys(byDate).sort().reverse(), byDate, msgs };
+    return S.archive;
+  }
+
+  // 一条心动时刻此刻的真实状态：结合聊天记录推断发没发出、用户回没回
+  function decStatus(w, msgs) {
+    if (!w.act) return { cls: "no", heart: "♡", badge: '<span class="badge off">未起念</span>' };
+    if (w.fireAt > Date.now()) {
+      return w.delivery === "push"
+        ? { cls: "on", heart: "♥", badge: '<span class="badge wait">待发 · 离线可达</span>' }
+        : { cls: "on", heart: "♥", badge: '<span class="badge local" title="' + esc(w.reason || "") + '">待发 · 仅在线</span>' };
+    }
+    // 已到时刻：在聊天记录里找到点后 3 小时内TA发出的那条
+    const sent = msgs.find((m) => m.role === "assistant" && m.t >= w.fireAt - 90000 && m.t <= w.fireAt + 3 * 3600000);
+    if (!sent) return { cls: "on", heart: "♥", badge: '<span class="badge done" title="聊天记录里没找到对应消息：可能没发成，也可能超出了可读的最近 200 条">已到时刻</span>' };
+    const rep = msgs.find((m) => m.role === "user" && m.t > sent.t);
+    return rep
+      ? { cls: "on", heart: "♥", badge: '<span class="badge replied">已发出 · 你回了</span>', sent }
+      : { cls: "on", heart: "♥", badge: '<span class="badge sent">已发出</span>', sent };
+  }
+
+  async function renderArchive() {
+    const v = $("#view");
+    const req = (S._arcReq = (S._arcReq || 0) + 1);
+    v.innerHTML = '<div class="card empty"><div class="art">🗂️</div><p>翻看TA想起你的那些日子…</p></div>';
+    let arc;
+    try { arc = await loadArchive(); } catch (e) {
+      v.innerHTML = '<div class="card empty"><div class="art">🌫️</div><p>记录读取失败：' + esc(e && e.message || e) + "</p></div>";
+      return;
+    }
+    if (req !== S._arcReq || S.tab !== "archive") return; // 期间切走了就不画
+
+    // 近 7 天统计
+    const d7 = new Date(); d7.setDate(d7.getDate() - 6);
+    const from = d7.getFullYear() + "-" + pad(d7.getMonth() + 1) + "-" + pad(d7.getDate());
+    let nAct = 0, nSent = 0, nRep = 0;
+    for (const date of arc.dates) {
+      if (date < from) continue;
+      const p = arc.byDate[date].plan;
+      for (const w of (p && p.items) || []) {
+        if (!w.act) continue;
+        nAct++;
+        const st = decStatus(w, arc.msgs);
+        if (st.badge.indexOf("已发出") >= 0) nSent++;
+        if (st.badge.indexOf("你回了") >= 0) nRep++;
+      }
+    }
+    let html =
+      '<div class="stats">' +
+      '<div class="stat"><div class="num">' + nAct + '</div><div class="cap">7天起念</div></div>' +
+      '<div class="stat" style="animation-delay:60ms"><div class="num">' + nSent + '</div><div class="cap">已发出</div></div>' +
+      '<div class="stat" style="animation-delay:120ms"><div class="num">' + (nSent ? Math.round(nRep / nSent * 100) + "%" : "—") + '</div><div class="cap">回复率</div></div>' +
+      "</div>";
+
+    if (!arc.dates.length) {
+      html += '<div class="card empty"><div class="art">🌱</div><p>还没有任何记录。<br>回「今天」页生成TA的一天，这里就会开始留痕。</p></div>';
+      v.innerHTML = html; return;
+    }
+
+    arc.dates.forEach((date, di) => {
+      const rec = arc.byDate[date];
+      const day = rec.day, plan = rec.plan;
+      const items = (plan && plan.items) || [];
+      const acted = items.filter((w) => w.act).length;
+      const wd = "日一二三四五六"[new Date(date + "T00:00:00").getDay()];
+      const isToday = date === todayStr();
+      let body = "";
+      if (day) {
+        body += '<div class="day-meta">' +
+          '<span class="chip">' + esc(day.moodEmoji || "🌙") + " " + esc(day.mood || "") + "</span>" +
+          '<span class="chip">⚡ 精力 ' + (day.energy != null ? day.energy : "?") + "%</span>" +
+          (day.location ? '<span class="chip">📍 ' + esc(day.location) + "</span>" : "") +
+          (plan && plan.chatUsed ? '<span class="chip">💬 判断时读了 ' + plan.chatUsed + " 句聊天</span>" : "") +
+          "</div>";
+      }
+      if (items.length) {
+        body += items.map((w) => {
+          const st = decStatus(w, arc.msgs);
+          return '<div class="dec ' + st.cls + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
+            '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + "</div>" +
+            '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
+            (st.sent ? '<div class="why" style="color:var(--tx3)">' + fmtHM(st.sent.t) + " · " + esc(st.sent.c.length > 46 ? st.sent.c.slice(0, 46) + "…" : st.sent.c) + "</div>" : "") +
+            "</div>";
+        }).join("");
+      } else {
+        body += '<div class="archive-note">这天没有编排记录' + (day ? "（只生成了生活面）" : "") + "</div>";
+      }
+      html += '<details class="day-card"' + (isToday || (di === 0 && !arc.byDate[todayStr()]) ? " open" : "") + ' style="animation-delay:' + Math.min(di * 50, 400) + 'ms">' +
+        '<summary class="day-sum"><span class="emo">' + esc(day && day.moodEmoji || "🗓️") + "</span>" +
+        '<span class="mid"><span class="d1">' + esc(date.slice(5).replace("-", " / ")) + '<span class="wd">周' + wd + (isToday ? " · 今天" : "") + "</span>" +
+        (acted ? '<span class="hearts">♥×' + acted + "</span>" : '<span class="hearts" style="color:var(--tx3)">安静的一天</span>') + "</span>" +
+        '<span class="d2">' + esc(day && day.mood || "没有生活面记录") + "</span></span>" +
+        '<span class="arr">▶</span></summary>' +
+        '<div class="day-body">' + body + "</div></details>";
+    });
+    html += '<div class="archive-note">发出 / 回复状态是对照最近 200 条聊天记录推断的，更早的日子可能显示「已到时刻」。</div>';
+    v.innerHTML = html;
+  }
+
   function previewCard() {
     return '<div class="card"><div class="sec-head"><span class="t">此 刻</span></div>' +
       '<button class="ghost-btn" id="btn-preview">听听TA此刻会说什么</button>' +
@@ -804,7 +1015,7 @@
     const changed = !S.character || S.character.id !== cid;
     S.character = S.characters.find((c) => c.id === cid) || S.character;
     closeSheet();
-    if (changed) { S.day = null; S.plan = null; await loadDayAndPlan(); }
+    if (changed) { S.day = null; S.plan = null; S.archive = null; await loadDayAndPlan(); }
     render();
     toast("已保存");
   }
@@ -816,6 +1027,14 @@
     $("#btn-save-settings").onclick = () => { saveSettings().catch((e) => toast("保存失败：" + (e && e.message || e))); };
     $("#q-minus").onclick = () => { const el = $("#q-val"); el.textContent = Math.max(1, +el.textContent - 1); };
     $("#q-plus").onclick = () => { const el = $("#q-val"); el.textContent = Math.min(6, +el.textContent + 1); };
+    document.querySelectorAll("#tabs .tab").forEach((b) => {
+      b.onclick = () => {
+        if (S.tab === b.dataset.tab) return;
+        S.tab = b.dataset.tab;
+        document.querySelectorAll("#tabs .tab").forEach((x) => x.classList.toggle("on", x === b));
+        render();
+      };
+    });
 
     try {
       const [launch, chars] = await Promise.all([
