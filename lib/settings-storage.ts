@@ -15,6 +15,20 @@ import type {
 } from "./settings-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
 import { createBuiltinPreset, BUILTIN_PRESET_VERSION } from "./builtin-preset";
+import {
+    NOVELAI_DEFAULT_MODEL,
+    NOVELAI_DEFAULT_NOISE_SCHEDULE,
+    NOVELAI_DEFAULT_RESOLUTION,
+    NOVELAI_DEFAULT_SAMPLER,
+    NOVELAI_DEFAULT_SCALE,
+    NOVELAI_DEFAULT_STEPS,
+    normalizeNovelAiModel,
+    normalizeNovelAiNoiseSchedule,
+    normalizeNovelAiResolution,
+    normalizeNovelAiSampler,
+    normalizeNovelAiScale,
+    normalizeNovelAiSteps,
+} from "./novelai-image-config";
 import { areTagsEqual, normalizePromptScopeTags, normalizeTags } from "./content-tag-utils";
 import {
     readPresetsCache, writePresetsCache,
@@ -645,8 +659,25 @@ export function saveVoiceConfigs(configs: VoiceApiConfig[]): void {
 
 // --- Image Generation Settings ──────────────────────────────────────────
 
+export const DEFAULT_NOVELAI_PRESET: import("./settings-types").NovelAiPreset = {
+    id: "preset_default_anime",
+    name: "默认动漫预设",
+    model: NOVELAI_DEFAULT_MODEL,
+    resolution: NOVELAI_DEFAULT_RESOLUTION,
+    steps: NOVELAI_DEFAULT_STEPS,
+    scale: NOVELAI_DEFAULT_SCALE,
+    sampler: NOVELAI_DEFAULT_SAMPLER,
+    noiseSchedule: NOVELAI_DEFAULT_NOISE_SCHEDULE,
+    positivePrompt: "masterpiece, best quality, amazing quality, very aesthetic, absurdres",
+    negativePrompt: "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name",
+    qualityToggle: true,
+    smea: false,
+    smeaDyn: false,
+};
+
 export const DEFAULT_IMAGE_GENERATION_SETTINGS: ImageGenerationSettings = {
     enabled: false,
+    provider: "openai",
     requestMode: "direct",
     apiKey: "",
     baseUrl: "https://api.openai.com/v1",
@@ -654,6 +685,11 @@ export const DEFAULT_IMAGE_GENERATION_SETTINGS: ImageGenerationSettings = {
     size: "1024x1024",
     quality: "auto",
     extraPrompt: "",
+    novelai: {
+        apiKey: "",
+        activePresetId: DEFAULT_NOVELAI_PRESET.id,
+        presets: [DEFAULT_NOVELAI_PRESET],
+    },
     characterReferences: {},
     imageHosting: {
         provider: "none",
@@ -665,32 +701,69 @@ export const DEFAULT_IMAGE_GENERATION_SETTINGS: ImageGenerationSettings = {
     },
 };
 
+function normalizeNovelAiPreset(preset: Partial<import("./settings-types").NovelAiPreset> | null | undefined, index: number): import("./settings-types").NovelAiPreset {
+    return {
+        id: typeof preset?.id === "string" && preset.id.trim() ? preset.id.trim() : `preset_nai_${Date.now()}_${index}`,
+        name: typeof preset?.name === "string" && preset.name.trim() ? preset.name.trim() : `预设 ${index + 1}`,
+        model: normalizeNovelAiModel(preset?.model),
+        resolution: normalizeNovelAiResolution(preset?.resolution),
+        steps: normalizeNovelAiSteps(preset?.steps),
+        scale: normalizeNovelAiScale(preset?.scale),
+        sampler: normalizeNovelAiSampler(preset?.sampler),
+        noiseSchedule: normalizeNovelAiNoiseSchedule(preset?.noiseSchedule),
+        positivePrompt: typeof preset?.positivePrompt === "string" ? preset.positivePrompt : DEFAULT_NOVELAI_PRESET.positivePrompt,
+        negativePrompt: typeof preset?.negativePrompt === "string" ? preset.negativePrompt : DEFAULT_NOVELAI_PRESET.negativePrompt,
+        qualityToggle: preset?.qualityToggle !== false,
+        smea: preset?.smea === true,
+        smeaDyn: preset?.smeaDyn === true,
+    };
+}
+
 function normalizeImageGenerationSettings(settings: Partial<ImageGenerationSettings> | null | undefined): ImageGenerationSettings {
     const refs = settings?.characterReferences && typeof settings.characterReferences === "object"
         ? settings.characterReferences
         : {};
+    const provider = settings?.provider === "novelai" ? "novelai" : "openai";
     const requestMode = settings?.requestMode === "server" || settings?.requestMode === "direct"
         ? settings.requestMode
         : DEFAULT_IMAGE_GENERATION_SETTINGS.requestMode;
     const hosting: Partial<ImageGenerationSettings["imageHosting"]> = settings?.imageHosting && typeof settings.imageHosting === "object"
         ? settings.imageHosting
         : {};
-    const provider = hosting.provider === "imgbb" ? "imgbb" : "none";
+    const hostingProvider = hosting.provider === "imgbb" ? "imgbb" : "none";
     const defaultExpirationSeconds = typeof hosting.defaultExpirationSeconds === "number"
         ? Math.max(0, Math.min(15552000, Math.floor(hosting.defaultExpirationSeconds)))
         : DEFAULT_IMAGE_GENERATION_SETTINGS.imageHosting.defaultExpirationSeconds;
     const maxUploadBytes = typeof hosting.maxUploadBytes === "number"
         ? Math.max(64 * 1024, Math.min(32 * 1024 * 1024, Math.floor(hosting.maxUploadBytes)))
         : DEFAULT_IMAGE_GENERATION_SETTINGS.imageHosting.maxUploadBytes;
+
+    const rawNai = settings?.novelai;
+    let naiPresets = Array.isArray(rawNai?.presets) && rawNai.presets.length > 0
+        ? rawNai.presets.map((p, idx) => normalizeNovelAiPreset(p, idx))
+        : [DEFAULT_NOVELAI_PRESET];
+    let activePresetId = typeof rawNai?.activePresetId === "string" ? rawNai.activePresetId : naiPresets[0].id;
+    if (!naiPresets.some(p => p.id === activePresetId)) {
+        activePresetId = naiPresets[0].id;
+    }
+
+    const novelai: import("./settings-types").NovelAiSettings = {
+        apiKey: typeof rawNai?.apiKey === "string" ? rawNai.apiKey : "",
+        activePresetId,
+        presets: naiPresets,
+    };
+
     return {
         ...DEFAULT_IMAGE_GENERATION_SETTINGS,
         ...(settings || {}),
+        provider,
         requestMode,
+        novelai,
         characterReferences: refs,
         imageHosting: {
             ...DEFAULT_IMAGE_GENERATION_SETTINGS.imageHosting,
             ...hosting,
-            provider,
+            provider: hostingProvider,
             defaultExpirationSeconds,
             maxUploadBytes,
             autoConvertToWebp: hosting.autoConvertToWebp !== false,
