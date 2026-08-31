@@ -19,6 +19,9 @@ jobs:
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       NEXT_PUBLIC_SELF_HOSTED_MODE: "false"
+      # 网易云 API 走同域的 /ncm/（Caddy 反代到 ncm-api 容器），前端同源直连不用 CORS。
+      # NEXT_PUBLIC_* 是构建时内联的，只能在这里给，写服务器上的 .env.local 无效。
+      NEXT_PUBLIC_DEFAULT_NETEASE_API_BASE: "https://float.yanny.top/ncm"
     steps:
       - uses: actions/checkout@v7
 
