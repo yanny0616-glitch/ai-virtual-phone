@@ -101,6 +101,15 @@ async function assertDedicatedProject(params: {
   return { ok: true };
 }
 
+// 报出实际收到的字符数：客户端 JS 是旧版时这里恒为 0，
+// 和「取到了但内容不对」是完全不同的两种故障，光看一句「无效」分不出来。
+function badPackage(label: string, code: string) {
+  return NextResponse.json(
+    { ok: false, error: `${label}部署包无效（收到 ${code.length} 字符）。` },
+    { status: 400 },
+  );
+}
+
 export async function POST(request: Request) {
   let payload: DeployRequest;
   try {
@@ -128,42 +137,42 @@ export async function POST(request: Request) {
     || !gatewayCode.includes("Deno.serve")
     || gatewayCode.length > 600_000
   ) {
-    return NextResponse.json({ ok: false, error: "离线推送网关部署包无效。" }, { status: 400 });
+    return badPackage("离线推送网关", gatewayCode);
   }
   if (
     !generateCode.includes("离线推送·兜底生成执行器")
     || !generateCode.includes("Deno.serve")
     || generateCode.length > 900_000
   ) {
-    return NextResponse.json({ ok: false, error: "离线生成器部署包无效。" }, { status: 400 });
+    return badPackage("离线生成器", generateCode);
   }
   if (
     !resultCode.includes("iPhone 快捷指令结果入口")
     || !resultCode.includes("Deno.serve")
     || resultCode.length > 600_000
   ) {
-    return NextResponse.json({ ok: false, error: "快捷指令结果入口部署包无效。" }, { status: 400 });
+    return badPackage("快捷指令结果入口", resultCode);
   }
   if (
     !bridgeCode.includes("现实桥服务端联动执行器")
     || !bridgeCode.includes("Deno.serve")
     || bridgeCode.length > 900_000
   ) {
-    return NextResponse.json({ ok: false, error: "现实桥联动执行器部署包无效。" }, { status: 400 });
+    return badPackage("现实桥联动执行器", bridgeCode);
   }
   if (
     !screenChatCode.includes("屏幕速聊·同步问答入口")
     || !screenChatCode.includes("Deno.serve")
     || screenChatCode.length > 600_000
   ) {
-    return NextResponse.json({ ok: false, error: "屏幕速聊入口部署包无效。" }, { status: 400 });
+    return badPackage("屏幕速聊入口", screenChatCode);
   }
   if (
     !recheckCode.includes("云端动态复核")
     || !recheckCode.includes("Deno.serve")
     || recheckCode.length > 600_000
   ) {
-    return NextResponse.json({ ok: false, error: "云端动态复核部署包无效。" }, { status: 400 });
+    return badPackage("云端动态复核", recheckCode);
   }
   if (
     !schemaSql.startsWith("-- ai-phone-personal-push-schema-v1")
@@ -171,7 +180,7 @@ export async function POST(request: Request) {
     || !schemaSql.includes("__PROJECT_REF__")
     || schemaSql.length > 300_000
   ) {
-    return NextResponse.json({ ok: false, error: "离线推送数据库脚本无效。" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: `离线推送数据库脚本无效（收到 ${schemaSql.length} 字符）。` }, { status: 400 });
   }
 
   try {
