@@ -14,7 +14,12 @@ import type {
     PromptOrderEntry,
 } from "./settings-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { createBuiltinPreset, BUILTIN_PRESET_VERSION } from "./builtin-preset";
+import {
+    createBuiltinPreset,
+    BUILTIN_PRESET_VERSION,
+    BUILTIN_PROMPT_PATCH_VERSION,
+    PATCHABLE_PROMPT_IDS,
+} from "./builtin-preset";
 import {
     NOVELAI_DEFAULT_MODEL,
     NOVELAI_DEFAULT_NOISE_SCHEDULE,
@@ -174,6 +179,33 @@ function preserveCustomAppPresetPrompts(fresh: PresetConfig, previous: PresetCon
 }
 
 
+/**
+ * 把新加的出厂条目补进内置预设，一条已有内容都不改。
+ * 走这条路而不是升 BUILTIN_PRESET_VERSION：升版本会用出厂内容整份重写，
+ * 用户改过的内置预设会被打回原样，为了加一个条目不值当。
+ * 返回 null = 已经是最新补丁号，不用动。
+ */
+function backfillBuiltinPrompts(preset: PresetConfig): PresetConfig | null {
+    if ((preset.builtInPatchVersion ?? 0) >= BUILTIN_PROMPT_PATCH_VERSION) return null;
+    const factory = createBuiltinPreset();
+    const havePrompt = new Set((preset.prompts ?? []).map(prompt => prompt.identifier));
+    const haveOrder = new Set((preset.prompt_order ?? []).map(entry => entry.identifier));
+    const addPrompts = (factory.prompts ?? []).filter(
+        prompt => PATCHABLE_PROMPT_IDS.includes(prompt.identifier) && !havePrompt.has(prompt.identifier),
+    );
+    const addOrder = (factory.prompt_order ?? []).filter(
+        entry => PATCHABLE_PROMPT_IDS.includes(entry.identifier) && !haveOrder.has(entry.identifier),
+    );
+    return {
+        ...preset,
+        builtInPatchVersion: BUILTIN_PROMPT_PATCH_VERSION,
+        // 一律追加到末尾：这些条目是给 chatHistory 之后那一区准备的，
+        // 挪进 system 区会让整段系统提示词每轮重算缓存
+        prompts: addPrompts.length ? [...(preset.prompts ?? []), ...addPrompts] : preset.prompts,
+        prompt_order: addOrder.length ? [...(preset.prompt_order ?? []), ...addOrder] : preset.prompt_order,
+    };
+}
+
 // --- Presets ──────────────────────────────────────────
 
 export function loadPresets(): PresetConfig[] {
@@ -197,8 +229,15 @@ export function loadPresets(): PresetConfig[] {
             presets[idx] = fresh;
             savePresets(presets);
             shouldPersistCleanup = false;
-        } else if (shouldPersistCleanup) {
-            savePresets(presets);
+        } else {
+            const patched = backfillBuiltinPrompts(existingBuiltin);
+            if (patched) {
+                presets[presets.indexOf(existingBuiltin)] = patched;
+                savePresets(presets);
+                shouldPersistCleanup = false;
+            } else if (shouldPersistCleanup) {
+                savePresets(presets);
+            }
         }
 
         return presets;

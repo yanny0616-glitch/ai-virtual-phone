@@ -298,6 +298,15 @@
   （`tags: ["chat"]`）和群聊版 `custom_app_context_group`（`tags: ["group_chat"]`），
   内容就是那个宏，**排在 `prompt_order` 最末**
 
+**老用户怎么拿到这个条目**：内置预设的副本只在 `BUILTIN_PRESET_VERSION` 升版本时
+才会被出厂内容整份重写，而那会把用户改过的内容打回原样。为了加一个条目不值当，
+所以另开了一个只增不改的补丁号 `BUILTIN_PROMPT_PATCH_VERSION`
+（`lib/builtin-preset.ts` + `settings-storage.ts` 的 `backfillBuiltinPrompts`）：
+只把 `PATCHABLE_PROMPT_IDS` 里列的新条目追加到末尾，一条已有内容都不动。
+以后再加出厂条目走同一条路——补丁号 +1，identifier 进那张表。
+**用户自建 / 导入的预设不在补丁范围内**，那是用户自己的东西，不该被悄悄改；
+要用就自己加一条内容为 `{{customAppContext}}` 的条目，或把这个宏拼进已有条目。
+
 **为什么必须排在 `shortTermMemory` 之后**：`lib/llm-provider-adapter.ts` 给整个 `system`
 串只挂一个 `cache_control` 断点，任何进 `system` 的逐轮变动文本都会让整段系统提示词
 （人设、世界书、记忆）每轮重新计费。放在 chatHistory 之后，作废的只是尾巴那一小截。

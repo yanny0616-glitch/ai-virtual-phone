@@ -68,6 +68,8 @@ export type Prompt = {
 export type PresetConfig = SettingItemMeta & {
     builtIn?: boolean;
     builtInVersion?: number;
+    /** 出厂条目补丁号，见 builtin-preset.ts 的 BUILTIN_PROMPT_PATCH_VERSION */
+    builtInPatchVersion?: number;
     temperature: number;
     top_p: number;
     top_k: number;

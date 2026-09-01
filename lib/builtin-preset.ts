@@ -8,6 +8,14 @@ import { getCheckPhonePromptTags } from "./checkphone-config";
 export const BUILTIN_PRESET_ID = "builtin_default_v1";
 export const BUILTIN_PRESET_VERSION = 262; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
 
+/** 只增不改的出厂条目补丁号。加了新的出厂条目时 +1，并把它的 identifier 写进
+ *  PATCHABLE_PROMPT_IDS。和 BUILTIN_PRESET_VERSION 的区别是它一条已有内容都不动，
+ *  所以改过内置预设的用户也能拿到新条目，不会被打回出厂。 */
+export const BUILTIN_PROMPT_PATCH_VERSION = 1;
+
+/** 允许被补丁补回来的条目。只列新加的——不然用户主动删掉的老条目会被一起塞回去。 */
+export const PATCHABLE_PROMPT_IDS = ["custom_app_context", "custom_app_context_group"];
+
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
     return {
@@ -18,6 +26,7 @@ export function createBuiltinPreset(): PresetConfig {
         updatedAt: now,
         builtIn: true,
         builtInVersion: BUILTIN_PRESET_VERSION,
+        builtInPatchVersion: BUILTIN_PROMPT_PATCH_VERSION,
         temperature: 0.8,
         top_p: 1,
         top_k: 0,
