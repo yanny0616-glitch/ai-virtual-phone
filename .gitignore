@@ -24,6 +24,9 @@ tools/weixin-local-assistant/config.txt
 自定义APP制作说明-完整版.md
 自定义APP制作说明-完整版改.md
 
+# eslint 增量缓存（npm run lint / lint:changed 生成，机器本地产物）
+.eslintcache
+
 # Tailscale serve cert files (written into cwd by `tailscale cert`)
 *.ts.net.crt
 *.ts.net.key

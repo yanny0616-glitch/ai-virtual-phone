@@ -16,7 +16,21 @@
 4. 本机 systemd timer 每 5 分钟拉一次最新 Release，校验 sha256 → 解包 → 切软链 → 重启服务
 5. 想验证结果：等 timer，或手动 `sudo systemctl start float-deploy.service`，再看 `cat /opt/float/current/VERSION`
 
-本地只允许 `npm run dev`（调试用）、`npm run lint`、`npm run check:*`。
+本地只允许 `npm run dev`（调试用）、lint、`npm run check:*`。
+
+**lint 别用全量。** `eslint .` 要跑好几分钟（900+ 源文件 × 类型感知规则 × React Compiler
+数据流分析），日常改几个文件不值当。按这个顺序选：
+
+| 命令 | 范围 | 耗时 |
+|---|---|---|
+| `npx tsc --noEmit` | 只查类型 | ~40 秒 |
+| `npm run lint:changed` | 未提交的改动（默认） | 秒级 |
+| `npm run lint:changed -- upstream/main` | fork 相对上游的全部改动 | ~35 秒 |
+| `npm run lint` | 全量，带增量缓存 | 首次几分钟，之后只查变过的 |
+| `npm run lint:all` | 全量，无缓存（CI 用） | 几分钟 |
+
+多数情况下 `npx tsc --noEmit` 就够；要查 eslint 专属规则（`set-state-in-effect`、
+`Date.now` purity 这类 tsc 看不见的）才需要 lint。
 
 ## 仓库地址
 
