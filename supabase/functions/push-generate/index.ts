@@ -650,15 +650,18 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // ── 未回应降速：预约带 cooldownRounds（>0）时，到点先看用户回没回。
-    // 数据源两处：聊天镜像（push_chat_mirror，App 在线时抄送）+ 离线期间本服务
-    // 已代发还没被浏览器取走的 push_outbox。规则与挂念本地一致：用户最后一条
-    // 之后角色的连续主动按「轮」数（相邻 3 分钟归一轮），最新一轮要晾满 30 分钟
-    // 才计数；达到阈值就取消这次生成。镜像没开（查不到该会话记录）则不拦。
+    // ── 发送前复核：到点了再综合判一次「这条现在发合不合适」。三个信号全部只读已有
+    // 数据、不调模型：未回应轮数、你是不是正聊着、离TA上一条主动多久。加权成「不合时宜度」，
+    // 过阈值就取消这次生成。判据写回挂念的计划，面板点开那条时刻就能展开看。
+    // 阈值来自挂念上传的 push_recheck_plans.context.presend*；匹配不到挂念的计划
+    // （不是它挂的预约）就只跑老的未回应硬规则。镜像没开（查不到会话记录）则一道都不拦。
+    // 轮数口径与挂念本地一致：用户最后一条之后角色的连续主动按「轮」算（相邻 3 分钟归一轮），
+    // 最新一轮要晾满 30 分钟才计数。数据源是聊天镜像 + 离线期间本服务代发的 push_outbox。
     if (job.kind === "timed_task") {
       const cooldownRounds = Number(payload.merge?.cooldownRounds);
+      const coolTarget = Number.isFinite(cooldownRounds) && cooldownRounds > 0 ? cooldownRounds : 0;
       const mirrorSessionId = typeof payload.merge?.sessionId === "string" ? payload.merge.sessionId : "";
-      if (Number.isFinite(cooldownRounds) && cooldownRounds > 0 && mirrorSessionId) {
+      if (mirrorSessionId) {
         try {
           const mirrorResponse = await rest(
             `push_chat_mirror?user_id=eq.${encodeURIComponent(job.user_id)}`
@@ -682,6 +685,13 @@ Deno.serve(async (req: Request) => {
               }
               prevT = t;
             }
+            // TA最后一条主动：镜像里最新的 assistant，和离线期间代发还没被取走的 outbox，取更晚的那个
+            let lastProactiveAt = 0;
+            const newestAssistant = mirrorRows.find(row => row.role === "assistant");
+            if (newestAssistant) {
+              const t = Date.parse(newestAssistant.message_at);
+              if (Number.isFinite(t)) lastProactiveAt = t;
+            }
             const newestMirrorAt = Date.parse(mirrorRows[0].message_at);
             if (Number.isFinite(newestMirrorAt)) {
               const outboxResponse = await rest(
@@ -696,15 +706,91 @@ Deno.serve(async (req: Request) => {
                 : [];
               for (const row of outboxRows) {
                 const t = Date.parse(row.created_at);
-                if (Number.isFinite(t) && nowMs - t >= graceMs) rounds += 1;
+                if (!Number.isFinite(t)) continue;
+                if (nowMs - t >= graceMs) rounds += 1;
+                if (t > lastProactiveAt) lastProactiveAt = t;
               }
             }
-            if (rounds >= cooldownRounds) {
-              await finish("done", `cooldown skip: ${rounds} unanswered rounds >= ${cooldownRounds}`);
-              return new Response("cooldown skip", { status: 200 });
+            const newestUser = mirrorRows.find(row => row.role === "user");
+            const lastUserAt = newestUser ? Date.parse(newestUser.message_at) : NaN;
+
+            // 挂念的这条时刻：靠 trigger_key 里的 wakeId 回查计划，顺带拿到用户调的阈值
+            type PresendPlan = {
+              plan_date: string;
+              context?: Record<string, unknown>;
+              decisions?: unknown[];
+              items?: { time?: string; wakeId?: string }[];
+            };
+            const characterId = payload.notify?.characterId || "";
+            const wakeId = job.trigger_key.startsWith("timedwake:") ? job.trigger_key.slice(10) : "";
+            let planRow: PresendPlan | null = null;
+            let planItem: { time?: string; wakeId?: string } | null = null;
+            if (characterId && wakeId) {
+              const planResponse = await rest(
+                `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
+                + `&character_id=eq.${encodeURIComponent(characterId)}`
+                // 取两天：跨零点触发时最新的那份可能已经是明天的计划，认 wakeId 不认日期
+                + "&select=plan_date,context,decisions,items&order=plan_date.desc&limit=2",
+              );
+              const planRows = planResponse.ok ? await planResponse.json() as PresendPlan[] : [];
+              for (const row of planRows) {
+                const hit = (row.items || []).find(item => item.wakeId === wakeId);
+                if (hit) { planRow = row; planItem = hit; break; }
+              }
+              if (!planRow) planRow = planRows[0] || null;
+            }
+            const planContext = planRow?.context || {};
+            const cfg = (key: string, def: number): number => {
+              const value = Number(planContext[key]);
+              return Number.isFinite(value) && value >= 0 ? value : def;
+            };
+            // 落在窗口内就按剩余比例给压力：刚说完话是 100，窗口边缘是 0
+            const closeness = (elapsedMs: number, windowMin: number): number => {
+              const span = windowMin * 60_000;
+              if (!(span > 0) || !Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs >= span) return 0;
+              return Math.round((1 - elapsedMs / span) * 100);
+            };
+            const pr = coolTarget > 0 ? Math.min(100, Math.round(rounds / coolTarget * 100)) : 0;
+            const pt = Number.isFinite(lastUserAt) ? closeness(nowMs - lastUserAt, cfg("presendTalkingMin", 15)) : 0;
+            const pg = lastProactiveAt ? closeness(nowMs - lastProactiveAt, cfg("presendGapMin", 60)) : 0;
+            const press = Math.round(pr * 0.4 + pt * 0.4 + pg * 0.2);
+            const maxPress = cfg("presendMax", 70);
+            const hardSkip = coolTarget > 0 && rounds >= coolTarget;
+            const blocked = hardSkip
+              ? `连续 ${rounds} 轮没等到你回`
+              : (planItem && press >= maxPress ? `此刻不合时宜（${press}%）` : "");
+
+            // 判据写回计划：不管发没发都写，面板要能看到"通过"的那次是几分过的
+            if (planRow && planItem) {
+              const prior = Array.isArray(planRow.decisions) ? planRow.decisions : [];
+              await rest(
+                `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
+                + `&character_id=eq.${encodeURIComponent(characterId)}`
+                + `&plan_date=eq.${encodeURIComponent(planRow.plan_date)}`,
+                {
+                  method: "PATCH",
+                  headers: { Prefer: "return=minimal" },
+                  body: JSON.stringify({
+                    decisions: [...prior, {
+                      at: nowMs,
+                      kind: "presend",
+                      time: planItem.time || "",
+                      by: "cloud",
+                      note: blocked || `到点复核通过（不合时宜度 ${press}%）`,
+                      blocked: !!blocked,
+                      scores: { pr, pt, pg, press, rounds, max: maxPress },
+                    }].slice(-60),
+                  }),
+                },
+              ).catch(() => undefined);
+            }
+
+            if (blocked) {
+              await finish("done", `presend skip: ${blocked} (press ${press}%, rounds ${rounds})`);
+              return;
             }
           }
-        } catch { /* 降速查询失败不阻塞生成，按原计划发 */ }
+        } catch { /* 复核查询失败不阻塞生成，按原计划发 */ }
       }
     }
 

@@ -40,6 +40,11 @@ type PlanContext = {
   chatCandidates?: string;
   bias?: string;
   wakePrefix?: string;
+  gateDailyCap?: number;
+  gateGapMin?: number;
+  gateHorizonMin?: number;
+  gateFreshMin?: number;
+  gateMinMsgs?: number;
 };
 type PlanRow = {
   session_id: string;
@@ -54,10 +59,15 @@ type PlanRow = {
 type Decision = { time?: string; act?: boolean; sem?: string; topic?: string; why?: string; intent?: string };
 type Extra = { time?: string; about?: string; intent?: string; why?: string };
 
-// 每份计划每天最多几次裁决调用。复核是省电功能，不该反过来把额度烧在判断上。
-const DAILY_RECHECK_CAP = 6;
-// cron 每 30 分钟派发一次，这里用 25 分钟做去重闸，容忍 cron 的抖动。
-const RECHECK_INTERVAL_MS = 25 * 60_000;
+// 门禁默认值，可被 App 上传的 context 里的同名字段覆盖（改设置不用重新部署云函数）。
+// 这一层每一道都只读本地状态，一次模型都不调——判断得勤和花钱多是两件事。
+const GATE_DEF = {
+  gateDailyCap: 8,     // 每份计划每天最多几次裁决调用
+  gateGapMin: 25,      // 两次裁决最小间隔（分钟）。cron 每 30 分钟派一次，留 5 分钟容抖动
+  gateHorizonMin: 240, // 最近的待发时刻在这么久以外就不判（分钟，0=不限）
+  gateFreshMin: 10,    // 最后一句话说完还不到这么久就先不判，等话说完（分钟，0=不等）
+  gateMinMsgs: 1,      // 上次裁决之后用户至少说这么多句才判
+};
 // 还有不到 2 分钟就到点的时刻不再改动，免得和 push-generate 抢同一条预约。
 const LEAD_MS = 2 * 60_000;
 
@@ -254,8 +264,62 @@ Deno.serve(async (req: Request) => {
 
   const nowMs = Date.now();
   const lastRecheckMs = plan.last_recheck_at ? Date.parse(plan.last_recheck_at) : NaN;
-  if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < RECHECK_INTERVAL_MS) {
-    return new Response("not due", { status: 200 });
+  const context = plan.context || {};
+  const gate = (key: keyof typeof GATE_DEF): number => {
+    const value = Number(context[key]);
+    return Number.isFinite(value) && value >= 0 ? value : GATE_DEF[key];
+  };
+
+  const items = Array.isArray(plan.items) ? plan.items : [];
+  const pending = items.filter(item => Number(item.fireAt) > nowMs + LEAD_MS);
+  const allDecisions = Array.isArray(plan.decisions) ? plan.decisions : [];
+  const priorDecisions = allDecisions.filter(d => (d as { kind?: string }).kind !== "gate");
+
+  // 门禁：全部过了才轮到下面那一次裁决调用。每一道都只读已有数据，不调模型，
+  // 所以可以放心让 cron 派得勤，甚至将来由客户端逐条消息触发。
+  const blocked = await (async (): Promise<string> => {
+    if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < gate("gateGapMin") * 60_000) return "离上次裁决还不够久";
+    if ((plan.recheck_count || 0) >= gate("gateDailyCap")) return "今天的裁决次数用完了";
+    if (pending.length === 0) return "今天没有还没到点的时刻";
+    const horizon = gate("gateHorizonMin") * 60_000;
+    const nearest = Math.min(...pending.map(item => Number(item.fireAt))) - nowMs;
+    if (horizon > 0 && nearest > horizon) return `最近的时刻还在 ${Math.round(nearest / 60_000)} 分钟以外`;
+
+    // 没新消息就没有新信息，再判一次只是烧额度。首次复核回看 6 小时，
+    // 别把开机前的对话全算成"新"。
+    const sinceMs = Number.isFinite(lastRecheckMs) ? lastRecheckMs : nowMs - 6 * 3600_000;
+    const freshResponse = await rest(
+      `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
+      + `&character_id=eq.${encodeURIComponent(characterId)}`
+      + "&role=eq.user"
+      + `&message_at=gt.${encodeURIComponent(new Date(sinceMs).toISOString())}`
+      + "&select=message_at&order=message_at.desc&limit=20",
+    );
+    const freshRows = freshResponse.ok ? await freshResponse.json() as { message_at: string }[] : [];
+    if (freshRows.length < Math.max(1, gate("gateMinMsgs"))) return "上次裁决之后你没说几句";
+    const freshMs = gate("gateFreshMin") * 60_000;
+    const lastMsgMs = Date.parse(freshRows[0]?.message_at || "");
+    if (freshMs > 0 && Number.isFinite(lastMsgMs) && nowMs - lastMsgMs < freshMs) return "你才刚说完，等一下再判";
+    return "";
+  })();
+
+  if (blocked) {
+    // 拦截原因写回 decisions：不带 time，App 合并裁决时会跳过它，只当诊断用。
+    // 原因没变就不写——cron 每半小时来一次，没必要每次都动这一行。
+    const prev = allDecisions.find(d => (d as { kind?: string }).kind === "gate") as { note?: string } | undefined;
+    if (prev?.note !== blocked) {
+      await rest(
+        plan.updated_at ? `${planFilter}&updated_at=eq.${encodeURIComponent(plan.updated_at)}` : planFilter,
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            decisions: [...priorDecisions, { at: nowMs, kind: "gate", note: blocked, by: "cloud" }].slice(-60),
+          }),
+        },
+      ).catch(() => undefined);
+    }
+    return new Response(blocked, { status: 200 });
   }
 
   // 先占坑再干活：后面任何一步失败都不会让 cron 每 30 分钟原地重试同一份计划。
@@ -274,25 +338,6 @@ Deno.serve(async (req: Request) => {
   await touch();
 
   const run = async (): Promise<void> => {
-    if ((plan.recheck_count || 0) >= DAILY_RECHECK_CAP) return;
-
-    // 判断的触发条件只有一个：用户在上次复核之后真的说了话。没新消息就没有新信息，
-    // 再判一次只是烧额度。首次复核回看 6 小时，别把开机前的对话全算成"新"。
-    const sinceMs = Number.isFinite(lastRecheckMs) ? lastRecheckMs : nowMs - 6 * 3600_000;
-    const freshResponse = await rest(
-      `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
-      + `&character_id=eq.${encodeURIComponent(characterId)}`
-      + "&role=eq.user"
-      + `&message_at=gt.${encodeURIComponent(new Date(sinceMs).toISOString())}`
-      + "&select=id&limit=1",
-    );
-    const freshRows = freshResponse.ok ? await freshResponse.json() as unknown[] : [];
-    if (freshRows.length === 0) return;
-
-    const items = Array.isArray(plan.items) ? plan.items : [];
-    const pending = items.filter(item => Number(item.fireAt) > nowMs + LEAD_MS);
-    if (pending.length === 0) return;
-
     // 时区：计划里的 time 是用户本地 HH:MM，fireAt 是绝对毫秒。两者一减就还原出本地偏移，
     // 后面给临时起念算时刻直接复用，不必猜数据库时区。
     // 挑第一条 time 合法的当基准；一条都没有就退回 UTC，同时不许云端起念——
@@ -341,7 +386,6 @@ Deno.serve(async (req: Request) => {
       ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse()
       : [];
 
-    const context = plan.context || {};
     // 免打扰和最小间隔在提示词里说过，但模型说了不算：和 App 本地一样再硬拦一道。
     const inQuiet = (hm: string) => {
       const qs = context.quietStart || "";
@@ -517,7 +561,6 @@ Deno.serve(async (req: Request) => {
     }
 
     nextItems.sort((a, b) => a.fireAt - b.fireAt);
-    const priorDecisions = Array.isArray(plan.decisions) ? plan.decisions : [];
     const saved = await touch({
       items: nextItems,
       decisions: [...priorDecisions, ...applied].slice(-60),
