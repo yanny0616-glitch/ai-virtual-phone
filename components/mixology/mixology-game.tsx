@@ -500,9 +500,8 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
         }
     }, [sessionId, onToast]);
 
-    // 退出对局：跑一次收摊钩子并收掉这一局的全部沙盒，别让它们挂在页面上。
-    // 延后一拍再判：开发期的严格模式会「挂载 → 立刻卸载 → 再挂载」，
-    // 直接在清理函数里收摊会在刚进对局时就把这一局收掉。
+    // 延后一拍再判：开发期严格模式会「挂载→卸载→再挂载」，直接在清理函数里收摊
+    // 会在刚进对局时就把这一局收掉。
     useEffect(() => {
         liveMixGames.add(sessionId);
         return () => {
@@ -513,19 +512,12 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
         };
     }, [sessionId]);
 
-    /**
-     * 界面以玩家身份发一句话：走的是和输入框一模一样的路径，不是特权通道。
-     * 声明放在「对局不存在」的提前返回之前——Hook 的调用顺序不能随渲染变；
-     * 真正的实现在下面挂到 sayRef 上，传给界面的这个函数身份始终不变。
-     */
+    // 声明必须留在「对局不存在」提前返回之前，否则 Hook 数量随渲染变化，React 会报错；
+    // 真正实现挂在 sayRef.current 上，对外的函数身份保持不变。
     const sayRef = useRef<(text: string) => void>(() => {});
     const handlePanelSay = useCallback((text: string) => { sayRef.current(text); }, []);
 
-    /**
-     * 背景观感微调：蒙版提亮（0=原样，100=无蒙版）与封面模糊，按局保存。
-     * 同 sayRef，声明必须留在「对局不存在」的提前返回之前——原来写在下面，
-     * session 从无到有时 Hook 数量会变，React 直接抛错。
-     */
+    // 同 sayRef，声明必须留在提前返回之前，否则 session 从无到有时 Hook 数量会变，React 直接抛错。
     const [bgTuneOpen, setBgTuneOpen] = useState(false);
 
     if (!session) {

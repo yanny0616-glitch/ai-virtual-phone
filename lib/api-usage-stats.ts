@@ -1,7 +1,5 @@
-// lib/api-usage-stats.ts
-// 按天累计的模型用量统计。与 api-log-store 的日志环分开存：日志环只留最近 150 条，
-// 想看「今天用了多少 token」「最近 7 天趋势」必须有独立累加器，不能靠翻日志。
-// 每条记录只存计数，不存提示词原文，所以体积极小，可以长期保留。
+// 与 api-log-store 的日志环（只留最近 150 条）分开存：要看「今天用了多少 token」「最近 7 天趋势」
+// 得有独立累加器。只存计数不存提示词原文，体积小，可以长期保留。
 
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 
@@ -32,7 +30,7 @@ export type ApiUsageDay = ApiUsageBucket & {
 const USAGE_KEY = "ai_phone_api_usage_stats_v1";
 registerKvMigration(USAGE_KEY);
 
-/** 保留天数：一条日记录几百字节，半年也就几十 KB。 */
+/** 一条日记录几百字节，半年也就几十 KB，可以放心保留更久。 */
 const MAX_DAYS = 180;
 
 function localDateKey(date: Date): string {
@@ -71,7 +69,7 @@ function saveDays(days: ApiUsageDay[]): void {
     try { kvSet(USAGE_KEY, JSON.stringify(days.slice(-MAX_DAYS))); } catch { /* 统计失败不影响主流程 */ }
 }
 
-/** 记一次调用。usage 缺失时按 0 计入次数——服务商不回 usage 也要能看到调用频次。 */
+/** usage 缺失时按 0 计入次数——服务商不回 usage 也要能看到调用频次。 */
 export function recordApiUsage(input: {
     model?: string;
     source?: string;
@@ -130,7 +128,7 @@ export function recordApiUsage(input: {
     } catch { /* 统计失败不影响主流程 */ }
 }
 
-/** 取最近 N 天（含今天，缺的天补零），新到旧由调用方自己排。默认 7 天。 */
+/** 含今天，缺的天补零；返回的是旧到新，调用方需要新到旧要自己再排。 */
 export function getApiUsageDays(options?: { days?: number }): ApiUsageDay[] {
     const want = Math.max(1, Math.min(MAX_DAYS, Math.floor(options?.days ?? 7)));
     const stored = new Map(loadDays().map(day => [day.date, day]));

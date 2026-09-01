@@ -17,7 +17,6 @@ const updateIconStyle = {
     "--icon-color": BINDING_ACCENTS.api,
 } as CSSProperties;
 
-/** 自部署实例的版本卡片：显示当前/最新构建，一键触发拉取部署并轮询到完成。 */
 export function SelfHostUpdateCard({ onNotice }: { onNotice: (msg: string) => void }) {
     const [info, setInfo] = useState<UpdateInfo | null>(null);
     const [checking, setChecking] = useState(false);

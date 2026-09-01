@@ -147,9 +147,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
                         continue;
                     }
-                    // 云端触发快捷动作失败的诊断行：角色已经说了"我去看一眼"却什么
-                    // 都没发生，写进现实桥动态让用户查得到原因。这是一条独立的
-                    // outbox 行（云端在投递之后才写），不是角色消息——消费掉即可，
+                    // 云端触发快捷动作失败的诊断行，不是角色消息——写进现实桥动态后直接消费掉，
                     // 绝不能走下面的建消息流程，否则聊天里会凭空多出一条。
                     if ((meta as { kind?: string }).kind === "shortcut_delivery_error") {
                         const detail = typeof meta.shortcutDeliveryError === "string"
@@ -217,8 +215,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         text = applyOutputRegex(text, regexes, { macroEngine, activeTags });
                     }
 
-                    // 云端执行过的快捷动作标记：在原始位置落一对 tool_call/tool_notice——
-                    // 上下文里保留标记原文，UI 显示与小手机内直接调用一致
+                    // 云端执行过的快捷动作标记：原位落一对 tool_call/tool_notice，UI 显示与本机直接调用一致
                     const rawMarker = (meta as { shortcutMarker?: { text?: unknown; insertAt?: unknown; name?: unknown } }).shortcutMarker;
                     const shortcutMarker = rawMarker
                         && typeof rawMarker.text === "string" && rawMarker.text
@@ -274,8 +271,7 @@ export function installServerOutboxConsumer(): void {
     if (typeof window === "undefined" || consumerInstalled) return;
     consumerInstalled = true;
 
-    // 启动时保留 5 分钟节流；回前台和 SW 明确告知新消息时强制补拉。
-    // iOS 会在后台冻结页面，如果回前台仍被节流，屏幕速聊消息只能等到下次重启才会合并。
+    // 启动时保留 5 分钟节流；回前台/SW 通知强制补拉——iOS 冻结后台页面，节流会让屏幕速聊消息等到下次重启才合并。
     const requestConsume = (force = false) => {
         if (consumeRequestTimer !== null) window.clearTimeout(consumeRequestTimer);
         consumeRequestTimer = window.setTimeout(() => {
@@ -285,7 +281,6 @@ export function installServerOutboxConsumer(): void {
     };
 
     requestConsume(false);
-    // 人已经进 App 了，托盘里挂着的聊天通知就该收掉，别一直弹在那
     if (!document.hidden) closeChatPushNotifications();
     document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {
@@ -301,8 +296,7 @@ export function installServerOutboxConsumer(): void {
         }
         if (event.data?.type === "run_shortcut" && typeof event.data.url === "string") {
             const url: string = event.data.url;
-            // 站点线的 /shortcut-run 票据地址、个人线的同源转发路由，
-            // 或个人云网关自己的 run 入口
+            // 站点线的 /shortcut-run 票据地址、个人线的同源转发路由，或个人云网关自己的 run 入口
             const personal = loadPersonalPushCloudState();
             const allowed = url.startsWith(`${window.location.origin}/shortcut-run`)
                 || url.startsWith(`${window.location.origin}/personal-shortcut-run?`)

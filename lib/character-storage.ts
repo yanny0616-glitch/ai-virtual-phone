@@ -227,9 +227,7 @@ export function parseCharacterFromJson(
 
     return {
       name,
-      // Float's role library only needs the card's core persona. SillyTavern
-      // greetings, scenario and examples stay out; character_book is kept
-      // separately so the card can offer it as a world book import.
+      // 只取核心 persona：SillyTavern 的 greeting/scenario/examples 不导入，character_book 另行处理。
       persona: nonEmptyText(src.description ?? src.persona),
       avatar: validAvatar(src.avatar),
       personality: typeof src.personality === "string" && src.personality.trim() ? src.personality : undefined,

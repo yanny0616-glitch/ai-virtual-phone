@@ -1,7 +1,5 @@
-// lib/api-log-store.ts
-// 底层模型调用日志存储（独立模块，避免 chat-engine ↔ api-helpers 循环依赖）。
-// 聊天引擎（整段/流式/原生工具）与 simpleLLMCall（记忆总结、朋友圈、日历等
-// 通用 LLM 调用）共用这份日志，统一在「底层调用大模型日志」面板查看。
+// 独立模块，避免 chat-engine ↔ api-helpers 循环依赖；聊天引擎与 simpleLLMCall（记忆总结、
+// 朋友圈、日历等后台调用）共用这份日志，统一在「底层调用大模型日志」面板查看。
 
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { recordApiUsage } from "./api-usage-stats";
@@ -32,25 +30,22 @@ export type DebugInfo = {
     channel?: "chat" | "qa";
 };
 
-// 底层调用日志环容量。原为 50：聊天请求与 18 处 simpleLLMCall 后台调用（记忆总结、
-// NPC 生成、剧情、地图等）共享一个环，用户想看自己刚才那次聊天时很容易已被后台调用
-// 挤掉，因此扩容；配合单条截断与体积预算控制总占用。
+// 原为 50，但聊天请求与 18 处 simpleLLMCall 后台调用共享一个环，很容易把刚才的聊天记录挤掉，
+// 因此扩容；配合单条截断与体积预算控制总占用。
 const MAX_API_LOGS = 150;
 // 工坊环容量：只有答疑引擎写入，量小，维持原值。
 const MAX_QA_API_LOGS = 50;
 // 单环序列化字符预算：超预算时从最旧开始丢弃，控制 IndexedDB 常驻体积与序列化开销。
 const MAX_API_LOGS_SERIALIZED_CHARS = 2 * 1024 * 1024;
 const MAX_QA_LOGS_SERIALIZED_CHARS = 1024 * 1024;
-// 单条文本截断上限：记忆总结类调用的完整 prompt 动辄几十 KB，写日志前先截断，
-// 控制每次 push 的 parse/stringify 写放大与常驻体积。
+// 记忆总结类调用的完整 prompt 动辄几十 KB，写日志前先截断，控制每次 push 的 parse/stringify 写放大与常驻体积。
 const MAX_LOG_MESSAGE_CHARS = 4000;
 const MAX_LOG_MESSAGES_TOTAL_CHARS = 96_000;
 const MAX_LOG_RESPONSE_CHARS = 8000;
 const MAX_LOG_METADATA_CHARS = 200;
 
 const API_LOGS_KEY = "ai_phone_api_logs_v1";
-// 工坊（QA 助手）专用调用记录：与聊天/记忆等底层调用日志彻底隔离，
-// 只在工坊界面右上角「调用记录」里查看，绝不混进聊天页的「底层调用大模型日志」。
+// 工坊（QA 助手）专用调用记录，与聊天页「底层调用大模型日志」彻底隔离。
 const QA_LOGS_KEY = "ai_phone_qa_api_logs_v1";
 registerKvMigration(API_LOGS_KEY);
 registerKvMigration(QA_LOGS_KEY);
@@ -139,19 +134,16 @@ function trimLogsForStorage(logs: DebugInfo[], maxCount: number, maxSerializedCh
 export function getApiLogs(): DebugInfo[] { return _loadLogs(API_LOGS_KEY); }
 export function clearApiLogs(): void { try { kvRemove(API_LOGS_KEY); } catch { } }
 
-/** 工坊专用调用记录（仅工坊 UI 读取，与底层日志完全隔离）。 */
 export function getQaApiLogs(): DebugInfo[] { return _loadLogs(QA_LOGS_KEY); }
 export function clearQaApiLogs(): void { try { kvRemove(QA_LOGS_KEY); } catch { } }
 
-/** 追加一条调用日志（id/timestamp 自动生成、超限文本截断），超出数量/体积上限时裁掉最旧的记录。 */
 export function pushApiLog(entry: Omit<DebugInfo, "id" | "timestamp">): void {
-    // 工坊（QA 助手）的调用单独归档，不进聊天页的底层调用日志。
-    // 分流只认显式 channel 字段：角色名恰好叫「工坊」的聊天不会被误扔进工坊记录。
+    // 分流只认显式 channel 字段，不看角色名——避免角色恰好叫「工坊」时被误分类。
     const isQa = entry.channel === "qa";
     const key = isQa ? QA_LOGS_KEY : API_LOGS_KEY;
     const maxCount = isQa ? MAX_QA_API_LOGS : MAX_API_LOGS;
     const maxSerializedChars = isQa ? MAX_QA_LOGS_SERIALIZED_CHARS : MAX_API_LOGS_SERIALIZED_CHARS;
-    // 用量统计独立累加：日志环只留最近 150 条，按天的用量必须在写日志时就记下来。
+    // 日志环只留最近 150 条，按天的用量必须在写日志时就记下来，不能靠翻日志累加。
     recordApiUsage({
         model: entry.model,
         source: entry.source,

@@ -43,15 +43,13 @@ export type LlmRequestPayload = {
     serverProxy?: boolean;
 };
 
-/** 各家 usage 字段归一后的形状。缓存两项分开记：命中按 1/10 计费、写入按 1.25 倍计费，
- *  合在一起就看不出这次到底省了还是亏了。 */
+/** 各家 usage 字段归一后的形状。缓存两项分开记：命中按 1/10 计费、写入按 1.25 倍计费。 */
 export type LlmUsage = {
     prompt_tokens?: number;
     completion_tokens?: number;
     total_tokens?: number;
     /** 命中提示缓存的输入 token（已包含在 prompt_tokens 里，各家口径见 normalize*Usage） */
     cache_read_tokens?: number;
-    /** 写入提示缓存的输入 token */
     cache_write_tokens?: number;
 };
 
@@ -86,8 +84,7 @@ type ProviderRequestOptions = {
     tools?: LlmToolDefinition[];
     /** 单次最大输出 token：按调用覆盖预设值（工坊输出护栏用）。不填则沿用预设/各家默认 */
     maxTokens?: number;
-    /** 提示缓存的调用方开关：默认跟随 API 配置上的 promptCache。
-     *  传 false 可以在配置开着的情况下单独关掉这一路调用（工坊自己的开关）。 */
+    /** 提示缓存的调用方开关：默认跟随 API 配置上的 promptCache，传 false 可单独关掉这一路调用。 */
     promptCache?: boolean;
     /** 官方 OpenAI 的路由分组 key：前缀不同的调用方用不同 key，命中率更高。 */
     promptCacheKey?: string;
@@ -157,16 +154,10 @@ export function toLlmRequestMessages(messages: LLMMessage[]): LlmRequestMessage[
     });
 }
 
-// The OpenAI tool protocol (DeepSeek enforces it strictly) requires that an
-// assistant message carrying tool_calls is IMMEDIATELY followed by tool
-// messages answering every tool_call_id. Histories rebuilt from chat storage
-// can interleave other messages between a call and its result — e.g. global
-// event-stream entries written while the tool was running sort in between —
-// which fails the next request with 400 "insufficient tool messages". Restore
-// adjacency at request-build time: hoist each call's results to sit right
-// behind it (displaced messages keep their relative order after the tool
-// block), synthesize a stub result when one is gone (truncated history), and
-// flatten orphaned tool results whose call no longer exists.
+// The OpenAI tool protocol (DeepSeek enforces it strictly) requires an assistant
+// message carrying tool_calls to be IMMEDIATELY followed by its tool result
+// messages; storage can interleave other messages in between, which fails the
+// next request with 400 "insufficient tool messages". Restore adjacency here.
 function normalizeNativeToolMessageAdjacency(messages: LlmRequestMessage[]): LlmRequestMessage[] {
     const hasNativeTools = messages.some((message) =>
         (message.role === "assistant" && message.toolCalls?.length) || message.role === "tool");
@@ -233,11 +224,8 @@ function ensureProviderHasUserMessage(messages: LlmRequestMessage[]): LlmRequest
     return messages;
 }
 
-/**
- * Anthropic/Gemini 的消息数组不接受 system 角色：开头连续的 system 提取为顶层
- * system / systemInstruction；插在历史中间的 system（@Depth 注入、系统指令等）
- * 原位转为 user 角色，保留位置语义，避免被整体挪到最前面。
- */
+/** Anthropic/Gemini 的消息数组不接受 system 角色：开头连续的 system 提取为顶层
+ *  system / systemInstruction；插在历史中间的 system 原位转为 user，避免被整体挪到最前面。 */
 function splitLeadingSystemMessages(messages: LlmRequestMessage[]): { systemText: string; rest: LlmRequestMessage[] } {
     let leading = 0;
     while (leading < messages.length && messages[leading].role === "system") leading += 1;
@@ -289,7 +277,6 @@ export function buildProviderRequest(
     const guardedMessages = config.enableImageRecognition === true ? messages : stripVisionParts(messages);
     const providerMessages = ensureProviderHasUserMessage(normalizeNativeToolMessageAdjacency(guardedMessages));
 
-    // 提示缓存以 API 配置上的开关为准；调用方显式传 false 时再关掉这一路。
     const resolved: ProviderRequestOptions = {
         ...options,
         promptCache: config.promptCache === true && options.promptCache !== false,
@@ -304,8 +291,7 @@ export function buildProviderRequest(
     return buildOpenAICompatibleRequest(config, preset, baseUrl, providerMessages, resolved);
 }
 
-// 剥离逻辑收敛到 api-helpers（更底层，微信助手运行时也照抄同一份正则）；
-// 这里保留同名再导出，调用方无需改动。
+// 剥离逻辑收敛到 api-helpers（微信助手运行时也照抄同一份正则），这里保留同名再导出。
 export { stripHallucinatedTimestamps };
 
 export function buildProviderDebugMessages(
@@ -775,11 +761,8 @@ function geminiParts(message: LlmRequestMessage): unknown[] {
         }];
     }
     if (message.role === "assistant" && message.toolCalls?.length) {
-        // Gemini 2.5+ 多轮工具调用要求把模型原始的 turn 结构完整还原回去：
-        //   1. thought 部分（reasoning 文本，thought:true）
-        //   2. 普通正文（content）
-        //   3. functionCall 部分（同 part 上挂 thoughtSignature）
-        // 缺一个上下文都会被 Gemini 当作不完整的 turn 丢弃，导致下一轮看不到任何历史。
+        // Gemini 2.5+ 多轮工具调用要求原样还原模型上一轮的 turn 结构（thought→text→functionCall），
+        // 少一部分就会被当作不完整 turn 丢弃，下一轮看不到历史。
         return [
             ...(message.reasoning ? [{ thought: true, text: message.reasoning }] : []),
             ...(message.content ? [{ text: message.content }] : []),

@@ -118,9 +118,8 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
         onConfigChanged?.();
     };
 
-    // 多端同步：把第二台设备指向第一台已经建好的个人云项目，两台共用同一个备份桶。
-    // 只写云备份配置，不打 managedProjectRef 标记 —— 带标记会让部署流程原地写入这个项目，
-    // 而手填的地址可能是用户自己的业务库，绝不能让建表建桶碰它。
+    // 多端同步只写云备份配置，不打 managedProjectRef 标记——带标记会让部署流程原地写入这个项目，
+    // 而手填地址可能是用户自己的业务库，绝不能让建表建桶碰它。
     const openLinkForm = () => {
         setResultDialog(null);
         setLinkUrl(loadCloudBackupConfig().url || "");
@@ -172,10 +171,9 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
             const managedRef = config.managedProjectRef === configuredRef ? configuredRef : "";
             let inPlaceRef = managedRef;
             if (!inPlaceRef && configuredRef) {
-                // 「接入已有个人云」和老版本会清掉/缺失 managedProjectRef 标记，导致重新部署
-                // 走新建流程撞免费项目上限。这里用服务器守卫复核当前项目：只有确认是
-                // 专用个人云（存在 ai_phone_cloud_meta 标记或仅含已知推送表）才原地重部署；
-                // 业务库或不属于该令牌的项目会复核失败，仍走新建流程。
+                // managedProjectRef 标记可能因老版本或手动接入而丢失，若直接走新建流程会撞免费项目上限；
+                // 这里用服务器守卫复核当前项目，只有确认是专用个人云（ai_phone_cloud_meta 标记或已知推送表）
+                // 才原地重部署，业务库或非本令牌项目复核失败仍走新建流程。
                 try {
                     await callSupabaseAdmin({ action: "assert_dedicated_project", token, projectRef: configuredRef });
                     inPlaceRef = configuredRef;
@@ -185,8 +183,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                 }
             }
             if (inPlaceRef) {
-                // 本应用创建过（或刚被守卫确认）的专用项目允许原地重新部署；
-                // 其余一律走新建流程，绝不把这次发布写回已有业务库。
+                // 本应用创建过（或刚被守卫确认）的专用项目才原地重新部署；其余一律走新建，绝不写回已有业务库。
                 setSelectedRef(inPlaceRef);
                 setOrganizations([]);
                 setSelectedOrganizationSlug(config.managedOrganizationSlug || "");

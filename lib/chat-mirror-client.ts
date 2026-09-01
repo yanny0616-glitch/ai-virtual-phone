@@ -1,8 +1,5 @@
-// 聊天镜像：把新产生的聊天消息抄送一份到用户自己的个人云（Supabase）。
-// 纯加法——本地 IndexedDB 仍是唯一事实来源，镜像失败不影响任何聊天功能。
-// 用途：让云端离线判断（未回应降速、动态复核）与挂念面板能看到最新对话。
-// 安全模型与离线推送一致：只发往用户自己的项目、service key 逐次校验、
-// 表仅 service_role 可读写；开关默认关闭，云端数据可随时一键清空。
+// 聊天镜像：把新聊天消息抄送到用户个人云（Supabase），供云端判断使用；纯加法，本地 IndexedDB 仍是唯一事实来源，镜像失败不影响聊天。
+// 安全模型与离线推送一致：只发往用户自己项目、service key 逐次校验、表仅 service_role 可读写；开关默认关闭。
 
 import {
     CHAT_MESSAGE_PUSHED_EVENT,
@@ -40,8 +37,7 @@ let installed = false;
 let flushing = false;
 let flushTimer: number | null = null;
 let retryTimer: number | null = null;
-// 网关能力探测缓存：null=未探测，true/false=本次会话内的结论。
-// 旧版个人云函数没有 chat-mirror 动作，探测失败时静默停发（不丢队列）。
+// null=未探测；旧版个人云函数没有 chat-mirror 动作，探测失败时静默停发（不丢队列）。
 let mirrorCapable: boolean | null = null;
 
 export function isChatMirrorEnabled(): boolean {
@@ -69,9 +65,8 @@ export function getChatMirrorQueueSize(): number {
 function characterIdForSession(sessionId: string): string {
     const session = loadChatSessions().find(item => item.id === sessionId);
     if (!session || session.isGroup) return "";
-    // 本代码库里 session.contactId 存的直接就是 characterId（createOrGetSession 的调用方
-    // 全部传角色 ID，contact.id 是另一套 contact_ 前缀 ID）。按两种口径查通讯录做兼容，
-    // 都查不到时把 contactId 本身当角色 ID 用，避免整条会话被静默丢弃。
+    // session.contactId 存的直接就是 characterId（contact.id 是另一套 contact_ 前缀 ID）；
+    // 两种口径都查一遍做兼容，查不到就把 contactId 当角色 ID 用，避免整条会话被静默丢弃。
     const cid = session.contactId || "";
     if (!cid) return "";
     const contact = loadChatContacts().find(item => item.characterId === cid || item.id === cid);
@@ -148,7 +143,7 @@ function enqueue(entry: ChatMirrorEntry): void {
     scheduleFlush();
 }
 
-/** 开关镜像；开启时回填最近会话，让云端判断立刻有上下文可用。 */
+/** 开启时回填最近会话，让云端判断立刻有上下文可用。 */
 export function setChatMirrorEnabled(enabled: boolean): void {
     kvSet(MIRROR_ENABLED_KEY, enabled ? "1" : "0");
     if (enabled) {
@@ -158,7 +153,6 @@ export function setChatMirrorEnabled(enabled: boolean): void {
     }
 }
 
-/** 回填最近 10 个单聊会话、每个最多 60 条，安静补齐云端上下文。 */
 function backfillRecentChat(): void {
     try {
         const sessions = loadChatSessions()
@@ -215,7 +209,6 @@ export async function flushChatMirrorNow(): Promise<{ sent: number; queued: numb
     return { sent, queued: getChatMirrorQueueSize() };
 }
 
-/** 清空云端镜像（全部或指定角色）。本地聊天记录不受影响。 */
 export async function clearChatMirrorCloud(characterId?: string): Promise<void> {
     const res = await personalPushFetch("chat-mirror", {
         method: "DELETE",
@@ -227,7 +220,6 @@ export async function clearChatMirrorCloud(characterId?: string): Promise<void> 
     }
 }
 
-/** 应用启动时挂载：监听消息落库事件，把新消息排队抄送到个人云。 */
 export function installChatMirror(): void {
     if (installed || typeof window === "undefined") return;
     installed = true;

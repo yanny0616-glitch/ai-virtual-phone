@@ -4,10 +4,8 @@ import { readFile } from "node:fs/promises";
 
 import { getCurrentAccount } from "@/lib/server/account-auth";
 
-// 自部署实例的版本检查与一键更新：
-// GET 对比 /opt/float/current/VERSION 与 GitHub 最新 Release；
-// POST 触发 float-deploy.service（--no-block：部署会重启本服务自身，必须先把响应发回去）。
-// 下载校验、切软链、失败回滚都由 ops/float-deploy.sh 负责，这里只是扳一下开关。
+// POST 用 --no-block 触发 float-deploy.service：部署会重启本服务自身，必须先把响应发回去。
+// 下载校验/切软链/失败回滚都在 ops/float-deploy.sh 里，这里只是扳开关。
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

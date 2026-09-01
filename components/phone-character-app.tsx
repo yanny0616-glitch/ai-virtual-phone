@@ -437,7 +437,6 @@ function FlipTransitionOverlay({ transit }: { transit: TransitionState }) {
 
 // ── 列表视图（照片墙） ─────────────────────────────────────────
 
-/** 导入角色卡后的落位提示：卡里带世界书时顺带说一声，免得用户不知道还能导。 */
 function placementNotice(char: Character): string {
   const book = char.embeddedWorldBook;
   if (!book) return "点击画布放置角色";
@@ -2040,7 +2039,6 @@ function CharArchiveView({
 
   // Helper limits
   const personaText = persona || "NO DATA AVAILABLE.";
-  // 导入的角色卡人设动辄上千字，默认折起来，超长才给展开按钮
   const PERSONA_CLAMP_LINES = 10;
   const personaIsLong = personaText.length > 260 || personaText.split("\n").length > PERSONA_CLAMP_LINES;
   const [personaExpanded, setPersonaExpanded] = useState(false);

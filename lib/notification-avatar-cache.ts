@@ -1,6 +1,4 @@
-// lib/notification-avatar-cache.ts
-// 把角色头像缩成小图写进 Cache Storage，供 SW 弹推送通知时取用作 icon
-// （sw.js 的 AVATAR_CACHE / AVATAR_PATH_PREFIX 与此对应）。
+// 把角色头像缩成小图写进 Cache Storage，供 SW 弹推送通知时取用作 icon（对应 sw.js 的 AVATAR_CACHE / AVATAR_PATH_PREFIX）。
 // 头像原图可能是几 MB 的 data URI，通知 icon 用不到也扛不动，统一缩到 192px。
 
 import { loadCharacters } from "./character-storage";
@@ -31,10 +29,7 @@ async function shrinkToIconBlob(avatar: string): Promise<Blob | null> {
     }
 }
 
-/**
- * 启动后调用一次：为每个有头像的角色写入/更新缩略图，清掉已删角色的残留。
- * 全程静默失败——这只是通知的锦上添花，绝不能影响启动。
- */
+/** 全程静默失败——这只是通知的锦上添花，绝不能影响启动。 */
 export async function syncNotificationAvatarCache(): Promise<void> {
     if (typeof window === "undefined" || !("caches" in window)) return;
     try {
@@ -56,10 +51,7 @@ export async function syncNotificationAvatarCache(): Promise<void> {
     } catch { /* 隐私模式等缓存不可用场景 */ }
 }
 
-/**
- * 回到前台时把托盘里的聊天类系统通知收掉（人已经在 App 里了，不用再挂着）。
- * 快捷指令/来电通知带有专属 type，不动。
- */
+/** 人已经在 App 里，收掉托盘里的聊天类通知；快捷指令/来电通知带有专属 type，不动。 */
 export function closeChatPushNotifications(): void {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     navigator.serviceWorker.getRegistration()

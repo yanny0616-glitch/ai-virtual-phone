@@ -2301,8 +2301,6 @@ export function updateCustomAppDataRecord(app: InstalledCustomApp, record: Recor
   return updated;
 }
 
-/* ---------- 现实桥（自定义 APP 出站通道） ---------- */
-
 /** APP 向现实桥发件箱回传数据：iPhone 快捷指令的「检查回传」会取走并按信号名执行 */
 export async function sendCustomAppBridgeOutbox(
   record: Record<string, unknown>,
@@ -2334,8 +2332,6 @@ export async function readCustomAppBridgeState(record: Record<string, unknown>):
   return readAllBridgeStateSnapshots(config, limit);
 }
 
-/* ---------- 离线主动消息（timed wake 预约，走主程序的 push-bailout 链路） ---------- */
-
 const CUSTOM_APP_TIMED_WAKE_MIN_DELAY_MS = 60_000;
 const CUSTOM_APP_TIMED_WAKE_MAX_DELAY_MS = 7 * 24 * 60 * 60_000;
 const CUSTOM_APP_TIMED_WAKE_MAX_PENDING = 24;
@@ -2344,11 +2340,8 @@ function customAppTimedWakePrefix(appId: string): string {
   return `timed_wake_capp_${appId}_`;
 }
 
-/**
- * APP 预约一条「角色离线主动消息」：到点后由角色以自己的人设开口。
- * 浏览器开着走 follow-up-service 本地轮询；被杀则由服务端 cron 接管生成并 Web Push。
- * armed=false 表示服务端预约没挂上（未开离线推送/安静时段等），本地路径仍然有效。
- */
+/** APP 预约一条「角色离线主动消息」：浏览器开着走 follow-up-service 本地轮询，被杀则由服务端 cron 接管生成并 Web Push。
+ *  armed=false 表示服务端预约没挂上（未开离线推送/安静时段等），本地路径仍然有效。 */
 export async function scheduleCustomAppTimedWake(
   app: InstalledCustomApp,
   record: Record<string, unknown>,

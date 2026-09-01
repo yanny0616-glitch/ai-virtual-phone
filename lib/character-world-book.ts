@@ -30,9 +30,8 @@ function keyList(entry: Record<string, unknown>): string {
 }
 
 /**
- * SillyTavern 的位置有两套写法：V2 规范里是 `position: "before_char" | "after_char"`，
- * 实际导出的卡把真实位置放在 `extensions.position` 的数字里（0/1 角色前后、2/3 作者注前后、
- * 4 按深度插入、5/6 示例对话前后）。数字优先，取不到再退回字符串。
+ * SillyTavern 位置有两套写法：V2 规范是 `position` 字符串，实际导出的卡把真实值放在
+ * `extensions.position` 数字里（0/1 角色前后、2/3 作者注前后、4 按深度插入、5/6 示例对话前后），数字优先。
  */
 function resolvePosition(entry: Record<string, unknown>, ext: Record<string, unknown>): WorldBookEntry["position"] {
   const numeric = Number(ext.position ?? entry.position);
@@ -81,10 +80,7 @@ function convertEntry(raw: unknown, index: number): WorldBookEntry | null {
   };
 }
 
-/**
- * 从角色卡里认领内嵌世界书（SillyTavern 的 `character_book`）。
- * V2/V3 卡放在 `data.character_book`，老的扁平卡放在根上，两处都看。
- */
+// V2/V3 卡把 character_book 放在 data.character_book，老的扁平卡放在根上，两处都看。
 export function parseEmbeddedWorldBook(
   src: Record<string, unknown>,
   root: Record<string, unknown>,
@@ -122,14 +118,13 @@ export function isCharacterWorldBookImported(characterId: string): boolean {
   return loadWorldBooks().some(book => book.id === id);
 }
 
-/** 这本卡内世界书当前是否绑在该角色名下（解绑只动绑定，书本身留在库里）。 */
 export function isCharacterWorldBookBound(characterId: string): boolean {
   const id = characterWorldBookId(characterId);
   const binding = getCharacterBinding(loadBindingConfig(), characterId);
   return (binding.defaults.worldBookIds || []).includes(id);
 }
 
-/** 挂上 / 摘掉角色与卡内世界书的绑定。摘掉不删书，世界书库里原样保留。 */
+// 摘掉绑定不删书，世界书库里原样保留。
 export function setCharacterWorldBookBound(characterId: string, bound: boolean): void {
   const id = characterWorldBookId(characterId);
   const config = loadBindingConfig();
@@ -145,12 +140,8 @@ export function setCharacterWorldBookBound(characterId: string, bound: boolean):
   }));
 }
 
-/**
- * 把角色卡自带的世界书写进世界书库，并绑定到这个角色。
- * 只导入不绑定的话，用户还得再去设置里挂一次，等于没导。
- * 注意：重复导入是整本覆盖——用户在世界书管理里的修改会被卡里的原始内容盖掉，
- * 所以 UI 侧对已导入的卡要先确认再调这里。
- */
+// 导入即绑定：只写库不绑的话用户还得再去设置里挂一次，等于没导。
+// 重复导入是整本覆盖，用户在世界书管理里的修改会被卡里的原始内容盖掉，UI 侧对已导入的卡要先确认再调这里。
 export function importCharacterWorldBook(char: Character): WorldBookConfig | null {
   const embedded = char.embeddedWorldBook;
   if (!embedded || embedded.entries.length === 0) return null;

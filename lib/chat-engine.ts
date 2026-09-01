@@ -1103,7 +1103,7 @@ export async function sendLLMToolStreamRequest(
         signal?: AbortSignal;
         /** 单次最大输出 token：按调用覆盖预设值（工坊输出护栏用） */
         maxTokens?: number;
-        /** 提示缓存：默认跟随 API 配置上的开关，传 false 可单独关掉这一路 */
+        /** 默认跟随 API 配置上的开关，传 false 可单独关掉这一路 */
         promptCache?: boolean;
         /** 官方 OpenAI 路由分组 key，不填按聊天分组 */
         promptCacheKey?: string;
