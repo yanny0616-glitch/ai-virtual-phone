@@ -120,6 +120,11 @@ export function createBuiltinPreset(): PresetConfig {
             { identifier: "interview_character_answer", enabled: true },
             { identifier: "checkphone_user_fact_guard", enabled: true },
             { identifier: "checkphone_bilingual_text", enabled: true },
+
+            // 自定义 app 注入的动态状态。排在最末是为了缓存：越靠后，前面被作废的前缀越短。
+            // 往上挪进 shortTermMemory 之前（system 区）会让整段系统提示词每轮都重算缓存。
+            { identifier: "custom_app_context", enabled: true },
+            { identifier: "custom_app_context_group", enabled: true },
         ],
 
         prompts: [
@@ -466,6 +471,26 @@ export function createBuiltinPreset(): PresetConfig {
                 injection_depth: 0,
                 enabled: true,
                 tags: ["chat", "text"],
+            },
+            {
+                identifier: "custom_app_context",
+                name: "▸ 自定义 APP 实时状态",
+                role: "system",
+                content: "{{customAppContext}}",
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["chat"],
+            },
+            {
+                identifier: "custom_app_context_group",
+                name: "▸ 自定义 APP 实时状态（群聊）",
+                role: "system",
+                content: "{{customAppContext}}",
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["group_chat"],
             },
             {
                 identifier: "chat_followup",

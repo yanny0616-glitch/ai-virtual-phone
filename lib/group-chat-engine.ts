@@ -72,6 +72,7 @@ import { prepareShortTermContext, prepareGroupShortTermContext } from "./short-t
 import { parseActionTags, dispatchActions } from "./action-parser";
 import { getCustomStickerExample, loadCustomStickers } from "./custom-sticker-storage";
 import { formatCustomAppChatDirectivesForPrompt } from "./custom-app-chat-directives";
+import { formatCustomAppChatContextForPrompt } from "./custom-app-chat-context";
 import { findEnabledToolForSchema, getEnabledTools } from "./tool-storage";
 import { formatToolsForPrompt, formatGroupToolsForPrompt, formatToolSchema } from "./tool-prompt";
 import { parseToolCalls, parseToolFetches, executeToolCalls, formatToolResults, type ToolCall } from "./tool-executor";
@@ -432,6 +433,7 @@ async function buildGroupChatPromptMessages(
     });
     const pluginPromptHint = pluginPrompt.hint?.trim() ? `\n\n### 扩展插件\n${pluginPrompt.hint.trim()}\n` : "";
     const customAppRichMediaDirectives = formatCustomAppChatDirectivesForPrompt({ group: true }) + buildScreenEffectPromptHint() + pluginPromptHint;
+    const customAppContext = formatCustomAppChatContextForPrompt();
     const toolsPrompt = usesNativeActions
         ? "需要动作时使用可用动作接口。"
         : formatToolsForPrompt(enabledTools);
@@ -484,6 +486,7 @@ async function buildGroupChatPromptMessages(
         groupTools: groupToolsPrompt,
         groupRoster,
         customAppRichMediaDirectives,
+        customAppContext,
         chatBilingualInstruction,
         statusRegionSection: resolveStatusRegionSection(statusRegionCfg, "group"),
         statusRegionExampleLine: resolveStatusRegionExampleLine(statusRegionCfg),

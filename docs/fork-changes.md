@@ -200,3 +200,126 @@
   来电通知不动）
 - 生效方式：站点更新后刷新一次页面让新 SW 接管；重新部署个人云更新 push-generate；
   已挂的预约在下次快照刷新/重新编排后才带 `characterId`
+
+## L. 云端复核门禁（2026-09-01）
+
+`push-recheck` 原来是「被 cron 派到 + 25 分钟没判过 + 有新消息」就直接发一次 LLM 裁决，
+判断即花钱，只能靠 `DAILY_RECHECK_CAP = 6` 硬压着——聊得密的上午就能把一天额度烧光。
+改成先过一层只读本地状态的门禁，全过了才花钱：
+
+- `supabase/functions/push-recheck/index.ts`（同步 dist）— 新增 `GATE_DEF` 五道门，
+  阈值可被 App 上传的 `context.gate*` 覆盖（改设置不用重新部署）：
+  `gateDailyCap`(8) / `gateGapMin`(25 分钟) / `gateHorizonMin`(240 分钟，最近的待发时刻比这更远就不判) /
+  `gateFreshMin`(10 分钟，刚说完话先等) / `gateMinMsgs`(1 句)。
+  `last_recheck_at` 改成只在真的发裁决时才占坑——被门禁拦下不推迟下一次判断
+- 拦截原因写进 `push_recheck_plans.decisions`，条目形如 `{kind:"gate", note, by:"cloud"}`：
+  不带 `time`，App 的合并循环天然跳过，只当诊断用；原因没变就不写回，免得每轮 cron 都动一次行
+- `custom-apps/gua-nian/`（0.6.2）— 设置里新增「云端复核门禁」五个 stepper，
+  随计划一起上传；拉取云端裁决时把门禁记录写进诊断日志
+- 无 schema 变更、无 cron 变更；生效需用户在「设置 → 云服务部署」重新部署个人云
+
+## M. 发送前复核（2026-09-01）
+
+原来到点那一刻只查一条硬规则：连续 N 轮没等到回复就跳过。改成先算一个「不合时宜度」，
+够高就不发，判据不管发没发都写回计划，App 点开那条主动消息能看到当时到底是怎么判的：
+
+- `supabase/functions/push-generate/index.ts`（同步 dist）— `timedwake:` 类任务在拿到
+  聊天镜像之后，按 `trigger_key` 里的 wakeId 反查 `push_recheck_plans`（取最近两天的计划，
+  认 wakeId 不认日期，跨零点触发才不会落空），算三个信号：
+  未回应轮数占比 40% + 距上一句用户消息的贴近度 40% + 距上一条主动消息的贴近度 20%，
+  合成 `press`，`press >= presendMax` 就不发。阈值同样走 `context`：
+  `presendMax`(70) / `presendTalkingMin`(15 分钟) / `presendGapMin`(60 分钟)
+- 只在 wakeId 能对上挂念计划里的时刻时才按分数拦；对不上就退回老的硬冷却规则，
+  别的来源的定时唤醒不受影响
+- 判据写进 `decisions`，条目形如 `{kind:"presend", time, blocked, note, scores:{pr,pt,pg,press,rounds,max}}`：
+  带 `time` 所以会并进对应时刻，但**不打「云端调整过」角标**——它是这一条的执行判据，不是改计划
+- `custom-apps/gua-nian/`（0.6.2）— 设置里新增「发送前复核」三个 stepper；
+  二级弹窗新增「发送前复核」一节，三个信号各一条进度条，末尾给结论和阈值，
+  被拦下的那条用警示色标出原因
+- 无 schema 变更；生效需用户在「设置 → 云服务部署」重新部署个人云
+
+## N. 精力随时间衰减（2026-09-01）
+
+`day.energy` 原来是生成生活面时定的一个数，一整天不动，卡片上那条精力条只是个标签。
+改成基线 + 衰减，每分钟重算：
+
+- `custom-apps/gua-nian/index.html` — 生活面的 JSON schema 里每条日程多一个 `cost`
+  （-40～40，负=开会/通勤/应酬这类消耗，正=午睡/吃饭/散步这类回血），
+  同一次 `ai.generate` 出，不多花调用；`energy` 的语义改成「刚醒时的基线」
+- 新增 `energyAt(day, ms)`：基线 + 已发生日程的 cost 累加 − 醒着时长缓降
+  （07:00 起每小时 1.2，22 点后每小时 8）。凌晨 5 点前算作前一晚的延长，
+  否则熬到 1 点反而显示精神饱满
+- 用上的地方：此刻卡片的精力条（多显示一个「起床 X%」对照）、记录页今天那张卡、
+  上传给云端的 `context.energy`、编排与在页复核两个 prompt
+- 编排 prompt 里每个候选时刻额外带上**那一刻**的剩余精力，模型能分辨
+  「22:30 那会儿只剩 35%」，不再只看一个全天平均数
+- 老的 day 记录没有 `cost`，默认 0，只吃时间缓降，不会报错
+
+## O. 日程可逐条改（2026-09-01）
+
+日程原来只能整天重生成，改一条得把一天全推倒。改成每条可点开单独处理：
+
+- `custom-apps/gua-nian/index.html` — 时间轴上的日程行可点，复用已有的 `#dsheet`
+  底部抽屉（标题在「时刻详情」和「日程详情」之间切换）；抽屉里显示这条的精力影响、
+  做完之后剩多少精力、挂着的心动时刻
+- 「重新生成这一条」：可留一句要求，一次 `ai.generate` 只重写这一条
+  （time/title/note/cost），把同一天其余日程一起给模型防撞时间；重写后时间可能变，
+  按新下标重画抽屉
+- 「删除这一条」：二次确认（按钮先变成「再点一次删掉」）
+- 改完照旧走 `syncCalendar`：清掉 `guanian_` 前缀的旧条目、保留手动条目、重新写回，
+  和整天重生成时一模一样
+- **不自动重排**：重排要花一次模型调用、还会取消已挂的预约，改完只 toast 提示
+  「要跟上就点♥ 重新编排」
+- 日程行如果已经挂了心动时刻，那一行由 `wakeRow` 占着点不到，所以时刻详情底部补了
+  一个「✎ 改这条日程」入口；`detailHtml` 会被异步重画，这个按钮走 `#dsheet-body` 委托绑定
+
+## P. 自定义 APP 注入聊天提示词（2026-09-01）
+
+自定义 APP 原来没有任何办法把自己的状态送进「用户↔角色」的聊天提示词：
+`custom-app-chat-directives.ts` 只管富媒体指令语法，`CustomAppPromptProfile` 只过滤 APP
+自己那次 `ai.generate`，`characters.state.write` 会往聊天里插一条可见的系统消息且只收
+0–100 的数值，`setChatPluginPromptFragment` 属于聊天插件那套扩展。新开一条通道：
+
+- 新权限 `chat.context`（`lib/custom-app-types.ts` + `lib/custom-app-storage.ts` 两处白名单）
+- 新文件 `lib/custom-app-chat-context.ts` — 按 `appId × characterId` 存覆盖式片段
+  （`characterId` 省略则落在全局作用域，对所有会话生效），
+  `formatCustomAppChatContextForPrompt(characterId)` 汇总成一个 `<app_context>` 块。
+  **只认还装着、且还持有 `chat.context` 的 APP**：用户在权限页撤销后注入立刻停，
+  不靠 APP 自己收手
+- `lib/custom-app-host-api.ts` — `writeCustomAppChatContext` / `dropCustomAppChatContext`，
+  同时登记成后台动作（`chat.setContext` / `chat.clearContext`），
+  APP 关着时也能靠 `tasks.schedule` 刷新
+- `components/app-market/custom-app-runner.tsx` — SDK 外壳 `AiPhone.chat.setContext()` /
+  `clearContext()`、dispatch 分支、命名空间方法表
+- `lib/macro-engine.ts` — 新宏 `{{customAppContext}}`（别名 `{{自定义应用状态}}`）；
+  `llm-prompt-assembler.ts`（单聊 + 群聊两处入参）、`chat-engine.ts`、`group-chat-engine.ts`
+  把它接上（群聊没有唯一角色，只取全局作用域的片段）
+- `lib/builtin-preset.ts` — 新条目「▸ 自定义 APP 实时状态」`custom_app_context`
+  （`tags: ["chat"]`）和群聊版 `custom_app_context_group`（`tags: ["group_chat"]`），
+  内容就是那个宏，**排在 `prompt_order` 最末**
+
+**为什么必须排在 `shortTermMemory` 之后**：`lib/llm-provider-adapter.ts` 给整个 `system`
+串只挂一个 `cache_control` 断点，任何进 `system` 的逐轮变动文本都会让整段系统提示词
+（人设、世界书、记忆）每轮重新计费。放在 chatHistory 之后，作废的只是尾巴那一小截。
+条目在预设编辑器里可以拖，位置是用户自己的选择，默认给到缓存最优的位置。
+
+## Q. 挂念 0.7.0：情绪跟随聊天 + 注入聊天（2026-09-01）
+
+- `custom-apps/gua-nian/index.html` — 新增会衰减的「情况栈」`day.conds`：
+  每条 `{mood, cause, energyDelta, intensity, halfLifeMin, startAt}`，
+  权重 `0.5 ^ (已过时间 / 半衰期)`，降到 0.08 以下就清掉（最多留 8 条）
+- 情绪三层：当天生成的 `day.mood` 是**情绪底色**，上面盖着聊天判出来的 cond
+  和刚做完那件事的余味（90 分钟半衰期），谁分量重显示谁，都淡了就露回底色。
+  此刻卡片的大字改成显示当前情绪，被盖住时多一行「因为 X · 底色「Y」」
+- `energyAt` 把 conds 的 `energyDelta × 权重` 也加进去——精力从此**可升可降**，
+  日程 cost 是走过就永久记账的，conds 会自己淡掉，两条路不重复计
+- 情绪从哪来：复核那一次 `ai.generate` 的 JSON 多要一个 `feel`
+  （情绪 / 缘由 / 对精力的加减 -20～20 / 强度 0–100 / 几小时淡一半），**不多花调用**。
+  所以复核关掉（`recheckMin = 0`）时情绪不会跟着聊天动
+- 新设置项 `injectChat`（默认开）+ manifest 加 `chat.context` 权限：
+  开着时每次状态变化就 `AiPhone.chat.setContext` 覆盖式写一段
+  （在做的事 / 情绪+底色+缘由 / 精力% + 一句体感 / 接下来那件事）；
+  关掉、或换挂念对象时写空串撤销
+- 正文里**不写当前钟点**：挂念关着的时候这段不会刷新，写死的时间会变成假话；
+  快照时刻放进 label，渲染成【挂念 · 14:32 的状态】，角色对着提示词里的真实时间
+  自己能看出这份状态旧了多少

@@ -8,6 +8,10 @@ import {
   readCustomAppCollection,
   writeCustomAppCollection,
 } from "./custom-app-storage";
+import {
+  clearCustomAppChatContext,
+  setCustomAppChatContext,
+} from "./custom-app-chat-context";
 import { buildCustomAppChatTags } from "./custom-app-tags";
 import { hydrateKvDb } from "./kv-db";
 import { loadCharacters } from "./character-storage";
@@ -162,6 +166,8 @@ const HOST_ACTION_PERMISSIONS: Record<string, CustomAppPermission[]> = {
   "db.update": ["app.data.write"],
   "app.data.update": ["app.data.write"],
   "chat.card": ["chat.sendCard"],
+  "chat.setContext": ["chat.context"],
+  "chat.clearContext": ["chat.context"],
   "chat.history": ["chat.write", "chat.sendMessage"],
   "chat.message": ["chat.write", "chat.sendMessage"],
   "chat.sendMessage": ["chat.write", "chat.sendMessage"],
@@ -1648,6 +1654,32 @@ export function normalizeCustomAppCardData(app: InstalledCustomApp, record: Reco
   } as NonNullable<ChatMessage["mediaData"]>;
 }
 
+/**
+ * 写入注入聊天提示词的状态片段。text 为空视为撤销这一条——app 里的注入开关关掉时
+ * 再调一次空串就能停，不必依赖它记得调 clearContext。
+ */
+export function writeCustomAppChatContext(app: InstalledCustomApp, record: Record<string, unknown>): {
+  characterId: string;
+  length: number;
+} {
+  const characterId = cleanText(record.characterId, 160);
+  const text = cleanText(record.text ?? record.content ?? record.context, 4000);
+  setCustomAppChatContext(app.id, app.name, {
+    text,
+    label: cleanText(record.label ?? record.title, 40),
+    characterId,
+  });
+  return { characterId, length: text.length };
+}
+
+export function dropCustomAppChatContext(app: InstalledCustomApp, record: Record<string, unknown>): { ok: true } {
+  clearCustomAppChatContext(
+    app.id,
+    record.characterId === undefined ? undefined : cleanText(record.characterId, 160),
+  );
+  return { ok: true };
+}
+
 export function sendCustomAppCard(app: InstalledCustomApp, record: Record<string, unknown>): {
   sessionId: string;
   messageId: string;
@@ -2432,6 +2464,10 @@ export async function executeCustomAppHostAction(
       return setCustomAppBadge(app.id, Number(payload.count ?? payload.badge) || 0);
     case "chat.card":
       return sendCustomAppCard(app, payload);
+    case "chat.setContext":
+      return writeCustomAppChatContext(app, payload);
+    case "chat.clearContext":
+      return dropCustomAppChatContext(app, payload);
     case "chat.updateCard":
       return updateCustomAppCard(app, payload);
     case "chat.history":

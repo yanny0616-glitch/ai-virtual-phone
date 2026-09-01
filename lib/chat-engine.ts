@@ -69,6 +69,7 @@ import { parseToolCalls, parseToolFetches, executeToolCalls, formatToolResults }
 import type { ToolCall, ToolResult } from "./tool-executor";
 import { getCustomStickerNames, getCustomStickerExample } from "./custom-sticker-storage";
 import { formatCustomAppChatDirectivesForPrompt } from "./custom-app-chat-directives";
+import { formatCustomAppChatContextForPrompt } from "./custom-app-chat-context";
 import { loadAllTracks } from "./music-storage";
 import { getActiveAppTags } from "./content-tag-utils";
 import { isNeteaseConfigured, getUserPlaylists, getPlaylistTracks, checkLoginStatus, loadMusicApiConfig } from "./music-service";
@@ -1898,6 +1899,7 @@ export async function buildChatPromptMessages(
     });
     const pluginPromptHint = pluginPrompt.hint?.trim() ? `\n\n### 扩展插件\n${pluginPrompt.hint.trim()}\n` : "";
     const customAppRichMediaDirectives = formatCustomAppChatDirectivesForPrompt() + buildScreenEffectPromptHint() + pluginPromptHint;
+    const customAppContext = formatCustomAppChatContextForPrompt(character.id);
     const toolsPrompt = toolsEnabled && !usesNativeActions ? formatToolsForPrompt(enabledTools) : "";
     const chatBilingualInstruction = !session.isGroup
         ? buildChatBilingualInstruction(session.bilingualTranslationEnabled !== false, "single", session.bilingualTranslationPrompt)
@@ -1946,6 +1948,7 @@ export async function buildChatPromptMessages(
         timeAware: loadChatAppSettings().timeAware,
         tools: toolsPrompt,
         customAppRichMediaDirectives,
+        customAppContext,
         chatBilingualInstruction,
         statusRegionSection: resolveStatusRegionSection(statusRegionCfg),
         statusRegionExampleLine: resolveStatusRegionExampleLine(statusRegionCfg),

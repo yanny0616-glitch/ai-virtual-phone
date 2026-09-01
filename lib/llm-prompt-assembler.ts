@@ -87,6 +87,7 @@ export interface AssemblerInput {
     cocreateReadActions?: string;            // read-only co-create action set for {{cocreateReadActions}} macro (discuss mode)
     groupTools?: string;                     // formatted tool definitions for {{groupTools}} macro (group chat)
     customAppRichMediaDirectives?: string;   // formatted custom app rich-media directives
+    customAppContext?: string;               // 自定义 app 注入的状态片段（{{customAppContext}}）
     chatBilingualInstruction?: string;       // session-specific bilingual output rule for {{chatBilingualInstruction}}
     statusRegionSection?: string;            // {{statusRegionSection}} — 状态区章节（native 原文 / 空 / 自定义契约）
     statusRegionExampleLine?: string;        // {{statusRegionExampleLine}} — 主动消息输出示例中的状态区行
@@ -680,6 +681,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
         engine.cocreateReadActions = input.cocreateReadActions ?? "";
         engine.groupTools = input.groupTools ?? "";
         engine.customAppRichMediaDirectives = input.customAppRichMediaDirectives ?? "";
+        engine.customAppContext = input.customAppContext ?? "";
         engine.chatBilingualInstruction = input.chatBilingualInstruction ?? "";
         engine.statusRegionSection = input.statusRegionSection ?? "";
         engine.statusRegionExampleLine = input.statusRegionExampleLine ?? "";
@@ -1612,6 +1614,7 @@ export interface GroupAssemblerInput {
     groupTools?: string;
     groupRoster?: string;
     customAppRichMediaDirectives?: string;
+    customAppContext?: string;
     chatBilingualInstruction?: string;
     statusRegionSection?: string;
     statusRegionExampleLine?: string;
@@ -1999,6 +2002,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
         groupEngine.groupTools = input.groupTools ?? "";
         groupEngine.groupRoster = input.groupRoster ?? "";
         groupEngine.customAppRichMediaDirectives = input.customAppRichMediaDirectives ?? "";
+        groupEngine.customAppContext = input.customAppContext ?? "";
         groupEngine.chatBilingualInstruction = input.chatBilingualInstruction ?? "";
         // 状态区四宏：群聊的输出格式条目是全群共享的，之前只给了 <member> 块内的引擎，
         // 共享条目里的 {{statusRegionSection}} 会解析成空串——群聊的状态值/内心章节整段消失。

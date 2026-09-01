@@ -77,6 +77,7 @@ import {
   scheduleCustomAppTimedWake,
   listCustomAppTimedWakes,
   cancelCustomAppTimedWake,
+  dropCustomAppChatContext,
   sendCustomAppCard,
   saveCustomAppMedia,
   setCustomAppBadge,
@@ -84,6 +85,7 @@ import {
   suggestCustomAppMemory,
   synthesizeCustomAppSpeech,
   updateCustomAppCard,
+  writeCustomAppChatContext,
   writeCustomAppCalendar,
   writeCustomAppHistoryMessage,
   writeCustomAppCharacterState,
@@ -448,6 +450,8 @@ html, body { min-height: 100%; }
       readHistory: function(payload){ return request('chat.readHistory', payload || {}); },
       sendMessage: function(payload){ return request('chat.sendMessage', payload || {}); },
       sendCard: function(payload){ return request('chat.sendCard', payload || {}); },
+      setContext: function(payload){ return request('chat.setContext', typeof payload === 'string' ? { text: payload } : (payload || {})); },
+      clearContext: function(payload){ return request('chat.clearContext', payload || {}); },
       updateCard: function(payload){ return request('chat.updateCard', payload || {}); },
       writeHistory: function(payload){ return request('chat.history', payload || {}); },
       pushHistory: function(payload){ return request('chat.history', payload || {}); },
@@ -1106,7 +1110,7 @@ export function CustomAppRunner({
           media: ["pick", "save", "put", "get", "revoke", "delete"],
           characters: ["list", "get", "readState", "writeState", "readRelations"],
           usage: ["readDaily", "readLogs", "readLogDetail"],
-          chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState"],
+          chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState", "setContext", "clearContext"],
           memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
           notifications: ["create", "list", "markRead", "markAllRead", "getBadge", "setBadge", "incrementBadge", "clearBadge"],
           tasks: ["schedule", "list", "cancel"],
@@ -1736,6 +1740,18 @@ export function CustomAppRunner({
       requirePermission("chat.sendCard");
       const result = sendCustomAppCard(app, { ...launchRecord, ...backgroundRecord });
       return { ok: true, sessionId: result.sessionId, messageId: result.messageId };
+    }
+
+    if (action === "chat.setContext") {
+      requirePermission("chat.context");
+      const result = writeCustomAppChatContext(app, { ...launchRecord, ...backgroundRecord });
+      return { ok: true, ...result };
+    }
+
+    if (action === "chat.clearContext") {
+      requirePermission("chat.context");
+      dropCustomAppChatContext(app, record);
+      return { ok: true };
     }
 
     if (action === "chat.updateCard") {
