@@ -34,7 +34,7 @@ create table if not exists public.ai_phone_cloud_meta (
   updated_at timestamptz not null default now()
 );
 insert into public.ai_phone_cloud_meta (id, schema_version, updated_at)
-values ('personal-cloud', 4, now())
+values ('personal-cloud', 5, now())
 on conflict (id) do update set schema_version = excluded.schema_version, updated_at = excluded.updated_at;
 
 create table if not exists public.push_server_config (
@@ -197,6 +197,28 @@ create table if not exists public.push_chat_mirror (
 create index if not exists push_chat_mirror_char_idx
   on public.push_chat_mirror (user_id, character_id, message_at desc);
 
+-- 云端动态复核：App 编排时把当天计划和判断上下文传上来，浏览器关着时由
+-- push-recheck 定时重判。items 里的 wakeId 对应 push_jobs 的 timedwake:<wakeId>，撤销/点亮直接改那边；
+-- decisions 是还没被 App 取走的云端裁决，App 下次打开时合并进本地轨迹。
+create table if not exists public.push_recheck_plans (
+  user_id text not null,
+  character_id text not null,
+  plan_date text not null,
+  session_id text not null default '',
+  context jsonb not null default '{}'::jsonb,
+  items jsonb not null default '[]'::jsonb,
+  decisions jsonb not null default '[]'::jsonb,
+  last_recheck_at timestamptz,
+  recheck_count integer not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, character_id, plan_date),
+  constraint push_recheck_plans_items_array check (jsonb_typeof(items) = 'array'),
+  constraint push_recheck_plans_decisions_array check (jsonb_typeof(decisions) = 'array')
+);
+-- cron 每轮的取数就是「按 last_recheck_at 最旧的几条、且 App 近期传过」，索引照这个顺序建。
+create index if not exists push_recheck_plans_due_idx
+  on public.push_recheck_plans (last_recheck_at nulls first, updated_at);
+
 -- 原子取得每个角色的生成锁并扣减日额度。不同悬浮球请求不会同时覆盖上下文。
 create or replace function public.ai_phone_screen_chat_begin(
   p_user_id text,
@@ -317,12 +339,14 @@ alter table public.push_bridge_config enable row level security;
 alter table public.push_bridge_snapshots enable row level security;
 alter table public.push_screen_threads enable row level security;
 alter table public.push_chat_mirror enable row level security;
+alter table public.push_recheck_plans enable row level security;
 
 -- 聊天镜像只由网关的 service_role 读写；anon/authenticated 无任何权限。
 revoke all on table public.push_chat_mirror from public, anon, authenticated;
 
 -- 屏幕速聊表和 RPC 只由 Edge Function 的 service_role 使用；客户端角色没有表级权限。
 revoke all on table public.push_screen_threads from public, anon, authenticated;
+revoke all on table public.push_recheck_plans from public, anon, authenticated;
 
 -- 2026 年起新项目不会自动把 public 新表暴露给 Data API。
 -- 网关和生成器只以 service_role 访问，绝不授予 anon 或 authenticated。
@@ -337,7 +361,8 @@ grant select, insert, update, delete on table
   public.push_bridge_config,
   public.push_bridge_snapshots,
   public.push_screen_threads,
-  public.push_chat_mirror
+  public.push_chat_mirror,
+  public.push_recheck_plans
 to service_role;
 
 revoke all on function public.ai_phone_screen_chat_begin(text, text, text, text, integer) from public, anon, authenticated;
@@ -397,6 +422,35 @@ select cron.schedule('ai-phone-personal-push-jobs-scan', '* * * * *', $CRON$
   ) j;
 $CRON$);
 
+select cron.unschedule(jobid)
+  from cron.job
+ where jobname = 'ai-phone-personal-push-recheck-scan';
+
+-- 云端动态复核：每 30 分钟挑几份计划交给 push-recheck。这里只负责派发，
+-- 「有没有新聊天、要不要真发 LLM 判断」全在函数里决定，省得 cron 里塞逻辑。
+-- 不按 plan_date 过滤：plan_date 是用户本地日期，和数据库的 UTC now() 对不上。
+select cron.schedule('ai-phone-personal-push-recheck-scan', '*/30 * * * *', $CRON$
+  select net.http_post(
+    url     := 'https://__PROJECT_REF__.supabase.co/functions/v1/push-recheck',
+    headers := jsonb_build_object('Content-Type', 'application/json'),
+    body    := jsonb_build_object(
+      'userId', p.user_id,
+      'characterId', p.character_id,
+      'planDate', p.plan_date,
+      'token', (select cron_secret from public.push_server_config where id = 'main')
+    ),
+    timeout_milliseconds := 5000
+  )
+  from (
+    select user_id, character_id, plan_date
+      from public.push_recheck_plans
+     where updated_at > now() - interval '36 hours'
+       and (last_recheck_at is null or last_recheck_at < now() - interval '25 minutes')
+     order by last_recheck_at asc nulls first
+     limit 5
+  ) p;
+$CRON$);
+
 -- pg_cron 运行日志清理：只保留最近 3 天，防止 cron.job_run_details 无限增长。
 select cron.unschedule(jobid)
   from cron.job
@@ -405,4 +459,5 @@ select cron.unschedule(jobid)
 select cron.schedule('ai-phone-personal-push-cron-cleanup', '0 3 * * *', $CRON$
   delete from cron.job_run_details where end_time < now() - interval '3 days';
   delete from public.push_chat_mirror where message_at < now() - interval '60 days';
+  delete from public.push_recheck_plans where updated_at < now() - interval '7 days';
 $CRON$);

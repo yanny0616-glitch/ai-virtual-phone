@@ -11,6 +11,7 @@ const pairs = [
   ["supabase/functions/push-shortcut-result/index.ts", "public/ai-phone-push/push-shortcut-result.mjs"],
   ["supabase/functions/push-bridge/index.ts", "public/ai-phone-push/push-bridge.mjs"],
   ["supabase/functions/screen-chat/index.ts", "public/ai-phone-push/screen-chat.mjs"],
+  ["supabase/functions/push-recheck/index.ts", "public/ai-phone-push/push-recheck.mjs"],
   ["docs/personal-push-supabase.sql", "public/ai-phone-push/schema.sql"],
 ];
 

@@ -591,6 +591,7 @@ Deno.serve(async (request: Request) => {
         capabilities: [
           ...(schemaVersion >= 3 ? ["screen-chat-continuous"] : []),
           ...(schemaVersion >= 4 ? ["chat-mirror"] : []),
+          ...(schemaVersion >= 5 ? ["recheck-plan"] : []),
           // 部署了本版网关即支持（纯代码能力，不依赖 schema）
           "job-status",
         ],
@@ -842,6 +843,108 @@ Deno.serve(async (request: Request) => {
       }
     }
 
+    if (action === "recheck-plan") {
+      // 云端动态复核的计划底本：App 编排完把当天时刻表和判断上下文传上来，
+      // push-recheck 浏览器关着时照它重判。decisions 是云端已经做出、App 还没
+      // 取走的裁决，POST 默认不动它——重新编排才传 resetDecisions 把旧裁决作废。
+      const bodyDate = (value: unknown) => cleanText(value, 10).replace(/[^0-9-]/g, "");
+      if (request.method === "POST") {
+        const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        const characterId = cleanText(body.characterId, 80);
+        const planDate = bodyDate(body.planDate);
+        if (!characterId || !/^\d{4}-\d{2}-\d{2}$/.test(planDate)) {
+          return json({ ok: false, error: "缺少 characterId 或 planDate。" }, 400);
+        }
+        // 只收 push-recheck 判断时真正会读的字段，别把 App 的整份 plan 原样堆进库里。
+        const rawItems = Array.isArray(body.items) ? body.items.slice(0, 40) : [];
+        const items = rawItems.map((item) => {
+          const it = item && typeof item === "object" ? item as Record<string, unknown> : {};
+          return {
+            time: cleanText(it.time, 10),
+            fireAt: Number(it.fireAt) || 0,
+            source: cleanText(it.source, 40),
+            act: it.act === true,
+            intent: cleanText(it.intent, 400),
+            why: cleanText(it.why, 400),
+            sem: cleanText(it.sem, 40),
+            topic: cleanText(it.topic, 200),
+            // 预约在服务端的键是 timedwake:<wakeId>，push-recheck 靠它撤销/改期。
+            // 这串会被拼进 PostgREST 的 in.("…") 过滤器，引号之类的字符挡在入口。
+            wakeId: cleanText(it.wakeId, 80).replace(/[^A-Za-z0-9._-]/g, ""),
+          };
+        }).filter((it) => it.time && it.fireAt > 0);
+        const rawContext = body.context && typeof body.context === "object"
+          ? body.context as Record<string, unknown>
+          : {};
+        const context = {
+          mood: cleanText(rawContext.mood, 200),
+          energy: cleanText(rawContext.energy, 200),
+          quota: Number(rawContext.quota) || 0,
+          quietStart: cleanText(rawContext.quietStart, 10),
+          quietEnd: cleanText(rawContext.quietEnd, 10),
+          minGapMin: Number(rawContext.minGapMin) || 0,
+          maxUnanswered: Number(rawContext.maxUnanswered) || 0,
+          chatCandidates: cleanText(rawContext.chatCandidates, 2000),
+          bias: cleanText(rawContext.bias, 2000),
+          // 云端点亮时自己造预约 id 要用的前缀，宿主只认 timed_wake_capp_<appId>_ 开头的
+          wakePrefix: cleanText(rawContext.wakePrefix, 120).replace(/[^A-Za-z0-9._-]/g, ""),
+        };
+        const row: Record<string, unknown> = {
+          user_id: OWNER_ID,
+          character_id: characterId,
+          plan_date: planDate,
+          session_id: cleanText(body.sessionId, 80),
+          context,
+          items,
+          updated_at: new Date().toISOString(),
+        };
+        // 重新编排 = 换了一份计划：旧裁决作废，当天 6 次的复核预算也跟着还回去，
+        // 否则用户中午手动重排一次，下午就只剩残额可用了。
+        if (body.resetDecisions === true) { row.decisions = []; row.recheck_count = 0; }
+        const save = await rest("push_recheck_plans?on_conflict=user_id,character_id,plan_date", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify([row]),
+        });
+        if (!save.ok) {
+          const detail = await save.text().catch(() => "");
+          return json({ ok: false, error: detail.slice(0, 300) || `数据库返回 HTTP ${save.status}` }, 500);
+        }
+        return json({ ok: true, items: items.length });
+      }
+      if (request.method === "GET") {
+        const characterId = cleanText(url.searchParams.get("characterId"), 80);
+        const planDate = bodyDate(url.searchParams.get("planDate"));
+        if (!characterId) return json({ ok: false, error: "缺少 characterId。" }, 400);
+        let query = `push_recheck_plans?user_id=eq.${OWNER_ID}`
+          + `&character_id=eq.${encodeURIComponent(characterId)}`
+          + "&select=plan_date,session_id,context,items,decisions,last_recheck_at,recheck_count"
+          + "&order=plan_date.desc&limit=1";
+        if (planDate) query += `&plan_date=eq.${encodeURIComponent(planDate)}`;
+        const rows = await readJson<Record<string, unknown>[]>(await rest(query));
+        return json({ ok: true, plan: rows[0] ?? null });
+      }
+      if (request.method === "DELETE") {
+        // decisions=1：App 合并完云端裁决后回执，只清 decisions，计划本体留着继续复核。
+        const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        const characterId = cleanText(body.characterId, 80);
+        const planDate = bodyDate(body.planDate);
+        if (!characterId) return json({ ok: false, error: "缺少 characterId。" }, 400);
+        const filter = `push_recheck_plans?user_id=eq.${OWNER_ID}`
+          + `&character_id=eq.${encodeURIComponent(characterId)}`
+          + (planDate ? `&plan_date=eq.${encodeURIComponent(planDate)}` : "");
+        const done = body.decisionsOnly === true
+          ? await rest(filter, {
+            method: "PATCH",
+            headers: { Prefer: "return=minimal" },
+            body: JSON.stringify({ decisions: [] }),
+          })
+          : await rest(filter, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+        if (!done.ok) return json({ ok: false, error: `数据库返回 HTTP ${done.status}` }, 500);
+        return json({ ok: true });
+      }
+    }
+
     if (action === "schedule" && request.method === "POST") {
       // 在线开关每分钟到期任务扫描（与微信云函数的在线开关同一套做法）。
       const body = await request.json().catch(() => ({})) as { enable?: unknown };
@@ -896,13 +999,36 @@ Deno.serve(async (request: Request) => {
      limit 5
   ) j;
 $CRON$)`);
+          await sql.unsafe(`select cron.schedule('ai-phone-personal-push-recheck-scan', '*/30 * * * *', $CRON$
+  select net.http_post(
+    url     := '${supabaseUrl}/functions/v1/push-recheck',
+    headers := jsonb_build_object('Content-Type', 'application/json'),
+    body    := jsonb_build_object(
+      'userId', p.user_id,
+      'characterId', p.character_id,
+      'planDate', p.plan_date,
+      'token', (select cron_secret from public.push_server_config where id = 'main')
+    ),
+    timeout_milliseconds := 5000
+  )
+  from (
+    select user_id, character_id, plan_date
+      from public.push_recheck_plans
+     where updated_at > now() - interval '36 hours'
+       and (last_recheck_at is null or last_recheck_at < now() - interval '25 minutes')
+     order by last_recheck_at asc nulls first
+     limit 5
+  ) p;
+$CRON$)`);
           await sql.unsafe(`select cron.schedule('ai-phone-personal-push-cron-cleanup', '0 3 * * *', $CRON$
   delete from cron.job_run_details where end_time < now() - interval '3 days';
   delete from public.push_chat_mirror where message_at < now() - interval '60 days';
+  delete from public.push_recheck_plans where updated_at < now() - interval '7 days';
 $CRON$)`);
           return json({ ok: true, scheduled: true });
         }
         await sql.unsafe("select cron.unschedule('ai-phone-personal-push-jobs-scan')").catch(() => {});
+        await sql.unsafe("select cron.unschedule('ai-phone-personal-push-recheck-scan')").catch(() => {});
         await sql.unsafe("select cron.unschedule('ai-phone-personal-push-cron-cleanup')").catch(() => {});
         return json({ ok: true, scheduled: false });
       } finally {

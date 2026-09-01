@@ -8,6 +8,7 @@ const GENERATE_SLUG = "push-generate";
 const RESULT_SLUG = "push-shortcut-result";
 const BRIDGE_SLUG = "push-bridge";
 const SCREEN_SLUG = "screen-chat";
+const RECHECK_SLUG = "push-recheck";
 
 type DeployRequest = {
   projectRef?: string;
@@ -17,6 +18,7 @@ type DeployRequest = {
   resultCode?: string;
   bridgeCode?: string;
   screenChatCode?: string;
+  recheckCode?: string;
   schemaSql?: string;
 };
 
@@ -114,6 +116,7 @@ export async function POST(request: Request) {
   const resultCode = typeof payload.resultCode === "string" ? payload.resultCode : "";
   const bridgeCode = typeof payload.bridgeCode === "string" ? payload.bridgeCode : "";
   const screenChatCode = typeof payload.screenChatCode === "string" ? payload.screenChatCode : "";
+  const recheckCode = typeof payload.recheckCode === "string" ? payload.recheckCode : "";
   const schemaSql = typeof payload.schemaSql === "string" ? payload.schemaSql : "";
 
   if (!/^[a-z0-9]{15,40}$/.test(projectRef)) {
@@ -154,6 +157,13 @@ export async function POST(request: Request) {
     || screenChatCode.length > 600_000
   ) {
     return NextResponse.json({ ok: false, error: "屏幕速聊入口部署包无效。" }, { status: 400 });
+  }
+  if (
+    !recheckCode.includes("云端动态复核")
+    || !recheckCode.includes("Deno.serve")
+    || recheckCode.length > 600_000
+  ) {
+    return NextResponse.json({ ok: false, error: "云端动态复核部署包无效。" }, { status: 400 });
   }
   if (
     !schemaSql.startsWith("-- ai-phone-personal-push-schema-v1")
@@ -212,6 +222,14 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { ok: false, step: "部署屏幕速聊入口失败", error: await upstreamMessage(screenChat) },
         { status: screenChat.status },
+      );
+    }
+
+    const recheck = await deployFunction({ projectRef, token, slug: RECHECK_SLUG, code: recheckCode });
+    if (!recheck.ok) {
+      return NextResponse.json(
+        { ok: false, step: "部署云端动态复核失败", error: await upstreamMessage(recheck) },
+        { status: recheck.status },
       );
     }
 
