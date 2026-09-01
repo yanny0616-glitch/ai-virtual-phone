@@ -18,19 +18,12 @@
 
 本地只允许 `npm run dev`（调试用）、lint、`npm run check:*`。
 
-**lint 别用全量。** `eslint .` 要跑好几分钟（900+ 源文件 × 类型感知规则 × React Compiler
-数据流分析），日常改几个文件不值当。按这个顺序选：
+验证改动优先用 `npx tsc --noEmit`（~40 秒）。要跑 eslint 就用 `npm run lint:changed`
+（只查未提交改动，秒级）；`npm run lint` 是带缓存的全量，`npm run lint:all` 无缓存。
 
-| 命令 | 范围 | 耗时 |
-|---|---|---|
-| `npx tsc --noEmit` | 只查类型 | ~40 秒 |
-| `npm run lint:changed` | 未提交的改动（默认） | 秒级 |
-| `npm run lint:changed -- upstream/main` | fork 相对上游的全部改动 | ~35 秒 |
-| `npm run lint` | 全量，带增量缓存 | 首次几分钟，之后只查变过的 |
-| `npm run lint:all` | 全量，无缓存（CI 用） | 几分钟 |
-
-多数情况下 `npx tsc --noEmit` 就够；要查 eslint 专属规则（`set-state-in-effect`、
-`Date.now` purity 这类 tsc 看不见的）才需要 lint。
+**同一时刻只允许一个 tsc / lint 进程。** 单个 tsc 峰值约 1 GB，本机可用内存约 2.3 GB，
+两三个并行就会打穿（2026-09-01 已因此被 OOM 杀掉过整个会话）。多 agent 并行改代码时，
+由主进程在最后统一跑一次校验，不要每个 agent 各跑一遍。
 
 ## 仓库地址
 
