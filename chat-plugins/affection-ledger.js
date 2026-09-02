@@ -6,7 +6,7 @@ export default {
     id: "affection-ledger",
     name: "好感与关系",
     apiVersion: 1,
-    version: "1.5.0",
+    version: "1.5.1",
     author: "自制",
     description: "角色回复里自带心里话与好感变化量，插件累加成慢变的好感；关系按角色各自存，由TA按人设自己定，转折时可选经你确认或TA自己改。区间、提示词、数值都在面板里改。",
     permissions: ["chat.read", "chat.write", "ui", "storage"],
@@ -130,16 +130,27 @@ export default {
     });
 
     // ── 截标记：从正文删掉，结算好感，心里话暂存等落库时挂到消息上 ──
-    const RE_BLOCK = /\[内心\]([\s\S]*?)\[\/内心\]/;
+    // 模型常漏掉结束标记、写成【内心】或干脆不打标记只给两行；都当块处理，别漏到正文里
+    const RE_BLOCK = /[\[【]\s*内心(?:话)?\s*[\]】]([\s\S]*?)(?:[\[【]\s*\/\s*内心(?:话)?\s*[\]】]|$)/;
+    const findBlock = (text) => {
+      const mb = text.match(RE_BLOCK);
+      if (mb) return { inner: mb[1], strip: mb[0] };
+      const cut = [RE_DELTA, RE_REL].map(re => text.search(re)).filter(i => i >= 0);
+      if (!cut.length) return null;
+      const start = Math.min(...cut);
+      const para = text.lastIndexOf("\n\n", start);
+      const from = para >= 0 ? para : text.lastIndexOf("\n", start - 1) + 1;
+      return { inner: text.slice(from), strip: text.slice(from) };
+    };
     const RE_DELTA = /^\s*[\[（(]?好感\s*[:：]?\s*([+-]?\s*\d+(?:\.\d+)?)\s*[|｜：:]\s*([^\]\n]*)[\]）)]?\s*$/m;
     const RE_REL = /^\s*[\[（(]?关系\s*(?:→|->|:|：)\s*([^|｜\]\n]+?)\s*(?:[|｜]\s*([^\]\n]*))?[\]）)]?\s*$/m;
     ctx.hooks.transform("llm.response", (p) => {
       if (!p.sessionId) return p;
       const cid = charOf(p.sessionId);
       if (!cid) return p;
-      const mb = p.text.match(RE_BLOCK);
+      const mb = findBlock(p.text);
       if (!mb) return p;
-      let inner = mb[1];
+      let inner = mb.inner;
       const md = inner.match(RE_DELTA), mr = inner.match(RE_REL);
       if (md) inner = inner.replace(RE_DELTA, "");
       if (mr) inner = inner.replace(RE_REL, "");
@@ -166,7 +177,7 @@ export default {
       }
       { const st = load(cid); pend.score = st.score; pend.tier = st.tier; pend.relation = st.relation; pend.at = Date.now(); }
       ctx.system.storage.set("pending:" + p.sessionId, pend);
-      p.text = p.text.replace(RE_BLOCK, "").replace(/\n{3,}/g, "\n\n").trim();
+      p.text = p.text.replace(mb.strip, "").replace(/\n{3,}/g, "\n\n").trim();
       return p;
     });
     ctx.hooks.transform("message.beforePersist", (p) => {
