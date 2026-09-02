@@ -13,6 +13,8 @@ import {
   setCustomAppChatContext,
 } from "./custom-app-chat-context";
 import { normalizeReplyGate, setCustomAppReplyGate } from "./chat-reply-gate";
+import { getChatPluginVar, setChatPluginVar, unsetChatPluginVar } from "./chat-plugin-storage";
+import type { ChatPluginVarScope } from "./chat-plugin-types";
 import { buildCustomAppChatTags } from "./custom-app-tags";
 import { hydrateKvDb } from "./kv-db";
 import { loadCharacters } from "./character-storage";
@@ -170,6 +172,10 @@ const HOST_ACTION_PERMISSIONS: Record<string, CustomAppPermission[]> = {
   "chat.setContext": ["chat.context"],
   "chat.clearContext": ["chat.context"],
   "chat.setReplyGate": ["chat.context"],
+  "variables.get": ["chat.context"],
+  "variables.set": ["chat.context"],
+  "variables.update": ["chat.context"],
+  "variables.unset": ["chat.context"],
   "chat.history": ["chat.write", "chat.sendMessage"],
   "chat.message": ["chat.write", "chat.sendMessage"],
   "chat.sendMessage": ["chat.write", "chat.sendMessage"],
@@ -1682,6 +1688,32 @@ export function writeCustomAppReplyGate(app: InstalledCustomApp, record: Record<
   return { characterId, active: !!gate };
 }
 
+// 与聊天插件共用同一个变量池（好感度、心情这类世界状态），APP 与插件两边读写的是同一份。
+function sharedVarArgs(record: Record<string, unknown>): { name: string; scope: ChatPluginVarScope; targetId?: string } {
+  const name = cleanText(record.name, 120);
+  if (!name) throw new Error("variables.* 缺少 name。");
+  const scope = record.scope === "session" || record.scope === "character" ? record.scope : "global";
+  const targetId = scope === "global" ? undefined : cleanText(record.characterId ?? record.sessionId ?? record.targetId, 160);
+  if (scope !== "global" && !targetId) throw new Error(`variables.* scope 为 ${scope} 时需要 ${scope === "session" ? "sessionId" : "characterId"}。`);
+  return { name, scope, targetId };
+}
+
+export function accessSharedVariable(action: string, record: Record<string, unknown>): { value: unknown } {
+  const { name, scope, targetId } = sharedVarArgs(record);
+  if (action === "variables.get") return { value: getChatPluginVar(name, scope, targetId) };
+  if (action === "variables.unset") { unsetChatPluginVar(name, scope, targetId); return { value: null }; }
+  if (action === "variables.update") {
+    const current = getChatPluginVar(name, scope, targetId);
+    const base = current && typeof current === "object" && !Array.isArray(current) ? current as Record<string, unknown> : {};
+    const patch = record.patch && typeof record.patch === "object" && !Array.isArray(record.patch) ? record.patch as Record<string, unknown> : {};
+    const next = { ...base, ...patch };
+    setChatPluginVar(name, next, scope, targetId);
+    return { value: next };
+  }
+  setChatPluginVar(name, record.value, scope, targetId);
+  return { value: record.value ?? null };
+}
+
 export function dropCustomAppChatContext(app: InstalledCustomApp, record: Record<string, unknown>): { ok: true } {
   clearCustomAppChatContext(
     app.id,
@@ -2480,6 +2512,11 @@ export async function executeCustomAppHostAction(
       return dropCustomAppChatContext(app, payload);
     case "chat.setReplyGate":
       return writeCustomAppReplyGate(app, payload);
+    case "variables.get":
+    case "variables.set":
+    case "variables.update":
+    case "variables.unset":
+      return accessSharedVariable(actionType, payload);
     case "chat.updateCard":
       return updateCustomAppCard(app, payload);
     case "chat.history":

@@ -122,6 +122,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
   - \`.get(name, scope?, targetId?)\` / \`.set(name, value, scope?, targetId?)\` / \`.update(name, patchObj, ...)\` / \`.unset(name, ...)\`
   - scope: "global"（默认）| "session"（传 sessionId）| "character"（传 characterId）
   - 插件自己的私有数据请用 ctx.system.storage，不要放变量池
+  - 自定义 APP（如挂念）通过 \`AiPhone.variables\` 读写的是同一个池：想让 APP 拿到的数放这里，变量名两边约好
 
 ## ctx.ai —— LLM 裸通道
 

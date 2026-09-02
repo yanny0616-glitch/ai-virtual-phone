@@ -87,6 +87,7 @@ import {
   updateCustomAppCard,
   writeCustomAppChatContext,
   writeCustomAppReplyGate,
+  accessSharedVariable,
   writeCustomAppCalendar,
   writeCustomAppHistoryMessage,
   writeCustomAppCharacterState,
@@ -469,6 +470,12 @@ html, body { min-height: 100%; }
       readDaily: function(payload){ return request('usage.readDaily', payload || {}); },
       readLogs: function(payload){ return request('usage.readLogs', payload || {}); },
       readLogDetail: function(payload){ return request('usage.readLogDetail', payload || {}); }
+    },
+    variables: {
+      get: function(name, opts){ return request('variables.get', Object.assign({ name: name }, opts || {})).then(function(r){ return r && r.value; }); },
+      set: function(name, value, opts){ return request('variables.set', Object.assign({ name: name, value: value }, opts || {})).then(function(r){ return r && r.value; }); },
+      update: function(name, patch, opts){ return request('variables.update', Object.assign({ name: name, patch: patch || {} }, opts || {})).then(function(r){ return r && r.value; }); },
+      unset: function(name, opts){ return request('variables.unset', Object.assign({ name: name }, opts || {})).then(function(){ return true; }); }
     },
     characters: {
       list: function(){ return request('characters.list'); },
@@ -1111,6 +1118,7 @@ export function CustomAppRunner({
           world: ["read", "list", "get", "write", "create", "update", "delete", "activate"],
           media: ["pick", "save", "put", "get", "revoke", "delete"],
           characters: ["list", "get", "readState", "writeState", "readRelations"],
+          variables: ["get", "set", "update", "unset"],
           usage: ["readDaily", "readLogs", "readLogDetail"],
           chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState", "setContext", "clearContext", "setReplyGate"],
           memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
@@ -1759,6 +1767,11 @@ export function CustomAppRunner({
     if (action === "chat.setReplyGate") {
       requirePermission("chat.context");
       return { ok: true, ...writeCustomAppReplyGate(app, record) };
+    }
+
+    if (action === "variables.get" || action === "variables.set" || action === "variables.update" || action === "variables.unset") {
+      requirePermission("chat.context");
+      return accessSharedVariable(action, record);
     }
 
     if (action === "chat.updateCard") {
