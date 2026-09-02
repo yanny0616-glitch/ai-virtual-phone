@@ -1748,6 +1748,7 @@
       await AiPhone.variables.set("presence", {
         at: now,
         asleep: ph.kind === "sleep",
+        busy: ph.kind === "on" && !!ph.it && isBusyItem(ph.it),
         doing: ph.kind === "sleep" ? "睡觉" : (currentDoing() || S.day.doing || ""),
         step: currentStep() || "",
         place: ph.kind === "sleep" ? "" : currentPlace(),
