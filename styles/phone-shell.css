@@ -292,6 +292,19 @@
 }
 
 /* Swipe layer wraps the icon grid to allow drag-to-switch pages */
+/* 手指位移写在 CSS 变量里；不注册的话变量默认可继承，每帧改一次就要把
+   滑动层下所有页、图标、小组件的样式全部重算一遍 */
+@property --swipe-drag {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --swipe-page {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 .phone-swipe-layer {
   flex: 1 1 auto;
   min-height: 0;
@@ -526,6 +539,20 @@
   mask-composite: exclude;
 }
 
+/* 翻页或拖拽进行中（data-glass-busy）：图标与 dock 的实时模糊暂停，底色调实一点顶住 */
+.phone-shell[data-glass-busy="1"][data-icon-effect="glass"] .icon-glyph-box {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 62%, transparent) !important;
+}
+.phone-shell[data-glass-busy="1"][data-icon-effect="glass"] .icon-glyph-box::before {
+  display: none;
+}
+.phone-shell[data-glass-busy="1"] .dock {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 .phone-shell[data-glass-pass="1"][data-icon-effect="glass"] .icon-glyph-box {
   backdrop-filter: blur(22.01px) saturate(140%);
   -webkit-backdrop-filter: blur(22.01px) saturate(140%);
@@ -668,9 +695,20 @@
 }
 .drag-ghost > * {
   animation: none !important;
-  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.28));
+  box-shadow: 0 14px 22px rgba(0, 0, 0, 0.32);
   transform: scale(1.12);
   transform-origin: center center;
+}
+/* 悬浮体一路在动，实时背景模糊每帧重算；克隆体上一律关掉，用静态白雾顶住观感 */
+.drag-ghost .icon-glyph-box,
+.drag-ghost .widget-glass > div,
+.drag-ghost .dock-item .icon-glyph-box {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  will-change: auto !important;
+}
+.drag-ghost .widget-glass > div {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.24) 55%, rgba(255, 255, 255, 0.32)) !important;
 }
 
 .drop-indicator {

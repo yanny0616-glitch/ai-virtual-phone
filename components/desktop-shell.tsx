@@ -776,9 +776,8 @@ function getGridGeometry(gridEl: HTMLElement): GridGeometry {
 function pointerToGridCell(
   px: number,
   py: number,
-  gridEl: HTMLElement
+  geom: GridGeometry
 ): { row: number; col: number } | null {
-  const geom = getGridGeometry(gridEl);
   const col = Math.floor((px - geom.originX) / geom.colStep);
   const row = Math.floor((py - geom.originY) / geom.rowStep);
   if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return null;
@@ -1327,6 +1326,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     mergeArmed: boolean;
     mergeTargetIconId: DesktopIconId | null;
     mergeTargetPage: DesktopPageKey | null;
+    // 拖拽期间网格几何按页缓存、工作区矩形缓存一次：每帧读 rect/computedStyle 会强制布局
+    geomCache?: Partial<Record<string, GridGeometry>>;
+    wsRect?: DOMRect;
   } | null>(null);
   const editTapRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   // Refs to latest state for use in stable callbacks
@@ -2614,6 +2616,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     editDragRef.current = null;
     editTapRef.current = null;
     if (ghostRef.current) ghostRef.current.style.display = "none";
+    releaseGlass();
     // Save layout, dock, folders and widgets once on exit
     kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(layoutRef.current));
     kvSet(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify(dockRef.current));
@@ -2743,6 +2746,15 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     if (ghost) {
       ghost.innerHTML = "";
       const clone = drag.element.cloneNode(true) as HTMLElement;
+      // 克隆出来的 iframe 会重新加载一遍，拖着走时是独立合成层；换成同尺寸空盒
+      clone.querySelectorAll("iframe").forEach((frame) => {
+        const stub = document.createElement("div");
+        stub.className = frame.className;
+        stub.style.cssText = frame.style.cssText;
+        stub.style.width = frame.getAttribute("width") ? `${frame.getAttribute("width")}px` : "100%";
+        stub.style.height = frame.getAttribute("height") ? `${frame.getAttribute("height")}px` : "100%";
+        frame.replaceWith(stub);
+      });
       clone.style.margin = "0";
       clone.style.gridRow = "";
       clone.style.gridColumn = "";
@@ -2751,12 +2763,12 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       clone.style.height = `${drag.ghostH}px`;
       clone.style.minHeight = "";
       clone.style.boxSizing = "border-box";
-      // 拿起手感：克隆体轻微放大 + 投影
-      clone.style.transition = "transform 0.16s ease, filter 0.16s ease";
+      // 拿起手感：克隆体轻微放大；投影在 .drag-ghost > * 的 box-shadow 里，
+      // 不用 filter——移动中的元素带 filter 每帧整块重新光栅化，iOS 上最费
+      clone.style.transition = "transform 0.16s ease";
       ghost.appendChild(clone);
       requestAnimationFrame(() => {
         clone.style.transform = "scale(1.06)";
-        clone.style.filter = "drop-shadow(0 14px 22px rgba(0,0,0,0.32))";
       });
       ghost.style.display = "block";
       ghost.style.width = `${drag.ghostW}px`;
@@ -2765,6 +2777,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     const shellRect = shellRef.current?.getBoundingClientRect();
     drag.shellLeft = shellRect?.left ?? 0;
     drag.shellTop = shellRect?.top ?? 0;
+    holdGlass();
     setDragItem({ type: drag.itemType, id: drag.itemId, sourcePage: drag.sourcePage });
     try { workspaceRef.current?.setPointerCapture(pointerId); } catch { /* pointer 可能已抬起 */ }
     updateGhostPos(clientX, clientY);
@@ -2857,6 +2870,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
 
     const pageNum = getDesktopPageNumber(pageKey) || 1;
     const ws = widgetsRef.current;
+    drag.geomCache ??= {};
+    const geom = (drag.geomCache[pageKey] ??= getGridGeometry(gridEl));
 
     if (drag.itemType === "icon") {
       // ── 矩形碰撞裁决（iOS 手感）──
@@ -2865,7 +2880,6 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       // ~0.2s 后亮圈武装，松手成组）；两边都不过半 = 换位（目标让位，照旧）。
       // 相交期间不改判——边对边推进去永远是合并，切着角进去永远是换位；
       // 想改判把图标拉开重新进即可。文件夹 tile 只换位不合并（不嵌套）。
-      const geom = getGridGeometry(gridEl);
       const dragBoxW = Math.min(58, drag.ghostW);
       const dragLeft = x - drag.offsetX + (drag.ghostW - dragBoxW) / 2;
       const dragTop = y - drag.offsetY;
@@ -2929,7 +2943,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       if (drag.contactId) clearContact(drag);
       const probeX = x - drag.offsetX + drag.ghostW / 2;
       const probeY = y - drag.offsetY + dragBoxW / 2;
-      const cell = pointerToGridCell(probeX, probeY, gridEl);
+      const cell = pointerToGridCell(probeX, probeY, geom);
       if (!cell) {
         if (drag.targetPage !== null) resetDragPreview(drag);
         drag.targetPage = null;
@@ -2946,7 +2960,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       setDropTarget({ page: pageKey, row: cell.row + 1, col: cell.col + 1 });
       simulateDragReflow(drag, pageKey, cell.row + 1, cell.col + 1);
     } else {
-      const cell = pointerToGridCell(x, y, gridEl);
+      const cell = pointerToGridCell(x, y, geom);
       if (!cell) {
         if (drag.targetPage !== null) resetDragPreview(drag);
         drag.targetPage = null;
@@ -3153,7 +3167,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     const drag = editDragRef.current;
     const ws = workspaceRef.current;
     if (!drag || !ws) return;
-    const rect = ws.getBoundingClientRect();
+    const rect = (drag.wsRect ??= ws.getBoundingClientRect());
     const EDGE = 36;
     const pageIdx = currentPageIndexRef.current;
     const activePageKeys = getDesktopPageKeysForState(layoutRef.current, widgetsRef.current);
@@ -3304,8 +3318,9 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
         ghost.style.transition = "";
         ghost.style.display = "none";
         const inner = ghost.firstElementChild as HTMLElement | null;
-        if (inner) { inner.style.transform = ""; inner.style.filter = ""; }
+        if (inner) inner.style.transform = "";
       }
+      releaseGlass();
       setDragItem(null);
     };
     if (!wasActive || !ghost || ghost.style.display === "none") {
@@ -3470,9 +3485,21 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
    * doesn't itself trigger a re-render, then let the blur snap back when idle.
    */
   function suspendGlass(): void {
+    holdGlass();
+    releaseGlass();
+  }
+
+  function holdGlass(): void {
     const el = shellRef.current;
     if (!el) return;
     el.setAttribute("data-glass-busy", "1");
+    if (glassBusyTimerRef.current) window.clearTimeout(glassBusyTimerRef.current);
+    glassBusyTimerRef.current = 0;
+  }
+
+  // 360ms 盖过落位动画（300ms），模糊在页面停稳后才回来
+  function releaseGlass(): void {
+    if (!shellRef.current?.hasAttribute("data-glass-busy")) return;
     if (glassBusyTimerRef.current) window.clearTimeout(glassBusyTimerRef.current);
     glassBusyTimerRef.current = window.setTimeout(() => {
       shellRef.current?.removeAttribute("data-glass-busy");
@@ -3804,6 +3831,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
         s.locked = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
         if (s.locked === "x") {
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          holdGlass();
         }
       } else {
         return;
@@ -3873,6 +3901,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     // currentPageIndex is the single source of truth → CSS settles to it, no race.
     swipeLayerRef.current?.classList.remove("phone-swipe-dragging");
     setSwipeDrag(0);
+    releaseGlass();
     if (targetPageIndex !== page) setCurrentPageIndex(targetPageIndex);
   }, [editMode, getSwipePageWidth, pageCount, setSwipeDrag]);
 
