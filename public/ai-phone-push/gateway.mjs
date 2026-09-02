@@ -810,15 +810,18 @@ Deno.serve(async (request: Request) => {
 
     if (action === "chat-mirror") {
       // 聊天镜像：客户端把新消息抄送到这里，云端判断（降速/复核）与面板按需读取。
-      // 只做三件事：批量追加（按 id 幂等）、按角色/时间查询、一键清空。不提供改写。
+      // 批量写入（按 id 覆盖，本地编辑/重生成也跟着变）、按 id 删除（本地删了云端也删）、
+      // 按角色/时间查询、一键清空。
       if (request.method === "POST") {
         const body = await request.json().catch(() => ({})) as { entries?: unknown };
         const list = Array.isArray(body.entries) ? body.entries.slice(0, 50) : [];
         if (list.length === 0) return json({ ok: false, error: "缺少 entries。" }, 400);
         const rows: Record<string, unknown>[] = [];
+        const deleteIds: string[] = [];
         for (const item of list) {
           const entry = item && typeof item === "object" ? item as Record<string, unknown> : {};
           const id = cleanText(entry.id, 80);
+          if (id && entry.deleted === true) { deleteIds.push(id); continue; }
           const role = cleanText(entry.role, 20);
           const messageAt = new Date(cleanText(entry.createdAt, 60));
           if (!id || (role !== "user" && role !== "assistant") || Number.isNaN(messageAt.getTime())) continue;
@@ -833,17 +836,30 @@ Deno.serve(async (request: Request) => {
             message_at: messageAt.toISOString(),
           });
         }
-        if (rows.length === 0) return json({ ok: false, error: "没有有效条目。" }, 400);
-        const insert = await rest("push_chat_mirror?on_conflict=id", {
-          method: "POST",
-          headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
-          body: JSON.stringify(rows),
-        });
-        if (!insert.ok) {
-          const detail = await insert.text().catch(() => "");
-          return json({ ok: false, error: detail.slice(0, 300) || `数据库返回 HTTP ${insert.status}` }, 500);
+        if (rows.length === 0 && deleteIds.length === 0) return json({ ok: false, error: "没有有效条目。" }, 400);
+        if (rows.length > 0) {
+          const insert = await rest("push_chat_mirror?on_conflict=id", {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify(rows),
+          });
+          if (!insert.ok) {
+            const detail = await insert.text().catch(() => "");
+            return json({ ok: false, error: detail.slice(0, 300) || `数据库返回 HTTP ${insert.status}` }, 500);
+          }
         }
-        return json({ ok: true, saved: rows.length });
+        if (deleteIds.length > 0) {
+          // 先写后删：同一批里「发出又删掉」的以删为准。id 会拼进 in.("…")，引号之类挡在入口
+          const safe = deleteIds.map(id => id.replace(/[^A-Za-z0-9._:-]/g, "")).filter(Boolean).map(id => `"${id}"`);
+          const del = safe.length > 0
+            ? await rest(`push_chat_mirror?user_id=eq.${OWNER_ID}&id=in.(${encodeURIComponent(safe.join(","))})`, {
+              method: "DELETE",
+              headers: { Prefer: "return=minimal" },
+            })
+            : null;
+          if (del && !del.ok) return json({ ok: false, error: `删除镜像失败 HTTP ${del.status}` }, 500);
+        }
+        return json({ ok: true, saved: rows.length, deleted: deleteIds.length });
       }
       if (request.method === "GET") {
         const characterId = cleanText(url.searchParams.get("characterId"), 80);

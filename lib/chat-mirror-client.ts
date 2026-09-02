@@ -2,7 +2,10 @@
 // 安全模型与离线推送一致：只发往用户自己项目、service key 逐次校验、表仅 service_role 可读写；开关默认关闭。
 
 import {
+    CHAT_MESSAGE_EDITED_EVENT,
     CHAT_MESSAGE_PUSHED_EVENT,
+    CHAT_MESSAGES_DELETED_EVENT,
+    CHAT_RESPONSE_BATCH_REPLACED_EVENT,
     getChatMessagePreview,
     loadChatContacts,
     loadChatMessages,
@@ -31,6 +34,8 @@ export type ChatMirrorEntry = {
     content: string;
     mediaType?: string;
     createdAt: string;
+    /** 本地删掉了这条：云端按 id 删。内容留空 */
+    deleted?: true;
 };
 
 let installed = false;
@@ -73,12 +78,13 @@ function characterIdForSession(sessionId: string): string {
     return contact?.characterId || cid;
 }
 
-function toMirrorEntry(msg: ChatMessage): ChatMirrorEntry | null {
+function toMirrorEntry(msg: ChatMessage, deleted?: true): ChatMirrorEntry | null {
     if (msg.role !== "user" && msg.role !== "assistant") return null;
     const characterId = characterIdForSession(msg.sessionId);
     // 群聊会话（characterId 解析不到单一角色）暂不镜像，控制数据量与隐私面。
-    if (!characterId) return null;
-    const content = (msg.content || getChatMessagePreview(msg) || "").slice(0, CONTENT_MAX);
+    // 删除例外：会话可能已经没了，按 id 删不需要角色。
+    if (!characterId && !deleted) return null;
+    const content = deleted ? "" : (msg.content || getChatMessagePreview(msg) || "").slice(0, CONTENT_MAX);
     return {
         id: msg.id,
         sessionId: msg.sessionId,
@@ -87,6 +93,7 @@ function toMirrorEntry(msg: ChatMessage): ChatMirrorEntry | null {
         content,
         mediaType: msg.mediaType || undefined,
         createdAt: msg.createdAt,
+        ...(deleted ? { deleted: true as const } : {}),
     };
 }
 
@@ -223,12 +230,30 @@ export async function clearChatMirrorCloud(characterId?: string): Promise<void> 
 export function installChatMirror(): void {
     if (installed || typeof window === "undefined") return;
     installed = true;
-    window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, event => {
+    // 镜像跟着本地变：新增、编辑、整批重生成都按 id 覆盖，删除按 id 删。
+    // 云端裁决读的就是这份镜像，本地删掉的话不该再被当成还在。
+    const mirrorMessages = (messages: ChatMessage[], deleted?: true) => {
         if (!isChatMirrorEnabled() || !isPersonalPushCloudActive()) return;
+        for (const message of messages) {
+            const entry = toMirrorEntry(message, deleted);
+            if (entry) enqueue(entry);
+        }
+    };
+    window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, event => {
         const message = (event as CustomEvent<{ message?: ChatMessage }>).detail?.message;
-        if (!message) return;
-        const entry = toMirrorEntry(message);
-        if (entry) enqueue(entry);
+        if (message) mirrorMessages([message]);
+    });
+    window.addEventListener(CHAT_MESSAGE_EDITED_EVENT, event => {
+        const message = (event as CustomEvent<{ message?: ChatMessage }>).detail?.message;
+        if (message) mirrorMessages([message]);
+    });
+    window.addEventListener(CHAT_RESPONSE_BATCH_REPLACED_EVENT, event => {
+        const messages = (event as CustomEvent<{ messages?: ChatMessage[] }>).detail?.messages;
+        if (Array.isArray(messages)) mirrorMessages(messages);
+    });
+    window.addEventListener(CHAT_MESSAGES_DELETED_EVENT, event => {
+        const messages = (event as CustomEvent<{ messages?: ChatMessage[] }>).detail?.messages;
+        if (Array.isArray(messages)) mirrorMessages(messages, true);
     });
     if (retryTimer === null) {
         retryTimer = window.setInterval(() => {

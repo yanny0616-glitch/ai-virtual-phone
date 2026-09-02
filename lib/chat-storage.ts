@@ -282,6 +282,8 @@ export function isSessionStreamingEnabled(session: Pick<ChatSession, "streamOnli
 export const CHAT_APP_SETTINGS_UPDATED_EVENT = "chat-app-settings-updated";
 export const CHAT_MESSAGE_PUSHED_EVENT = "chat-message-pushed";
 export const CHAT_MESSAGES_DELETED_EVENT = "chat-messages-deleted";
+/** 单条消息内容被编辑：携带编辑后的整条消息，供聊天镜像等就地覆盖。 */
+export const CHAT_MESSAGE_EDITED_EVENT = "chat-message-edited";
 export const CHAT_REQUEST_REPLY_EVENT = "chat-request-reply";
 /** 长按编辑整批回复后重建消息：携带新消息与编辑后的原文，供云同步回写。 */
 export const CHAT_RESPONSE_BATCH_REPLACED_EVENT = "chat-response-batch-replaced";
@@ -1525,6 +1527,9 @@ export function editChatMessage(messageId: string, newContent: string) {
     if (msgIdx !== -1) {
         _messagesCache[msgIdx] = { ..._messagesCache[msgIdx], content: newContent };
         dbPutMessage(_messagesCache[msgIdx]);
+        if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent(CHAT_MESSAGE_EDITED_EVENT, { detail: { message: _messagesCache[msgIdx] } }));
+        }
 
         const sessionId = _messagesCache[msgIdx].sessionId;
         const lastMsg = getLastVisibleSessionMessage(sessionId);
