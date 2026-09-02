@@ -374,7 +374,7 @@ function hhmm(ms: number, offsetMin: number): string {
  * 以下带「App 同名」注释的函数改动要和 index.html 同步。 */
 type GenKit = {
   date?: string; instruction?: string; autoGenAt?: string; tz?: number;
-  existing?: { id?: string; startTime?: string; endTime?: string; title?: string; location?: string }[];
+  existing?: { id?: string; startTime?: string; endTime?: string; title?: string; location?: string; lock?: string }[];
   tplDaily?: string; tplImpulse?: string;
   anchorMorning?: boolean; anchorSleep?: boolean; moodGate?: boolean; kitAt?: number;
 };
@@ -443,7 +443,9 @@ function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, setti
     busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
   }));
   for (const it of existing) {
-    if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: String(it.startTime || ""), title: String(it.title || ""), place: it.location || "", note: it.location || "日程表上的安排" });
+    const hit = sched.find((x) => x.time === it.startTime);
+    if (!hit) sched.push({ time: String(it.startTime || ""), title: String(it.title || ""), place: it.location || "", note: it.location || "日程表上的安排", busy: it.lock === "busy" });
+    else if (it.lock) hit.busy = it.lock === "busy";
   }
   sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
   for (const it of sched) if (it.end && it.end <= it.time) it.end = "";

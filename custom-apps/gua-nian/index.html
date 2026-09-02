@@ -585,6 +585,7 @@
       character: ch,       // {id,name,avatar}
       day: null,           // db 记录 {id, date, characterId, mood, moodEmoji, energy, doing, location, schedule[]}
       plan: null,          // db 记录 {id, date, characterId, items:[{time,fireAt,act,why,intent,delivery,reason,wakeId}]}
+      prev: null,          // 昨天的 day 记录：今天还没生成时靠它撑过零点到生成之间这段
       aff: null, busy: false, _planLock: false, _ctx: undefined, _gate: null,
       _kitAt: 0, _autoGenDay: "", _rcTry: 0, _gateNoted: 0, _selfNoted: 0,
       archive: null,       // 记录页缓存 {at, dates[], byDate:{date:{day,plan}}, msgs[]}
@@ -805,6 +806,21 @@
     const w = sleepWindow(day);
     if (!w) return false;
     return w.overnight ? (hm >= w.bed && hm < w.wake) : (hm >= w.bed || hm < w.wake);
+  }
+  // 零点一过今天就换了记录，可TA的一夜还没过完。今天没生成之前，睡没睡、几点醒
+  // 都按昨天那条记录里的作息来，别一到零点就当TA凭空消失了。
+  function nightBridge(cx) {
+    if (cx.day || !cx.prev) return null;
+    const sw = sleepWindow(cx.prev);
+    if (!sw) return null;
+    const hm = fmtHM(Date.now());
+    const asleep = asleepAt(cx.prev, hm);
+    const upLate = sw.overnight && hm < sw.bed; // 过了零点还没上床
+    return {
+      asleep: asleep, wake: sw.wake, bed: sw.bed,
+      doing: asleep ? "睡觉" : (upLate ? "还没睡，快上床了" : "刚起床，今天的安排还没定"),
+      next: asleep ? sw.wake + " 起床" : (upLate ? sw.bed + " 睡觉" : ""),
+    };
   }
   // 此刻处在一天的哪一段：sleep 睡着 / gap 两件事之间自己待着 / pre 最后一件事做完到上床之间 / on 正做着某条
   function phaseAt(day, ms) {
@@ -1081,7 +1097,9 @@
     try {
       const r = await AiPhone.calendar.read({ ownerType: "character", ownerId: cx.character.id, date: date });
       const items = (r && r.plan && r.plan.items) || [];
-      return items.filter((it) => it.date === date).sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+      return items.filter((it) => it.date === date)
+        .map((it) => { const l = lockOfTitle(it.title); return Object.assign({}, it, { title: l.title, lock: l.lock }); })
+        .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
     } catch (e) { return []; }
   }
   // 把「生成明天」需要的一切算好寄上去：指令文本由本地同一个 buildDayInstruction 生成，
@@ -1100,12 +1118,12 @@
       try {
         const existing = await readCalendarOn(cx, date);
         const cal = calendarReality(dateOf(date));
-        const past = await recentDaysBrief(cx, 5, date);
+        const past = await recentDaysBrief(cx, 7, date);
         const ctx = cloudContext(cx);
         ctx.day = null; // 还没生成的那天不该拿今天的生活面去自发起念
         ctx.genKit = {
           date: date, instruction: buildDayInstruction(cal, at, past, existing),
-          existing: existing.map((it) => ({ id: it.id, startTime: it.startTime, endTime: it.endTime || "", title: it.title, location: it.location || "" })),
+          existing: existing.map((it) => ({ id: it.id, startTime: it.startTime, endTime: it.endTime || "", title: it.title, location: it.location || "", lock: it.lock || "" })),
           autoGenAt: at, tz: -new Date().getTimezoneOffset(),
           tplDaily: tpl.daily, tplImpulse: tpl.impulse,
           anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
@@ -1287,18 +1305,18 @@
     const date = todayStr(), cid = cx.character.id;
     const days = await AiPhone.db.list("days", { limit: 60 });
     cx.day = (days || []).find((r) => r.date === date && r.characterId === cid) || null;
+    const yd = dateOf(date); yd.setDate(yd.getDate() - 1);
+    cx.prev = (days || []).find((r) => r.date === dateStrOf(yd) && r.characterId === cid) || null;
     const plans = await AiPhone.db.list("plans", { limit: 60 });
     cx.plan = (plans || []).find((r) => r.date === date && r.characterId === cid) || null;
   }
 
   /* ================= 系统日程互通 ================= */
-  async function readTodayCalendar(cx) {
-    try {
-      const r = await AiPhone.calendar.read({ ownerType: "character", ownerId: cx.character.id, date: todayStr() });
-      const items = (r && r.plan && r.plan.items) || [];
-      return items.filter((it) => it.date === todayStr())
-        .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
-    } catch (e) { return []; }
+  async function readTodayCalendar(cx) { return readCalendarOn(cx, todayStr()); }
+  // 日程表条目标题末尾写「·忙」或「·闲」，就是你替TA定死了做这件事时顾不顾得上看手机
+  function lockOfTitle(title) {
+    const m = /^(.*?)\s*[·・]\s*(忙|闲)\s*$/.exec(String(title || ""));
+    return m ? { title: m[1], lock: m[2] === "忙" ? "busy" : "free" } : { title: String(title || ""), lock: "" };
   }
   function addMin(hm, n) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim()); if (!m) return hm;
@@ -1389,7 +1407,7 @@
       "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
       "以当前角色的人设、职业、近期记忆和最近的聊天为依据，想象TA今天真实会过的一天：先定今天的身体底子和情绪底色，再排日程。",
       "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + nowHM + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
-      past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵）：\n" + past.lines.join("\n") : null,
+      past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵；跨好几天的事——项目、备考、排练、等结果——按筹备、进行、收尾、余波的顺序往下走，让这几天连成线）：\n" + past.lines.join("\n") : null,
       past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
       "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
       "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
@@ -1400,8 +1418,8 @@
       "schedule 给 5 到 9 条，从起床后第一件事到睡前最后一件事；有主线也有琐碎，时间不均匀；不用把每个小时填满，事与事之间可以留空档（空档里TA就是自己待着）；有的日子轻（3、4 条），有的日子满；最后一件事结束到 bed 之间是TA自己的睡前时间；「睡觉」本身不要写成一条日程。",
     ].filter(Boolean).join("\n");
     if (existing.length) {
-      inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，围绕它们补全其余的一天）：\n" +
-        JSON.stringify(existing.map((it) => ({ time: it.startTime, title: it.title, note: it.location || "" })));
+      inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，带 busy 的照抄 busy，围绕它们补全其余的一天）：\n" +
+        JSON.stringify(existing.map((it) => Object.assign({ time: it.startTime, title: it.title, note: it.location || "" }, it.lock ? { busy: it.lock === "busy" } : {})));
     }
     return inst;
   }
@@ -1419,8 +1437,10 @@
       cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
       busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
     }));
-    for (const it of existing) { // 模型漏掉的已定安排补回来
-      if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排" });
+    for (const it of existing) { // 模型漏掉的已定安排补回来；定死了忙闲的以日程表为准
+      const hit = sched.find((x) => x.time === it.startTime);
+      if (!hit) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排", busy: it.lock === "busy" });
+      else if (it.lock) hit.busy = it.lock === "busy";
     }
     sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
     for (const it of sched) if (it.end && it.end <= it.time) it.end = ""; // 结束早于开始的当没写
@@ -1457,7 +1477,7 @@
     try {
       const existing = await readTodayCalendar(cx); // 日程 app 里TA今天已定的安排
       const cal = calendarReality(new Date());
-      const past = await recentDaysBrief(cx, 5);
+      const past = await recentDaysBrief(cx, 7);
       const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing);
       const d = await generateJson(cx, {
         characterId: cx.character.id,
@@ -1944,6 +1964,12 @@
   // 快照时刻放进 label（渲染成【挂念 · 14:32 的状态】），角色自己对着提示词里的
   // 真实时间就能看出这份状态是不是旧的。
   function chatContextText(cx) {
+    const nb = nightBridge(cx);
+    if (nb) {
+      return (nb.asleep
+        ? "在睡觉（" + nb.wake + " 左右才醒）：这会儿不会看到消息；真被吵醒也只是迷迷糊糊回一两句，说不了长话。"
+        : "在做的事：" + nb.doing + "。") + "\n今天的日程还没排，先按昨天的作息过。";
+    }
     const now = Date.now(), m = moodNow(cx.day, now), e = energyAt(cx.day, now);
     const ph = phaseAt(cx.day, now), sw = sleepWindow(cx.day);
     const cur = currentDoing(cx) || cx.day.doing || "";
@@ -1979,8 +2005,12 @@
   async function syncReplyGate(cx) {
     if (!cx.character || !AiPhone.chat || !AiPhone.chat.setReplyGate) return;
     const st = S.settings || {};
-    const sw = cx.day ? sleepWindow(cx.day) : null;
-    const gate = st.replyGate && cx.day ? {
+    const nb = nightBridge(cx);
+    const sw = cx.day ? sleepWindow(cx.day) : (nb ? { bed: nb.bed, wake: nb.wake } : null);
+    const gate = st.replyGate && nb ? {
+      sleep: { bed: sw.bed, wake: sw.wake, mode: st.sleepMode, wakeProb: st.sleepWakeProb, bufferMin: st.busyBufferMin },
+      busy: { date: todayStr(), peekMin: st.busyPeekMin, windows: [] },
+    } : st.replyGate && cx.day ? {
       sleep: sw ? { bed: sw.bed, wake: sw.wake, mode: st.sleepMode, wakeProb: st.sleepWakeProb, bufferMin: st.busyBufferMin } : undefined,
       busy: { date: cx.day.date, peekMin: st.busyPeekMin, windows: (cx.day.schedule || [])
         .filter((it) => isBusyItem(it) && it.time && it.end && it.end > it.time)
@@ -2015,6 +2045,11 @@
     if (!cx.character || !AiPhone.variables || !AiPhone.variables.set) return;
     try {
       const opts = { scope: "character", characterId: cx.character.id };
+      const nb = nightBridge(cx);
+      if (nb) {
+        await AiPhone.variables.set("presence", { at: Date.now(), asleep: nb.asleep, busy: false, doing: nb.doing, step: "", place: "", mood: String(cx.prev.mood || ""), energy: Math.round(energyAt(cx.prev, Date.now())), next: nb.next }, opts);
+        return;
+      }
       if (!cx.day) { await AiPhone.variables.unset("presence", opts); return; }
       const now = Date.now(), ph = phaseAt(cx.day, now), sw = sleepWindow(cx.day), nx = nextSched(cx.day, now);
       await AiPhone.variables.set("presence", {
@@ -2035,7 +2070,7 @@
     await refreshAffection(cx);
     await publishPresence(cx);
     if (!cx.character || !AiPhone.chat || !AiPhone.chat.setContext) return;
-    const on = !!(S.settings && S.settings.injectChat) && !!cx.day;
+    const on = !!(S.settings && S.settings.injectChat) && !!(cx.day || nightBridge(cx));
     const text = on ? chatContextText(cx) : "";
     if (!force && text === cx._ctx) return;
     try {
@@ -2075,7 +2110,8 @@
         : esc((cx.character.name || "?").slice(0, 1));
       $("#who-name").textContent = cx.character.name;
       const doing = currentDoing(cx);
-      $("#who-now").innerHTML = cx.day ? nowLineHtml(cx.day, doing) : '<span class="live"></span>今天还没开始';
+      const nb = nightBridge(cx);
+      $("#who-now").innerHTML = cx.day ? nowLineHtml(cx.day, doing) : '<span class="live"></span>' + (nb ? esc(nb.doing) : "今天还没开始");
     } else { who.hidden = true; }
     // 「今天」页有生活面时，角色和此刻状态合成一张卡，页顶不再单独放一条
     if (cx.character && S.tab === "today" && cx.day) who.hidden = true;
@@ -2094,6 +2130,7 @@
       v.innerHTML =
         '<div class="card empty"><div class="art">🌅</div>' +
         '<p>TA的今天还是一张白纸。<br>生成TA今天的状态与日程，<br>再看看TA会在哪些时刻想起你。'
+        + (nightBridge(cx) ? '<br><span style="color:var(--tx3)">' + esc("眼下按昨天的作息：" + nightBridge(cx).doing + (nightBridge(cx).next ? "，" + nightBridge(cx).next : "")) + "</span>" : "")
         + (S.settings && S.settings.autoGen ? '<br><span style="color:var(--tx3)">每天 ' + esc(S.settings.autoGenAt || SET_DEF.autoGenAt) + ' 会自动生成（挂念得开着；错过了下次打开时补）</span>' : "") + "</p>" +
         '<button class="big-btn" id="btn-gen"' + (cx.busy ? " disabled" : "") + ">" +
         (cx.busy ? '<span class="spin"></span>正在展开TA的一天…' : "开始TA的今天") + "</button></div>" + previewCard();
@@ -2239,14 +2276,17 @@
     }
     // 起床和上床两行只是标记，不可点；过零点才睡的排在最末，标「次日」
     const sw = sleepWindow(c.day);
+    if (sw && c.day.wake) merged.push({ kind: "mark", time: "00:00", label: c.prev && c.prev.bed ? "昨晚 " + c.prev.bed : "昨晚", icon: "🌙", text: "睡觉", night: true });
     if (sw && c.day.wake) merged.push({ kind: "mark", time: sw.wake, icon: "☀️", text: "起床" });
     if (sw && c.day.bed) merged.push({ kind: "mark", time: sw.overnight ? "24:00" : sw.bed, label: (sw.overnight ? "次日 " : "") + sw.bed, icon: "🌙", text: "睡觉" });
-    merged.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    // 同一时刻起床排在日程前面：先醒才能做事
+    const ord = (m) => String(m.time) + (m.kind === "mark" && m.text === "起床" ? "0" : "1");
+    merged.sort((a, b) => ord(a).localeCompare(ord(b)));
     let tl = "", idx = 0, nowInserted = false;
     const nowLine = '<div class="tl-now"><span class="lbl">现在 ' + now + "</span></div>";
     let curIdx = -1; // 最后一条已开始的日程 = 正在进行；睡着时亮的是「睡觉」那行
     merged.forEach((m, i) => { if (m.time <= now) curIdx = i; });
-    if (asleepAt(c.day, now)) curIdx = merged.findIndex((m) => m.kind === "mark" && m.text === "睡觉");
+    if (asleepAt(c.day, now)) { const early = sw && now < sw.wake; curIdx = merged.findIndex((m) => m.kind === "mark" && m.text === "睡觉" && !!m.night === !!early); }
     for (let i = 0; i < merged.length; i++) {
       const m = merged[i];
       const cur = i === curIdx;
