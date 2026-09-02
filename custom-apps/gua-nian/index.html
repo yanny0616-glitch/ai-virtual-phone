@@ -876,7 +876,7 @@
       doing: String(S.day.doing || ""),
       wake: String(S.day.wake || ""), bed: String(S.day.bed || ""),
       schedule: (S.day.schedule || []).map((it) => ({
-        time: it.time, end: it.end || "", title: it.title, cost: +it.cost || 0, mood: it.mood || "", busy: !!it.busy,
+        time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +it.cost || 0, mood: it.mood || "", busy: !!it.busy,
         steps: Array.isArray(it.steps) ? it.steps.map((x) => ({ time: x.time, what: x.what })) : undefined,
       })),
       conds: (S.day.conds || []).filter((c) => condWeight(c, Date.now()) > 0.08).map((c) => ({
@@ -1154,7 +1154,7 @@
         past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
         "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
         "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
-        '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-20到20的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-40到40的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
+        '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-20到20的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-40到40的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
         "body 是今天真实带在身上的状况，多数日子是空数组，最多两条；睡得不好、昨天太累、生病、天气才会有。",
         "情绪写法：用可感的状态词（迷糊、清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空、粘人）再带一点原因或身体感受，例如「开完会后脑子发紧」；一天里要有起伏，别每条都差不多；情绪要和 cost 对得上，耗神的事之后不该是「轻松」，回血的事之后不该是「疲惫」；底色 mood 要能从 sleep 和昨天的余波推出来。",
         "cost 负数=消耗（开会、通勤、应酬、体力活），正数=回血（午睡、吃饭、散步、发呆），平淡的事给 0；一天累计下来别把人耗到负数太多。",
@@ -1175,13 +1175,14 @@
         time: normHM(pickField(it, ["time", "时间", "at"])),
         end: normHM(pickField(it, ["end", "endTime", "结束", "到"])),
         title: String(pickField(it, ["title", "标题", "事项", "name"]) || ""),
+        place: String(pickField(it, ["place", "地点", "位置", "在哪"]) || "").slice(0, 16),
         note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
         mood: String(pickField(it, ["mood", "情绪", "心情"]) || "").slice(0, 24),
         cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
         busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
       }));
       for (const it of existing) { // 模型漏掉的已定安排补回来
-        if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: it.startTime, title: it.title, note: it.location || "日程表上的安排" });
+        if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排" });
       }
       sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
       for (const it of sched) if (it.end && it.end <= it.time) it.end = ""; // 结束早于开始的当没写
@@ -1621,7 +1622,7 @@
     const zone = $("#preview-zone");
     zone.innerHTML = '<div class="bubble"><div class="from">' + esc(S.character.name) + ' · 此刻</div><span class="typing"><i></i><i></i><i></i></span></div>';
     try {
-      const ctx = S.day ? ("TA此刻的状态：" + S.day.mood + "；正在" + (currentDoing() || S.day.doing) + (phaseAt(S.day, Date.now()).kind === "sleep" ? "" : "；在" + S.day.location) + "。") : "";
+      const ctx = S.day ? ("TA此刻的状态：" + S.day.mood + "；正在" + (currentDoing() || S.day.doing) + (phaseAt(S.day, Date.now()).kind === "sleep" ? "" : "；在" + currentPlace()) + "。") : "";
       const r = await AiPhone.ai.generate({
         characterId: S.character.id,
         appTags: ["companion", "preview"],
@@ -1643,6 +1644,14 @@
     if (ph.kind === "on") return ph.it.title;
     if (ph.kind === "pre") return "睡前自己待着，准备睡了";
     return ph.it ? "歇着（刚忙完" + ph.it.title + "）" : (S.day.doing || "起床后的时间");
+  }
+  // 地点跟着日程走：正做着或刚做完，人就在那件事的地方；睡前、睡着按最后一件算；
+  // 第一件事还没开始才用早上生成时的地点。云端 push-generate 同一套规则。
+  function currentPlace() {
+    if (!S.day) return "";
+    const ph = phaseAt(S.day, Date.now());
+    const it = ph.it || (lastDone(S.day, Date.now()) || {}).it;
+    return (it && it.place) || S.day.location || "";
   }
   // 细排过的那条日程，此刻落在哪一小步上。没细排过、或这条已经做完了就没有，返回空串。
   function currentStep() {
@@ -1672,7 +1681,7 @@
       lines.push("在睡觉" + (sw ? "（" + sw.wake + " 左右才醒）" : "") + "：这会儿不会看到消息；真被吵醒也只是迷迷糊糊回一两句，说不了长话。");
     } else {
       lines.push("在做的事：" + (cur || "没什么特别的") + (step ? "，具体是在" + step : "")
-        + (S.day.location ? "；人在" + S.day.location : ""));
+        + (currentPlace() ? "；人在" + currentPlace() : ""));
     }
     if (S.day.sleep && ph.kind !== "sleep") lines.push("昨晚：" + S.day.sleep);
     lines.push("情绪：" + (m.text || S.day.mood || "说不上来")
@@ -1814,7 +1823,7 @@
     return '<span class="chip' + (tone ? " " + tone : "") + '">' + text + "</span>";
   }
   function nowLineHtml(day, doing) {
-    const loc = doing === "睡觉" ? "" : String(day.location || "");
+    const loc = doing === "睡觉" ? "" : (currentPlace() || String(day.location || ""));
     return '<span class="doing"><span class="live"></span>' + esc(doing ? "正在" + doing : day.doing) + "</span>" +
       (loc ? '<span class="loc">📍 ' + esc(loc) + "</span>" : "");
   }
@@ -2236,7 +2245,7 @@
         "当前这条：" + JSON.stringify({ time: it.time, title: it.title, note: it.note || "", cost: +it.cost || 0 }),
         "同一天其余日程（不要撞时间、不要写成重复的事）：" + JSON.stringify(others),
         ask ? "用户的要求：" + ask : "没有具体要求，换一个更贴合TA的写法，时间可以微调。",
-        '输出严格 JSON，第一个字符必须是 {：{"time":"HH:MM","title":"日程标题（8字内）","note":"一句具体的细节","mood":"做完之后TA的情绪（8字内）","detail":"这件事的细化描写（60字内，写具体发生了什么、TA注意到了什么，第三人称）","cost":这件事做完对精力的影响-40到40的整数}',
+        '输出严格 JSON，第一个字符必须是 {：{"time":"HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完之后TA的情绪（8字内）","detail":"这件事的细化描写（60字内，写具体发生了什么、TA注意到了什么，第三人称）","cost":这件事做完对精力的影响-40到40的整数}',
         "cost 负数=消耗（开会、通勤、应酬、体力活），正数=回血（午睡、吃饭、散步、发呆），平淡的事给 0。",
         "mood 用可感的状态词（清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空）带一点原因或身体感受，要和 cost 对得上。",
       ].filter(Boolean).join("\n"),
@@ -2245,6 +2254,7 @@
     sched[i] = {
       time: time,
       title: String(pickField(d, ["title", "标题", "事项", "name"]) || it.title),
+      place: String(pickField(d, ["place", "地点", "位置", "在哪"]) || it.place || "").slice(0, 16),
       note: String(pickField(d, ["note", "备注", "细节", "desc"]) || ""),
       mood: String(pickField(d, ["mood", "情绪", "心情"]) || it.mood || "").slice(0, 24),
       detail: String(pickField(d, ["detail", "细化", "描写"]) || "").slice(0, 200),

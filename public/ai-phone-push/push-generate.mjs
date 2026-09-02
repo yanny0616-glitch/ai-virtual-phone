@@ -483,7 +483,7 @@ async function loadRecheckPlan(
 
 // ── 挂念：TA此刻的状态。预约里冻着的是编排那会儿的样子，到点了按寄存的日程和「情况」
 // 重算一遍。算法与挂念 index.html 的 energyAt / moodNow / currentStep 一致，改一处要同步另一处。
-type GuanianSched = { time?: string; end?: string; title?: string; cost?: number; mood?: string; busy?: boolean; steps?: { time?: string; what?: string }[] };
+type GuanianSched = { time?: string; end?: string; title?: string; place?: string; cost?: number; mood?: string; busy?: boolean; steps?: { time?: string; what?: string }[] };
 type GuanianCond = { startAt?: number; halfLifeMin?: number; intensity?: number; energyDelta?: number; mood?: string; cause?: string };
 type GuanianDay = {
   tz?: number; mood?: string; energy?: number; location?: string; doing?: string;
@@ -560,6 +560,8 @@ function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, q
   if (done && !over && !asleep && Array.isArray(done.steps)) {
     for (const x of done.steps) if (x && typeof x.time === "string" && x.time <= nowHM) step = String(x.what || "");
   }
+  // 与 App 端 currentPlace 同步：地点跟着最后一件已开始的日程走，第一件没开始才用早上的
+  const place = String((done && done.place) || day.location || "");
 
   const hh = h < 5 ? h + 24 : h;
   let energy = Number.isFinite(Number(day.energy)) ? Number(day.energy) : 60;
@@ -600,7 +602,7 @@ function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, q
     `[系统备忘：这不是对方发来的消息。这是你此刻（本地时间 ${nowHM}）的状态，提示词里若有更早的「挂念 · 某某时刻的状态」以这份为准：`,
     asleep
       ? `在睡觉${day.wake ? "（" + day.wake + " 左右才醒）" : ""}：这会儿不会看到消息；真被吵醒也只是迷迷糊糊回一两句，说不了长话。`
-      : `在做的事：${doing || "没什么特别的"}${step ? "，具体是在" + step : ""}${day.location ? "；人在" + day.location : ""}`,
+      : `在做的事：${doing || "没什么特别的"}${step ? "，具体是在" + step : ""}${place ? "；人在" + place : ""}`,
     `情绪：${moodLine}`,
     `精力：${energy}%${energy < 25 ? "——很累了，话短、反应慢、容易敷衍" : energy < 50 ? "——有点乏" : energy < 80 ? "——还行" : "——精神很好"}`,
   ];
