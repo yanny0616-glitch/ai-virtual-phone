@@ -1,5 +1,5 @@
 import { previewMessagesForApi, sendLLMRequest } from "./chat-engine";
-import { loadApiConfigs, loadBindingConfig } from "./settings-storage";
+import { loadApiConfigs, loadBindingConfig, resolveBinding } from "./settings-storage";
 import type { CheckPhoneShoppingProduct, CheckPhoneShoppingTone } from "./checkphone-config";
 import type { ApiConfig } from "./settings-types";
 import type { ShoppingCatalog, ShoppingCategory, ShoppingRefreshResult, ShoppingSearchResponse } from "./shopping-types";
@@ -101,9 +101,9 @@ type ParsedRecommendationBlock = {
 
 function resolveShoppingApiConfig(): ApiConfig | null {
   const configs = loadApiConfigs();
-  const binding = loadBindingConfig();
-  if (binding.globalDefaults.apiConfigId) {
-    return configs.find(config => config.id === binding.globalDefaults.apiConfigId) ?? null;
+  const slot = resolveBinding(loadBindingConfig(), undefined, "shopping");
+  if (slot.apiConfigId) {
+    return configs.find(config => config.id === slot.apiConfigId) ?? null;
   }
   return configs[0] ?? null;
 }

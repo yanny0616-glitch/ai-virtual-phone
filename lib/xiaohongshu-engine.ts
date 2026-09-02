@@ -796,11 +796,11 @@ function prependXiaohongshuUserIdentityHint(context: string, hint: string): stri
   return [hint.trim(), context.trim()].filter(Boolean).join("\n\n");
 }
 
-function resolveGlobalApiConfig(): ApiConfig | null {
+function resolveXiaohongshuApiConfig(): ApiConfig | null {
   const configs = loadApiConfigs();
-  const binding = loadBindingConfig();
-  if (binding.globalDefaults.apiConfigId) {
-    return configs.find(config => config.id === binding.globalDefaults.apiConfigId) ?? null;
+  const slot = resolveBinding(loadBindingConfig(), undefined, "xiaohongshu");
+  if (slot.apiConfigId) {
+    return configs.find(config => config.id === slot.apiConfigId) ?? null;
   }
   return configs[0] ?? null;
 }
@@ -1114,7 +1114,7 @@ export async function generateXiaohongshuNpcFeed(
   userIpLocation = "",
   userXiaohongshuName = "",
 ): Promise<XiaohongshuNote[]> {
-  const apiConfig = resolveGlobalApiConfig();
+  const apiConfig = resolveXiaohongshuApiConfig();
   if (!apiConfig) throw new ChatEngineError("未配置全局默认 API。");
   const prompt = [
     buildXiaohongshuNpcPrompt(
@@ -1143,7 +1143,7 @@ export async function generateXiaohongshuNpcReactionForUserPost(
   note: XiaohongshuNote,
   settings: XiaohongshuSettings,
 ): Promise<ParsedXiaohongshuNpcReaction> {
-  const apiConfig = resolveGlobalApiConfig();
+  const apiConfig = resolveXiaohongshuApiConfig();
   if (!apiConfig) throw new ChatEngineError("未配置全局默认 API。");
   const userNames = getUserXiaohongshuNamesFromNote(note);
   const context = [
@@ -1233,7 +1233,7 @@ export async function generateXiaohongshuNpcReplyToUserComment(
   settings: XiaohongshuSettings,
   targetComment?: XiaohongshuComment,
 ): Promise<ParsedXiaohongshuNpcCommentReply> {
-  const apiConfig = resolveGlobalApiConfig();
+  const apiConfig = resolveXiaohongshuApiConfig();
   if (!apiConfig) throw new ChatEngineError("未配置全局默认 API。");
   const commentContext = formatXiaohongshuCommentContext(note, userComment, targetComment);
   const userNames = Array.from(new Set([
@@ -1269,7 +1269,7 @@ export async function generateXiaohongshuNpcMoreComments(
   note: XiaohongshuNote,
   settings: XiaohongshuSettings,
 ): Promise<ParsedXiaohongshuNpcCommentReply> {
-  const apiConfig = resolveGlobalApiConfig();
+  const apiConfig = resolveXiaohongshuApiConfig();
   if (!apiConfig) throw new ChatEngineError("未配置全局默认 API。");
   const commentContext = formatXiaohongshuNoteCommentContext(note);
   const userNames = getUserXiaohongshuNamesFromNote(note);
@@ -1304,7 +1304,7 @@ export async function generateXiaohongshuNpcDmReply(input: {
   latestUserText: string;
   settings: XiaohongshuSettings;
 }): Promise<ParsedXiaohongshuNpcDmReply> {
-  const apiConfig = resolveGlobalApiConfig();
+  const apiConfig = resolveXiaohongshuApiConfig();
   if (!apiConfig) throw new ChatEngineError("未配置全局默认 API。");
   const prompt = [
     buildXiaohongshuNpcPrompt(

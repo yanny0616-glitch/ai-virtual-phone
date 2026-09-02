@@ -71,11 +71,20 @@ export function buildRequestHeaders(config: ApiConfig, baseUrl: string): Record<
 /**
  * Check if this provider uses the native Anthropic Messages API format
  * (not OpenAI-compatible chat/completions).
- * Only true for direct Anthropic API — proxies/relays that wrap Anthropic
- * behind OpenAI-compatible endpoints should use Custom provider + baseUrl.
+ * Anthropic-compatible relays can provide a custom base URL; callers that expose
+ * Anthropic models through OpenAI-compatible endpoints must use Custom instead.
  */
 export function isNativeAnthropicApi(config: ApiConfig): boolean {
-    return config.provider === "Anthropic" && !config.baseUrl;
+    return config.provider === "Anthropic";
+}
+
+/** Claude Opus 4.7+ and Claude 5 reject non-default sampling controls.
+ * Omit them entirely so both native endpoints and compatibility relays work. */
+export function shouldOmitDeprecatedSamplingParameters(config: Pick<ApiConfig, "defaultModel">): boolean {
+    const model = config.defaultModel.trim().toLowerCase();
+    return /(?:^|\/)claude-(?:opus|sonnet|fable|mythos)-5(?:$|[-.:])/.test(model)
+        || /(?:^|\/)claude-opus-4-(?:7|8)(?:$|[-.:])/.test(model)
+        || /(?:^|\/)claude-mythos-preview(?:$|[-.:])/.test(model);
 }
 
 /**
@@ -108,6 +117,7 @@ export async function simpleLLMCall(
     const headers = buildRequestHeaders(config, baseUrl);
     const temperature = options?.temperature ?? 0.7;
     const max_tokens = options?.max_tokens;
+    const omitSampling = shouldOmitDeprecatedSamplingParameters(config);
 
     try {
         let fetchUrl: string;
@@ -124,7 +134,7 @@ export async function simpleLLMCall(
                 model: config.defaultModel,
                 messages: anthropicMessages,
                 ...(systemMsg ? { system: systemMsg.content } : {}),
-                temperature,
+                ...(!omitSampling ? { temperature } : {}),
                 // Anthropic requires max_tokens. Keep this helper aligned with
                 // the main chat engine instead of silently capping output low.
                 max_tokens: max_tokens ?? SIMPLE_ANTHROPIC_AUTO_MAX_TOKENS,
@@ -141,7 +151,7 @@ export async function simpleLLMCall(
             body = JSON.stringify({
                 contents: parts,
                 generationConfig: {
-                    temperature,
+                    ...(!omitSampling ? { temperature } : {}),
                     ...(max_tokens ? { maxOutputTokens: max_tokens } : {}),
                 },
             });
@@ -151,7 +161,7 @@ export async function simpleLLMCall(
             body = JSON.stringify({
                 model: config.defaultModel,
                 messages,
-                temperature,
+                ...(!omitSampling ? { temperature } : {}),
                 ...(max_tokens ? { max_tokens } : {}),
             });
         }

@@ -997,7 +997,8 @@ export function setCharacterBinding(config: BindingConfig, binding: CharacterBin
 }
 
 /**
- * Cascade resolution: global defaults → character defaults → app overrides.
+ * Cascade resolution: global defaults → character defaults → app defaults
+ * → character-specific app overrides.
  * undefined/empty fields mean "inherit from parent level".
  */
 export function resolveBinding(
@@ -1026,10 +1027,10 @@ export function resolveBinding(
         if (slot.regexIds && slot.regexIds.length > 0) resolved.regexIds = [...slot.regexIds];
     };
 
-    if (!characterId) return resolved;
-
     // Apply character defaults
-    const charBinding = config.characterBindings.find(b => b.characterId === characterId);
+    const charBinding = characterId
+        ? config.characterBindings.find(b => b.characterId === characterId)
+        : undefined;
     if (charBinding) {
         applySlot(charBinding.defaults);
     }
