@@ -66,7 +66,9 @@
   .who .ava img { width: 100%; height: 100%; object-fit: cover; }
   .who .meta { min-width: 0; }
   .who .name { font-size: 17px; font-weight: 700; }
-  .who .now { font-size: 12px; color: var(--tx2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .who .now { font-size: 12px; color: var(--tx2); margin-top: 3px; line-height: 1.45; overflow-wrap: anywhere; }
+  .now .doing { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .now .loc { display: block; margin-top: 2px; font-size: 11px; color: var(--tx3); }
   .who .now .live { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--good); margin-right: 6px; vertical-align: 1px; animation: breathe 2.4s ease-in-out infinite; }
   @keyframes breathe { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
 
@@ -162,6 +164,9 @@
   .tl-item.wake.skipped .dot::before { content: "♡"; color: var(--tx3); }
   @keyframes pulse { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.35) } }
   .tl-item.wake .intent { font-size: 13px; color: var(--tx); line-height: 1.55; margin-top: 3px; }
+  /* 挂在日程下的心动行：心形往里缩，不复述日程标题 */
+  .tl-item.wake.sub { margin-left: 16px; padding-top: 3px; }
+  .tl-item.wake.sub .tt { font-size: 12px; font-weight: 500; color: var(--tx3); }
   .tl-item.wake.skipped .intent { color: var(--tx3); }
   .badge {
     display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px;
@@ -351,7 +356,9 @@
   .no-anim .fill { transition: none !important; }
 
   /* ── 页签 ─────────────────────────── */
-  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs { display: flex; gap: 8px; margin: 0 -18px 8px; padding: 6px 18px 8px;
+    position: sticky; top: var(--ai-phone-app-safe-top, 0px); z-index: 5;
+    background: linear-gradient(180deg, var(--bg1) 90%, transparent); }
   .tab {
     flex: 1; padding: 9px 0; border-radius: 999px; border: 1px solid var(--line);
     background: var(--card); color: var(--tx2);
@@ -424,7 +431,8 @@
     transform: translateX(-50%) translateY(16px); z-index: 60;
     background: rgba(69, 48, 56, .92); border: 1px solid rgba(255, 255, 255, .15);
     color: #fff; font-size: 13px; padding: 10px 18px; border-radius: 999px;
-    opacity: 0; pointer-events: none; transition: all .25s ease; white-space: nowrap;
+    opacity: 0; pointer-events: none; transition: all .25s ease;
+    max-width: calc(100vw - 32px); box-sizing: border-box; text-align: center; line-height: 1.5; border-radius: 18px;
   }
   #toast.show { opacity: 1; transform: translateX(-50%); }
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.25); border-top-color: #fff; border-radius: 50%; animation: rot .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
@@ -436,6 +444,8 @@
   .kv span { color: var(--tx); text-align: right; }
   .kv span.dim { color: var(--tx3); }
   .kv span.hi { color: var(--acc2); font-weight: 600; }
+  .kv.col { flex-direction: column; align-items: stretch; gap: 1px; }
+  .kv.col span { text-align: left; overflow-wrap: anywhere; }
   .kvs + .kvs { margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--line); }
   .stats.four { grid-template-columns: repeat(4, 1fr); gap: 7px; }
   .stats.four .stat { padding: 11px 3px 9px; }
@@ -472,7 +482,7 @@
   .hero-hd .ava img { width: 100%; height: 100%; object-fit: cover; }
   .hero-hd .meta { flex: 1; min-width: 0; }
   .hero-hd .name { font-size: 16px; font-weight: 700; }
-  .hero-hd .now { font-size: 12px; color: var(--tx2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero-hd .now { font-size: 12px; color: var(--tx2); margin-top: 3px; line-height: 1.45; overflow-wrap: anywhere; }
   .hero-hd .now .live { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--good); margin-right: 6px; vertical-align: 1px; animation: breathe 2.4s ease-in-out infinite; }
   .hero-hd .act { margin-left: 0; flex: none; font-size: 12px; color: var(--acc); background: none; border: none; cursor: pointer; padding: 4px 2px; font-family: inherit; }
   .hero-hd .act:disabled { color: var(--tx3); }
@@ -493,7 +503,7 @@
   details.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; }
   details.fold > summary::-webkit-details-marker { display: none; }
   details.fold > summary .t { font-size: 13px; font-weight: 700; letter-spacing: 3px; color: var(--tx2); white-space: nowrap; }
-  details.fold > summary .sm { flex: 1; min-width: 0; font-size: 11px; color: var(--tx3); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  details.fold > summary .sm { flex: 1; min-width: 0; font-size: 11px; color: var(--tx3); text-align: right; line-height: 1.5; }
   details.fold > summary .cv { font-size: 12px; color: var(--tx3); transition: transform .18s ease; }
   details.fold[open] > summary .cv { transform: rotate(90deg); }
   details.fold[open] > summary { margin-bottom: 4px; }
@@ -1738,9 +1748,7 @@
         : esc((S.character.name || "?").slice(0, 1));
       $("#who-name").textContent = S.character.name;
       const doing = currentDoing();
-      $("#who-now").innerHTML = S.day
-        ? '<span class="live"></span>' + esc((doing ? "正在" + doing : S.day.doing) + (doing === "睡觉" ? "" : " · " + S.day.location))
-        : '<span class="live"></span>今天还没开始';
+      $("#who-now").innerHTML = S.day ? nowLineHtml(S.day, doing) : '<span class="live"></span>今天还没开始';
     } else { who.hidden = true; }
     // 「今天」页有生活面时，角色和此刻状态合成一张卡，页顶不再单独放一条
     if (S.character && S.tab === "today" && S.day) who.hidden = true;
@@ -1805,8 +1813,14 @@
   function tag(text, tone) {
     return '<span class="chip' + (tone ? " " + tone : "") + '">' + text + "</span>";
   }
+  function nowLineHtml(day, doing) {
+    const loc = doing === "睡觉" ? "" : String(day.location || "");
+    return '<span class="doing"><span class="live"></span>' + esc(doing ? "正在" + doing : day.doing) + "</span>" +
+      (loc ? '<span class="loc">📍 ' + esc(loc) + "</span>" : "");
+  }
   function kv(label, value, cls) {
-    return '<div class="kv"><b>' + esc(label) + '</b><span' + (cls ? ' class="' + cls + '"' : "") + ">" + value + "</span></div>";
+    const col = cls && cls.indexOf("col") >= 0;
+    return '<div class="kv' + (col ? " col" : "") + '"><b>' + esc(label) + '</b><span' + (cls ? ' class="' + cls.replace("col", "").trim() + '"' : "") + ">" + value + "</span></div>";
   }
   function sortedItems(c) {
     return ((c.plan && c.plan.items) || []).slice().sort((a, b) => a.fireAt - b.fireAt);
@@ -1817,9 +1831,8 @@
     const next = sortedItems(c).find((w) => w.act && w.fireAt >= c.now);
     const ch = c.character;
     const ava = ch.avatar ? '<img src="' + esc(ch.avatar) + '" alt="">' : esc((ch.name || "?").slice(0, 1));
-    const nowLine = (doing ? "正在" + doing : c.day.doing) + (doing === "睡觉" ? "" : " · " + c.day.location);
     return '<div class="card hero"><div class="hero-hd" id="hero-who"><div class="ava">' + ava + '</div>' +
-      '<div class="meta"><div class="name">' + esc(ch.name) + '</div><div class="now"><span class="live"></span>' + esc(nowLine) + "</div></div>" +
+      '<div class="meta"><div class="name">' + esc(ch.name) + '</div><div class="now">' + nowLineHtml(c.day, doing) + "</div></div>" +
       '<button class="act" id="btn-regen"' + (S.busy ? " disabled" : "") + ">" + (S.busy ? "生成中…" : "↻ 重新生成") + "</button></div>" +
       (function () {
         // 大字是此刻的情绪；它盖住底色时，把底色和缘由缩在下面一行，看得出是被什么带偏的
@@ -1838,7 +1851,7 @@
       '<div class="kvs">' +
       (next
         ? kv("下一次想起你", esc(next.time) + " · " + esc(fromNow(next.fireAt)), "hi") +
-          kv("那会儿TA想说", "「" + esc(next.intent) + "」")
+          kv("那会儿TA想说", "「" + esc(next.intent) + "」", "col")
         : kv("下一次想起你", "今天没有还没到点的时刻了", "dim")) +
       "</div>" + previewZone() + "</div>";
   }
@@ -1880,8 +1893,14 @@
     for (const w of (c.plan && c.plan.items) || []) wakeByTime[w.time] = w;
     const times = new Set();
     const merged = [];
-    for (const it of c.day.schedule) { merged.push({ kind: "sched", time: it.time, it }); times.add(it.time); }
-    for (const w of (c.plan && c.plan.items) || []) if (!times.has(w.time)) merged.push({ kind: "wakeOnly", time: w.time, w });
+    const bySource = {};
+    for (const it of c.day.schedule) { const m = { kind: "sched", time: it.time, it, subs: [] }; merged.push(m); times.add(it.time); if (!bySource[it.title]) bySource[it.title] = m; }
+    for (const w of (c.plan && c.plan.items) || []) {
+      if (times.has(w.time)) continue;
+      const host = bySource[w.source];
+      if (host && w.time >= host.time) host.subs.push(w);
+      else merged.push({ kind: "wakeOnly", time: w.time, w });
+    }
     // 起床和上床两行只是标记，不可点；过零点才睡的排在最末，标「次日」
     const sw = sleepWindow(c.day);
     if (sw && c.day.wake) merged.push({ kind: "mark", time: sw.wake, icon: "☀️", text: "起床" });
@@ -1913,9 +1932,9 @@
             + (steps ? '<div class="nt more">…点开看这段时间里的 ' + steps + " 件事</div>"
                : m.it.detail ? '<div class="nt more">…点开看细化的部分</div>' : "") + "</div>";
         }
+        for (const w of m.subs) tl += wakeRow(w, w.time < now, "之后", 'style="animation-delay:' + (idx++ * 40) + 'ms"', true);
       } else {
-        const after = c.day.schedule.some((it) => it.title === m.w.source);
-        tl += wakeRow(m.w, past, after ? m.w.source + "之后" : m.w.source, delay);
+        tl += wakeRow(m.w, past, m.w.source, delay);
       }
     }
     if (merged.length && !nowInserted) tl += nowLine; // 一天已全部过完
@@ -1953,7 +1972,7 @@
     return "";
   }
 
-  function wakeRow(w, past, title, delay) {
+  function wakeRow(w, past, title, delay, sub) {
     let badge = "", intent = "";
     if (w.act) {
       const fired = w.fireAt < Date.now();
@@ -1966,7 +1985,7 @@
       badge = '<span class="badge off">未起念</span>';
       intent = '<div class="intent">' + esc(w.why || "TA这会儿不想") + "</div>";
     }
-    return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + '" data-t="' + esc(w.time) + '" ' + delay + '><span class="dot"></span>' +
+    return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + (sub ? " sub" : "") + '" data-t="' + esc(w.time) + '" ' + delay + '><span class="dot"></span>' +
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
   }
 
