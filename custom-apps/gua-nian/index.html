@@ -1222,27 +1222,31 @@
     const now = Date.now() + 3 * 60000;
     const seen = new Set();
     const cands = [];
+    // 时刻不卡在整点：人是做着做着才想起对方的，每条往后飘 1–12 分钟；锚点也各自在一个区间里落
+    const drift = (lo, hi) => Math.round(lo + Math.random() * (hi - lo)) * 60000;
     for (const it of S.day.schedule) {
-      const ms = timeToMs(it.time);
+      const base = timeToMs(it.time);
+      const ms = base ? base + drift(1, 12) : null;
       if (!ms || ms < now || seen.has(it.time)) continue;
-      if (inQuiet(it.time) || asleepAt(S.day, it.time)) continue;
+      const hm = fmtHM(ms);
+      if (inQuiet(hm) || asleepAt(S.day, hm)) continue;
       seen.add(it.time);
-      cands.push({ time: it.time, source: it.title, fireAt: ms, mood: it.mood || "" });
+      cands.push({ time: hm, source: it.title, fireAt: ms, mood: it.mood || "" });
     }
-    // 早安锚点：免打扰结束后 40 分钟
+    // 早安锚点：免打扰结束后 25–55 分钟
     if (S.settings.anchorMorning) {
       const ms = timeToMs(S.settings.quietEnd) || timeToMs("08:00");
-      const gm = ms ? ms + 40 * 60000 : null;
+      const gm = ms ? ms + drift(25, 55) : null;
       if (gm && gm > now) {
         const hm = fmtHM(gm);
         if (!seen.has(hm) && !inQuiet(hm)) { seen.add(hm); cands.push({ time: hm, source: "早安", fireAt: gm }); }
       }
     }
-    // 睡前锚点：TA自己上床前 20 分钟；过零点才睡的就压到 23:30，时间轴只认当天
+    // 睡前锚点：TA自己上床前 10–30 分钟；过零点才睡的就压到 23:50 之前，时间轴只认当天
     const sw = sleepWindow(S.day);
     if (S.settings.anchorSleep && sw) {
       const ms = sw.overnight ? timeToMs("23:50") : timeToMs(sw.bed);
-      const gm = ms ? ms - 20 * 60000 : null;
+      const gm = ms ? ms - drift(10, 30) : null;
       if (gm && gm > now) {
         const hm = fmtHM(gm);
         if (!seen.has(hm) && !inQuiet(hm) && !asleepAt(S.day, hm)) cands.push({ time: hm, source: "睡前", fireAt: gm });
@@ -2675,7 +2679,7 @@
         { key: "anchorMorning", label: "早安锚点" },
         { key: "chatCandidates", label: "聊天临时起念" },
         { key: "moodGate", label: "状态低落时更安静" },
-      ] }], hint: "睡前锚点：TA上床前 20 分钟。早安锚点：免打扰结束后 40 分钟。<br>聊天临时起念：复核时允许按没聊完的话头临时加一个时刻。<br>状态低落时更安静：精力很低的那天明显少起念。" },
+      ] }], hint: "睡前锚点：TA上床前 10–30 分钟里的某一刻。早安锚点：免打扰结束后 25–55 分钟里的某一刻。日程上的时刻也不卡整点，各往后飘几分钟。<br>聊天临时起念：复核时允许按没聊完的话头临时加一个时刻。<br>状态低落时更安静：精力很低的那天明显少起念。" },
     ] },
     { id: "chat", name: "聊天", groups: [
       { title: "动态复核", fields: [{ type: "stepper", key: "recheckMin", min: 0, max: 120, step: 5, label: "在页时每隔", unit: "分钟 · 0 关" }],
@@ -2713,7 +2717,7 @@
         { type: "stepper", key: "sleepWakeProb", min: 5, max: 60, step: 5, label: "醒来的概率", unit: "%" },
         { type: "toggles", items: [{ key: "replyGate", label: "你发消息时也照此办" }] },
         { type: "stepper", key: "busyPeekMin", min: 0, max: 30, step: 1, label: "忙着时偷空回要等", unit: "分钟 · 0 不等" },
-      ], hint: "到点时TA正忙（上课、开会、开车这类，生成日程时标的），主动消息就押到忙完再加几分钟；押得超过上限就作罢。睡着了按选的办：不发、押到起床后、或按概率迷迷糊糊醒来说一两句。只管云端预约。<br>「你发消息时也照此办」管的是TA回你：睡着押到起床后再回（选了「概率醒来」就按同一概率被吵醒）；忙着就当偷空看了眼手机，等这个分钟数左右再回。押后期间再发只重新计时，最后一并回。带「救命、医院、快回」的消息不押。<br>等待期间小手机得开着（不用停在聊天窗）；整个关了的话，下次打开时补回。" },
+      ], hint: "到点时TA正忙（上课、开会、开车这类，生成日程时标的），主动消息就押到忙完再加几分钟（按这个数上下浮动四成）；押得超过上限就作罢。睡着了按选的办：不发、押到起床后、或按概率迷迷糊糊醒来说一两句。只管云端预约。<br>「你发消息时也照此办」管的是TA回你：睡着押到起床后再回（选了「概率醒来」就按同一概率被吵醒）；忙着就当偷空看了眼手机，等这个分钟数左右再回。押后期间再发只重新计时，最后一并回。带「救命、医院、快回」的消息不押。<br>等待期间小手机得开着（不用停在聊天窗）；整个关了的话，下次打开时补回。" },
     ] },
   ];
   const SET_SCHEMA = SET_SECTIONS.reduce((acc, sec) => acc.concat(sec.groups), []);

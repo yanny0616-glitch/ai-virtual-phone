@@ -959,7 +959,8 @@ Deno.serve(async (req: Request) => {
       const nowMs = Date.now();
       const origFireAt = Number((guanianPlan.item as { fireAt?: unknown }).fireAt) || nowMs;
       const maxHoldMs = cnum("busyMaxHoldMin", 180) * 60_000;
-      const bufferMs = cnum("busyBufferMin", 10) * 60_000;
+      // 忙完 / 醒来再等多久不取整：按设定值上下浮动四成，种子用任务 id，同一条重判不会漂
+      const bufferMs = cnum("busyBufferMin", 10) * 60_000 * (0.6 + guanianRoll(job.id + ":buffer") / 100 * 0.8);
       // 押后 = 这条任务改回 pending、到点时刻往后挪；判据记进计划，面板能看到「押后到几点」
       const hold = async (untilMs: number, note: string): Promise<void> => {
         const prior = Array.isArray(guanianPlan.row?.decisions) ? guanianPlan.row!.decisions : [];
