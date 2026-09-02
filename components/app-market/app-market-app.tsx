@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { customAppGlyphPath } from "@/components/icon-glyph";
+import { cancelAllCustomAppTimedWakes } from "@/lib/custom-app-host-api";
 
 import { CUSTOM_APP_CREATOR_GUIDE_MD } from "@/lib/custom-app-creator-guide";
 import { permissionLabelWithContext } from "@/lib/custom-app-permission-labels";
@@ -1021,6 +1022,7 @@ export function AppMarketApp({ onClose, onOpenCustomApp, onInstallToDesktop, onN
     try {
       const removal = await removeCustomAppRegistrationsAsync(app.id, { deleteResources: deleteData });
       const removalText = formatCustomAppRegistrationRemovalSummary(removal);
+      await cancelAllCustomAppTimedWakes(app.id).catch(() => undefined);
       await uninstallCustomAppAsync(app.id, { deleteData });
       setConfirmDelete(null);
       setSelectedInstalledApp(null);

@@ -93,6 +93,7 @@ import {
   writeCustomAppHistoryMessage,
   writeCustomAppCharacterState,
   writeCustomAppWorld,
+  cancelAllCustomAppTimedWakes,
 } from "@/lib/custom-app-host-api";
 import { REALITY_BRIDGE_APP_EVENT_NAME, REALITY_BRIDGE_DATA_EVENT } from "@/lib/reality-bridge/types";
 import { OnlineRoomConnection, onlineCloudApi } from "@/lib/online-room-client";
@@ -961,6 +962,7 @@ export function CustomAppRunner({
   const handleUninstall = useCallback(async (deleteData: boolean) => {
     const removal = await removeCustomAppRegistrationsAsync(app.id, { deleteResources: deleteData });
     const removalText = formatCustomAppRegistrationRemovalSummary(removal);
+    await cancelAllCustomAppTimedWakes(app.id).catch(() => undefined);
     await uninstallCustomAppAsync(app.id, { deleteData });
     const base = deleteData ? `已卸载「${app.name}」并删除数据` : `已卸载「${app.name}」`;
     onNotice?.(removalText ? `${base}，${removalText}` : base);

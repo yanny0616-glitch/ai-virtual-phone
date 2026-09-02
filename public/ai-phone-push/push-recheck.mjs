@@ -891,6 +891,15 @@ Deno.serve(async (req: Request) => {
     else await work;
     return new Response("gen: started", { status: 200 });
   }
+  // 过了日子的行还会在 cron 的 36 小时窗口里待一天：没有待发时刻，但起念门可能还开着，
+  // 每轮都可能白调一次模型，产出又全因为不是今天而被丢掉。
+  const dayTz = context.day && typeof context.day === "object" ? Number((context.day as { tz?: number }).tz) : NaN;
+  const rowTz = Number.isFinite(dayTz) ? dayTz : (kit ? Number(kit.tz) || 0 : NaN);
+  if (Number.isFinite(rowTz) && usageLocalDay(nowMs, rowTz) > planDate) {
+    await rest(planFilter, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_recheck_at: new Date().toISOString() }) }).catch(() => undefined);
+    return new Response("plan date passed", { status: 200 });
+  }
+
   const gate = (key: keyof typeof GATE_DEF): number => {
     const value = Number(context[key]);
     return Number.isFinite(value) && value >= 0 ? value : GATE_DEF[key];

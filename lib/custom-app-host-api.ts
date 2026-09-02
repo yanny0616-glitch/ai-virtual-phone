@@ -92,7 +92,7 @@ import {
   sanitizeBridgeDataKey,
 } from "./reality-bridge/storage";
 import { loadTimedWakeSchedules, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
-import { armTemplateBailout, armTimedWakeBailout, cancelBailoutKey } from "./push-bailout-client";
+import { armTemplateBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "./push-bailout-client";
 
 const CUSTOM_APP_NOTIFICATIONS_KEY = "ai_phone_custom_app_notifications_v1";
 const CUSTOM_APP_BADGES_KEY = "ai_phone_custom_app_badges_v1";
@@ -2588,6 +2588,17 @@ export function listCustomAppTimedWakes(appId: string): Array<Pick<TimedWakeSche
   return loadTimedWakeSchedules()
     .filter(item => item.id.startsWith(prefix))
     .map(({ id, characterId, fireAt, intent, createdAt, source }) => ({ id, characterId, fireAt, intent, createdAt, source }));
+}
+
+/** 卸载时把这个 APP 挂的所有主动消息（本地登记 + 服务端预约）一起撤掉，
+ *  否则它排好的时刻和 48 小时后的兜底预约会在 APP 已经不在的情况下照发。 */
+export async function cancelAllCustomAppTimedWakes(appId: string): Promise<number> {
+  const prefix = customAppTimedWakePrefix(appId);
+  const ids = loadTimedWakeSchedules().filter(item => item.id.startsWith(prefix)).map(item => item.id);
+  for (const id of ids) removeTimedWakeSchedule(id);
+  await cancelBailoutPrefix(`timedwake:${prefix}`);
+  if (ids.length > 0) emitHostStateUpdated();
+  return ids.length;
 }
 
 export function cancelCustomAppTimedWake(appId: string, rawId: string): { ok: boolean } {

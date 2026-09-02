@@ -35,7 +35,7 @@ create table if not exists public.ai_phone_cloud_meta (
   updated_at timestamptz not null default now()
 );
 insert into public.ai_phone_cloud_meta (id, schema_version, updated_at)
-values ('personal-cloud', 6, now())
+values ('personal-cloud', 7, now())
 on conflict (id) do update set schema_version = excluded.schema_version, updated_at = excluded.updated_at;
 
 create table if not exists public.push_server_config (
@@ -78,7 +78,7 @@ create table if not exists public.push_jobs (
 );
 alter table public.push_jobs drop constraint if exists push_jobs_kind_check;
 alter table public.push_jobs add constraint push_jobs_kind_check
-  check (kind in ('followup', 'reply_bailout', 'timed_task', 'bridge_scan', 'shortcut_resume'));
+  check (kind in ('followup', 'reply_bailout', 'timed_task', 'bridge_scan', 'shortcut_resume', 'template'));
 create unique index if not exists push_jobs_trigger_idx on public.push_jobs (user_id, trigger_key);
 create index if not exists push_jobs_due_idx on public.push_jobs (status, execute_at);
 

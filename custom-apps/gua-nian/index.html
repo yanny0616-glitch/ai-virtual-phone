@@ -1023,7 +1023,7 @@
             gateFreshMin: S.settings.gateFreshMin,
             gateMinMsgs: S.settings.gateMinMsgs,
             selfImpulseCap: S.settings.selfImpulseCap,
-            selfUsed: cx.plan.selfUsed || 0,
+            selfUsed: (cx.plan && cx.plan.selfUsed) || 0,
             presendMax: S.settings.presendMax,
             presendTalkingMin: S.settings.presendTalkingMin,
             presendGapMin: S.settings.presendGapMin,
@@ -1074,6 +1074,7 @@
       } catch (e) { await log(cx, "云端生成：冻结 " + k + " 模板失败——" + (e && e.message || e)); }
     }
     S.settings = await AiPhone.db.update("settings", S.settings.id, { genTpls: Object.assign({}, S.settings.genTpls, { [cx.character.id]: out }) });
+    if (out.daily && out.impulse) await log(cx, "云端生成：两份模板已冻到云端（7 天内有效，6 小时后再续）");
     return out;
   }
   async function readCalendarOn(cx, date) {
@@ -1114,6 +1115,7 @@
           method: "POST",
           body: JSON.stringify({ characterId: cx.character.id, planDate: date, sessionId: "", resetDecisions: true, context: ctx, items: [] }),
         });
+        await log(cx, "云端生成：" + date + " 的原料已寄到云端，到 " + at + " 由云端生成");
       } catch (e) { await log(cx, "云端生成：" + date + " 的原料上传失败——" + (e && e.message || e)); }
     }
   }
@@ -1148,6 +1150,7 @@
       await log(cx, "接管云端生成的今天：" + cx.day.schedule.length + " 条日程，写回系统日程 " + wrote + " 条，" + items.filter((w) => w.act).length + " 个想起你的时刻");
       cx.busy = false; cx._planLock = false;
       await syncChatContext(cx, true);
+      uploadGenKitCloud(cx, true).catch(() => { /* 已在函数内记日志 */ });
       toast("TA今天的一天已在云端生成");
       render();
       return true;
@@ -1471,7 +1474,6 @@
       cx.busy = false;
       await syncChatContext(cx, true);
       await orchestrate(cx); // 生活面就绪后立即编排心动时刻
-      uploadGenKitCloud(cx, true).catch(() => { /* 已在函数内记日志 */ });
     } catch (e) {
       cx.busy = false;
       toast("生成失败：" + (e && e.message || e));
@@ -1622,6 +1624,16 @@
   // 预约专门当模板：云端到点认出它直接作废；cron 只派 36 小时内更新过的计划，所以
   // 48 小时够覆盖。真到点了只可能是两天没打开挂念，intent 里写的就是这个由头。
   function sentinelOf(cx) { return cx.character ? (S.settings.sentinels || {})[cx.character.id] || null : null; }
+  // 不再挂念的人：今天的预约、48 小时哨兵、云端计划行全撤，否则两天后TA还会按哨兵的由头来找你
+  async function forgetCharacter(cx) {
+    await cancelTodayWakes(cx);
+    const old = sentinelOf(cx);
+    if (old && old.wakeId) { try { await AiPhone.push.cancelWake(old.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
+    if (cloudCfg()) { try { await cloudFetch("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id }) }); } catch (e) { /* 云端没配好就算了 */ } }
+    const sentinels = Object.assign({}, S.settings.sentinels), genTpls = Object.assign({}, S.settings.genTpls);
+    delete sentinels[cx.character.id]; delete genTpls[cx.character.id];
+    S.settings = await AiPhone.db.update("settings", S.settings.id, { sentinels: sentinels, genTpls: genTpls });
+  }
   async function armSentinel(cx) {
     const old = sentinelOf(cx);
     if (old && old.wakeId) { try { await AiPhone.push.cancelWake(old.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
@@ -1710,6 +1722,8 @@
         { date: todayStr(), characterId: cx.character.id, items, chatUsed: lines.length, plannedAt: Date.now(), recheckAt: 0, selfUsed: 0 });
       cx.archive = null; // 记录页缓存失效
       await uploadPlanCloud(cx, true);
+      // 哨兵刚换了一条，明天的原料里记的还是旧 id，不重寄云端明天就没模板可借
+      uploadGenKitCloud(cx, true).catch(() => { /* 已在函数内记日志 */ });
       if (kept.length) await log(cx, "重排保留了 " + kept.length + " 个临时起念（重排只重排日程时刻）");
       toast(armedCount ? "TA今天有 " + armedCount + " 个想起你的时刻" : "TA今天想安静地过");
     } catch (e) {
@@ -3269,6 +3283,8 @@
     closeSheet();
     // 不再挂念的人：身上注入的状态得撤掉，不然TA会一直以为自己在过挂念的那一天
     for (const id of removed) {
+      const cx = S.byId[id];
+      if (cx && cx.character) await forgetCharacter(cx);
       if (AiPhone.chat && AiPhone.chat.clearContext) { try { await AiPhone.chat.clearContext({ characterId: id }); } catch (e) { /* 未授权时无所谓 */ } }
       if (AiPhone.chat && AiPhone.chat.setReplyGate) { try { await AiPhone.chat.setReplyGate({ characterId: id, gate: null }); } catch (e) { /* 同上 */ } }
       delete S.byId[id];
