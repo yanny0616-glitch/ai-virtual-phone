@@ -6,7 +6,7 @@
 // 押后不是「不回」：人睡醒 / 忙完总会看到消息，所以睡着的三种模式在这里只分两路——
 // 概率醒来（模式 2）掷中就立刻回，其余一律押到醒来之后。
 
-import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
+import { kvGet, kvSet, kvRemove, kvKeysWithPrefix, registerKvMigration } from "./kv-db";
 import { loadInstalledCustomApps } from "./custom-app-storage";
 
 const GATE_KEY = "custom_app_reply_gate_v1";
@@ -178,6 +178,19 @@ export function readDeferredReply(sessionId: string): DeferredReply | null {
 export function writeDeferredReply(sessionId: string, record: DeferredReply | null): void {
     if (record) kvSet(DEFER_PREFIX + sessionId, JSON.stringify(record));
     else kvRemove(DEFER_PREFIX + sessionId);
+}
+
+/** 到点的押后记录：标记已触发并返回会话 id，由桌面壳统一发回复请求（聊天室开着就它接，没开就后台生成） */
+export function takeDueDeferredReplies(nowMs = Date.now()): string[] {
+    const due: string[] = [];
+    for (const key of kvKeysWithPrefix(DEFER_PREFIX)) {
+        const sessionId = key.slice(DEFER_PREFIX.length);
+        const rec = readDeferredReply(sessionId);
+        if (!rec || rec.firedAt || rec.until > nowMs) continue;
+        writeDeferredReply(sessionId, { ...rec, firedAt: nowMs });
+        due.push(sessionId);
+    }
+    return due;
 }
 
 /** 押后 / 吵醒的那次回复，提示词里补一句为什么现在才回、该是什么状态 */

@@ -126,6 +126,7 @@ import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
 import { DebugPromptPanel } from "@/components/debug-prompt-panel";
 import { QuickActionFloat } from "@/components/quick-action-float";
+import { takeDueDeferredReplies } from "@/lib/chat-reply-gate";
 import { CHAT_MESSAGE_PUSHED_EVENT, CHAT_REQUEST_REPLY_EVENT, hydrateChatStorage, loadChatSessions, loadChatMessages, pushChatMessage, type ChatMessage, type ChatSession } from "@/lib/chat-storage";
 import { ensureGlobalBindingDefaults, resolveUserIdentity } from "@/lib/settings-storage";
 import { loadCharacters } from "@/lib/character-storage";
@@ -2482,6 +2483,19 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
 
     window.addEventListener(CHAT_REQUEST_REPLY_EVENT, handler);
     return () => window.removeEventListener(CHAT_REQUEST_REPLY_EVENT, handler);
+  }, []);
+
+  // 押后的被动回复到点了就发一次回复请求：聊天室开着由它接，没开走上面的后台生成
+  useEffect(() => {
+    const tick = () => {
+      for (const sessionId of takeDueDeferredReplies()) {
+        window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, { detail: { source: "reply_gate", sessionId, handled: false } }));
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 20000);
+    document.addEventListener("visibilitychange", tick);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", tick); };
   }, []);
 
   // Swipe up to dismiss the message notice; tap still opens the chat. Auto-dismiss

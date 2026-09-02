@@ -1106,7 +1106,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "await AiPhone.chat.setReplyGate({ characterId: character.id, gate: null });  // 撤销",
   "```",
   "",
-  "押后期间用户再发消息只会重新计时，到点一并回；含「救命、医院、快回」等字眼的消息不押。押后的那次回复，提示词末尾会自动补一句「刚起床才看到」/「偷空回的」。同一权限 `chat.context`，撤销授权后闸门一并失效。",
+  "押后期间用户再发消息只会重新计时，到点一并回；含「救命、医院、快回」等字眼的消息不押。押后的那次回复，提示词末尾会自动补一句「刚起床才看到」/「偷空回的」。到点由桌面壳触发，聊天室没开也会后台生成；小手机整个关着则下次打开补回。同一权限 `chat.context`，撤销授权后闸门一并失效。",
   "",
   "注意：`chat.sendCard({ historyText })` 和 `chat.writeHistory` 作为聊天室历史的一部分，也会进入短期记忆事件流。因此，如果已经使用 `chat.sendCard` 或 `chat.writeHistory` 写入同一事件，就无需再重复调用 `memory.addTimeline`。",
   "",
