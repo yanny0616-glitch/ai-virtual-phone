@@ -5,7 +5,7 @@
 // 方案 B（无沙箱直接执行）：安装非官方来源插件前给一次明确的风险确认。
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, ChevronUp, FileText, Puzzle, ScrollText, Settings2, Download } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, ChevronUp, FileText, Puzzle, ScrollText, Settings2, Download, BadgeCheck } from "lucide-react";
 import { PageShell } from "@/components/ui/page-shell";
 import { Toggle } from "@/components/ui/form";
 import type { ChatPluginSettingField, InstalledChatPlugin } from "@/lib/chat-plugin-types";
@@ -20,6 +20,7 @@ import {
     updateChatPluginSettings,
 } from "@/lib/chat-plugin-storage";
 import { installChatPluginFromCode } from "@/lib/chat-plugin-loader";
+import { compareVersion, fetchOfficialChatPluginIndex, installOfficialChatPlugin, type OfficialChatPluginEntry } from "@/lib/chat-plugin-official";
 import { getChatPluginRuntime, isChatPluginSafeMode, setChatPluginSafeMode } from "@/lib/chat-plugin-runtime";
 import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
 import { CHAT_PLUGIN_FULL_DOC } from "@/lib/chat-plugin-docs";
@@ -45,6 +46,22 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
     const fileTargetRef = useRef<string>("import");
     const [settingsOpenId, setSettingsOpenId] = useState<string | null>(null);
     const [docCopied, setDocCopied] = useState(false);
+    const [official, setOfficial] = useState<OfficialChatPluginEntry[]>([]);
+    const [officialBusyId, setOfficialBusyId] = useState<string | null>(null);
+    const [officialHint, setOfficialHint] = useState<{ id: string; ok: boolean; text: string } | null>(null);
+    useEffect(() => { void fetchOfficialChatPluginIndex().then(setOfficial); }, []);
+
+    const handleOfficialInstall = async (entry: OfficialChatPluginEntry) => {
+        setOfficialBusyId(entry.id);
+        try {
+            const result = await installOfficialChatPlugin(entry);
+            setOfficialHint(result.ok
+                ? { id: entry.id, ok: true, text: result.upgraded ? `已更新到 v${entry.version}，配置与数据已保留` : `已安装「${entry.name}」` }
+                : { id: entry.id, ok: false, text: result.error || "安装失败" });
+        } finally {
+            setOfficialBusyId(null);
+        }
+    };
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [runtimeState, setRuntimeState] = useState<{ started: boolean; activeIds: string[] }>({ started: false, activeIds: [] });
 
@@ -299,6 +316,41 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
                         </div>
                     )}
                 </div>
+
+                {/* 官方插件：随宿主发布，一键装、启动自动更新 */}
+                {official.length > 0 && (
+                    <div>
+                        <div className="settings-menu-section-title">官方插件</div>
+                        <span className="menu-desc" style={{ margin: "6px 8px 12px", display: "block" }}>随本应用一起发布，装上以后每次应用更新自动换成新版</span>
+                        <div className="menu-group">
+                            {official.map(entry => {
+                                const cur = plugins.find(p => p.manifest.id === entry.id);
+                                const behind = !!cur && compareVersion(cur.manifest.version || "0", entry.version) < 0;
+                                const label = !cur ? "安装" : behind ? `更新到 v${entry.version}` : `已是最新 v${entry.version}`;
+                                const busy = officialBusyId === entry.id;
+                                return (
+                                    <div key={entry.id}>
+                                        <button className="menu-item" disabled={busy || (!!cur && !behind)} onClick={() => { void handleOfficialInstall(entry); }}>
+                                            <div className="menu-icon" style={iconWrap("#10b981")}>
+                                                <BadgeCheck size={17} strokeWidth={1.6} />
+                                            </div>
+                                            <div className="menu-label-group">
+                                                <span className="menu-label">{entry.name}</span>
+                                                <span className="menu-desc">{entry.description}</span>
+                                            </div>
+                                            <div className="menu-right"><span className="menu-desc" style={{ color: !cur || behind ? "var(--c-primary, #10b981)" : undefined }}>{busy ? "处理中…" : label}</span></div>
+                                        </button>
+                                        {officialHint?.id === entry.id && (
+                                            <div style={{ padding: "0 16px 12px" }}>
+                                                <span className="menu-desc" style={{ color: officialHint.ok ? "var(--c-success)" : "var(--c-danger)" }}>{officialHint.text}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 {/* 安装 */}
                 <div>

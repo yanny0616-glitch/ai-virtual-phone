@@ -1,5 +1,5 @@
 // 好感与关系 · 聊天插件（apiVersion 1）
-// 安装：设置 → 聊天插件 → 粘贴本文件全文。
+// 安装：设置 → 扩展插件 → 官方插件里一键装（随宿主发布、自动更新）；也可以导入本文件。
 // 与挂念共用变量池：scope "character"，affection（插件写）/ presence（挂念写）。
 export default {
   manifest: {

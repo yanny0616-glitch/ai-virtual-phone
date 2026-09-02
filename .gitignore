@@ -31,3 +31,4 @@ CLAUDE.md
 *.ts.net.crt
 *.ts.net.key
 /public/models/world-builder/
+/public/chat-plugins/

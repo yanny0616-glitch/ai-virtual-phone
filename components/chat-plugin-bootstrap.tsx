@@ -6,10 +6,15 @@
 
 import { useEffect } from "react";
 import { getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
+import { autoUpdateOfficialChatPlugins } from "@/lib/chat-plugin-official";
 
 export function ChatPluginBootstrap() {
     useEffect(() => {
-        void getChatPluginRuntime().ensureStarted();
+        void (async () => {
+            // 先升级再启动：官方插件随宿主发布，装过的用户不必再手动导入新版
+            try { await autoUpdateOfficialChatPlugins(); } catch { /* 离线或没有官方插件目录 */ }
+            await getChatPluginRuntime().ensureStarted();
+        })();
     }, []);
     return null;
 }
