@@ -2226,14 +2226,30 @@ function createPresetPromptIdentifier(name: string, requested: unknown, existing
     return candidate;
 }
 
-function rebuildPresetPromptOrder(prompts: Prompt[], previousOrder: Array<{ identifier: string; enabled: boolean }> | undefined) {
-    const previousEnabled = new Map((previousOrder || []).map((entry) => [entry.identifier, entry.enabled]));
-    return prompts
-        .filter((prompt) => prompt.identifier)
-        .map((prompt) => ({
-            identifier: prompt.identifier,
-            enabled: previousEnabled.get(prompt.identifier) ?? prompt.enabled,
-        }));
+// 用户在预设页拖出来的顺序只存在 prompt_order 里，prompts 数组里新条目一律追加在末尾。
+// 所以必须以旧 prompt_order 为骨架：剔掉已不存在的，新条目跟在锚点后面，没锚点才放末尾；
+// 按 prompts 数组重新生成会把用户自己加的条目全部甩到最底下。
+function rebuildPresetPromptOrder(
+    prompts: Prompt[],
+    previousOrder: Array<{ identifier: string; enabled: boolean }> | undefined,
+    insertAfterIdentifier?: string | null,
+) {
+    const byId = new Map(prompts.filter((prompt) => prompt.identifier).map((prompt) => [prompt.identifier, prompt]));
+    const order: Array<{ identifier: string; enabled: boolean }> = [];
+    const seen = new Set<string>();
+    for (const entry of previousOrder || []) {
+        if (!byId.has(entry.identifier) || seen.has(entry.identifier)) continue;
+        seen.add(entry.identifier);
+        order.push({ identifier: entry.identifier, enabled: entry.enabled });
+    }
+    const fresh = prompts
+        .filter((prompt) => prompt.identifier && !seen.has(prompt.identifier))
+        .map((prompt) => ({ identifier: prompt.identifier, enabled: prompt.enabled }));
+    if (fresh.length === 0) return order;
+    const at = insertAfterIdentifier ? order.findIndex((entry) => entry.identifier === insertAfterIdentifier) : -1;
+    if (at >= 0) order.splice(at + 1, 0, ...fresh);
+    else order.push(...fresh);
+    return order;
 }
 
 async function handleListPresets(): Promise<ToolResult> {
@@ -2424,13 +2440,15 @@ async function handleAddPresetPrompt(args: Record<string, unknown>): Promise<Too
     const insertAfterIndex = typeof args.insertAfterIndex === "number" && Number.isFinite(args.insertAfterIndex)
         ? Math.trunc(args.insertAfterIndex)
         : null;
+    let anchorIdentifier: string | null = null;
     if (insertAfterIndex !== null && insertAfterIndex >= 0 && insertAfterIndex < preset.prompts.length) {
+        anchorIdentifier = preset.prompts[insertAfterIndex]?.identifier || null;
         preset.prompts.splice(insertAfterIndex + 1, 0, prompt);
     } else {
         preset.prompts.push(prompt);
     }
 
-    preset.prompt_order = rebuildPresetPromptOrder(preset.prompts, preset.prompt_order);
+    preset.prompt_order = rebuildPresetPromptOrder(preset.prompts, preset.prompt_order, anchorIdentifier);
     preset.updatedAt = Date.now();
     presets[idx] = preset;
     await savePresetsAsync(presets);
