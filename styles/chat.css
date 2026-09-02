@@ -7161,3 +7161,22 @@
   background: currentColor;
   animation: chat-stream-cursor-blink 1s steps(2, start) infinite;
 }
+
+/* 插件「气泡旁边」坑位：绝对定位挂在气泡外侧，不占布局；对方消息在右、自己的在左 */
+.chat-plugin-message-side {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  transform: translateY(-50%);
+  margin-left: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.chat-plugin-message-side:empty { display: none; }
+.chat-bubble-role-user .chat-plugin-message-side {
+  left: auto;
+  right: 100%;
+  margin: 0 6px 0 0;
+}

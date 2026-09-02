@@ -141,6 +141,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
   - "chat.header"：聊天标题栏下方（props: { sessionId, isGroup }）
   - "chat.inputToolbar"：输入栏"+"面板的网格里，和内置按钮排在一起（props: { sessionId, isGroup }）。想和内置按钮长得一样，用这段结构：\`<div class="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer"><div class="chat-plus-icon-box">图标</div><span class="ts-11">标签</span></div>\`
   - "message.footer"：每条文本气泡下方（props: { sessionId, message }）——注意会被多条消息各调用一次
+  - "message.side"：每条文本气泡旁边，贴着气泡垂直居中（对方消息在右、自己的在左），只放一个小图标之类；气泡本身有长按菜单，图标的 pointerdown 记得 stopPropagation
   - "settings.section"：插件管理页的自定义设置区
 - \`ctx.ui.messageAction({ id, label, filter?, onSelect })\` —— 消息长按菜单加一项；onSelect(msg, { updateMessage, toast })
 - \`ctx.ui.messageKind(kind, (el, msg) => {})\` —— 注册自定义消息类型；配合 \`ctx.data.messages.push({ ..., mediaType: "plugin:" + kind, mediaData: {...} })\` 发出由你渲染的卡片消息

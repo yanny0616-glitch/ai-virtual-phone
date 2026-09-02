@@ -159,18 +159,20 @@ export type ChatPluginEventPayloadMap = {
  *   chat.header        聊天室标题栏下方（每会话一个）
  *   chat.inputToolbar  输入栏"+"扩展面板内（插件工具按钮区）
  *   message.footer     每条文本消息气泡下方
+ *   message.side       每条文本消息气泡旁边（对方消息在右侧、自己的在左侧），放小图标用
  *   settings.section   插件管理页内该插件的自定义设置区
  */
 export type ChatPluginSlotName =
     | "chat.header"
     | "chat.inputToolbar"
     | "message.footer"
+    | "message.side"
     | "settings.section";
 
 export type ChatPluginSlotProps = {
     sessionId?: string;
     isGroup?: boolean;
-    /** message.footer 坑位携带当前消息 */
+    /** message.footer / message.side 坑位携带当前消息 */
     message?: ChatMessage;
 };
 
