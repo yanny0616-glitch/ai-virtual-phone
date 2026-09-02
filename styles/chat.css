@@ -238,6 +238,33 @@
   border-radius: 50%;
   z-index: 1;
 }
+/* 角色在线状态：绿在线 / 橙忙碌 / 灰睡觉 / 浅灰离开 / 隐身不画 */
+.minimal-online-dot[data-state="busy"] { background: #f5a524; }
+.minimal-online-dot[data-state="sleep"] { background: #8e949b; }
+.minimal-online-dot[data-state="away"] { background: #c9ced4; }
+.minimal-online-dot[data-state="hidden"] { display: none; }
+.chat-presence-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 1px;
+  font-size: calc(10.5px * var(--app-text-scale, 1));
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.2;
+  color: var(--c-icon);
+}
+.chat-presence-line i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2dd36f;
+}
+.chat-presence-line[data-state="busy"] i { background: #f5a524; }
+.chat-presence-line[data-state="sleep"] i { background: #8e949b; }
+.chat-presence-line[data-state="away"] i { background: #c9ced4; }
+.page-title:has(.chat-presence-line) { line-height: 1.15; }
 .minimal-unread-count {
   background: var(--c-action-blue, #246bfd);
   color: #fff;

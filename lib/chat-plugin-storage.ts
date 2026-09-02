@@ -176,12 +176,19 @@ export function getChatPluginVar(name: string, scope: ChatPluginVarScope, target
     try { return JSON.parse(raw); } catch { return raw; }
 }
 
+/** 变量池有写入就广播一次；角色在线状态这类宿主界面靠它刷新 */
+export const CHAT_PLUGIN_VARS_CHANGED_EVENT = "chat-plugin-vars-changed";
+function emitVarsChanged(): void {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(CHAT_PLUGIN_VARS_CHANGED_EVENT));
+}
+
 export function setChatPluginVar(name: string, value: unknown, scope: ChatPluginVarScope, targetId?: string): void {
     const store = loadVarStore();
     const bucket = varBucket(store, scope, targetId);
     if (!bucket) return;
     bucket[name] = JSON.stringify(value === undefined ? null : value);
     writeJson(VARS_KEY, store);
+    emitVarsChanged();
 }
 
 export function unsetChatPluginVar(name: string, scope: ChatPluginVarScope, targetId?: string): void {
@@ -190,6 +197,7 @@ export function unsetChatPluginVar(name: string, scope: ChatPluginVarScope, targ
     if (bucket && name in bucket) {
         delete bucket[name];
         writeJson(VARS_KEY, store);
+        emitVarsChanged();
     }
 }
 

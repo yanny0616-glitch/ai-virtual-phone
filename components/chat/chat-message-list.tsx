@@ -23,6 +23,7 @@ import {
 } from "@/lib/chat-session-merge";
 import { kvSet } from "@/lib/kv-db";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
+import { useCharacterPresence } from "@/lib/character-presence";
 import {
     getMascotLastPreview,
     getMascotChatSnapshot,
@@ -761,6 +762,7 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
 
     // Group chat: build grid of participant avatars (2×2)
     const isGroup = session.isGroup;
+    const presence = useCharacterPresence(isGroup ? null : session.contactId);
     const userIdentity = isGroup ? resolveUserIdentity(undefined, "group_chat") : null;
     const groupAvatarItems = isGroup
         ? [
@@ -799,7 +801,7 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
                     ) : (
                         <ChatFallbackAvatar className="pointer-events-none rounded-full" />
                     )}
-                    <span className="minimal-online-dot" />
+                    <span className="minimal-online-dot" data-state={presence.state} />
                 </div>
             )}
             <div className="flex-1 overflow-hidden h-[48px] flex flex-col justify-center gap-1">
