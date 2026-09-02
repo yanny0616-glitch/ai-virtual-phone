@@ -2469,10 +2469,10 @@
     }
   }
   function closeDetail() { document.body.classList.remove("dsheet-open"); S._detailW = null; S._detailSi = -1; }
-    const cx = cur();
 
   /* ---- 日程条目详情：细化 / 重新生成 / 删除 ---- */
   function schedDetailHtml(i) {
+    const cx = cur();
     const it = ((cx.day && cx.day.schedule) || [])[i];
     if (!it) return '<div class="kvs">' + kv("这条日程", "已经不在了", "dim") + "</div>";
     const cost = +it.cost || 0;
