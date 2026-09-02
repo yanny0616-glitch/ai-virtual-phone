@@ -2731,6 +2731,11 @@
   animation: chatPanelExpand 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* 插件放进「+」面板的按钮直接当网格格子，和内置项排在一起 */
+.chat-plugin-input-toolbar {
+  display: contents;
+}
+
 /* ── Plus menu icon box ── */
 .chat-plus-icon-box {
   width: 44px;

@@ -169,7 +169,6 @@ export default {
       .afl-body{margin-top:4px;padding:6px 9px;border-radius:10px;background:rgba(0,0,0,.05);font-size:12px;line-height:1.5;color:inherit;opacity:.85;white-space:pre-wrap}
       .afl-body .d{display:block;margin-top:3px;font-size:11px;opacity:.7}
       .afl-body .d.up{color:#d81b60}.afl-body .d.down{color:#5c6bc0}
-      .afl-tool{display:inline-flex;align-items:center;gap:4px;padding:6px 10px;border-radius:10px;background:rgba(0,0,0,.05);font-size:12px;cursor:pointer}
 
       .afl-sheet{--afl-rose:#e5527f;--afl-rose-soft:#fde8ef;--afl-ink:var(--c-text,#1c1a1f);--afl-mute:rgba(28,26,31,.55);--afl-line:rgba(28,26,31,.08);--afl-bg:var(--c-card-bg,#fff);
         width:min(94vw,400px);max-height:84vh;display:flex;flex-direction:column;border-radius:24px;overflow:hidden;background:var(--afl-bg);color:var(--afl-ink);font-size:13px;line-height:1.5;
@@ -289,8 +288,10 @@ export default {
     ctx.hooks.on("session.opened", (p) => { currentSessionId = p.isGroup ? null : p.sessionId; });
     ctx.ui.slot("chat.inputToolbar", (el, props) => {
       if (props.isGroup) return;
-      const b = document.createElement("button");
-      b.type = "button"; b.className = "afl-tool"; b.textContent = "❤ 好感与关系";
+      // 和「+」面板里的内置按钮同一套结构，排在它们后面
+      const b = document.createElement("div");
+      b.className = "chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer";
+      b.innerHTML = '<div class="chat-plus-icon-box"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e5527f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></svg></div><span class="ts-11">好感</span>';
       b.onclick = () => openPanel(props.sessionId || currentSessionId);
       el.appendChild(b);
     });

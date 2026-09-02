@@ -893,10 +893,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                             <span className="ts-11 text-[var(--c-text)]">{item.label}</span>
                         </div>
                     ))}
+                    <ChatPluginSlot name="chat.inputToolbar" slotProps={{ sessionId, isGroup }} className="chat-plugin-input-toolbar" />
                 </div>
-            )}
-            {showPlusMenu && (
-                <ChatPluginSlot name="chat.inputToolbar" slotProps={{ sessionId, isGroup }} className="chat-plugin-input-toolbar" />
             )}
 
             {showEmojiPanel && (
