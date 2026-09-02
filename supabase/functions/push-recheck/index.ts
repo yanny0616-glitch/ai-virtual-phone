@@ -45,7 +45,90 @@ type PlanContext = {
   gateHorizonMin?: number;
   gateFreshMin?: number;
   gateMinMsgs?: number;
+  selfImpulseCap?: number;
+  selfUsed?: number;
+  day?: GuanianDay;
+  [key: string]: unknown;
 };
+// 挂念寄存的当天原料：日程带 cost/情绪，conds 是还在起作用的聊天情绪。算法与挂念 index.html
+// 的 energyAt / moodNow 一致，改一处要同步另一处（push-generate 里也有一份）。
+type GuanianSched = { time?: string; end?: string; title?: string; cost?: number; mood?: string; steps?: { time?: string; what?: string }[] };
+type GuanianCond = { startAt?: number; halfLifeMin?: number; intensity?: number; energyDelta?: number; mood?: string; cause?: string };
+type GuanianDay = {
+  tz?: number; mood?: string; energy?: number; location?: string; doing?: string;
+  wake?: string; bed?: string; schedule?: GuanianSched[]; conds?: GuanianCond[];
+};
+// 睡眠窗：bed 起到 wake 止，允许过零点；老版本 App 没寄 wake/bed 时退回免打扰时段。与 App 端 asleepAt 同步。
+function guanianAsleep(day: GuanianDay, hm: string, quietStart?: string, quietEnd?: string): boolean {
+  const bed = /^\d{2}:\d{2}$/.test(String(day.bed || "")) ? String(day.bed) : String(quietStart || "");
+  const wake = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(quietEnd || "");
+  if (!bed || !wake || bed === wake) return false;
+  return bed < wake ? (hm >= bed && hm < wake) : (hm >= bed || hm < wake);
+}
+type GuanianNow = { hm: string; doing: string; step: string; mood: string; energy: number; next: string; done: GuanianSched | null; asleep: boolean };
+
+function guanianNow(day: GuanianDay, nowMs: number, quietStart?: string, quietEnd?: string): GuanianNow {
+  const tz = Number.isFinite(Number(day.tz)) ? Number(day.tz) : 0;
+  const local = new Date(nowMs + tz * 60_000);
+  const h = local.getUTCHours() + local.getUTCMinutes() / 60;
+  const hm = `${String(local.getUTCHours()).padStart(2, "0")}:${String(local.getUTCMinutes()).padStart(2, "0")}`;
+  const sched = (Array.isArray(day.schedule) ? day.schedule : []).filter(it => it && typeof it.time === "string");
+  const conds = (Array.isArray(day.conds) ? day.conds : [])
+    .map(c => ({ c, w: Math.pow(0.5, Math.max(0, nowMs - (Number(c.startAt) || 0)) / (Math.max(10, Number(c.halfLifeMin) || 180) * 60_000)) }))
+    .filter(x => x.w > 0.08 && (Number(x.c.startAt) || 0) <= nowMs)
+    .sort((a, b) => (b.w * (Number(b.c.intensity) || 50)) - (a.w * (Number(a.c.intensity) || 50)));
+  let done: GuanianSched | null = null;
+  for (const it of sched) if (String(it.time) <= hm) done = it;
+  const next = sched.find(it => String(it.time) > hm) || null;
+  const asleep = guanianAsleep(day, hm, quietStart, quietEnd);
+  // 与 App 端 phaseAt 同步：睡着 / 正做着 / 做完了在空档 / 最后一件做完在等睡（过零点还没睡也算）
+  const bedHM = /^\d{2}:\d{2}$/.test(String(day.bed || "")) ? String(day.bed) : String(quietStart || "");
+  const wakeHM = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(quietEnd || "");
+  const lateNight = !done && !!bedHM && !!wakeHM && bedHM < wakeHM && hm < bedHM;
+  const over = lateNight || !!(done && done.end && done.end > String(done.time) && hm >= done.end);
+  const doing = asleep ? "睡觉"
+    : lateNight ? "睡前自己待着，准备睡了"
+    : !done ? (day.doing || "起床后的时间")
+    : !over ? String(done.title || "")
+    : next ? `歇着（刚忙完${done.title || ""}）` : "睡前自己待着，准备睡了";
+  let step = "";
+  if (done && !over && !asleep && Array.isArray(done.steps)) {
+    for (const x of done.steps) if (x && typeof x.time === "string" && x.time <= hm) step = String(x.what || "");
+  }
+  const hh = h < 5 ? h + 24 : h;
+  let energy = Number.isFinite(Number(day.energy)) ? Number(day.energy) : 60;
+  const hmNum = (v: unknown): number | null => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || ""));
+    return m ? Number(m[1]) + Number(m[2]) / 60 : null;
+  };
+  // 与面板 energyAt 同步：cost 按进度记账、状况负向合计封顶 -25、缓降从起床时刻起算
+  for (const it of sched) {
+    if (h >= 5 && String(it.time) > hm) continue;
+    const a = hmNum(it.time), b = hmNum(it.end);
+    const prog = a != null && b != null && b > a ? Math.max(0, Math.min(1, (h - a) / (b - a))) : 1;
+    energy += (Number(it.cost) || 0) * prog;
+  }
+  let cd = 0;
+  for (const x of conds) cd += (Number(x.c.energyDelta) || 0) * x.w;
+  energy += Math.max(-25, cd);
+  const wakeH = hmNum(day.wake) ?? 7;
+  energy -= Math.max(0, Math.min(hh, 22) - wakeH) * 1.2 + Math.max(0, hh - 22) * 8;
+  energy = Math.max(0, Math.min(100, Math.round(energy)));
+  const cand: { text: string; w: number }[] = [];
+  const top = conds[0];
+  if (top && top.c.mood) cand.push({ text: `${top.c.mood}（因为${top.c.cause || "刚才聊的"}）`, w: top.w * (Number(top.c.intensity) || 50) / 100 });
+  if (done && done.mood) {
+    const [dh, dm] = String(done.time).split(":").map(Number);
+    cand.push({ text: `${done.mood}（${done.title || ""}之后）`, w: Math.pow(0.5, Math.max(0, (h * 60 - (dh * 60 + dm)) * 60_000) / (90 * 60_000)) * 0.6 });
+  }
+  cand.sort((a, b) => b.w - a.w);
+  const hit = cand.find(x => x.w > 0.15);
+  return {
+    hm, done, step, energy, doing, asleep,
+    mood: hit ? hit.text : `${day.mood || "说不上来"}（今天的底色）`,
+    next: asleep ? `${day.wake || quietEnd || ""} 起床`.trim() : next ? `${next.time} ${next.title || ""}` : (over && day.bed ? `${day.bed} 睡觉` : ""),
+  };
+}
 type PlanRow = {
   session_id: string;
   context: PlanContext;
@@ -67,7 +150,10 @@ const GATE_DEF = {
   gateHorizonMin: 240, // 最近的待发时刻在这么久以外就不判（分钟，0=不限）
   gateFreshMin: 10,    // 最后一句话说完还不到这么久就先不判，等话说完（分钟，0=不等）
   gateMinMsgs: 1,      // 上次裁决之后用户至少说这么多句才判
+  selfImpulseCap: 0,   // 没有新聊天时，每天最多几次「自发起念」裁决（0=关）
 };
+// 自发起念的第二种由头：双方都这么久没说话了
+const SELF_SILENCE_MS = 3 * 3600_000;
 // 还有不到 2 分钟就到点的时刻不再改动，免得和 push-generate 抢同一条预约。
 const LEAD_MS = 2 * 60_000;
 
@@ -277,13 +363,28 @@ Deno.serve(async (req: Request) => {
 
   // 门禁：全部过了才轮到下面那一次裁决调用。每一道都只读已有数据，不调模型，
   // 所以可以放心让 cron 派得勤，甚至将来由客户端逐条消息触发。
+  //
+  // 分两组：判决是重判已排好的时刻，没有待发时刻就无从判起；起念是新开一个时刻，
+  // 跟有没有待发时刻无关——日程走完的晚上恰恰最该起念，两者共用一道闸时它永远轮不上。
+  // 频率仍然共享（间隔、每日上限）：两组共用同一次裁决调用，分开算等于放开调用次数。
+  const litCount = items.filter(item => item.act).length;
+  const horizon = gate("gateHorizonMin") * 60_000;
+  const nearest = pending.length > 0 ? Math.min(...pending.map(item => Number(item.fireAt))) - nowMs : Infinity;
+  const canJudge = pending.length > 0 && (horizon <= 0 || nearest <= horizon);
+  const canImpulse = litCount < Number(context.quota ?? 3);
+  // 自发起念：没有新聊天也可以起念，由头是TA自己这一天里的事——刚做完一件有分量的日程，
+  // 或者双方安静太久。每一次都是一次裁决调用，所以另有每日上限（selfImpulseCap），
+  // 用掉的次数记在 context.selfUsed，App 上传计划时会原样带回来，重新编排才清零。
+  const day = context.day && typeof context.day === "object" ? context.day : null;
+  const selfUsed = Number(context.selfUsed) || 0;
+  let selfReason = "";
   const blocked = await (async (): Promise<string> => {
     if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < gate("gateGapMin") * 60_000) return "离上次裁决还不够久";
     if ((plan.recheck_count || 0) >= gate("gateDailyCap")) return "今天的裁决次数用完了";
-    if (pending.length === 0) return "今天没有还没到点的时刻";
-    const horizon = gate("gateHorizonMin") * 60_000;
-    const nearest = Math.min(...pending.map(item => Number(item.fireAt))) - nowMs;
-    if (horizon > 0 && nearest > horizon) return `最近的时刻还在 ${Math.round(nearest / 60_000)} 分钟以外`;
+    if (!canJudge && !canImpulse) {
+      if (pending.length === 0) return "今天没有还没到点的时刻，今日额度也满了";
+      return `最近的时刻还在 ${Math.round(nearest / 60_000)} 分钟以外，今日额度也满了`;
+    }
 
     // 没新消息就没有新信息，再判一次只是烧额度。首次复核回看 6 小时，
     // 别把开机前的对话全算成"新"。
@@ -296,7 +397,37 @@ Deno.serve(async (req: Request) => {
       + "&select=message_at&order=message_at.desc&limit=20",
     );
     const freshRows = freshResponse.ok ? await freshResponse.json() as { message_at: string }[] : [];
-    if (freshRows.length < Math.max(1, gate("gateMinMsgs"))) return "上次裁决之后你没说几句";
+    if (freshRows.length < Math.max(1, gate("gateMinMsgs"))) {
+      const quiet = "上次裁决之后你没说几句";
+      if (!canImpulse || !day || gate("selfImpulseCap") <= 0) return quiet;
+      if (selfUsed >= gate("selfImpulseCap")) return `${quiet}，今天的自发起念也用完了`;
+      const qs = String(context.quietStart || ""), qe = String(context.quietEnd || "");
+      const now = guanianNow(day, nowMs, qs, qe);
+      if (qs && qe && qs !== qe && (qs < qe ? (now.hm >= qs && now.hm < qe) : (now.hm >= qs || now.hm < qe))) return `${quiet}，现在是免打扰时段`;
+      if (now.asleep) return `${quiet}，TA在睡觉`;
+      // 由头一：上次裁决之后新开始了一条有分量的日程（耗神/回血明显，或有情绪余味）
+      const tzMs = (Number(day.tz) || 0) * 60_000;
+      const sameLocalDay = Number.isFinite(lastRecheckMs)
+        && Math.floor((lastRecheckMs + tzMs) / 86_400_000) === Math.floor((nowMs + tzMs) / 86_400_000);
+      const sinceHM = sameLocalDay ? guanianNow(day, lastRecheckMs, qs, qe).hm : "00:00";
+      const weighty = now.done && String(now.done.time) > sinceHM
+        && (Math.abs(Number(now.done.cost) || 0) >= 15 || !!now.done.mood);
+      if (weighty) { selfReason = `刚${now.done!.title || "做完一件事"}`; return ""; }
+      // 由头二：双方都安静太久。要有过对话才算，从没聊过的不算「安静」
+      const lastAnyResponse = await rest(
+        `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
+        + `&character_id=eq.${encodeURIComponent(characterId)}`
+        + "&select=message_at&order=message_at.desc&limit=1",
+      );
+      const lastAny = lastAnyResponse.ok ? await lastAnyResponse.json() as { message_at: string }[] : [];
+      const lastAnyMs = Date.parse(lastAny[0]?.message_at || "");
+      const silentMs = Number.isFinite(lastAnyMs) ? nowMs - lastAnyMs : 0;
+      if (silentMs >= SELF_SILENCE_MS && (!Number.isFinite(lastRecheckMs) || lastRecheckMs < lastAnyMs + SELF_SILENCE_MS)) {
+        selfReason = `已经 ${Math.round(silentMs / 3600_000)} 小时没联系`;
+        return "";
+      }
+      return quiet;
+    }
     const freshMs = gate("gateFreshMin") * 60_000;
     const lastMsgMs = Date.parse(freshRows[0]?.message_at || "");
     if (freshMs > 0 && Number.isFinite(lastMsgMs) && nowMs - lastMsgMs < freshMs) return "你才刚说完，等一下再判";
@@ -342,7 +473,10 @@ Deno.serve(async (req: Request) => {
     // 后面给临时起念算时刻直接复用，不必猜数据库时区。
     // 挑第一条 time 合法的当基准；一条都没有就退回 UTC，同时不许云端起念——
     // 临时起念的绝对时刻全靠这个基准换算，基准不可信只会把消息发到错的钟点。
-    const anchor = pending.find(item => /^\d{1,2}:\d{2}$/.test(item.time)) || pending[0];
+    // 用 items 而不是 pending：日程走完的晚上 pending 是空的，但今天已经过点的时刻
+    // 一样能还原出时区偏移，起念照样算得出绝对时刻。
+    const anchor = items.find(item => /^\d{1,2}:\d{2}$/.test(item.time)) || items[0];
+    if (!anchor) return;
     const anchorTrusted = /^\d{1,2}:\d{2}$/.test(anchor.time);
     const anchorLocal = anchorTrusted
       ? Number(anchor.time.split(":")[0]) * 60 + Number(anchor.time.split(":")[1])
@@ -354,7 +488,9 @@ Deno.serve(async (req: Request) => {
 
     // 快照模板：优先拿今天还没发的那几条预约。它们的 payload 里冻着上游地址和密钥，
     // 裁决调用和后面的点亮都靠它——本函数自己不持有任何模型凭据。
-    const wakeKeys = items.map(item => item.wakeId).filter(Boolean).map(id => `"timedwake:${id}"`);
+    // 哨兵预约（App 编排时挂的、48 小时后才到点的模板）也算在内：一个时刻都没点亮的日子全靠它。
+    const sentinelWakeId = typeof context.sentinelWakeId === "string" ? context.sentinelWakeId : "";
+    const wakeKeys = items.map(item => item.wakeId).concat(sentinelWakeId).filter(Boolean).map(id => `"timedwake:${id}"`);
     let found: JobPayload | null = null;
     const jobsByKey = new Map<string, JobRow>();
     if (wakeKeys.length > 0) {
@@ -390,6 +526,7 @@ Deno.serve(async (req: Request) => {
     const inQuiet = (hm: string) => {
       const qs = context.quietStart || "";
       const qe = context.quietEnd || "";
+      if (day && guanianAsleep(day, hm, qs, qe)) return true; // 睡着的时段和免打扰一样硬拦
       if (!qs || !qe || qs === qe) return false;
       return qs < qe ? (hm >= qs && hm < qe) : (hm >= qs || hm < qe);
     };
@@ -405,27 +542,48 @@ Deno.serve(async (req: Request) => {
     const planLines = pending
       .map(item => `- ${item.time}｜${item.source}｜${item.act ? "已点亮" : "未点亮"}｜意图：${item.intent || "（无）"}｜理由：${item.why || "（无）"}`)
       .join("\n");
-    const litCount = items.filter(item => item.act).length;
 
+    // 自发起念这轮没有新聊天，判决无从谈起：只问「此刻TA自己想不想找用户」
+    const judge = canJudge && !selfReason;
+    const now = day ? guanianNow(day, nowMs, context.quietStart, context.quietEnd) : null;
+    const stateLine = now
+      ? `此刻的状态：${now.asleep ? "在睡觉" : "在" + (now.doing || "没什么特别的")}${now.step ? "（" + now.step + "）" : ""}，情绪「${now.mood}」，精力 ${now.energy}%${now.next ? "，接下来 " + now.next : ""}。`
+      : (context.mood || context.energy ? `今天的状态：心情「${context.mood || "普通"}」，精力「${context.energy || "普通"}」。` : "");
     const prompt = [
       `你现在是「${characterName}」，在盘算今天剩下的时间要不要主动联系用户。现在是本地时间 ${hhmm(nowMs, offsetMin)}。`,
       context.bias ? `你的性格倾向：${context.bias}` : "",
-      context.mood || context.energy ? `今天的状态：心情「${context.mood || "普通"}」，精力「${context.energy || "普通"}」。` : "",
+      stateLine,
       `规矩：今天最多主动 ${context.quota ?? 3} 次（已点亮 ${litCount} 次）；`
       + `${context.quietStart || "23:00"}–${context.quietEnd || "07:00"} 不打扰；两次之间至少隔 ${context.minGapMin ?? 90} 分钟。`,
       "",
-      "刚刚和用户的对话：",
+      selfReason ? "最近和用户的对话（这之后没有新消息）：" : "刚刚和用户的对话：",
       chatLines || "（这段时间没有对话记录）",
       "",
-      "今天剩下的计划时刻：",
-      planLines,
+      judge ? "今天剩下的计划时刻：" : (selfReason ? "" : "今天排好的时刻都已经过点了，没有要重判的。"),
+      judge ? planLines : "",
       "",
-      "根据刚才聊过的内容重新判断每个时刻：聊过的话题已经了了就别再提，"
-      + "用户说了忙/情绪不好就收敛，聊到一半没说完或约好了要说的事可以点亮甚至新加一个时刻。",
+      selfReason
+        ? `没有新对话。由头是你自己这边的事：${selfReason}。想一想此刻的你会不会想找用户说点什么——`
+          + "分享刚发生的、忽然想起TA、单纯想搭句话都行；但不想说、或者上面聊到的事已经了了，就老实写 []，"
+          + "不要为了发而发。真要发的话时刻定在接下来 5 到 40 分钟之间。"
+        : canJudge
+        ? "根据刚才聊过的内容重新判断每个时刻：聊过的话题已经了了就别再提，"
+          + "用户说了忙/情绪不好就收敛，聊到一半没说完或约好了要说的事可以点亮"
+          + (canImpulse ? "甚至新加一个时刻。" : "。")
+        : "只看刚才聊的内容里有没有值得临时起一个新念头的事：聊到一半没说完的话头、"
+          + "约好了要说的、答应了要问的。只是随口聊到、没落实的事不算。",
       "只输出 JSON，不要任何解释：",
-      '{"decisions":[{"time":"HH:MM","act":true,"sem":"关心|分享|约定|闲聊","topic":"一句话主题","why":"你为什么这么定","intent":"到点时你想说的事，一句话"}],'
-      + '"extra":[{"time":"HH:MM","about":"临时起念的由头","intent":"想说的事","why":"为什么现在加"}]}',
-      "decisions 只写你要改的时刻（其余的保持原样就不用写）。extra 最多 1 条，没有就写 []。",
+      "{"
+      + (judge
+        ? '"decisions":[{"time":"HH:MM","act":true,"sem":"关心|分享|约定|闲聊","topic":"一句话主题","why":"你为什么这么定","intent":"到点时你想说的事，一句话"}]'
+        : '"decisions":[]')
+      + ","
+      + (canImpulse
+        ? '"extra":[{"time":"HH:MM","about":"临时起念的由头","intent":"想说的事","why":"为什么现在加"}]'
+        : '"extra":[]')
+      + "}",
+      judge ? "decisions 只写你要改的时刻（其余的保持原样就不用写）。" : "decisions 一律写 []。",
+      canImpulse ? "extra 最多 1 条，没有就写 []。" : "今日额度已满，extra 一律写 []。",
     ].filter(Boolean).join("\n");
 
     const controller = new AbortController();
@@ -446,7 +604,11 @@ Deno.serve(async (req: Request) => {
       clearTimeout(timeout);
     }
 
-    const { decisions, extra } = parseJudgeJson(judgeText);
+    // 门禁只放行了其中一组时，另一组的返回一律丢掉——提示词里已经要求写 []，
+    // 但模型不一定听话，这里是硬拦。
+    const judged = parseJudgeJson(judgeText);
+    const decisions = judge ? judged.decisions : [];
+    const extra = canImpulse ? judged.extra : [];
     if (decisions.length === 0 && extra.length === 0) {
       await touch({ recheck_count: (plan.recheck_count || 0) + 1 });
       return;
@@ -548,7 +710,7 @@ Deno.serve(async (req: Request) => {
       nextItems.push({
         time,
         fireAt,
-        source: `临时·${String(one.about || "未完话题").slice(0, 10)}`,
+        source: `${selfReason ? "自发" : "临时"}·${String(one.about || (selfReason ? "想起你" : "未完话题")).slice(0, 10)}`,
         act: true,
         intent,
         why: String(one.why || "").slice(0, 200),
@@ -561,10 +723,13 @@ Deno.serve(async (req: Request) => {
     }
 
     nextItems.sort((a, b) => a.fireAt - b.fireAt);
+    // 自发起念不管有没有起成都记一笔：既扣次数，也让 App 的诊断里看得到「TA想了想，没找你」
+    if (selfReason) applied.push({ at: Date.now(), kind: "self", note: `自发起念（${selfReason}）——${lit > litCount ? "起了一个念头" : "想了想，没找你"}`, by: "cloud" });
     const saved = await touch({
       items: nextItems,
       decisions: [...priorDecisions, ...applied].slice(-60),
       recheck_count: (plan.recheck_count || 0) + 1,
+      ...(selfReason ? { context: { ...context, selfUsed: selfUsed + 1 } } : {}),
     }, true);
     const rows = saved?.ok ? await saved.json().catch(() => []) as unknown[] : [];
     if (Array.isArray(rows) && rows.length > 0) return;

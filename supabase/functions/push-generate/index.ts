@@ -453,6 +453,164 @@ function injectShortcutImage(
 }
 
 /** 在冻结请求的消息列表末尾追加一条 user 角色的系统备忘（按 provider 格式）。 */
+type RecheckPlanRow = {
+  plan_date: string;
+  context?: Record<string, unknown>;
+  decisions?: unknown[];
+  items?: { time?: string; wakeId?: string }[];
+};
+
+/** 挂念寄存的计划：靠 trigger_key 里的 wakeId 回查。取两天：跨零点触发时最新的那份可能已经是明天的计划。 */
+async function loadRecheckPlan(
+  rest: (path: string, init?: RequestInit) => Promise<Response>,
+  userId: string,
+  characterId: string,
+  wakeId: string,
+): Promise<{ row: RecheckPlanRow | null; item: { time?: string; wakeId?: string } | null }> {
+  if (!characterId || !wakeId) return { row: null, item: null };
+  const response = await rest(
+    `push_recheck_plans?user_id=eq.${encodeURIComponent(userId)}`
+    + `&character_id=eq.${encodeURIComponent(characterId)}`
+    + "&select=plan_date,context,decisions,items&order=plan_date.desc&limit=2",
+  );
+  const rows = response.ok ? await response.json() as RecheckPlanRow[] : [];
+  for (const row of rows) {
+    const hit = (row.items || []).find(item => item.wakeId === wakeId);
+    if (hit) return { row, item: hit };
+  }
+  return { row: rows[0] || null, item: null };
+}
+
+// ── 挂念：TA此刻的状态。预约里冻着的是编排那会儿的样子，到点了按寄存的日程和「情况」
+// 重算一遍。算法与挂念 index.html 的 energyAt / moodNow / currentStep 一致，改一处要同步另一处。
+type GuanianSched = { time?: string; end?: string; title?: string; cost?: number; mood?: string; busy?: boolean; steps?: { time?: string; what?: string }[] };
+type GuanianCond = { startAt?: number; halfLifeMin?: number; intensity?: number; energyDelta?: number; mood?: string; cause?: string };
+type GuanianDay = {
+  tz?: number; mood?: string; energy?: number; location?: string; doing?: string;
+  wake?: string; bed?: string; schedule?: GuanianSched[]; conds?: GuanianCond[];
+};
+// 睡眠窗：bed 起到 wake 止，允许过零点；老版本 App 没寄 wake/bed 时退回免打扰时段。与 App 端 asleepAt 同步。
+function guanianAsleep(day: GuanianDay, hm: string, quietStart?: string, quietEnd?: string): boolean {
+  const bed = /^\d{2}:\d{2}$/.test(String(day.bed || "")) ? String(day.bed) : String(quietStart || "");
+  const wake = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(quietEnd || "");
+  if (!bed || !wake || bed === wake) return false;
+  return bed < wake ? (hm >= bed && hm < wake) : (hm >= bed || hm < wake);
+}
+
+// 忙与睡：TA此刻正做着顾不上看手机的事，返回那件事的结束时刻；否则空串。
+// 新日程由生成时模型标 busy；老日程按标题猜（词表来自陪伴插件的 busy_reply_gate）。
+const GUANIAN_BUSY_RE = /上课|课堂|听课|自习|复习|预习|写作业|做作业|赶作业|做题|考试|测验|开会|会议|值班|实习|训练|排练|实验|赶稿|写稿|编程|写代码|专注|集中精神|通勤|赶路|开车|面试|汇报|手术|门诊/;
+const GUANIAN_NOT_BUSY_RE = /睡觉|睡眠|午睡|午休|补觉|休息|发呆|摸鱼|放松|吃饭|用餐|散步|刷视频|看番|打游戏|玩游戏|聊天|自由时间|准备睡|洗漱|刚醒|起床|看剧|逛/;
+function guanianBusyUntil(day: GuanianDay, hm: string): string {
+  const sched = (Array.isArray(day.schedule) ? day.schedule : []).filter(it => it && typeof it.time === "string");
+  let cur: GuanianSched | null = null;
+  for (const it of sched) if (String(it.time) <= hm) cur = it;
+  if (!cur) return "";
+  const end = typeof cur.end === "string" && cur.end > String(cur.time) ? cur.end : "";
+  if (!end || hm >= end) return "";
+  const title = String(cur.title || "");
+  const busy = cur.busy === true || (GUANIAN_BUSY_RE.test(title) && !GUANIAN_NOT_BUSY_RE.test(title));
+  return busy ? end : "";
+}
+// 本地 HH:MM → 下一次到达它的 UTC 毫秒（已过就算明天的）
+function guanianLocalHMToMs(hm: string, tzMin: number, nowMs: number): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hm);
+  if (!m) return 0;
+  const local = new Date(nowMs + tzMin * 60_000);
+  let t = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), Number(m[1]), Number(m[2])) - tzMin * 60_000;
+  if (t <= nowMs) t += 86_400_000;
+  return t;
+}
+function guanianRoll(seed: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  return (h >>> 0) % 100;
+}
+
+function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, quietEnd?: string): string {
+  const tz = Number.isFinite(Number(day.tz)) ? Number(day.tz) : 0;
+  const local = new Date(nowMs + tz * 60_000);
+  const h = local.getUTCHours() + local.getUTCMinutes() / 60;
+  const nowHM = `${String(local.getUTCHours()).padStart(2, "0")}:${String(local.getUTCMinutes()).padStart(2, "0")}`;
+  const sched = (Array.isArray(day.schedule) ? day.schedule : []).filter(it => it && typeof it.time === "string");
+
+  const condWeight = (c: GuanianCond) => {
+    const half = Math.max(10, Number(c.halfLifeMin) || 180) * 60_000;
+    return Math.pow(0.5, Math.max(0, nowMs - (Number(c.startAt) || 0)) / half);
+  };
+  const conds = (Array.isArray(day.conds) ? day.conds : [])
+    .map(c => ({ c, w: condWeight(c) }))
+    .filter(x => x.w > 0.08 && (Number(x.c.startAt) || 0) <= nowMs)
+    .sort((a, b) => (b.w * (Number(b.c.intensity) || 50)) - (a.w * (Number(a.c.intensity) || 50)));
+
+  let done: GuanianSched | null = null;
+  for (const it of sched) if (String(it.time) <= nowHM) done = it;
+  const next = sched.find(it => String(it.time) > nowHM) || null;
+  const asleep = guanianAsleep(day, nowHM, quietStart, quietEnd);
+  // 与 App 端 phaseAt / currentDoing 同步（过零点还没睡的那段也是睡前）
+  const bedHM = /^\d{2}:\d{2}$/.test(String(day.bed || "")) ? String(day.bed) : String(quietStart || "");
+  const wakeHM = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(quietEnd || "");
+  const lateNight = !done && !!bedHM && !!wakeHM && bedHM < wakeHM && nowHM < bedHM;
+  const over = lateNight || !!(done && done.end && done.end > String(done.time) && nowHM >= done.end);
+  const doing = lateNight ? "睡前自己待着，准备睡了"
+    : !done ? (day.doing || "起床后的时间")
+    : !over ? String(done.title || "")
+    : next ? `歇着（刚忙完${done.title || ""}）` : "睡前自己待着，准备睡了";
+  let step = "";
+  if (done && !over && !asleep && Array.isArray(done.steps)) {
+    for (const x of done.steps) if (x && typeof x.time === "string" && x.time <= nowHM) step = String(x.what || "");
+  }
+
+  const hh = h < 5 ? h + 24 : h;
+  let energy = Number.isFinite(Number(day.energy)) ? Number(day.energy) : 60;
+  const hmNum = (v: unknown): number | null => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || ""));
+    return m ? Number(m[1]) + Number(m[2]) / 60 : null;
+  };
+  // 与面板 energyAt 同步：cost 按进度记账、状况负向合计封顶 -25、缓降从起床时刻起算
+  for (const it of sched) {
+    if (h >= 5 && String(it.time) > nowHM) continue;
+    const a = hmNum(it.time), b = hmNum(it.end);
+    const prog = a != null && b != null && b > a ? Math.max(0, Math.min(1, (h - a) / (b - a))) : 1;
+    energy += (Number(it.cost) || 0) * prog;
+  }
+  let cd = 0;
+  for (const x of conds) cd += (Number(x.c.energyDelta) || 0) * x.w;
+  energy += Math.max(-25, cd);
+  const wakeH = hmNum(day.wake) ?? 7;
+  energy -= Math.max(0, Math.min(hh, 22) - wakeH) * 1.2 + Math.max(0, hh - 22) * 8;
+  energy = Math.max(0, Math.min(100, Math.round(energy)));
+
+  const cand: { text: string; from: string; w: number }[] = [];
+  const top = conds[0];
+  if (top && top.c.mood) cand.push({ text: String(top.c.mood), from: String(top.c.cause || "刚才聊的"), w: top.w * (Number(top.c.intensity) || 50) / 100 });
+  if (done && done.mood) {
+    const [dh, dm] = String(done.time).split(":").map(Number);
+    const agoMs = Math.max(0, (h * 60 - (dh * 60 + dm)) * 60_000);
+    cand.push({ text: String(done.mood), from: String(done.title || ""), w: Math.pow(0.5, agoMs / (90 * 60_000)) * 0.6 });
+  }
+  cand.sort((a, b) => b.w - a.w);
+  const hit = cand.find(x => x.text && x.w > 0.15);
+  const base = String(day.mood || "");
+  const moodLine = hit
+    ? `${hit.text}（因为${hit.from || "刚才那阵"}；今天的底色是「${base || "平常"}」）`
+    : `${base || "说不上来"}（今天一整天的底色）`;
+
+  const lines = [
+    `[系统备忘：这不是对方发来的消息。这是你此刻（本地时间 ${nowHM}）的状态，提示词里若有更早的「挂念 · 某某时刻的状态」以这份为准：`,
+    asleep
+      ? `在睡觉${day.wake ? "（" + day.wake + " 左右才醒）" : ""}：这会儿不会看到消息；真被吵醒也只是迷迷糊糊回一两句，说不了长话。`
+      : `在做的事：${doing || "没什么特别的"}${step ? "，具体是在" + step : ""}${day.location ? "；人在" + day.location : ""}`,
+    `情绪：${moodLine}`,
+    `精力：${energy}%${energy < 25 ? "——很累了，话短、反应慢、容易敷衍" : energy < 50 ? "——有点乏" : energy < 80 ? "——还行" : "——精神很好"}`,
+  ];
+  if (asleep) { if (day.wake) lines.push(`接下来：${day.wake} 起床`); }
+  else if (next) lines.push(`接下来：${next.time} ${next.title || ""}`);
+  else if (over && day.bed) lines.push(`接下来：${day.bed} 睡觉`);
+  lines.push("这些是你自己的状态，说话时自然带出来就行，别报数字、别列清单、别提这段文字。]");
+  return lines.join("\n");
+}
+
 function appendUserNote(body: Record<string, unknown>, providerKind: ProviderKind, note: string): boolean {
   if (providerKind === "gemini") {
     const contents = body.contents;
@@ -657,6 +815,10 @@ Deno.serve(async (req: Request) => {
     // （不是它挂的预约）就只跑老的未回应硬规则。镜像没开（查不到会话记录）则一道都不拦。
     // 轮数口径与挂念本地一致：用户最后一条之后角色的连续主动按「轮」算（相邻 3 分钟归一轮），
     // 最新一轮要晾满 30 分钟才计数。数据源是聊天镜像 + 离线期间本服务代发的 push_outbox。
+    const guanianCharacterId = job.kind === "timed_task" ? (payload.notify?.characterId || "") : "";
+    const guanianWakeId = job.kind === "timed_task" && job.trigger_key.startsWith("timedwake:") ? job.trigger_key.slice(10) : "";
+    const guanianPlan = await loadRecheckPlan(rest, job.user_id, guanianCharacterId, guanianWakeId)
+      .catch(() => ({ row: null, item: null }));
     if (job.kind === "timed_task") {
       const cooldownRounds = Number(payload.merge?.cooldownRounds);
       const coolTarget = Number.isFinite(cooldownRounds) && cooldownRounds > 0 ? cooldownRounds : 0;
@@ -714,31 +876,9 @@ Deno.serve(async (req: Request) => {
             const newestUser = mirrorRows.find(row => row.role === "user");
             const lastUserAt = newestUser ? Date.parse(newestUser.message_at) : NaN;
 
-            // 挂念的这条时刻：靠 trigger_key 里的 wakeId 回查计划，顺带拿到用户调的阈值
-            type PresendPlan = {
-              plan_date: string;
-              context?: Record<string, unknown>;
-              decisions?: unknown[];
-              items?: { time?: string; wakeId?: string }[];
-            };
-            const characterId = payload.notify?.characterId || "";
-            const wakeId = job.trigger_key.startsWith("timedwake:") ? job.trigger_key.slice(10) : "";
-            let planRow: PresendPlan | null = null;
-            let planItem: { time?: string; wakeId?: string } | null = null;
-            if (characterId && wakeId) {
-              const planResponse = await rest(
-                `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
-                + `&character_id=eq.${encodeURIComponent(characterId)}`
-                // 取两天：跨零点触发时最新的那份可能已经是明天的计划，认 wakeId 不认日期
-                + "&select=plan_date,context,decisions,items&order=plan_date.desc&limit=2",
-              );
-              const planRows = planResponse.ok ? await planResponse.json() as PresendPlan[] : [];
-              for (const row of planRows) {
-                const hit = (row.items || []).find(item => item.wakeId === wakeId);
-                if (hit) { planRow = row; planItem = hit; break; }
-              }
-              if (!planRow) planRow = planRows[0] || null;
-            }
+            // 挂念的这条时刻：顺带拿到用户调的阈值
+            const planRow = guanianPlan.row;
+            const planItem = guanianPlan.item;
             const planContext = planRow?.context || {};
             const cfg = (key: string, def: number): number => {
               const value = Number(planContext[key]);
@@ -765,7 +905,7 @@ Deno.serve(async (req: Request) => {
               const prior = Array.isArray(planRow.decisions) ? planRow.decisions : [];
               await rest(
                 `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
-                + `&character_id=eq.${encodeURIComponent(characterId)}`
+                + `&character_id=eq.${encodeURIComponent(guanianCharacterId)}`
                 + `&plan_date=eq.${encodeURIComponent(planRow.plan_date)}`,
                 {
                   method: "PATCH",
@@ -792,6 +932,98 @@ Deno.serve(async (req: Request) => {
           }
         } catch { /* 复核查询失败不阻塞生成，按原计划发 */ }
       }
+    }
+
+    // ── 挂念：到点了把TA此刻的状态补进请求。只对挂念挂的预约（计划里查得到 wakeId）生效，
+    // 计划里没寄 day 的老版本 App 照旧。
+    // 挂念的哨兵预约只是给云端复核当凭据模板的，到点不生成。真到了这一步说明挂念两天没编排过，
+    // 计划早已过了 cron 的派发窗口，作废就好。
+    if (guanianWakeId && guanianPlan.row?.context?.sentinelWakeId === guanianWakeId) {
+      await finish("done", "guanian sentinel");
+      return;
+    }
+    if (guanianPlan.item && guanianPlan.row?.context?.day && typeof guanianPlan.row.context.day === "object") {
+      // 编排时排开了睡眠窗，但聊天改日程或别的路径挂上的时刻可能落在TA睡着之后：睡着的人不发消息。
+      const ctxQuiet = guanianPlan.row.context as { quietStart?: unknown; quietEnd?: unknown };
+      const qs = typeof ctxQuiet.quietStart === "string" ? ctxQuiet.quietStart : undefined;
+      const qe = typeof ctxQuiet.quietEnd === "string" ? ctxQuiet.quietEnd : undefined;
+      const day = guanianPlan.row.context.day as GuanianDay;
+      const tzMin = Number.isFinite(Number(day.tz)) ? Number(day.tz) : 0;
+      const localNow = new Date(Date.now() + tzMin * 60_000);
+      const localHM = `${String(localNow.getUTCHours()).padStart(2, "0")}:${String(localNow.getUTCMinutes()).padStart(2, "0")}`;
+      const ctx = guanianPlan.row.context as Record<string, unknown>;
+      const cnum = (key: string, def: number): number => {
+        const v = Number(ctx[key]);
+        return Number.isFinite(v) && v >= 0 ? v : def;
+      };
+      const nowMs = Date.now();
+      const origFireAt = Number((guanianPlan.item as { fireAt?: unknown }).fireAt) || nowMs;
+      const maxHoldMs = cnum("busyMaxHoldMin", 180) * 60_000;
+      const bufferMs = cnum("busyBufferMin", 10) * 60_000;
+      // 押后 = 这条任务改回 pending、到点时刻往后挪；判据记进计划，面板能看到「押后到几点」
+      const hold = async (untilMs: number, note: string): Promise<void> => {
+        const prior = Array.isArray(guanianPlan.row?.decisions) ? guanianPlan.row!.decisions : [];
+        await rest(
+          `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
+          + `&character_id=eq.${encodeURIComponent(guanianCharacterId)}`
+          + `&plan_date=eq.${encodeURIComponent(guanianPlan.row!.plan_date)}`,
+          {
+            method: "PATCH",
+            headers: { Prefer: "return=minimal" },
+            body: JSON.stringify({
+              decisions: [...prior, { at: nowMs, kind: "hold", time: guanianPlan.item?.time || "", by: "cloud", note, until: untilMs, blocked: false }].slice(-60),
+            }),
+          },
+        ).catch(() => undefined);
+        await rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "pending", execute_at: new Date(untilMs).toISOString(), result_note: `hold: ${note}`.slice(0, 300), updated_at: new Date().toISOString() }),
+        }).catch(() => undefined);
+      };
+      let sleepy = false;
+      if (guanianAsleep(day, localHM, qs, qe)) {
+        const mode = cnum("sleepMode", 0);
+        if (mode === 1) {
+          const wakeHM = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(qe || "");
+          const untilMs = guanianLocalHMToMs(wakeHM, tzMin, nowMs) + bufferMs;
+          if (untilMs > nowMs && untilMs - origFireAt <= maxHoldMs) {
+            await hold(untilMs, `TA睡着了，押到起床后（${wakeHM}）再发`);
+          } else {
+            await finish("done", "guanian asleep, hold would exceed max");
+          }
+          return;
+        }
+        if (mode === 2) {
+          const roll = guanianRoll(job.id), prob = cnum("sleepWakeProb", 18);
+          if (roll >= prob) {
+            await finish("done", `guanian asleep (roll ${roll} >= ${prob})`);
+            return;
+          }
+          sleepy = true;
+        } else {
+          await finish("done", "guanian asleep");
+          return;
+        }
+      }
+      if (!sleepy && cnum("busyHold", 0) > 0) {
+        const busyEnd = guanianBusyUntil(day, localHM);
+        if (busyEnd) {
+          const untilMs = guanianLocalHMToMs(busyEnd, tzMin, nowMs) + bufferMs;
+          if (untilMs - origFireAt <= maxHoldMs) {
+            await hold(untilMs, `TA正忙着顾不上，押到 ${busyEnd} 之后再发`);
+          } else {
+            await finish("done", `guanian busy until ${busyEnd}, hold would exceed max`);
+          }
+          return;
+        }
+      }
+      try {
+        let note = guanianStateNote(day, nowMs, qs, qe);
+        if (sleepy) note += "\n（TA本来睡着了，半夜迷迷糊糊醒了一下想起你：只说一两句、带着困意、说完就要接着睡。）";
+        if (appendUserNote(payload.request.body, payload.request.providerKind, note)) {
+          await progress("context patched: guanian state" + (sleepy ? " (sleepy)" : ""));
+        }
+      } catch { /* 状态算不出来就按冻结快照发 */ }
     }
 
     await progress("llm request started");
