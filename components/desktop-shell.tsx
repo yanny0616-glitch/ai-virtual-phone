@@ -1818,6 +1818,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       // 定时唤醒/经期关怀兜底：切后台时刷新快照预约
       void import("@/lib/push-bailout-client").then(m => m.installScheduledBailoutRefresher()).catch(() => undefined);
       void import("@/lib/chat-mirror-client").then(m => m.installChatMirror()).catch(() => undefined);
+      // 自定义 APP 冻在服务端的提示词模板：角色回复后记忆会变，自动重冻
+      void import("@/lib/custom-app-host-api").then(m => m.installCustomAppTemplateRefresher()).catch(() => undefined);
       // 延后跑，别抢启动窗口的解码/IO。
       window.setTimeout(() => {
         void import("@/lib/notification-avatar-cache").then(m => m.syncNotificationAvatarCache()).catch(() => undefined);

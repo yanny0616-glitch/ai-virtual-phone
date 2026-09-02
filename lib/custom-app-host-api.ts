@@ -21,6 +21,7 @@ import { loadCharacters } from "./character-storage";
 import {
   addChatContact,
   createOrGetSession,
+  CHAT_MESSAGE_PUSHED_EVENT,
   CHAT_REQUEST_REPLY_EVENT,
   getLatestCharacterStateValues,
   hydrateChatStorage,
@@ -2493,6 +2494,7 @@ export async function freezeCustomAppTemplate(
     || record.activateWorldBooks === true
     || activeWorlds.some(item => item.activateAll);
   const triggerKey = `capptpl:${app.id}:${characterId}:${key}`;
+  rememberCustomAppTemplate(app.id, characterId, key, record);
   const armResult = await armTemplateBailout({
     triggerKey,
     session,
@@ -2510,6 +2512,75 @@ export async function freezeCustomAppTemplate(
     armed: armResult.ok,
     reason: armResult.ok ? undefined : armResult.reason,
   };
+}
+
+// 模板登记簿：APP 冻过哪些模板。角色聊完天记忆会变，模板里烤着旧记忆，
+// 所以宿主在角色每次回复之后自动按登记簿重冻一遍，不用等 APP 再被打开。
+const CUSTOM_APP_TEMPLATE_REGISTRY_KEY = "custom_app_templates_v1";
+const CUSTOM_APP_TEMPLATE_REFRESH_DEBOUNCE_MS = 3 * 60_000;
+type CustomAppTemplateRecord = { appId: string; characterId: string; key: string; record: Record<string, unknown>; at: number };
+
+function loadCustomAppTemplateRegistry(): CustomAppTemplateRecord[] {
+  try {
+    const parsed = JSON.parse(kvGet(CUSTOM_APP_TEMPLATE_REGISTRY_KEY) || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter(item => item && typeof item === "object") as CustomAppTemplateRecord[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberCustomAppTemplate(appId: string, characterId: string, key: string, record: Record<string, unknown>): void {
+  const { instruction: _i, context: _c, ...rest } = record;
+  let stored: Record<string, unknown> = {};
+  try { stored = JSON.parse(JSON.stringify(rest)) as Record<string, unknown>; } catch { stored = {}; }
+  const next = loadCustomAppTemplateRegistry()
+    .filter(item => !(item.appId === appId && item.characterId === characterId && item.key === key))
+    .concat([{ appId, characterId, key, record: stored, at: Date.now() }])
+    .slice(-60);
+  kvSet(CUSTOM_APP_TEMPLATE_REGISTRY_KEY, JSON.stringify(next));
+}
+
+export async function refreshCustomAppTemplatesForCharacter(characterId: string): Promise<number> {
+  const entries = loadCustomAppTemplateRegistry().filter(item => item.characterId === characterId);
+  if (entries.length === 0) return 0;
+  await hydrateKvDb();
+  await ensureSettingsStorageHydrated();
+  await hydrateChatStorage();
+  const apps = new Map(loadInstalledCustomApps().map(app => [app.id, app]));
+  let done = 0;
+  for (const entry of entries) {
+    const app = apps.get(entry.appId);
+    if (!app || !hasPermission(app, "push.wake")) continue;
+    try {
+      const result = await freezeCustomAppTemplate(app, { ...entry.record, characterId, key: entry.key });
+      if (result.armed) done += 1;
+    } catch (err) {
+      console.warn("[CustomAppTemplate] refresh failed:", err);
+    }
+  }
+  return done;
+}
+
+let templateRefresherInstalled = false;
+/** 角色每次回复后（记忆可能已更新）延迟几分钟重冻该角色的全部模板；连续聊天只在停下来后冻一次。 */
+export function installCustomAppTemplateRefresher(): void {
+  if (templateRefresherInstalled || typeof window === "undefined") return;
+  templateRefresherInstalled = true;
+  const timers = new Map<string, number>();
+  window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, event => {
+    const message = (event as CustomEvent<{ message?: ChatMessage }>).detail?.message;
+    if (!message || message.role !== "assistant") return;
+    const session = loadChatSessions().find(item => item.id === message.sessionId);
+    if (!session || session.isGroup) return;
+    const characterId = session.contactId;
+    if (!loadCustomAppTemplateRegistry().some(item => item.characterId === characterId)) return;
+    const prev = timers.get(characterId);
+    if (prev !== undefined) window.clearTimeout(prev);
+    timers.set(characterId, window.setTimeout(() => {
+      timers.delete(characterId);
+      void refreshCustomAppTemplatesForCharacter(characterId);
+    }, CUSTOM_APP_TEMPLATE_REFRESH_DEBOUNCE_MS));
+  });
 }
 
 export function listCustomAppTimedWakes(appId: string): Array<Pick<TimedWakeSchedule, "id" | "characterId" | "fireAt" | "intent" | "createdAt" | "source">> {

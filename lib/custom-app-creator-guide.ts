@@ -1268,7 +1268,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "// 把 tpl.id 连同指令原料一起寄给你的云函数；模板 7 天不续会被作废，建议每次打开 APP 都重新冻一次",
   "```",
   "",
-  "需 `push.wake` 权限；`armed: false` 的原因和 `push.wake` 相同（没开离线推送等）。",
+  "需 `push.wake` 权限；`armed: false` 的原因和 `push.wake` 相同（没开离线推送等）。宿主会记住冻过的模板：该角色每次回复之后（记忆可能已更新）停 3 分钟自动重冻一遍，APP 不用一直开着。",
   "",
   "### 5.24 钱包付款",
   "",
