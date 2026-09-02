@@ -247,7 +247,7 @@ async function usageBudget(rest: (path: string, init?: RequestInit) => Promise<R
   const limits = limitsRes && limitsRes.ok ? (await limitsRes.json().catch(() => []) as { daily_calls?: number; daily_tokens?: number; tz?: number }[])[0] : undefined;
   const tz = Number(limits?.tz) || 0;
   const day = usageLocalDay(Date.now(), tz);
-  const rowsRes = await rest(`push_api_usage?user_id=eq.${encodeURIComponent(userId)}&day=eq.${encodeURIComponent(day)}&select=calls,prompt_tokens,completion_tokens`).catch(() => null);
+  const rowsRes = await rest(`push_api_usage?user_id=eq.${encodeURIComponent(userId)}&day=eq.${encodeURIComponent(day)}&source=neq.cloud-chat&select=calls,prompt_tokens,completion_tokens`).catch(() => null);
   const rows = rowsRes && rowsRes.ok ? await rowsRes.json().catch(() => []) as { calls: number; prompt_tokens: number; completion_tokens: number }[] : [];
   let calls = 0, tokens = 0;
   for (const r of rows) { calls += Number(r.calls) || 0; tokens += (Number(r.prompt_tokens) || 0) + (Number(r.completion_tokens) || 0); }
@@ -815,10 +815,11 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     log("云端生成失败：" + msg);
+    // 也带乐观锁：生成期间 App 自己生成并上传了计划的话，这份带 genKit 的旧 context 盖回去会让云端再生成一次
     await patchPlan({
       last_recheck_at: new Date().toISOString(),
       context: { ...context, genTries: tries, genError: msg.slice(0, 300), genLog },
-    }, false);
+    }, true);
   }
 }
 

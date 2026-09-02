@@ -122,6 +122,16 @@ export function readCustomAppChatContexts(appId: string): CustomAppChatContextEn
  * 汇总当前对该角色生效的片段。只认还装着、且还持有 chat.context 权限的 app——
  * 用户在权限页撤销授权后注入必须立刻停，不能靠 app 自己收手。
  */
+
+const CONTEXT_STALE_MS = 6 * 60 * 60 * 1000;
+function isStaleContext(updatedAt: unknown): boolean {
+    const at = Number(updatedAt);
+    if (!Number.isFinite(at) || at <= 0) return false;
+    if (Date.now() - at > CONTEXT_STALE_MS) return true;
+    const a = new Date(at), n = new Date();
+    return a.getFullYear() !== n.getFullYear() || a.getMonth() !== n.getMonth() || a.getDate() !== n.getDate();
+}
+
 export function formatCustomAppChatContextForPrompt(characterId?: string): string {
     const store = readStore();
     if (Object.keys(store).length === 0) return "";
@@ -138,6 +148,8 @@ export function formatCustomAppChatContextForPrompt(characterId?: string): strin
         if (!allowed.has(appId)) continue;
         const entry = (scope && bucket[scope]) || bucket[GLOBAL_SCOPE];
         if (!entry?.text?.trim()) continue;
+        // app 关着就不再刷新，写死的「在开会」过几小时就是假话；隔了天更别当此刻
+        if (isStaleContext(entry.updatedAt)) continue;
         const name = allowed.get(appId) || entry.appName || appId;
         const title = entry.label ? `【${name} · ${entry.label}】` : `【${name}】`;
         blocks.push(`${title}\n${entry.text.trim()}`);

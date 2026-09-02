@@ -2437,7 +2437,7 @@ export async function scheduleCustomAppTimedWake(
   if (fireAt > now + CUSTOM_APP_TIMED_WAKE_MAX_DELAY_MS) throw new Error("push.wake 最多提前 7 天预约。");
   if (!loadCharacters().some(item => item.id === characterId)) throw new Error("找不到对应角色。");
   const prefix = customAppTimedWakePrefix(app.id);
-  if (loadTimedWakeSchedules().filter(item => item.id.startsWith(prefix)).length >= CUSTOM_APP_TIMED_WAKE_MAX_PENDING) {
+  if (loadTimedWakeSchedules().filter(item => item.id.startsWith(prefix) && item.characterId === characterId).length >= CUSTOM_APP_TIMED_WAKE_MAX_PENDING) {
     throw new Error(`同一 APP 最多同时挂 ${CUSTOM_APP_TIMED_WAKE_MAX_PENDING} 条预约，请先取消旧的。`);
   }
   if (!loadChatContacts().some(contact => contact.characterId === characterId)) addChatContact(characterId);

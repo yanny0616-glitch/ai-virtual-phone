@@ -729,7 +729,7 @@
     if (over) throw new Error(over);
     S.settings.apiUse = { date: todayStr(), n: apiUseToday().n + 1 };
     if (S._useLocal) S._useLocal.calls = Math.max(S._useLocal.calls, S.settings.apiUse.n);
-    try { S.settings = await AiPhone.db.update("settings", S.settings.id, { apiUse: S.settings.apiUse }); } catch (e) { /* 记不上也不拦 */ }
+    try { await patchSettings((s) => ({ apiUse: s.apiUse })); } catch (e) { /* 记不上也不拦 */ }
     // 宿主的用量统计在回复落库后才更新：过几秒再读一次并上报云端
     clearTimeout(S._useTimer);
     S._useTimer = setTimeout(() => { readLocalUsage(true).then(() => syncUsageCloud(true)).catch(() => { /* 已记日志 */ }); }, 8000);
@@ -1090,7 +1090,7 @@
         else await log(cx, "云端生成：" + k + " 模板没冻上（" + ((r && r.reason) || "服务端未确认") + "），云端今天生成不了");
       } catch (e) { await log(cx, "云端生成：冻结 " + k + " 模板失败——" + (e && e.message || e)); }
     }
-    S.settings = await AiPhone.db.update("settings", S.settings.id, { genTpls: Object.assign({}, S.settings.genTpls, { [cx.character.id]: out }) });
+    await patchSettings((s) => ({ genTpls: Object.assign({}, s.genTpls, { [cx.character.id]: out }) }));
     if (out.daily && out.impulse) await log(cx, "云端生成：两份模板已冻到云端（7 天内有效，6 小时后再续）");
     return out;
   }
@@ -1301,6 +1301,15 @@
       missing.genTpl = null;
     }
     if (Object.keys(missing).length) S.settings = await AiPhone.db.update("settings", S.settings.id, missing);
+  }
+  // settings 是一行整体覆盖写：两个人同时冻模板/换哨兵，各自拿内存里的旧字典改一格再写回，
+  // 后写的把先写的那格盖掉，丢的哨兵 id 从此撤不掉。所有后台写都排队，写时再取最新值。
+  let _settingsQ = Promise.resolve();
+  function patchSettings(fn) {
+    const run = async () => { S.settings = await AiPhone.db.update("settings", S.settings.id, fn(S.settings)); return S.settings; };
+    const p = _settingsQ.then(run, run);
+    _settingsQ = p.catch(() => { /* 失败不卡住后面的写 */ });
+    return p;
   }
   async function loadDayAndPlan(cx) {
     const date = todayStr(), cid = cx.character.id;
@@ -1665,9 +1674,11 @@
     const old = sentinelOf(cx);
     if (old && old.wakeId) { try { await AiPhone.push.cancelWake(old.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
     if (cloudCfg()) { try { await cloudFetch("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id }) }); } catch (e) { /* 云端没配好就算了 */ } }
-    const sentinels = Object.assign({}, S.settings.sentinels), genTpls = Object.assign({}, S.settings.genTpls);
-    delete sentinels[cx.character.id]; delete genTpls[cx.character.id];
-    S.settings = await AiPhone.db.update("settings", S.settings.id, { sentinels: sentinels, genTpls: genTpls });
+    await patchSettings((s) => {
+      const sentinels = Object.assign({}, s.sentinels), genTpls = Object.assign({}, s.genTpls);
+      delete sentinels[cx.character.id]; delete genTpls[cx.character.id];
+      return { sentinels: sentinels, genTpls: genTpls };
+    });
   }
   async function armSentinel(cx) {
     const old = sentinelOf(cx);
@@ -1681,7 +1692,7 @@
       next = { wakeId: res.id, armed: !!res.armed };
       if (!res.armed) await log(cx, "哨兵预约只在本地挂上（" + (res.reason || "服务端未挂载") + "），云端复核这两天没有模板可借");
     } catch (e) { await log(cx, "哨兵预约失败（云端复核这两天没有模板可借）：" + (e && e.message || e)); }
-    S.settings = await AiPhone.db.update("settings", S.settings.id, { sentinels: Object.assign({}, S.settings.sentinels, { [cx.character.id]: next }) });
+    await patchSettings((s) => ({ sentinels: Object.assign({}, s.sentinels, { [cx.character.id]: next }) }));
   }
 
   async function orchestrate(cx) {
@@ -3056,7 +3067,8 @@
               else if (j.resultNote) line += "<br>" + esc(j.resultNote);
               return line + "</div>";
             }).join("");
-            const stale = jobs.some((j) => j.status === "pending" && !(j.cooldownRounds > 0)) && S.settings.maxUnanswered > 0;
+            const sentinelKeys = Object.values(S.settings.sentinels || {}).map((x) => x && x.wakeId ? "timedwake:" + x.wakeId : "");
+            const stale = jobs.some((j) => j.status === "pending" && !(j.cooldownRounds > 0) && sentinelKeys.indexOf(j.triggerKey) < 0) && S.settings.maxUnanswered > 0;
             if (stale) jHtml += '<div class="archive-note">有预约没带降速阈值（旧版挂的）。到「今天」页点「♥ 重新编排」重挂一次就带上了。</div>';
             const pendingN = jobs.filter((j) => j.status === "pending").length;
             fill("jobs", jHtml,
@@ -3334,7 +3346,8 @@
     const removed = prevIds.filter((id) => !ids.includes(id));
     const added = ids.filter((id) => !prevIds.includes(id));
     if (!ids.includes(S.cur)) S.cur = ids[0] || "";
-    S.settings = await AiPhone.db.update("settings", S.settings.id, Object.assign({ characterIds: ids, characterId: S.cur }, readSheet()));
+    const sheet = readSheet();
+    await patchSettings(() => Object.assign({ characterIds: ids, characterId: S.cur }, sheet));
     closeSheet();
     // 不再挂念的人：身上注入的状态得撤掉，不然TA会一直以为自己在过挂念的那一天
     for (const id of removed) {
