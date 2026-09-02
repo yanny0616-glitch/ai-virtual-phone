@@ -6,26 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-    Archive,
-    ChevronLeft,
-    Copy,
-    Download,
-    GlassWater,
-    ImageDown,
-    Martini,
-    MoreHorizontal,
-    Pencil,
-    Play,
-    Plus,
-    RefreshCw,
-    Share2,
-    SlidersHorizontal,
-    Trash2,
-    Upload,
-    Users,
-    Wine,
-    X,
-} from "lucide-react";
+    Archive, ChevronLeft, Copy, Download, GlassWater, ImageDown, Martini, MoreHorizontal, Pencil, Play, Plug, Plus, RefreshCw, Share2, SlidersHorizontal, Trash2, Upload, Users, Wine, X } from "lucide-react";
 import {
     clearMixMaterialPublished,
     clearMixRecipePublished,
@@ -75,6 +56,7 @@ import { MixMatAutoCover, mixMatHasAutoCover } from "./mixology-preview";
 import { MixologyGame } from "./mixology-game";
 import { CommentThread, MixologyHall } from "./mixology-hall";
 import { AuthorAvatar, KindGlyph, MatCard, MaterialDetail, MixConfirm, MixTagList, SealedNote, formatMixTime } from "./mixology-shared";
+import { MixConnectorSheet } from "./connector-sheet";
 import { MixSlotEditor } from "./slot-editor";
 import { describeMixCondition } from "@/lib/mixology/state";
 
@@ -125,6 +107,8 @@ export function MixologyApp({ onClose }: { onClose: () => void }) {
     // 创作者资料：发布到酒材/配方页时的署名与头像（酒柜头部可编辑）
     const [profile, setProfile] = useState<MixProfile>(() => loadMixProfile());
     const [profileOpen, setProfileOpen] = useState(false);
+    // 连接器管理：玩家自己的外部接口配置（机括 mix.call 用），酒柜页头部打开
+    const [connectorsOpen, setConnectorsOpen] = useState(false);
     const [profileName, setProfileName] = useState("");
     const [profileAvatar, setProfileAvatar] = useState("");
     const avatarFileRef = useRef<HTMLInputElement | null>(null);
@@ -592,6 +576,7 @@ export function MixologyApp({ onClose }: { onClose: () => void }) {
                             <span className="mix-profile-name">{profile.name || "起个笔名"}</span>
                             <Pencil size={12} />
                         </button>
+                        <button type="button" className="mix-icon-btn" onClick={() => setConnectorsOpen(true)} aria-label="连接器" title="连接器：给机括用的外部接口"><Plug size={17} /></button>
                         <button type="button" className="mix-icon-btn" onClick={() => importFileRef.current?.click()} aria-label="导入材料" title="从文件导入"><Upload size={17} /></button>
                     </>
                 ) : null}
@@ -978,6 +963,37 @@ export function MixologyApp({ onClose }: { onClose: () => void }) {
                                     </button>
                                 </>
                             ) : null}
+                            {/* 官方件不可改：想改就复制一份自建的——进酒柜、直接打开编辑器 */}
+                            {isMixBuiltinId(detail.id) ? (
+                                <button
+                                    type="button"
+                                    className="mix-icon-btn"
+                                    onClick={() => {
+                                        const now = Date.now();
+                                        const copy = {
+                                            ...detail,
+                                            id: createMixId("mixmat"),
+                                            name: `${detail.name.replace(/^官方\s*·\s*/, "")} 副本`,
+                                            author: undefined,
+                                            tags: (detail.tags ?? []).filter((t) => t !== "官方"),
+                                            publishedId: undefined,
+                                            publishedAt: undefined,
+                                            imported: undefined,
+                                            createdAt: now,
+                                            updatedAt: now,
+                                        } as MixMaterial;
+                                        saveMixMaterial(copy);
+                                        refresh();
+                                        setDetail(null);
+                                        setEditor({ kind: copy.kind, initial: copy });
+                                        showToast(`已复制为自建材料「${copy.name}」，可以随意改了。`);
+                                    }}
+                                    aria-label="复制为自建"
+                                    title="复制为自建：得到一份可编辑的副本"
+                                >
+                                    <Copy size={16} />
+                                </button>
+                            ) : null}
                             {!isMixBuiltinId(detail.id) && !detail.imported ? (
                                 <>
                                     <button
@@ -1067,6 +1083,7 @@ export function MixologyApp({ onClose }: { onClose: () => void }) {
             ) : null}
 
             {/* 创作者资料编辑 */}
+            {connectorsOpen ? <MixConnectorSheet onClose={() => setConnectorsOpen(false)} onToast={showToast} /> : null}
             {profileOpen ? (
                 <div className="mix-sheet-mask" onClick={() => setProfileOpen(false)}>
                     <div className="mix-sheet" onClick={(e) => e.stopPropagation()}>

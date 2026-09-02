@@ -6,8 +6,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronLeft, Copy, History, MoreHorizontal, Pencil, Plus, RotateCcw, Send, Sun, WandSparkles, X } from "lucide-react";
-import { continueMix, editMixTurn, generateMixReply, canReplayMixFrom, MIX_REPAIR_EVENT, MIX_STORE_SNAPSHOT_TURNS, mixTurnRawText, recordMixPanelStore, refreshMixOpening, regenerateMixTail, rerollMixReply, runMixEditSync, runMixSessionEnd, truncateMixAfterTurn, type MixRepairEventDetail } from "@/lib/mixology/engine";
-import { getMixMaterial, getMixSession, isMixBuiltinId, listMixPickables, MIX_CABINET_UPDATED_EVENT, resolveMixRecipeMaterials, saveMixMaterial, saveMixSession } from "@/lib/mixology/storage";
+import { continueMix, editMixTurn, generateMixReply, canReplayMixFrom, MIX_STORE_SNAPSHOT_TURNS, mixTurnRawText, recordMixPanelStore, refreshMixOpening, regenerateMixTail, rerollMixReply, runMixEditSync, runMixSessionEnd, truncateMixAfterTurn } from "@/lib/mixology/engine";
+import { findMixConnector, getMixMaterial, getMixSession, isMixBuiltinId, listMixPickables, MIX_CABINET_UPDATED_EVENT, resolveMixRecipeMaterials, saveMixMaterial, saveMixSession } from "@/lib/mixology/storage";
 import { applyMixMacros, MIX_DEFAULT_USER_NAME } from "@/lib/mixology/assembler";
 import { buildMixConditionContext, pickActiveMixMaterials } from "@/lib/mixology/state";
 import { scopeMixCss } from "@/lib/mixology/css-scope";
@@ -17,7 +17,9 @@ import { MixProseView } from "./prose-view";
 import { MixRichText } from "./rich-text";
 import { KindGlyph, MixConfirm } from "./mixology-shared";
 import { MixTicketFrame } from "./ticket-frame";
-import { MixMechanismInline, MixMechanismPanel } from "./mechanism-panel";
+import { MixMechanismInline, MixMechanismPanel, sendMixDialogue } from "./mechanism-panel";
+import { primeMixAudio } from "@/lib/mixology/audio-player";
+import type { MixProseDialogue } from "./prose-view";
 import { MixSlotEditor } from "./slot-editor";
 import { MixMaterialEditor } from "./mixology-editor";
 import { disposeMixSandboxesForMaterial } from "@/lib/mixology/mechanism-runtime";
@@ -34,7 +36,7 @@ type GameProps = {
 /** 一轮里要渲染的一块（状态栏/小剧场）：皮 + 这一轮的原文 */
 type TurnFrame = { key: string; html: string; raw: string };
 
-function AssistantTurn({ turn, ticketFrames, encoreFrames, filterRules, state }: { turn: MixTurn; ticketFrames: TurnFrame[]; encoreFrames: TurnFrame[]; filterRules?: MixFilterRule[]; state?: MixState }) {
+function AssistantTurn({ turn, ticketFrames, encoreFrames, filterRules, state, dialogue }: { turn: MixTurn; ticketFrames: TurnFrame[]; encoreFrames: TurnFrame[]; filterRules?: MixFilterRule[]; state?: MixState; dialogue?: MixProseDialogue }) {
     // 展示顺序：状态栏在正文前、小剧场在正文后（与模型的输出顺序一致，无需重排）；
     // 一轮多块时依次上下排开，各块各自的皮各渲染各的
     // 滤网「仅显示」模式在这里生效：存储不动，渲染前替换，历史消息也即时生效
@@ -46,7 +48,7 @@ function AssistantTurn({ turn, ticketFrames, encoreFrames, filterRules, state }:
                     <MixTicketFrame html={frame.html} raw={frame.raw} state={state} />
                 </div>
             ))}
-            {shownText ? <MixProseView text={shownText} /> : null}
+            {shownText ? <MixProseView text={shownText} dialogue={dialogue} /> : null}
             {encoreFrames.map((frame) => (
                 <div className="mix-encore-turn" key={frame.key}>
                     <MixTicketFrame html={frame.html} raw={frame.raw} state={state} />
@@ -183,22 +185,6 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
         window.addEventListener(MIX_CABINET_UPDATED_EVENT, bump);
         return () => window.removeEventListener(MIX_CABINET_UPDATED_EVENT, bump);
     }, []);
-    /**
-     * 状态栏补写提示：补写是流式结束后追加的一次模型往返，屏幕上没有任何
-     * 东西在动——引擎广播事件，这里挂一个半透明小 toast 告诉用户在补什么。
-     */
-    const [repairNote, setRepairNote] = useState<string | null>(null);
-    useEffect(() => {
-        const onRepair = (event: Event) => {
-            const detail = (event as CustomEvent<MixRepairEventDetail>).detail;
-            if (!detail || detail.sessionId !== sessionId) return;
-            setRepairNote(detail.done ? null : detail.name ?? "");
-        };
-        window.addEventListener(MIX_REPAIR_EVENT, onRepair);
-        return () => window.removeEventListener(MIX_REPAIR_EVENT, onRepair);
-    }, [sessionId]);
-    // 兜底：这轮怎么收场的都别让 toast 挂着（引擎侧异常路径已在 finally 里收过一道）
-    useEffect(() => { if (!busy) setRepairNote(null); }, [busy]);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const abortRef = useRef<AbortController | null>(null);
     const wheelRef = useRef<HTMLDivElement | null>(null);
@@ -294,6 +280,20 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
             .filter((item): item is { material: MixMechanismMaterial; layout: MixPanelLayout } => item !== null);
     }, [session, cabinetTick]);
 
+    // 机括声明了连接器而本机没配：进局时提醒一次（同一局只提一次），
+    // 免得玩家点了半天按钮才在沙盒里看到一条报错
+    const missingWarnedRef = useRef("");
+    useEffect(() => {
+        const missing = panels.flatMap(({ material }) =>
+            (material.connectors ?? []).filter((name) => !findMixConnector(name)).map((name) => ({ material: material.name, name })));
+        if (!missing.length) return;
+        const key = missing.map((m) => `${m.material}:${m.name}`).join("|");
+        if (missingWarnedRef.current === key) return;
+        missingWarnedRef.current = key;
+        const first = missing[0];
+        onToast(`机括「${first.material}」需要连接器「${first.name}」，到酒柜的「连接器」里创建一个再来。`);
+    }, [panels, onToast]);
+
     /**
      * 按挂点分组：float 走悬浮层（老形态），header/inputbar-* 由宿主画按钮开合，
      * flow-* 作为内嵌卡进滚动流。按钮与容器都是宿主画的，沙盒只管格子里的内容。
@@ -306,6 +306,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
             "inputbar-right": [] as typeof panels,
             "flow-top": [] as typeof panels,
             "flow-bottom": [] as typeof panels,
+            hidden: [] as typeof panels,
         };
         for (const item of panels) groups[mixPanelSlotOf(item.layout)].push(item);
         return groups;
@@ -336,6 +337,49 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
         saveMixSession({ ...current, panelOpen: next });
         setSession(getMixSession(sessionId));
     }, [sessionId]);
+
+    /**
+     * 对白按钮：声明了 dialogueButton 的机括，宿主替它在每句「对白」后画一颗图标。
+     * 点击把这句话递进它的界面（sendMixDialogue），界面用 mix.mark 回报状态改图标。
+     * 按钮位（header/inputbar-*）的面板关着时收不到，先替玩家打开再递。
+     */
+    const dialogueActions = useMemo(
+        () => panels
+            .filter(({ material }) => material.dialogueButton?.icon)
+            .map(({ material }) => ({ key: material.id, icon: material.dialogueButton!.icon, title: material.dialogueButton!.title || material.name })),
+        [panels],
+    );
+    const [dialogueStates, setDialogueStates] = useState<Record<string, string>>({});
+    const handlePanelMark = useCallback((materialId: string, id: string, state: string) => {
+        setDialogueStates((prev) => {
+            const key = `${materialId}|${id}`;
+            if ((prev[key] || "") === state) return prev;
+            const next = { ...prev };
+            if (state) next[key] = state;
+            else delete next[key];
+            return next;
+        });
+    }, []);
+    const handleDialogueTap = useCallback((materialId: string, segmentId: string, text: string, turnId: string) => {
+        const item = panels.find(({ material }) => material.id === materialId);
+        if (!item) return;
+        // 这次点击是宿主拿到的唯一手势：趁现在把播放元素解锁，机括稍后 mix.play 才放得出声（iOS）
+        primeMixAudio();
+        const slot = mixPanelSlotOf(item.layout);
+        if ((slot === "header" || slot === "inputbar-left" || slot === "inputbar-right") && !(getMixSession(sessionId)?.panelOpen?.[materialId])) {
+            toggleDock(materialId);
+        }
+        sendMixDialogue(materialId, { id: segmentId, text, turnId });
+    }, [panels, sessionId, toggleDock]);
+    const dialogueFor = useCallback((turnId: string): MixProseDialogue | undefined => {
+        if (!dialogueActions.length) return undefined;
+        return {
+            actions: dialogueActions,
+            states: dialogueStates,
+            idPrefix: `${turnId}:`,
+            onTap: (key, segmentId, text) => handleDialogueTap(key, segmentId, text, turnId),
+        };
+    }, [dialogueActions, dialogueStates, handleDialogueTap]);
 
     /**
      * 机括界面的逃生口。摆放完全交给创作者之后，理论上存在"一块面板糊满整个屏幕、
@@ -917,6 +961,9 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onStore={handlePanelStore}
                             onState={handlePanelState}
                             onSay={handlePanelSay}
+                            connectors={material.connectors}
+                            onMark={handlePanelMark}
+                            onToast={onToast}
                         />
                     ))}
                 </div>
@@ -948,6 +995,9 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onStore={handlePanelStore}
                             onState={handlePanelState}
                             onSay={handlePanelSay}
+                            connectors={material.connectors}
+                            onMark={handlePanelMark}
+                            onToast={onToast}
                         />
                     </div>
                 ))}
@@ -971,7 +1021,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                         </div>
                     ) : (
                         <div className="mix-assistant-turn" key={turn.id}>
-                            <AssistantTurn turn={turn} ticketFrames={turnTicketFrames(turn)} encoreFrames={turnEncoreFrames(turn)} filterRules={assets.filterRules} state={turn.state} />
+                            <AssistantTurn turn={turn} ticketFrames={turnTicketFrames(turn)} encoreFrames={turnEncoreFrames(turn)} filterRules={assets.filterRules} state={turn.state} dialogue={dialogueFor(turn.id)} />
                             {actions}
                         </div>
                     );
@@ -1001,6 +1051,9 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onStore={handlePanelStore}
                             onState={handlePanelState}
                             onSay={handlePanelSay}
+                            connectors={material.connectors}
+                            onMark={handlePanelMark}
+                            onToast={onToast}
                         />
                     </div>
                 ))}
@@ -1010,6 +1063,27 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                     </div>
                 ))}
             </div>
+            {/* 无界面的机括：沙盒照常挂着、照常收对白事件，只是什么都不画 */}
+            {slotGroups.hidden.length ? (
+                <div hidden aria-hidden="true">
+                    {slotGroups.hidden.map(({ material }) => (
+                        <MixMechanismInline
+                            key={material.id}
+                            materialId={material.id}
+                            name={material.name}
+                            html={material.panelHtml ?? ""}
+                            state={session.state ?? {}}
+                            store={session.mechanismStore?.[material.id] ?? {}}
+                            onStore={handlePanelStore}
+                            onState={handlePanelState}
+                            onSay={handlePanelSay}
+                            connectors={material.connectors}
+                            onMark={handlePanelMark}
+                            onToast={onToast}
+                        />
+                    ))}
+                </div>
+            ) : null}
             {slotGroups.float.length && !panelsHidden ? (
                 <div className="mix-panel-layer">
                     {slotGroups.float.map(({ material, layout }) => (
@@ -1024,6 +1098,9 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onStore={handlePanelStore}
                             onState={handlePanelState}
                             onSay={handlePanelSay}
+                            connectors={material.connectors}
+                            onMark={handlePanelMark}
+                            onToast={onToast}
                             onBox={handlePanelBox}
                         />
                     ))}
@@ -1043,14 +1120,11 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onStore={handlePanelStore}
                             onState={handlePanelState}
                             onSay={handlePanelSay}
+                            connectors={material.connectors}
+                            onMark={handlePanelMark}
+                            onToast={onToast}
                         />
                     ))}
-                </div>
-            ) : null}
-            {repairNote !== null ? (
-                <div className="mix-repair-toast" role="status">
-                    <span className="mix-repair-dots" aria-hidden="true"><i /><i /><i /></span>
-                    {repairNote ? `「${repairNote}」状态栏补写中` : "状态栏补写中"}
                 </div>
             ) : null}
             <div className="mix-game-inputbar">
