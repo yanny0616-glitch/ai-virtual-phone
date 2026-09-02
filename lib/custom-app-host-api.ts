@@ -91,7 +91,7 @@ import {
   sanitizeBridgeDataKey,
 } from "./reality-bridge/storage";
 import { loadTimedWakeSchedules, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
-import { armTimedWakeBailout, cancelBailoutKey } from "./push-bailout-client";
+import { armTemplateBailout, armTimedWakeBailout, cancelBailoutKey } from "./push-bailout-client";
 
 const CUSTOM_APP_NOTIFICATIONS_KEY = "ai_phone_custom_app_notifications_v1";
 const CUSTOM_APP_BADGES_KEY = "ai_phone_custom_app_badges_v1";
@@ -194,6 +194,7 @@ const HOST_ACTION_PERMISSIONS: Record<string, CustomAppPermission[]> = {
   "world.activate": ["world.activate"],
   "bridge.send": ["bridge.send"],
   "push.wake": ["push.wake"],
+  "push.freeze": ["push.wake"],
 };
 
 function emitHostStateUpdated(): void {
@@ -2460,6 +2461,57 @@ export async function scheduleCustomAppTimedWake(
   return { id: schedule.id, fireAt, armed: armResult.ok, reason: armResult.ok ? undefined : armResult.reason };
 }
 
+// push.freeze：把一份和 ai.generate 同源的提示词请求冻到服务端当模板（不到点发送）。
+// 云函数拿到它后只换掉最后一条用户消息里的占位符再调用，所以云端生成的人设/记忆/预设和本地完全一致。
+// 每个 APP 每个角色每个 key 只留一份，重复冻结即覆盖。
+export const CUSTOM_APP_TEMPLATE_PLACEHOLDER = "__CUSTOM_APP_INSTRUCTION__";
+
+export async function freezeCustomAppTemplate(
+  app: InstalledCustomApp,
+  record: Record<string, unknown>,
+): Promise<{ id: string; placeholder: string; armed: boolean; reason?: string }> {
+  const characterId = cleanText(record.characterId, 160);
+  if (!characterId) throw new Error("push.freeze 缺少 characterId。");
+  const key = cleanText(record.key, 40).toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  if (!key) throw new Error("push.freeze 缺少 key（模板名，字母数字）。");
+  if (!loadCharacters().some(item => item.id === characterId)) throw new Error("找不到对应角色。");
+  const session = ensureCharacterSession(characterId);
+  const profile = resolvePromptProfile(app, record);
+  const instruction = cleanUnboundedText(record.instruction ?? record.context) || CUSTOM_APP_TEMPLATE_PLACEHOLDER;
+  const taskMessage: ChatMessage = {
+    id: `custom-app-task-${Date.now()}`,
+    sessionId: session.id,
+    role: "user",
+    content: `[${app.name}] ${instruction}`,
+    status: "sent",
+    createdAt: new Date().toISOString(),
+  };
+  const activeWorlds = readWorldActivations(app.id);
+  const worldActivationContext = cleanUnboundedText(record.worldBookActivationContext ?? record.worldContext)
+    || activeWorlds.map(item => item.context).filter(Boolean).join("\n");
+  const activateAllWorldBooks = record.activateAllWorldBooks === true
+    || record.activateWorldBooks === true
+    || activeWorlds.some(item => item.activateAll);
+  const triggerKey = `capptpl:${app.id}:${characterId}:${key}`;
+  const armResult = await armTemplateBailout({
+    triggerKey,
+    session,
+    history: [taskMessage],
+    appId: `custom_app:${app.id}`,
+    appTags: buildCustomAppChatTags(app, record),
+    promptProfile: profile ?? undefined,
+    extraWorldBookIds: activeCustomAppWorldBookIds(app, record),
+    worldBookActivationContext: worldActivationContext || undefined,
+    activateAllWorldBooks,
+  });
+  return {
+    id: triggerKey,
+    placeholder: CUSTOM_APP_TEMPLATE_PLACEHOLDER,
+    armed: armResult.ok,
+    reason: armResult.ok ? undefined : armResult.reason,
+  };
+}
+
 export function listCustomAppTimedWakes(appId: string): Array<Pick<TimedWakeSchedule, "id" | "characterId" | "fireAt" | "intent" | "createdAt" | "source">> {
   const prefix = customAppTimedWakePrefix(appId);
   return loadTimedWakeSchedules()
@@ -2549,6 +2601,8 @@ export async function executeCustomAppHostAction(
       return sendCustomAppBridgeOutbox(payload);
     case "push.wake":
       return scheduleCustomAppTimedWake(app, payload);
+    case "push.freeze":
+      return freezeCustomAppTemplate(app, payload);
     default:
       throw new Error(`未知后台动作：${actionType}`);
   }
@@ -2562,11 +2616,13 @@ function customAppHostActionNeedsChatStorage(actionType: string): boolean {
     || actionType === "chat.sendMessage"
     || actionType === "chat.reply"
     || actionType === "chat.contact"
-    || actionType === "push.wake";
+    || actionType === "push.wake"
+    || actionType === "push.freeze";
 }
 
 function customAppHostActionNeedsSettingsStorage(actionType: string): boolean {
   return actionType === "ai.generate"
+    || actionType === "push.freeze"
     || actionType === "world.write"
     || actionType === "world.activate";
 }

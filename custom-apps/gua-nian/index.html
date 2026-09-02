@@ -572,6 +572,8 @@
   const pad = (n) => String(n).padStart(2, "0");
   const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
   const fmtHM = (ms) => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+  const dateStrOf = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  const dateOf = (ymd) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0, 0) : new Date(); };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   function toast(msg) {
@@ -803,6 +805,8 @@
     quietStart: "23:30", quietEnd: "08:00",
     autoGen: false,      // 每天到点自动生成TA的一天（要挂念开着；错过了下次打开时补）
     autoGenAt: "07:30",
+    cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
+    genTpl: null,        // 云端生成借用的提示词模板 { characterId, daily, impulse, at }
     quota: 3,            // 每天最多主动几次
     minGapMin: 60,       // 相邻两次起念最小间隔（分钟，0=不限制）
     maxUnanswered: 2,    // 未回应降速：TA连续 N 轮主动未被回后今天不再主动（0=关闭）
@@ -885,21 +889,14 @@
       })),
     };
   }
-  async function uploadPlanCloud(resetDecisions) {
-    if (!cloudRecheckOn() || !S.character || !S.plan || !Array.isArray(S.plan.items)) return;
+  // 寄给云端的判断上下文：今天的计划和明天的生成原料共用一份
+  function cloudContext() {
     // wakePrefix：云端点亮时要自己造预约 id，宿主只认 timed_wake_capp_<appId>_ 开头的，
-    // 这里从任意一个已有 wakeId 上把前缀切下来给它，免得云函数写死本 APP 的 id。
-    const any = S.plan.items.find((w) => w.wakeId);
-    const wakePrefix = any ? String(any.wakeId).replace(/\d+_[a-z0-9]+$/i, "") : "";
-    try {
-      await cloudFetch("recheck-plan", {
-        method: "POST",
-        body: JSON.stringify({
-          characterId: S.character.id,
-          planDate: todayStr(),
-          sessionId: "",
-          resetDecisions: resetDecisions === true,
-          context: {
+    // 这里从任意一个已有 wakeId（或哨兵）上把前缀切下来给它，免得云函数写死本 APP 的 id。
+    const any = (S.plan && Array.isArray(S.plan.items) ? S.plan.items : []).find((w) => w.wakeId);
+    const anyId = any ? any.wakeId : (S.settings.sentinel && S.settings.sentinel.wakeId) || "";
+    const wakePrefix = anyId ? String(anyId).replace(/\d+_[a-z0-9]+$/i, "") : "";
+    return {
             mood: String((S.day && S.day.mood) || ""),
             energy: String(S.day ? energyAt(S.day, Date.now()) : ""),
             quota: S.settings.quota,
@@ -928,7 +925,19 @@
             sleepWakeProb: S.settings.sleepWakeProb,
             affection: S.aff || null,
             day: dayForCloud(),
-          },
+    };
+  }
+  async function uploadPlanCloud(resetDecisions) {
+    if (!cloudRecheckOn() || !S.character || !S.plan || !Array.isArray(S.plan.items)) return;
+    try {
+      await cloudFetch("recheck-plan", {
+        method: "POST",
+        body: JSON.stringify({
+          characterId: S.character.id,
+          planDate: todayStr(),
+          sessionId: "",
+          resetDecisions: resetDecisions === true,
+          context: cloudContext(),
           items: S.plan.items.map((w) => ({
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
@@ -937,6 +946,108 @@
         }),
       });
     } catch (e) { await log("云端复核：计划上传失败（不影响本地）——" + (e && e.message || e)); }
+  }
+  /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
+  function cloudGenOn() {
+    return !!(cloudCfg() && S.settings && S.settings.autoGen && S.settings.cloudGen);
+  }
+  // 云端没有角色卡、记忆和预设：把和本地 ai.generate 同源的两份请求冻在服务端当模板，
+  // 云函数只换掉最后一条用户消息里的占位符。模板 7 天作废，所以每次打开都续一次（6 小时内不重复）。
+  async function freezeGenTemplates(force) {
+    const t = S.settings.genTpl;
+    if (!force && t && t.characterId === S.character.id && t.daily && t.impulse && Date.now() - (t.at || 0) < 6 * 3600000) return t;
+    const out = { characterId: S.character.id, daily: "", impulse: "", at: Date.now() };
+    for (const k of ["daily", "impulse"]) {
+      try {
+        const r = await AiPhone.push.freeze({ characterId: S.character.id, appTags: ["companion", k], key: k });
+        if (r && r.armed) out[k] = r.id;
+        else await log("云端生成：" + k + " 模板没冻上（" + ((r && r.reason) || "服务端未确认") + "），云端今天生成不了");
+      } catch (e) { await log("云端生成：冻结 " + k + " 模板失败——" + (e && e.message || e)); }
+    }
+    S.settings = await AiPhone.db.update("settings", S.settings.id, { genTpl: out });
+    return out;
+  }
+  async function readCalendarOn(date) {
+    try {
+      const r = await AiPhone.calendar.read({ ownerType: "character", ownerId: S.character.id, date: date });
+      const items = (r && r.plan && r.plan.items) || [];
+      return items.filter((it) => it.date === date).sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+    } catch (e) { return []; }
+  }
+  // 把「生成明天」需要的一切算好寄上去：指令文本由本地同一个 buildDayInstruction 生成，
+  // 云端不再自己拼提示词，所以生成内容和本地一字不差。今天还没生成且没到点的话，今天也寄一份。
+  async function uploadGenKitCloud(force) {
+    if (!cloudGenOn() || !S.character || !S.settings) return;
+    if (!force && Date.now() - (S._kitAt || 0) < 20 * 60000) return;
+    S._kitAt = Date.now();
+    const tpl = await freezeGenTemplates(false);
+    if (!tpl.daily || !tpl.impulse) return;
+    const at = S.settings.autoGenAt || SET_DEF.autoGenAt;
+    const tm = new Date(); tm.setDate(tm.getDate() + 1);
+    const dates = [dateStrOf(tm)];
+    if (!S.day && fmtHM(Date.now()) < at) dates.unshift(todayStr());
+    for (const date of dates) {
+      try {
+        const existing = await readCalendarOn(date);
+        const cal = calendarReality(dateOf(date));
+        const past = await recentDaysBrief(5, date);
+        const ctx = cloudContext();
+        ctx.day = null; // 还没生成的那天不该拿今天的生活面去自发起念
+        ctx.genKit = {
+          date: date, instruction: buildDayInstruction(cal, at, past, existing),
+          existing: existing.map((it) => ({ id: it.id, startTime: it.startTime, endTime: it.endTime || "", title: it.title, location: it.location || "" })),
+          autoGenAt: at, tz: -new Date().getTimezoneOffset(),
+          tplDaily: tpl.daily, tplImpulse: tpl.impulse,
+          anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
+          kitAt: Date.now(),
+        };
+        await cloudFetch("recheck-plan", {
+          method: "POST",
+          body: JSON.stringify({ characterId: S.character.id, planDate: date, sessionId: "", resetDecisions: true, context: ctx, items: [] }),
+        });
+      } catch (e) { await log("云端生成：" + date + " 的原料上传失败——" + (e && e.message || e)); }
+    }
+  }
+  // 云端生成好了今天：把它当成自己生成的接过来——落库、写回系统日程、接管预约，再走正常的复核流程。
+  async function adoptCloudDay() {
+    if (!cloudGenOn() || !S.character || S.day || S.busy || S._planLock) return false;
+    let data;
+    try { data = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: S.character.id, planDate: todayStr() }); }
+    catch (e) { return false; }
+    const p = data && data.plan;
+    const ctx = p && p.plan_date === todayStr() && p.context;
+    if (!ctx || ctx.generatedBy !== "cloud" || !ctx.dayFull || !Array.isArray(ctx.dayFull.schedule)) return false;
+    S.busy = true; S._planLock = true; render();
+    try {
+      const genAt = +ctx.genAt || Date.now();
+      S.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === S.character.id,
+        Object.assign({ date: todayStr(), characterId: S.character.id, by: "cloud" }, ctx.dayFull));
+      const existing = await readTodayCalendar();
+      const wrote = await syncCalendar(existing);
+      const items = (Array.isArray(p.items) ? p.items : []).map((w) => ({
+        time: w.time, fireAt: +w.fireAt || 0, source: w.source || "", act: !!w.act,
+        why: w.why || "", intent: w.intent || "", wakeId: w.wakeId || "",
+        delivery: w.act && w.wakeId ? "push" : "", reason: w.act && !w.wakeId ? (w.reason || "云端没有可借的聊天模板") : "",
+        sem: w.sem || "", topic: w.topic || "", score: w.score || calcScore(+w.fireAt || 0, 0, 0, 0),
+        hist: Array.isArray(w.hist) && w.hist.length ? w.hist : [{ at: genAt, kind: w.act ? "plan" : "skip", note: w.act ? (w.intent || "") : (w.why || "TA这会儿不想"), by: "cloud" }],
+      })).sort((a, b) => a.fireAt - b.fireAt);
+      S.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === S.character.id,
+        { date: todayStr(), characterId: S.character.id, items: items, chatUsed: +ctx.genChatUsed || 0,
+          plannedAt: genAt, recheckAt: 0, selfUsed: +ctx.selfUsed || 0, cloudAckAt: genAt, by: "cloud" });
+      S.archive = null;
+      for (const line of (Array.isArray(ctx.genLog) ? ctx.genLog : []).slice(0, 30)) await log("云端生成：" + line);
+      await log("接管云端生成的今天：" + S.day.schedule.length + " 条日程，写回系统日程 " + wrote + " 条，" + items.filter((w) => w.act).length + " 个想起你的时刻");
+      S.busy = false; S._planLock = false;
+      await syncChatContext(true);
+      toast("TA今天的一天已在云端生成");
+      render();
+      return true;
+    } catch (e) {
+      S.busy = false; S._planLock = false;
+      await log("接管云端生成失败：" + (e && e.message || e));
+      render();
+      return false;
+    }
   }
   // 编排 / 复核 / 合并云端裁决都会整份重写 plan，三者共用 _planLock：
   // 并发跑的话，后写的那个手里是 await 之前取的旧 items，会把先写的成果整份盖回去
@@ -1068,8 +1179,9 @@
     } catch (e) { return []; }
   }
   function addMin(hm, n) {
-    const ms = timeToMs(hm); if (!ms) return hm;
-    return fmtHM(Math.min(ms + n * 60000, timeToMs("23:59")));
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim()); if (!m) return hm;
+    const t = Math.min(+m[1] * 60 + +m[2] + n, 23 * 60 + 59);
+    return pad(Math.floor(t / 60)) + ":" + pad(t % 60);
   }
   async function syncCalendar(existing) {
     // 先清掉本 app 之前写入的今日条目，再把新生成的一天写回系统日程
@@ -1103,8 +1215,15 @@
   // 到点自动生成。一天只试一次：失败了留给用户手动按，别每分钟烧一次模型调用。
   async function maybeAutoGen() {
     if (!S.settings || !S.settings.autoGen || !S.character || S.day || S.busy) return;
-    if (fmtHM(Date.now()) < (S.settings.autoGenAt || SET_DEF.autoGenAt)) return;
+    const at = S.settings.autoGenAt || SET_DEF.autoGenAt;
+    if (fmtHM(Date.now()) < at) return;
     if (S._autoGenDay === todayStr()) return;
+    if (cloudGenOn()) {
+      // 生成交给了云端：到点后每分钟看一眼有没有生成好；45 分钟还没等到就本地补，别让今天空着
+      if (await adoptCloudDay()) { S._autoGenDay = todayStr(); return; }
+      if (fmtHM(Date.now()) < addMin(at, 45)) return;
+      await log("云端到点没生成（设定 " + at + "，等了 45 分钟），本地补生成");
+    }
     S._autoGenDay = todayStr();
     await log("到点自动生成TA的一天（设定 " + (S.settings.autoGenAt || SET_DEF.autoGenAt) + "）");
     await generateDay();
@@ -1122,15 +1241,16 @@
     return { label: d.getFullYear() + "-" + pad(m) + "-" + pad(day) + " 周" + "日一二三四五六"[wd] + (tags.length ? "（" + tags.join("、") + "）" : ""), season: season };
   }
   // 前几天的生活面：给模型看骨架防止天天一样，也让昨天开了头的事今天有下文
-  async function recentDaysBrief(n) {
+  async function recentDaysBrief(n, forDate) {
+    const upto = forDate || todayStr();
     try {
       const rows = await AiPhone.db.list("days", { limit: 60 });
-      const past = (rows || []).filter((r) => r.characterId === S.character.id && r.date && r.date < todayStr())
+      const past = (rows || []).filter((r) => r.characterId === S.character.id && r.date && r.date < upto)
         .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, n || 5);
       const lines = past.map((r) => "- " + r.date + (r.mood ? " 心情「" + r.mood + "」" : "") + "："
         + ((r.schedule || []).map((it) => it.title).filter(Boolean).join("、") || "没生成日程")
         + (r.bed ? "（" + r.bed + " 睡）" : ""));
-      const yd = new Date(); yd.setDate(yd.getDate() - 1);
+      const yd = dateOf(upto); yd.setDate(yd.getDate() - 1);
       const y = past.find((r) => r.date === yd.getFullYear() + "-" + pad(yd.getMonth() + 1) + "-" + pad(yd.getDate()));
       const residue = [];
       if (y && y.bed && y.bed < "06:00") residue.push("昨晚 " + y.bed + " 才睡");
@@ -1141,86 +1261,98 @@
       return { lines: lines, residue: residue };
     } catch (e) { return { lines: [], residue: [] }; }
   }
+  // 生成指令：本地生成和云端生成（push-recheck 里有一份逐字对照的副本）共用这段文字，改这里要同步那边。
+  function buildDayInstruction(cal, nowHM, past, existing) {
+    let inst = [
+      "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
+      "以当前角色的人设、职业、近期记忆和最近的聊天为依据，想象TA今天真实会过的一天：先定今天的身体底子和情绪底色，再排日程。",
+      "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + nowHM + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
+      past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵）：\n" + past.lines.join("\n") : null,
+      past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
+      "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
+      "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
+      '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-20到20的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-40到40的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
+      "body 是今天真实带在身上的状况，多数日子是空数组，最多两条；睡得不好、昨天太累、生病、天气才会有。",
+      "情绪写法：用可感的状态词（迷糊、清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空、粘人）再带一点原因或身体感受，例如「开完会后脑子发紧」；一天里要有起伏，别每条都差不多；情绪要和 cost 对得上，耗神的事之后不该是「轻松」，回血的事之后不该是「疲惫」；底色 mood 要能从 sleep 和昨天的余波推出来。",
+      "cost 负数=消耗（开会、通勤、应酬、体力活），正数=回血（午睡、吃饭、散步、发呆），平淡的事给 0；一天累计下来别把人耗到负数太多。",
+      "schedule 给 5 到 9 条，从起床后第一件事到睡前最后一件事；有主线也有琐碎，时间不均匀；不用把每个小时填满，事与事之间可以留空档（空档里TA就是自己待着）；有的日子轻（3、4 条），有的日子满；最后一件事结束到 bed 之间是TA自己的睡前时间；「睡觉」本身不要写成一条日程。",
+    ].filter(Boolean).join("\n");
+    if (existing.length) {
+      inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，围绕它们补全其余的一天）：\n" +
+        JSON.stringify(existing.map((it) => ({ time: it.startTime, title: it.title, note: it.location || "" })));
+    }
+    return inst;
+  }
+  // 把模型返回的 JSON 归一成 day 记录（不含 date/characterId）；云端 push-recheck 有逐字对照的副本，改这里要同步那边。
+  function parseDayResult(d, existing, settings, nowMs) {
+    const schedRaw = pickField(d, ["schedule", "日程", "日程表"]);
+    if (!Array.isArray(schedRaw)) throw new Error("日程缺失（模型返回的字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）");
+    const sched = schedRaw.slice(0, 10).map((it) => ({
+      time: normHM(pickField(it, ["time", "时间", "at"])),
+      end: normHM(pickField(it, ["end", "endTime", "结束", "到"])),
+      title: String(pickField(it, ["title", "标题", "事项", "name"]) || ""),
+      place: String(pickField(it, ["place", "地点", "位置", "在哪"]) || "").slice(0, 16),
+      note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
+      mood: String(pickField(it, ["mood", "情绪", "心情"]) || "").slice(0, 24),
+      cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
+      busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
+    }));
+    for (const it of existing) { // 模型漏掉的已定安排补回来
+      if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排" });
+    }
+    sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    for (const it of sched) if (it.end && it.end <= it.time) it.end = ""; // 结束早于开始的当没写
+    // 模型没给作息时退到日程首尾：起床 = 第一件事，上床 = 最后一件事结束后半小时
+    const last = sched[sched.length - 1];
+    const wake = normHM(pickField(d, ["wake", "起床", "wakeUp"])) || (sched[0] && sched[0].time) || settings.quietEnd;
+    // 身上的小状况走 conds 那条路：和聊天判出来的情绪一样按半衰期淡掉，精力和情绪都会自动算进去
+    const bodyRaw = pickField(d, ["body", "身体", "状况"]);
+    const bodyConds = (Array.isArray(bodyRaw) ? bodyRaw : []).slice(0, 2)
+      .filter((b) => b && String(b.label || "").trim())
+      .map((b) => ({
+        mood: String(b.mood || b.label).trim().slice(0, 24),
+        cause: String(b.label).trim().slice(0, 20),
+        energyDelta: Math.max(-20, Math.min(20, Math.round(+b.energy || 0))),
+        intensity: 60,
+        halfLifeMin: Math.max(1, Math.min(12, Math.round(+b.hours || 4))) * 60,
+        startAt: nowMs,
+      }));
+    const bed = normHM(pickField(d, ["bed", "睡觉", "bedtime"])) || (last ? addMin(last.end || last.time, last.end ? 30 : 90) : settings.quietStart);
+    return {
+      wake: wake, bed: bed,
+      mood: String(pickField(d, ["mood", "心情", "情绪"]) || ""),
+      moodEmoji: String(pickField(d, ["moodEmoji", "emoji", "表情"]) || "🌙").slice(0, 4),
+      energy: Math.max(0, Math.min(100, +pickField(d, ["energy", "精力", "体力"]) || 60)),
+      doing: String(pickField(d, ["doing", "正在做", "当前"]) || ""),
+      location: String(pickField(d, ["location", "位置", "地点"]) || ""),
+      sleep: String(pickField(d, ["sleep", "睡眠", "昨晚"]) || "").slice(0, 40),
+      schedule: sched,
+      conds: bodyConds,
+    };
+  }
   async function generateDay() {
     if (S.busy) return; S.busy = true; render();
     try {
       const existing = await readTodayCalendar(); // 日程 app 里TA今天已定的安排
       const cal = calendarReality(new Date());
       const past = await recentDaysBrief(5);
-      let inst = [
-        "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
-        "以当前角色的人设、职业、近期记忆和最近的聊天为依据，想象TA今天真实会过的一天：先定今天的身体底子和情绪底色，再排日程。",
-        "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + fmtHM(Date.now()) + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
-        past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵）：\n" + past.lines.join("\n") : null,
-        past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
-        "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
-        "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
-        '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-20到20的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-40到40的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
-        "body 是今天真实带在身上的状况，多数日子是空数组，最多两条；睡得不好、昨天太累、生病、天气才会有。",
-        "情绪写法：用可感的状态词（迷糊、清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空、粘人）再带一点原因或身体感受，例如「开完会后脑子发紧」；一天里要有起伏，别每条都差不多；情绪要和 cost 对得上，耗神的事之后不该是「轻松」，回血的事之后不该是「疲惫」；底色 mood 要能从 sleep 和昨天的余波推出来。",
-        "cost 负数=消耗（开会、通勤、应酬、体力活），正数=回血（午睡、吃饭、散步、发呆），平淡的事给 0；一天累计下来别把人耗到负数太多。",
-        "schedule 给 5 到 9 条，从起床后第一件事到睡前最后一件事；有主线也有琐碎，时间不均匀；不用把每个小时填满，事与事之间可以留空档（空档里TA就是自己待着）；有的日子轻（3、4 条），有的日子满；最后一件事结束到 bed 之间是TA自己的睡前时间；「睡觉」本身不要写成一条日程。",
-      ].filter(Boolean).join("\n");
-      if (existing.length) {
-        inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，围绕它们补全其余的一天）：\n" +
-          JSON.stringify(existing.map((it) => ({ time: it.startTime, title: it.title, note: it.location || "" })));
-      }
+      const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing);
       const d = await generateJson({
         characterId: S.character.id,
         appTags: ["companion", "daily"],
         instruction: inst,
       });
-      const schedRaw = pickField(d, ["schedule", "日程", "日程表"]);
-      if (!Array.isArray(schedRaw)) throw new Error("日程缺失（模型返回的字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）");
-      const sched = schedRaw.slice(0, 10).map((it) => ({
-        time: normHM(pickField(it, ["time", "时间", "at"])),
-        end: normHM(pickField(it, ["end", "endTime", "结束", "到"])),
-        title: String(pickField(it, ["title", "标题", "事项", "name"]) || ""),
-        place: String(pickField(it, ["place", "地点", "位置", "在哪"]) || "").slice(0, 16),
-        note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
-        mood: String(pickField(it, ["mood", "情绪", "心情"]) || "").slice(0, 24),
-        cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
-        busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
-      }));
-      for (const it of existing) { // 模型漏掉的已定安排补回来
-        if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排" });
-      }
-      sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
-      for (const it of sched) if (it.end && it.end <= it.time) it.end = ""; // 结束早于开始的当没写
-      // 模型没给作息时退到日程首尾：起床 = 第一件事，上床 = 最后一件事结束后半小时
-      const last = sched[sched.length - 1];
-      const wake = normHM(pickField(d, ["wake", "起床", "wakeUp"])) || (sched[0] && sched[0].time) || S.settings.quietEnd;
-      // 身上的小状况走 conds 那条路：和聊天判出来的情绪一样按半衰期淡掉，精力和情绪都会自动算进去
-      const bodyRaw = pickField(d, ["body", "身体", "状况"]);
-      const bodyConds = (Array.isArray(bodyRaw) ? bodyRaw : []).slice(0, 2)
-        .filter((b) => b && String(b.label || "").trim())
-        .map((b) => ({
-          mood: String(b.mood || b.label).trim().slice(0, 24),
-          cause: String(b.label).trim().slice(0, 20),
-          energyDelta: Math.max(-20, Math.min(20, Math.round(+b.energy || 0))),
-          intensity: 60,
-          halfLifeMin: Math.max(1, Math.min(12, Math.round(+b.hours || 4))) * 60,
-          startAt: Date.now(),
-        }));
-      const bed = normHM(pickField(d, ["bed", "睡觉", "bedtime"])) || (last ? addMin(last.end || last.time, last.end ? 30 : 90) : S.settings.quietStart);
-      S.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === S.character.id, {
-        date: todayStr(), characterId: S.character.id,
-        wake: wake, bed: bed,
-        mood: String(pickField(d, ["mood", "心情", "情绪"]) || ""),
-        moodEmoji: String(pickField(d, ["moodEmoji", "emoji", "表情"]) || "🌙").slice(0, 4),
-        energy: Math.max(0, Math.min(100, +pickField(d, ["energy", "精力", "体力"]) || 60)),
-        doing: String(pickField(d, ["doing", "正在做", "当前"]) || ""),
-        location: String(pickField(d, ["location", "位置", "地点"]) || ""),
-        sleep: String(pickField(d, ["sleep", "睡眠", "昨晚"]) || "").slice(0, 40),
-        schedule: sched,
-        conds: bodyConds,
-      });
+      const parsed = parseDayResult(d, existing, S.settings, Date.now());
+      const sched = parsed.schedule, wake = parsed.wake, bed = parsed.bed, bodyConds = parsed.conds;
+      S.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === S.character.id,
+        Object.assign({ date: todayStr(), characterId: S.character.id, by: "local" }, parsed));
       const wrote = await syncCalendar(existing);
       await log("生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + S.day.mood + "」" + (S.day.sleep ? "，昨晚" + S.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "")
         + (S.day.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）"));
       S.busy = false;
       await syncChatContext(true);
       await orchestrate(); // 生活面就绪后立即编排心动时刻
+      uploadGenKitCloud(true).catch(() => { /* 已在函数内记日志 */ });
     } catch (e) {
       S.busy = false;
       toast("生成失败：" + (e && e.message || e));
@@ -1229,6 +1361,24 @@
     }
   }
 
+  // 起念判断的指令：本地编排和云端生成后的编排共用这段文字（push-recheck 有逐字副本），改这里要同步那边。
+  function buildImpulseInstruction(day, candRows, lines, settings, biasLine) {
+    return [
+      "【后台系统任务，不是聊天：不要以角色口吻说话、不要直接写消息内容，只输出判断 JSON】",
+      "你是当前角色的内心。逐个判断：在下面每个候选时刻、做完那件事之后，TA会不会真的想给用户发消息？不是每个都要发——按TA的性格克制判断。",
+      '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"这次接触的类型，从 问候/关心/追话题/分享/惦记 里选一个","topic":"这次想聊的话题（8字内）","why":"判断理由（20字内）","intent":"act为true时TA当时的第一人称心理动机（40字内，不写台词），否则空字符串"}]}。decisions 与候选时刻一一对应、顺序一致。',
+      "TA今天的生活面：", JSON.stringify({ mood: day.mood, energy: day.energy, schedule: day.schedule }),
+      "（energy 是TA刚醒时的基线；下面每个候选时刻另给了那一刻的剩余精力和做完那件事之后的情绪，精力越低越懒得开口，情绪决定TA想说什么样的话）",
+      lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
+      lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
+      "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
+      JSON.stringify(candRows),
+      "", "约束：今天最多真的发 " + settings.quota + " 条；免打扰时段 " + settings.quietStart + "–" + settings.quietEnd
+        + (settings.minGapMin > 0 ? "；相邻两次起念至少隔 " + settings.minGapMin + " 分钟" : "") + "。",
+      (settings.moodGate && day.energy < 30) ? "TA今天精力只有 " + day.energy + "%，很低。这种时候TA更想缩着，明显减少主动。" : null,
+      biasLine || null,
+    ].filter((s) => s !== null).join("\n");
+  }
   /* ================= 核心：编排心动时刻 ================= */
   function buildCandidates() {
     const now = Date.now() + 3 * 60000;
@@ -1390,21 +1540,9 @@
       const parsed = await generateJson({
         characterId: S.character.id,
         appTags: ["companion", "impulse"],
-        instruction: [
-          "【后台系统任务，不是聊天：不要以角色口吻说话、不要直接写消息内容，只输出判断 JSON】",
-          "你是当前角色的内心。逐个判断：在下面每个候选时刻、做完那件事之后，TA会不会真的想给用户发消息？不是每个都要发——按TA的性格克制判断。",
-          '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"这次接触的类型，从 问候/关心/追话题/分享/惦记 里选一个","topic":"这次想聊的话题（8字内）","why":"判断理由（20字内）","intent":"act为true时TA当时的第一人称心理动机（40字内，不写台词），否则空字符串"}]}。decisions 与候选时刻一一对应、顺序一致。',
-          "TA今天的生活面：", JSON.stringify({ mood: S.day.mood, energy: S.day.energy, schedule: S.day.schedule }),
-          "（energy 是TA刚醒时的基线；下面每个候选时刻另给了那一刻的剩余精力和做完那件事之后的情绪，精力越低越懒得开口，情绪决定TA想说什么样的话）",
-          lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
-          lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
-          "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
-          JSON.stringify(cands.map((c) => ({ time: c.time, justFinished: c.source, mood: c.mood || "", energy: energyAt(S.day, c.fireAt) }))),
-          "", "约束：今天最多真的发 " + S.settings.quota + " 条；免打扰时段 " + S.settings.quietStart + "–" + S.settings.quietEnd
-            + (S.settings.minGapMin > 0 ? "；相邻两次起念至少隔 " + S.settings.minGapMin + " 分钟" : "") + "。",
-          (S.settings.moodGate && S.day.energy < 30) ? "TA今天精力只有 " + S.day.energy + "%，很低。这种时候TA更想缩着，明显减少主动。" : null,
-          biasText() || null,
-        ].filter((s) => s !== null).join("\n"),
+        instruction: buildImpulseInstruction(S.day,
+          cands.map((c) => ({ time: c.time, justFinished: c.source, mood: c.mood || "", energy: energyAt(S.day, c.fireAt) })),
+          lines, S.settings, biasText()),
       });
       const decisions = Array.isArray(parsed.decisions) ? parsed.decisions : [];
       await cancelTodayWakes(keptIds);
@@ -1925,6 +2063,7 @@
       '<div class="strip">' +
       tag(wait.length ? (reach.length === wait.length ? "待发的都离线可达" : "离线可达 " + reach.length + " / " + wait.length) : "没有待发", wait.length && reach.length === wait.length ? "ok" : (wait.length ? "warn" : "")) +
       tag(cloudRecheckOn() ? "云端复核 · 每半小时" : (cloudCfg() ? "云端复核关着" : "没配云"), cloudRecheckOn() ? "ok" : "") +
+      (c.day && c.day.by === "cloud" ? tag("今天由云端生成", "cool") : (cloudGenOn() ? tag("明天云端生成 " + esc(S.settings.autoGenAt || SET_DEF.autoGenAt), "") : "")) +
       tag(c.plan && c.plan.recheckAt ? "本机复核 " + esc(fmtHM(c.plan.recheckAt)) : "本机还没复核过", "") +
       (adj.length || imp.length ? tag([adj.length ? "复核改了 " + adj.length + " 处" : "", imp.length ? "临时起念 " + imp.length : ""].filter(Boolean).join(" · "), "cool") : "") +
       "</div>" +
@@ -2728,9 +2867,9 @@
       { title: "挂念的人", fields: [{ type: "chars" }] },
       { title: "免打扰时段", sub: "这段时间TA不会来找你", fields: [{ type: "timeRange", keys: ["quietStart", "quietEnd"] }] },
       { title: "自动生成TA的一天", fields: [
-        { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }] },
+        { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }, { key: "cloudGen", label: "浏览器关着也生成（云端）" }] },
         { type: "timeRange", keys: ["autoGenAt"], label: "每天几点" },
-      ], hint: "到点自动生成TA今天的状态、日程和心动时刻。挂念在后台也算开着。<br>错过了这个点，下次打开时补。浏览器一整天没开就生成不了，那天只有云端的兜底问候。" },
+      ], hint: "到点自动生成TA今天的状态、日程和心动时刻。挂念在后台也算开着。<br>开了「云端」：每次打开挂念会把明天的生成原料和一份和本地同源的提示词模板寄到你的个人云，到点由云函数生成并编排，你打开时直接接管；云端 45 分钟没生成会本地补。需要云连接和离线推送。<br>错过了这个点，下次打开时补。浏览器一整天没开就生成不了，那天只有云端的兜底问候。" },
       { title: "什么时候生效", fields: [], hint: "额度、间隔、倾向、锚点：改完回「今天」页点「♥ 重新编排」才生效。<br>其余各项保存即生效。<br>重新编排只动日程上的时刻，聊天里临时起的念头留着不动。", open: true },
     ] },
     { id: "pace", name: "分寸", groups: [
@@ -3000,6 +3139,8 @@
       if (S.character) await loadDayAndPlan();
       render();
       await syncChatContext(true);
+      if (S.character) await adoptCloudDay();
+      uploadGenKitCloud().catch(() => { /* 已在函数内记日志 */ });
       // 先收浏览器关着这段时间云端替TA做的决定，再按最新聊天做本地复核
       // 打开小手机本身就是一次复核时机：按你们最新的聊天，让TA重新想想今天。
       // 两步必须串行：都会重写 plan，并行的话后写的会盖掉前一个的结果。

@@ -34,7 +34,7 @@ type EncryptedPayload = { v: 1; iv: string; tag: string; ct: string };
 
 const OWNER_ID = "owner";
 const MAX_PAYLOAD_BYTES = 900_000;
-const ALLOWED_JOB_KINDS = new Set(["followup", "reply_bailout", "timed_task", "shortcut_resume"]);
+const ALLOWED_JOB_KINDS = new Set(["followup", "reply_bailout", "timed_task", "shortcut_resume", "template"]);
 const SHORTCUT_RESULT_MODES = new Set(["none", "text", "image"]);
 const SHORTCUT_MAX_ARGS_BYTES = 16_000;
 const SHORTCUT_COMMAND_ID_PATTERN = /^cmd_[a-z0-9-]{20,80}$/i;
@@ -61,6 +61,36 @@ function json(data: unknown, status = 200): Response {
 
 function cleanText(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+// push-recheck / push-generate 的分寸闸门、自发起念、到点预发、忙碌保留、睡眠模式全靠这些数；
+// 名单外的键一律不落库，App 新增一项要同时加在这里。
+const RECHECK_NUMERIC_CONTEXT_KEYS = [
+  "gateDailyCap", "gateGapMin", "gateHorizonMin", "gateFreshMin", "gateMinMsgs",
+  "selfImpulseCap", "selfUsed",
+  "presendMax", "presendTalkingMin", "presendGapMin",
+  "busyHold", "busyBufferMin", "busyMaxHoldMin",
+  "sleepMode", "sleepWakeProb",
+] as const;
+
+function cleanAffection(value: unknown): { score: number; tier: string; relation: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const score = Number(raw.score);
+  return {
+    score: Number.isFinite(score) ? score : 0,
+    tier: cleanText(raw.tier, 40),
+    relation: cleanText(raw.relation, 40),
+  };
+}
+
+// 挂念寄存的当天原料（日程 + 情绪条件）原样透传，只卡总体积，防止把整张表撑爆
+function cleanJsonObject(value: unknown, maxChars: number): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  let text = "";
+  try { text = JSON.stringify(value); } catch { return null; }
+  if (!text || text.length > maxChars) return null;
+  return JSON.parse(text) as Record<string, unknown>;
 }
 
 function randomHex(size: number): string {
@@ -876,7 +906,7 @@ Deno.serve(async (request: Request) => {
         const rawContext = body.context && typeof body.context === "object"
           ? body.context as Record<string, unknown>
           : {};
-        const context = {
+        const context: Record<string, unknown> = {
           mood: cleanText(rawContext.mood, 200),
           energy: cleanText(rawContext.energy, 200),
           quota: Number(rawContext.quota) || 0,
@@ -888,7 +918,18 @@ Deno.serve(async (request: Request) => {
           bias: cleanText(rawContext.bias, 2000),
           // 云端点亮时自己造预约 id 要用的前缀，宿主只认 timed_wake_capp_<appId>_ 开头的
           wakePrefix: cleanText(rawContext.wakePrefix, 120).replace(/[^A-Za-z0-9._-]/g, ""),
+          // 哨兵预约 id 会拼进 PostgREST 的 in.("…") 过滤器，和 wakeId 一样只留安全字符
+          sentinelWakeId: cleanText(rawContext.sentinelWakeId, 80).replace(/[^A-Za-z0-9._-]/g, ""),
+          affection: cleanAffection(rawContext.affection),
+          day: cleanJsonObject(rawContext.day, 24_000),
+          // 云端生成TA的一天要用的原料（生成指令、模板键、到点时刻），App 每次打开为明天寄一份
+          genKit: cleanJsonObject(rawContext.genKit, 40_000),
         };
+        for (const key of RECHECK_NUMERIC_CONTEXT_KEYS) {
+          if (rawContext[key] === undefined || rawContext[key] === null || rawContext[key] === "") continue;
+          const n = Number(rawContext[key]);
+          if (Number.isFinite(n)) context[key] = n;
+        }
         const row: Record<string, unknown> = {
           user_id: OWNER_ID,
           character_id: characterId,

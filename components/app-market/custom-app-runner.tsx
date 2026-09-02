@@ -77,6 +77,7 @@ import {
   scheduleCustomAppTimedWake,
   listCustomAppTimedWakes,
   cancelCustomAppTimedWake,
+  freezeCustomAppTemplate,
   dropCustomAppChatContext,
   sendCustomAppCard,
   saveCustomAppMedia,
@@ -509,7 +510,8 @@ html, body { min-height: 100%; }
     push: {
       wake: function(payload){ return request('push.wake', payload || {}); },
       listWakes: function(){ return request('push.listWakes'); },
-      cancelWake: function(id){ return request('push.cancelWake', { id: id }); }
+      cancelWake: function(id){ return request('push.cancelWake', { id: id }); },
+      freeze: function(payload){ return request('push.freeze', payload || {}); }
     },
     wallet: {
       get: function(){ return request('wallet.get'); },
@@ -1944,6 +1946,10 @@ export function CustomAppRunner({
     if (action === "push.cancelWake") {
       requirePermission("push.wake");
       return cancelCustomAppTimedWake(app.id, String(record.id ?? ""));
+    }
+    if (action === "push.freeze") {
+      requirePermission("push.wake");
+      return freezeCustomAppTemplate(app, record);
     }
 
     if (action === "bridge.send") {

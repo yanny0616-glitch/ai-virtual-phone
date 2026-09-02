@@ -50,6 +50,9 @@ type PlanContext = {
   /** 聊天插件「好感与关系」算出来的分寸，App 编排时寄来；没装插件就没有 */
   affection?: { score?: number; tier?: string; relation?: string } | null;
   day?: GuanianDay;
+  genKit?: GenKit | null;
+  generatedBy?: string;
+  genTries?: number;
   [key: string]: unknown;
 };
 // 挂念寄存的当天原料：日程带 cost/情绪，conds 是还在起作用的聊天情绪。算法与挂念 index.html
@@ -318,6 +321,455 @@ function hhmm(ms: number, offsetMin: number): string {
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 }
 
+/* ═══════════════ 云端生成TA的一天（挂念「浏览器关着也生成」） ═══════════════
+ * App 每次打开为明天寄一份 genKit：生成指令（由 App 的 buildDayInstruction 拼好，云端不自己拼提示词）、
+ * 两个 push.freeze 模板键（companion+daily / companion+impulse，与本地 ai.generate 同源）、到点时刻、时区、锚点开关。
+ * 到点后：借 daily 模板换掉占位符 → 生成 JSON → 下面这些逐字对照 App index.html 的函数归一/编排 →
+ * 借 impulse 模板判断起念 → 克隆哨兵聊天快照挂预约 → 整份写回计划行，App 打开时 adoptCloudDay 接管。
+ * 以下带「App 同名」注释的函数改动要和 index.html 同步。 */
+type GenKit = {
+  date?: string; instruction?: string; autoGenAt?: string; tz?: number;
+  existing?: { id?: string; startTime?: string; endTime?: string; title?: string; location?: string }[];
+  tplDaily?: string; tplImpulse?: string;
+  anchorMorning?: boolean; anchorSleep?: boolean; moodGate?: boolean; kitAt?: number;
+};
+type GenDay = {
+  wake: string; bed: string; mood: string; moodEmoji: string; energy: number; doing: string; location: string; sleep: string;
+  schedule: { time: string; end?: string; title: string; place?: string; note?: string; mood?: string; cost?: number; busy?: boolean }[];
+  conds: { mood: string; cause: string; energyDelta: number; intensity: number; halfLifeMin: number; startAt: number }[];
+};
+const GEN_PLACEHOLDER = "__CUSTOM_APP_INSTRUCTION__";
+const GEN_MAX_TRIES = 3;
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+// App 同名 parseModelJson
+function parseModelJson(text: unknown): any {
+  let t = String(text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/```(?:json)?/gi, "")
+    .trim();
+  try { return JSON.parse(t); } catch (_e) { /* 继续尝试截取 */ }
+  for (let a = t.indexOf("{"); a >= 0; a = t.indexOf("{", a + 1)) {
+    let depth = 0, inStr = false, escaped = false;
+    for (let i = a; i < t.length; i++) {
+      const ch = t[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === "{") depth++;
+      else if (ch === "}" && --depth === 0) {
+        try { return JSON.parse(t.slice(a, i + 1)); } catch (_e) { break; }
+      }
+    }
+  }
+  throw new Error("模型没回 JSON，它说的是：「" + t.slice(0, 100) + (t.length > 100 ? "…" : "") + "」");
+}
+// App 同名 pickField / isTrue / normHM / addMin
+function pickField(o: any, keys: string[]): any {
+  for (const k of keys) {
+    if (o && o[k] != null && String(o[k]).trim() !== "") return o[k];
+  }
+  return "";
+}
+function isTrue(v: unknown): boolean { return v === true || /^(true|是|1)$/i.test(String(v || "").trim()); }
+function normHM(v: unknown): string {
+  const m = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(String(v || ""));
+  if (!m) return "";
+  return String(Math.min(23, +m[1])).padStart(2, "0") + ":" + String(Math.min(59, +(m[2] || 0))).padStart(2, "0");
+}
+function addMin(hm: string, n: number): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim()); if (!m) return hm;
+  const t = Math.min(+m[1] * 60 + +m[2] + n, 23 * 60 + 59);
+  return pad2(Math.floor(t / 60)) + ":" + pad2(t % 60);
+}
+// App 同名 parseDayResult
+function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, settings: { quietStart?: string; quietEnd?: string }, nowMs: number): GenDay {
+  const schedRaw = pickField(d, ["schedule", "日程", "日程表"]);
+  if (!Array.isArray(schedRaw)) throw new Error("日程缺失（模型返回的字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）");
+  const sched: GenDay["schedule"] = schedRaw.slice(0, 10).map((it: any) => ({
+    time: normHM(pickField(it, ["time", "时间", "at"])),
+    end: normHM(pickField(it, ["end", "endTime", "结束", "到"])),
+    title: String(pickField(it, ["title", "标题", "事项", "name"]) || ""),
+    place: String(pickField(it, ["place", "地点", "位置", "在哪"]) || "").slice(0, 16),
+    note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
+    mood: String(pickField(it, ["mood", "情绪", "心情"]) || "").slice(0, 24),
+    cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
+    busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
+  }));
+  for (const it of existing) {
+    if (!sched.some((x) => x.time === it.startTime)) sched.push({ time: String(it.startTime || ""), title: String(it.title || ""), place: it.location || "", note: it.location || "日程表上的安排" });
+  }
+  sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  for (const it of sched) if (it.end && it.end <= it.time) it.end = "";
+  const last = sched[sched.length - 1];
+  const wake = normHM(pickField(d, ["wake", "起床", "wakeUp"])) || (sched[0] && sched[0].time) || String(settings.quietEnd || "");
+  const bodyRaw = pickField(d, ["body", "身体", "状况"]);
+  const bodyConds: GenDay["conds"] = (Array.isArray(bodyRaw) ? bodyRaw : []).slice(0, 2)
+    .filter((b: any) => b && String(b.label || "").trim())
+    .map((b: any) => ({
+      mood: String(b.mood || b.label).trim().slice(0, 24),
+      cause: String(b.label).trim().slice(0, 20),
+      energyDelta: Math.max(-20, Math.min(20, Math.round(+b.energy || 0))),
+      intensity: 60,
+      halfLifeMin: Math.max(1, Math.min(12, Math.round(+b.hours || 4))) * 60,
+      startAt: nowMs,
+    }));
+  const bed = normHM(pickField(d, ["bed", "睡觉", "bedtime"])) || (last ? addMin(last.end || last.time, last.end ? 30 : 90) : String(settings.quietStart || ""));
+  return {
+    wake: wake, bed: bed,
+    mood: String(pickField(d, ["mood", "心情", "情绪"]) || ""),
+    moodEmoji: String(pickField(d, ["moodEmoji", "emoji", "表情"]) || "🌙").slice(0, 4),
+    energy: Math.max(0, Math.min(100, +pickField(d, ["energy", "精力", "体力"]) || 60)),
+    doing: String(pickField(d, ["doing", "正在做", "当前"]) || ""),
+    location: String(pickField(d, ["location", "位置", "地点"]) || ""),
+    sleep: String(pickField(d, ["sleep", "睡眠", "昨晚"]) || "").slice(0, 40),
+    schedule: sched,
+    conds: bodyConds,
+  };
+}
+// App 同名 buildImpulseInstruction
+function buildImpulseInstruction(day: { mood: string; energy: number; schedule: unknown[] }, candRows: unknown[], lines: string[],
+  settings: { quota: number; quietStart: string; quietEnd: string; minGapMin: number; moodGate: boolean }, biasLine: string): string {
+  return [
+    "【后台系统任务，不是聊天：不要以角色口吻说话、不要直接写消息内容，只输出判断 JSON】",
+    "你是当前角色的内心。逐个判断：在下面每个候选时刻、做完那件事之后，TA会不会真的想给用户发消息？不是每个都要发——按TA的性格克制判断。",
+    '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"这次接触的类型，从 问候/关心/追话题/分享/惦记 里选一个","topic":"这次想聊的话题（8字内）","why":"判断理由（20字内）","intent":"act为true时TA当时的第一人称心理动机（40字内，不写台词），否则空字符串"}]}。decisions 与候选时刻一一对应、顺序一致。',
+    "TA今天的生活面：", JSON.stringify({ mood: day.mood, energy: day.energy, schedule: day.schedule }),
+    "（energy 是TA刚醒时的基线；下面每个候选时刻另给了那一刻的剩余精力和做完那件事之后的情绪，精力越低越懒得开口，情绪决定TA想说什么样的话）",
+    lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
+    lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
+    "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
+    JSON.stringify(candRows),
+    "", "约束：今天最多真的发 " + settings.quota + " 条；免打扰时段 " + settings.quietStart + "–" + settings.quietEnd
+      + (settings.minGapMin > 0 ? "；相邻两次起念至少隔 " + settings.minGapMin + " 分钟" : "") + "。",
+    (settings.moodGate && day.energy < 30) ? "TA今天精力只有 " + day.energy + "%，很低。这种时候TA更想缩着，明显减少主动。" : null,
+    biasLine || null,
+  ].filter((s) => s !== null).join("\n");
+}
+// App 同名 chatExcerpt / unansweredStreak
+function chatExcerpt(msgs: { role: string; c: string }[], maxLines: number): string[] {
+  return msgs.slice(-(maxLines || 20)).map((m) =>
+    (m.role === "user" ? "我：" : "TA：") + (m.c.length > 60 ? m.c.slice(0, 60) + "…" : m.c));
+}
+function unansweredStreak(msgs: { role: string; t: number }[], nowMs: number): number {
+  let prevT: number | null = null, rounds = 0;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.role !== "assistant") break;
+    if (prevT === null || prevT - m.t > 3 * 60000) {
+      if (nowMs - m.t >= 30 * 60000) rounds++;
+    }
+    prevT = m.t;
+  }
+  return rounds;
+}
+// App 同名 fitScore / calcScore（本地小时用 tz 换算）
+function fitScore(fireAt: number, tz: number): number {
+  const d = new Date(fireAt + tz * 60_000);
+  const h = d.getUTCHours() + d.getUTCMinutes() / 60;
+  const g = (peak: number, sigma: number) => Math.exp(-Math.pow(h - peak, 2) / (2 * sigma * sigma));
+  return Math.round(100 * Math.min(1, g(13, 3) * 0.75 + g(21, 2.5)));
+}
+function calcScore(fireAt: number, armedBefore: number, streak: number, lastArmedAt: number, tz: number,
+  settings: { quota: number; maxUnanswered: number; minGapMin: number }) {
+  const pq = Math.round(Math.min(100, armedBefore / Math.max(1, settings.quota) * 100));
+  const mu = settings.maxUnanswered;
+  const pr = Math.round(Math.min(100, mu > 0 ? streak / mu * 100 : streak * 25));
+  let pg = 0;
+  const gapMin = settings.minGapMin;
+  if (gapMin > 0 && lastArmedAt) {
+    const dist = (fireAt - lastArmedAt) / 60000;
+    if (dist < gapMin * 2) pg = Math.round(Math.max(0, Math.min(100, (1 - dist / (gapMin * 2)) * 100)));
+  }
+  return { fit: fitScore(fireAt, tz), pq, pr, pg, press: Math.round(pq * 0.4 + pr * 0.4 + pg * 0.2) };
+}
+// App 同名 buildCandidates：本地 timeToMs/fmtHM 换成按 tz 的 UTC 算术
+function buildCandidates(day: GenDay, planDate: string, tz: number, nowMs: number,
+  settings: { quietStart: string; quietEnd: string; anchorMorning: boolean; anchorSleep: boolean }) {
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(planDate);
+  const dayUtc = dm ? Date.UTC(+dm[1], +dm[2] - 1, +dm[3]) : NaN;
+  const timeToMs = (hm: string): number | null => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim());
+    if (!m || !Number.isFinite(dayUtc)) return null;
+    return dayUtc + (+m[1] * 60 + +m[2] - tz) * 60_000;
+  };
+  const fmtHM = (ms: number) => hhmm(ms, tz);
+  const inQuiet = (hm: string) => {
+    const qs = settings.quietStart, qe = settings.quietEnd;
+    if (!qs || !qe || qs === qe) return false;
+    return qs < qe ? (hm >= qs && hm < qe) : (hm >= qs || hm < qe);
+  };
+  const sleepWindow = () => {
+    const bed = normHM(day.bed) || settings.quietStart || "";
+    const wake = normHM(day.wake) || settings.quietEnd || "";
+    return bed && wake && bed !== wake ? { bed, wake, overnight: bed < wake } : null;
+  };
+  const asleepAt = (hm: string) => {
+    const w = sleepWindow();
+    if (!w) return false;
+    return w.overnight ? (hm >= w.bed && hm < w.wake) : (hm >= w.bed || hm < w.wake);
+  };
+  const now = nowMs + 3 * 60000;
+  const seen = new Set<string>();
+  const cands: { time: string; source: string; fireAt: number; mood?: string }[] = [];
+  const drift = (lo: number, hi: number) => Math.round(lo + Math.random() * (hi - lo)) * 60000;
+  for (const it of day.schedule) {
+    const base = timeToMs(it.time);
+    const ms = base ? base + drift(1, 12) : null;
+    if (!ms || ms < now || seen.has(it.time)) continue;
+    const hm = fmtHM(ms);
+    if (inQuiet(hm) || asleepAt(hm)) continue;
+    seen.add(it.time);
+    cands.push({ time: hm, source: it.title, fireAt: ms, mood: it.mood || "" });
+  }
+  if (settings.anchorMorning) {
+    const ms = timeToMs(settings.quietEnd) || timeToMs("08:00");
+    const gm = ms ? ms + drift(25, 55) : null;
+    if (gm && gm > now) {
+      const hm = fmtHM(gm);
+      if (!seen.has(hm) && !inQuiet(hm)) { seen.add(hm); cands.push({ time: hm, source: "早安", fireAt: gm }); }
+    }
+  }
+  const sw = sleepWindow();
+  if (settings.anchorSleep && sw) {
+    const ms = sw.overnight ? timeToMs("23:50") : timeToMs(sw.bed);
+    const gm = ms ? ms - drift(10, 30) : null;
+    if (gm && gm > now) {
+      const hm = fmtHM(gm);
+      if (!seen.has(hm) && !inQuiet(hm) && !asleepAt(hm)) cands.push({ time: hm, source: "睡前", fireAt: gm });
+    }
+  }
+  cands.sort((a, b) => a.fireAt - b.fireAt);
+  return cands.slice(0, 8);
+}
+
+// 模板里最后一条用户消息是「[挂念] __CUSTOM_APP_INSTRUCTION__」，把占位符换成真正的指令。各家消息结构不同，逐段找字符串替换。
+function fillTemplate(body: Record<string, unknown>, providerKind: ProviderKind, instruction: string): boolean {
+  let hit = false;
+  const fix = (text: string) => {
+    if (!text.includes(GEN_PLACEHOLDER)) return text;
+    hit = true;
+    return text.split(GEN_PLACEHOLDER).join(instruction);
+  };
+  const walkParts = (parts: unknown) => {
+    for (const part of (Array.isArray(parts) ? parts : [])) {
+      const p = part as Record<string, unknown>;
+      if (typeof p?.text === "string") p.text = fix(p.text);
+    }
+  };
+  if (providerKind === "gemini") {
+    for (const one of (Array.isArray(body.contents) ? body.contents : [])) walkParts((one as Record<string, unknown>)?.parts);
+    return hit;
+  }
+  for (const one of (Array.isArray(body.messages) ? body.messages : [])) {
+    const m = one as Record<string, unknown>;
+    if (typeof m?.content === "string") m.content = fix(m.content);
+    else walkParts(m?.content);
+  }
+  return hit;
+}
+
+// 与 App generateJson 一致：第一次没拿到 JSON 就追加严格指令再试一次
+async function generateJsonWith(template: JobPayload, instruction: string, log: (line: string) => void): Promise<any> {
+  const call = async (inst: string): Promise<string> => {
+    const clone = JSON.parse(JSON.stringify(template.request)) as JobPayload["request"];
+    if (!fillTemplate(clone.body, clone.providerKind, inst)) throw new Error("模板里找不到指令占位符");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 240_000);
+    try {
+      const response = await fetch(clone.url, { method: "POST", headers: clone.headers, body: JSON.stringify(clone.body), signal: controller.signal });
+      if (!response.ok) throw new Error(`模型 HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 160)}`);
+      return extractResponseText(clone.providerKind, await response.json());
+    } finally { clearTimeout(timeout); }
+  };
+  try { return parseModelJson(await call(instruction)); } catch (e) {
+    log("首次生成未得到 JSON（" + (e instanceof Error ? e.message : String(e)) + "），追加严格指令重试");
+    return parseModelJson(await call(instruction + "\n\n重要：只输出 JSON 本身，第一个字符必须是 {，最后一个字符必须是 }，不要任何解释、前言、思考过程或代码块标记。"));
+  }
+}
+
+type GenDeps = {
+  rest: (path: string, init?: RequestInit) => Promise<Response>;
+  payloadKey: string; userId: string; characterId: string; planDate: string; planFilter: string;
+  plan: PlanRow; context: PlanContext; kit: GenKit; nowMs: number;
+};
+// 到点生成 + 编排。失败只记 genTries/genError，cron 下一轮再来，最多 GEN_MAX_TRIES 次。
+async function generateCloudDay(deps: GenDeps): Promise<void> {
+  const { rest, payloadKey, userId, characterId, planDate, planFilter, plan, context, kit, nowMs } = deps;
+  const tz = Number(kit.tz) || 0;
+  const genLog: string[] = [];
+  const log = (line: string) => { if (genLog.length < 40) genLog.push(line); };
+  const tries = (Number(context.genTries) || 0) + 1;
+  const patchPlan = (body: Record<string, unknown>, guard: boolean) => rest(
+    guard && plan.updated_at ? `${planFilter}&updated_at=eq.${encodeURIComponent(plan.updated_at)}` : planFilter,
+    { method: "PATCH", headers: { Prefer: guard ? "return=representation" : "return=minimal" }, body: JSON.stringify(body) },
+  ).catch(() => undefined);
+  const armedKeys: string[] = [];
+  try {
+    // 借模板：daily / impulse 两份 push.freeze 冻的完整提示词，加上哨兵聊天快照（点亮预约要克隆它）
+    const sentinelWakeId = typeof context.sentinelWakeId === "string" ? context.sentinelWakeId : "";
+    const keys = [kit.tplDaily, kit.tplImpulse, sentinelWakeId ? `timedwake:${sentinelWakeId}` : ""].filter(Boolean) as string[];
+    const jobsResponse = await rest(
+      `push_jobs?user_id=eq.${encodeURIComponent(userId)}`
+      + `&trigger_key=in.(${encodeURIComponent(keys.map(k => `"${k}"`).join(","))})`
+      + "&select=id,trigger_key,status,execute_at,payload",
+    );
+    const jobRows = jobsResponse.ok ? await jobsResponse.json() as JobRow[] : [];
+    jobRows.sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending"));
+    const payloads = new Map<string, JobPayload>();
+    for (const row of jobRows) {
+      if (payloads.has(row.trigger_key)) continue;
+      try { payloads.set(row.trigger_key, JSON.parse(await decryptPayload(row.payload, payloadKey)) as JobPayload); }
+      catch { /* 单条解不开就算没有 */ }
+    }
+    const tplDaily = kit.tplDaily ? payloads.get(kit.tplDaily) : undefined;
+    const tplImpulse = kit.tplImpulse ? payloads.get(kit.tplImpulse) : undefined;
+    const tplChat = sentinelWakeId ? payloads.get(`timedwake:${sentinelWakeId}`) : undefined;
+    if (!tplDaily || !tplImpulse) throw new Error("云端没有可借的提示词模板（App 打开一次会重新冻结）");
+    const instruction = String(kit.instruction || "");
+    if (!instruction) throw new Error("生成原料里没有指令");
+    const existing = Array.isArray(kit.existing) ? kit.existing : [];
+    const settings = {
+      quota: Number(context.quota) || 3,
+      quietStart: String(context.quietStart || ""), quietEnd: String(context.quietEnd || ""),
+      minGapMin: Number(context.minGapMin) || 0, maxUnanswered: Number(context.maxUnanswered) || 0,
+      moodGate: kit.moodGate !== false, anchorMorning: kit.anchorMorning === true, anchorSleep: kit.anchorSleep !== false,
+    };
+
+    // ── 生成TA的一天（与 App generateDay 同一份指令、同一套归一）
+    const raw = await generateJsonWith(tplDaily, instruction, log);
+    const dayFull = parseDayResult(raw, existing, settings, nowMs);
+    const day: GuanianDay & Record<string, unknown> = {
+      tz, mood: dayFull.mood, energy: dayFull.energy, location: dayFull.location, doing: dayFull.doing,
+      wake: dayFull.wake, bed: dayFull.bed,
+      schedule: dayFull.schedule.map(it => ({ time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +(it.cost || 0), mood: it.mood || "", busy: !!it.busy })),
+      conds: dayFull.conds.map(c => ({ startAt: c.startAt, halfLifeMin: c.halfLifeMin, intensity: c.intensity, energyDelta: c.energyDelta, mood: c.mood, cause: c.cause })),
+    };
+    log("生成今日生活面：" + dayFull.schedule.length + " 条日程（日程表已定 " + existing.length + " 条），作息 " + dayFull.wake + " 起 " + dayFull.bed + " 睡，心情「" + dayFull.mood + "」"
+      + (dayFull.sleep ? "，昨晚" + dayFull.sleep : "") + (dayFull.conds.length ? "，身上：" + dayFull.conds.map(c => c.cause).join("、") : "")
+      + (dayFull.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(raw || {}).slice(0, 10).join("/") + "）"));
+
+    // ── 编排心动时刻（与 App orchestrate 同一套候选、同一份判断指令、同一套数值约束）
+    const cands = buildCandidates(dayFull, planDate, tz, nowMs, settings);
+    const items: Record<string, unknown>[] = [];
+    let chatUsed = 0;
+    if (!cands.length) {
+      log("编排：无未来候选时刻（已过时段或全部落在免打扰内）");
+    } else {
+      log("候选时刻：" + cands.map(c => c.time + "·" + c.source).join("，"));
+      const mirrorResponse = await rest(
+        `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
+        + `&character_id=eq.${encodeURIComponent(characterId)}`
+        + "&select=role,content,message_at&order=message_at.desc&limit=60",
+      );
+      const mirrorRows = mirrorResponse.ok ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse() : [];
+      const chat = mirrorRows
+        .filter(m => m.role === "user" || m.role === "assistant")
+        .map(m => ({ role: m.role, t: Date.parse(m.message_at) || 0, c: String(m.content || "").replace(/\s+/g, " ").trim() }))
+        .filter(m => m.c)
+        .sort((a, b) => a.t - b.t);
+      const streak0 = unansweredStreak(chat, nowMs);
+      const lines = chatExcerpt(chat, 20);
+      chatUsed = lines.length;
+      if (lines.length) log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
+      const candRows = cands.map(c => ({ time: c.time, justFinished: c.source, mood: c.mood || "", energy: guanianNow(day, c.fireAt, settings.quietStart, settings.quietEnd).energy }));
+      const parsed = await generateJsonWith(tplImpulse, buildImpulseInstruction(dayFull, candRows, lines, settings, String(context.bias || "")), log);
+      const decisions: Decision[] = Array.isArray(parsed?.decisions) ? parsed.decisions : [];
+
+      const wakePrefix = String(context.wakePrefix || "");
+      const armWake = async (fireAt: number, intent: string): Promise<{ id: string; reason: string }> => {
+        if (!tplChat) return { id: "", reason: "云端没有可借的聊天模板（哨兵预约不在了）" };
+        if (!wakePrefix) return { id: "", reason: "没有预约 id 前缀" };
+        const wakeId = `${wakePrefix}${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const clone = JSON.parse(JSON.stringify(tplChat)) as JobPayload;
+        const note = `[系统备忘：这不是对方发来的消息。到点了，你现在想主动跟对方说的是——${intent}。`
+          + "顺着你们刚才聊的往下说，别重复已经说过的话，也别提起这条备忘。]";
+        if (!appendIntentNote(clone.request.body, clone.request.providerKind, note)) return { id: "", reason: "聊天模板结构不认识" };
+        retuneWakeSnapshot(clone.request.body, clone.request.providerKind, intent, Math.max(1, Math.round((fireAt - Date.now()) / 60_000)));
+        clone.merge = { ...(clone.merge || {}), ...(settings.maxUnanswered > 0 ? { cooldownRounds: settings.maxUnanswered } : {}) };
+        const insert = await rest("push_jobs", {
+          method: "POST",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify([{
+            id: `job_${crypto.randomUUID()}`, user_id: userId, trigger_key: `timedwake:${wakeId}`, kind: "timed_task",
+            execute_at: new Date(fireAt + 15_000).toISOString(), status: "pending",
+            payload: await encryptPayload(JSON.stringify(clone), payloadKey),
+          }]),
+        });
+        if (!insert.ok) return { id: "", reason: `预约写入失败 HTTP ${insert.status}` };
+        armedKeys.push(`"timedwake:${wakeId}"`);
+        return { id: wakeId, reason: "" };
+      };
+
+      const armedAt: number[] = [];
+      let armedCount = 0;
+      const prevArmed = (t: number) => armedAt.filter(x => x < t).sort((a, b) => b - a)[0] || 0;
+      for (let i = 0; i < cands.length; i++) {
+        const c = cands[i];
+        const d = decisions[i] || {};
+        const item: Record<string, unknown> = {
+          time: c.time, fireAt: c.fireAt, source: c.source, act: !!d.act,
+          why: String(d.why || ""), intent: String(d.intent || ""), delivery: "", reason: "", wakeId: "",
+          sem: String(d.sem || ""), topic: String(d.topic || ""),
+          score: calcScore(c.fireAt, armedCount, streak0, prevArmed(c.fireAt), tz, settings),
+        };
+        if (item.act && armedCount >= settings.quota) { item.act = false; item.why = "超出今日额度"; }
+        if (item.act && settings.minGapMin > 0 && armedAt.some(t => Math.abs(c.fireAt - t) < settings.minGapMin * 60000)) { item.act = false; item.why = "离上一个起念太近"; }
+        if (item.act) {
+          const intent = String(item.intent || ("刚" + c.source + "，忽然想到用户"));
+          const res = await armWake(c.fireAt, intent);
+          if (res.id) {
+            item.wakeId = res.id; item.delivery = "push"; item.reason = "";
+            armedCount++; armedAt.push(c.fireAt);
+            log(c.time + " 起念 ✓ 已预约离线推送：" + intent);
+          } else {
+            // 和本地「仅本地」不同：云端没有本地路径可退，起念留着，App 打开时能看到原因
+            item.delivery = ""; item.reason = res.reason;
+            armedCount++; armedAt.push(c.fireAt);
+            log(c.time + " 起念 ✓ 但没挂上预约（" + res.reason + "）：" + intent);
+          }
+        } else {
+          log(c.time + " 未起念：" + (item.why || "TA这会儿不想"));
+        }
+        item.hist = [{ at: nowMs, kind: item.act ? "plan" : "skip", note: item.act ? item.intent : (item.why || "TA这会儿不想"), by: "cloud" }];
+        items.push(item);
+      }
+      items.sort((a, b) => Number(a.fireAt) - Number(b.fireAt));
+      log(armedCount ? "TA今天有 " + armedCount + " 个想起你的时刻" : "TA今天想安静地过");
+    }
+
+    const saved = await patchPlan({
+      items,
+      decisions: [],
+      recheck_count: 0,
+      last_recheck_at: new Date().toISOString(),
+      context: {
+        ...context,
+        mood: dayFull.mood, energy: String(dayFull.energy),
+        day, dayFull, genKit: null,
+        generatedBy: "cloud", genAt: nowMs, genLog, genChatUsed: chatUsed, genTries: tries, genError: "", selfUsed: 0,
+      },
+    }, true);
+    const rows = saved?.ok ? await saved.json().catch(() => []) as unknown[] : [];
+    if (Array.isArray(rows) && rows.length > 0) return;
+    // 生成期间 App 自己生成并上传了计划：以 App 为准，刚挂的预约撤掉，别成孤儿
+    if (armedKeys.length) {
+      await rest(`push_jobs?user_id=eq.${encodeURIComponent(userId)}&status=eq.pending`
+        + `&trigger_key=in.(${encodeURIComponent(armedKeys.join(","))})`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "cancelled" }),
+      }).catch(() => undefined);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log("云端生成失败：" + msg);
+    await patchPlan({
+      last_recheck_at: new Date().toISOString(),
+      context: { ...context, genTries: tries, genError: msg.slice(0, 300), genLog },
+    }, false);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   const supabaseUrl = (Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -357,6 +809,36 @@ Deno.serve(async (req: Request) => {
   const nowMs = Date.now();
   const lastRecheckMs = plan.last_recheck_at ? Date.parse(plan.last_recheck_at) : NaN;
   const context = plan.context || {};
+
+  // 云端生成：这一行还只是 App 寄来的生成原料（没有 day，也没有时刻），到点才动，
+  // 生成之前不走下面的复核——没有生活面的复核和自发起念都无从判起。
+  const kit = context.genKit && typeof context.genKit === "object" ? context.genKit : null;
+  if (kit && context.generatedBy !== "cloud") {
+    const tz = Number(kit.tz) || 0;
+    const local = new Date(nowMs + tz * 60_000);
+    const localDate = `${local.getUTCFullYear()}-${pad2(local.getUTCMonth() + 1)}-${pad2(local.getUTCDate())}`;
+    // 还没到点的原料行也记一下 last_recheck_at，别让它一直排在 cron 派发队列最前面挤掉别的计划
+    const later = (note: string) => rest(planFilter, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_recheck_at: new Date().toISOString() }),
+    }).catch(() => undefined).then(() => new Response(note, { status: 200 }));
+    if (localDate < planDate) return later("gen: not that day yet");
+    if (localDate > planDate) return later("gen: day passed");
+    if (hhmm(nowMs, tz) < String(kit.autoGenAt || "07:30")) return later("gen: before autoGenAt");
+    if ((Number(context.genTries) || 0) >= GEN_MAX_TRIES) return new Response("gen: gave up", { status: 200 });
+    if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < 10 * 60_000) return new Response("gen: in progress", { status: 200 });
+    // 先占坑：last_recheck_at 一写，cron 25 分钟内不会再派同一行
+    const claim = await rest(
+      plan.updated_at ? `${planFilter}&updated_at=eq.${encodeURIComponent(plan.updated_at)}` : planFilter,
+      { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ last_recheck_at: new Date().toISOString() }) },
+    ).catch(() => undefined);
+    const claimed = claim?.ok ? await claim.json().catch(() => []) as unknown[] : [];
+    if (!Array.isArray(claimed) || claimed.length === 0) return new Response("gen: plan changed", { status: 200 });
+    const work = generateCloudDay({ rest, payloadKey, userId, characterId, planDate, planFilter, plan, context, kit, nowMs }).catch(() => undefined);
+    const edgeRuntime = (globalThis as { EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void } }).EdgeRuntime;
+    if (edgeRuntime?.waitUntil) edgeRuntime.waitUntil(work);
+    else await work;
+    return new Response("gen: started", { status: 200 });
+  }
   const gate = (key: keyof typeof GATE_DEF): number => {
     const value = Number(context[key]);
     return Number.isFinite(value) && value >= 0 ? value : GATE_DEF[key];

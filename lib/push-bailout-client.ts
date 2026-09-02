@@ -28,6 +28,7 @@ import {
     type IdleReconnectRule,
 } from "./idle-reconnect-storage";
 import { loadCharacters } from "./character-storage";
+import type { CustomAppPromptProfile } from "./custom-app-types";
 import type { RegexConfig } from "./settings-types";
 import type { LLMMessage } from "./llm-prompt-assembler";
 
@@ -329,7 +330,7 @@ export async function armFollowUpBailout(
 /** 通用预约上传：组装快照 → POST 服务端任务。返回是否成功。 */
 async function postBailoutJob(input: {
     triggerKey: string;
-    kind: "followup" | "reply_bailout" | "timed_task";
+    kind: "followup" | "reply_bailout" | "timed_task" | "template";
     executeAtMs: number;
     request: Pick<LlmRequestPayload, "url" | "headers" | "body" | "providerKind">;
     notifyTitle: string;
@@ -537,6 +538,64 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
         return posted ? { ok: true } : { ok: false, reason: "服务端预约接口没有确认成功" };
     } catch (err) {
         console.warn("[PushBailout] timed wake arm failed:", err);
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+}
+
+export const TEMPLATE_BAILOUT_TTL_MS = 7 * 24 * 3600_000;
+
+/**
+ * 模板预约：把一份完整的提示词请求冻在服务端，不到点发送，只给云函数当「换掉最后一条用户消息再调用」的凭据。
+ * 自定义 APP 的云端生成（如挂念在浏览器关着时生成TA的一天）靠它拿到和本地一字不差的人设/记忆/预设。
+ * 同一 triggerKey 重复冻结即覆盖；7 天不续就由 push-generate 作废。
+ */
+export async function armTemplateBailout(input: {
+    triggerKey: string;
+    session: ChatSession;
+    history: ChatMessage[];
+    appId: string;
+    appTags: string[];
+    promptProfile?: CustomAppPromptProfile;
+    extraWorldBookIds?: string[];
+    worldBookActivationContext?: string;
+    activateAllWorldBooks?: boolean;
+}): Promise<BailoutArmResult> {
+    if (!bailoutEnabled()) return { ok: false, reason: "当前环境不支持服务端离线预约" };
+    try {
+        if (!(await hasAccountPushSubscription())) return { ok: false, reason: "当前账号没有可用的离线推送订阅" };
+        const { llmMessages, character, config, preset, regexes, userIdentity } = await buildChatPromptMessages(
+            input.session,
+            input.history,
+            {
+                appId: input.appId,
+                appTags: input.appTags,
+                promptProfile: input.promptProfile,
+                extraWorldBookIds: input.extraWorldBookIds,
+                worldBookActivationContext: input.worldBookActivationContext,
+                activateAllWorldBooks: input.activateAllWorldBooks,
+            },
+        );
+        const request = buildProviderRequest(config, preset, toLlmRequestMessages(llmMessages));
+        const posted = await postBailoutJob({
+            triggerKey: input.triggerKey,
+            kind: "template",
+            executeAtMs: Date.now() + TEMPLATE_BAILOUT_TTL_MS,
+            request,
+            notifyTitle: character.name,
+            notifyCharacterId: character.id,
+            merge: {
+                sessionId: input.session.id,
+                regexes,
+                characterName: character.name,
+                userName: userIdentity?.name ?? "用户",
+                appId: input.appId,
+                appTags: input.appTags,
+                template: true,
+            },
+        });
+        return posted ? { ok: true } : { ok: false, reason: "服务端预约接口没有确认成功" };
+    } catch (err) {
+        console.warn("[PushBailout] template arm failed:", err);
         return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
 }

@@ -691,6 +691,12 @@ Deno.serve(async (req: Request) => {
     const payload = JSON.parse(await decryptPayload(job.payload, payloadKey)) as JobPayload;
     let shortcutStoragePath = "";
 
+    // 模板预约（push.freeze）只是给云函数借提示词用的，到点即作废，永远不生成。
+    if (job.kind === "template") {
+      await finish("done", "template expired");
+      return;
+    }
+
     if (job.kind === "shortcut_resume" && payload.shortcut) {
       const commandResponse = await rest(
         `push_shortcut_commands?id=eq.${encodeURIComponent(payload.shortcut.commandId)}`
