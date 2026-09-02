@@ -6,9 +6,9 @@ export default {
     id: "affection-ledger",
     name: "好感与关系",
     apiVersion: 1,
-    version: "1.1.0",
+    version: "1.2.0",
     author: "自制",
-    description: "角色回复里自带心里话与好感变化量，插件累加成慢变的好感；关系只在转折点经你确认才变。区间、关系阶段、提示词、数值都在面板里改。",
+    description: "角色回复里自带心里话与好感变化量，插件累加成慢变的好感；关系由TA按人设自己定，之后只在转折点经你确认才变。区间、关系阶段、提示词、数值都在面板里改。",
     permissions: ["chat.read", "chat.write", "ui", "storage"],
     settings: [
       { key: "showThought", label: "气泡下显示心里话（折叠）", type: "boolean", default: true },
@@ -23,8 +23,10 @@ export default {
       startScore: 10, maxUp: 3, maxDown: 3, dailyCap: 4, decayAfterDays: 3, decayPerDay: 1,
       pThought: "第一行起是心里话：回复前一瞬真实的念头、潜台词、没说出口的情绪、对这句话的第一反应。一两句，第一人称，不复述正文，不写任何数字。",
       pDelta: "好感 变化|理由 —— 单独一行。这一轮你对TA的感觉变了多少：-{{maxDown}} 到 +{{maxUp}} 之间的数，可以带小数（如 +0.5）。多数轮次是 0 或 ±1 以内；只有特别打动或特别伤人才到更大。理由 12 字内写具体的事（如「记得我讨厌香菜」），不写「聊得开心」这种空话。你累、忙、心情差的时候更难被打动。",
-      pRelation: "关系→新关系|理由 —— 单独一行，只在两人关系真的发生转折时（表白被接受、说开了、决定不再联系、和好）才写；平时绝对不写这一行。可选的关系：{{stages}}。",
+      pRelation: "关系→新关系|理由 —— 单独一行，只在两人关系真的发生转折时（表白被接受、说开了、决定不再联系、和好）才写；平时绝对不写这一行。关系按你们的人设写，12 字内；常见的有 {{stages}}，不合适就自己写（如 兄妹、青梅竹马、上司下属）。",
+      pRelationInit: "两人的关系还没定：这一轮必须在 [内心] 里写一行 关系→xxx|理由，按你的人设和你们之间实际的关系写（如 兄妹、青梅竹马、同事、刚认识），12 字内。",
       pStance: "你现在对TA：{{tier}}（{{tierHint}}）；两人现在的关系：{{relation}}。说话的分寸按这个来，不要越过这个关系该有的界限，也不要冷淡得不像这个关系。",
+      pStanceInit: "你现在对TA：{{tier}}（{{tierHint}}）。你们的关系按人设来。",
     };
     const cfg = () => {
       const saved = ctx.system.storage.get("cfg") || {};
@@ -47,7 +49,7 @@ export default {
     const stages = () => String(cfg().stages).split("\n").map((s) => s.trim()).filter(Boolean);
     const fill = (tpl, st) => String(tpl)
       .replace(/\{\{tier\}\}/g, st.tier).replace(/\{\{tierHint\}\}/g, tierOf(st.score).hint || "")
-      .replace(/\{\{relation\}\}/g, st.relation).replace(/\{\{score\}\}/g, String(st.score))
+      .replace(/\{\{relation\}\}/g, st.relation || "还没定，按人设来").replace(/\{\{score\}\}/g, String(st.score))
       .replace(/\{\{maxUp\}\}/g, String(num("maxUp"))).replace(/\{\{maxDown\}\}/g, String(num("maxDown"))).replace(/\{\{maxStep\}\}/g, String(Math.max(num("maxUp"), num("maxDown")))).replace(/\{\{stages\}\}/g, stages().join("、"));
 
     function charOf(sessionId) {
@@ -61,7 +63,7 @@ export default {
       const score = Number.isFinite(Number(base.score)) ? Number(base.score) : num("startScore");
       return {
         score, tier: tierOf(score).name,
-        relation: String(base.relation || stages()[0] || "刚认识"),
+        relation: String(base.relation || ""),
         updatedAt: Number(base.updatedAt) || 0,
         todayDate: String(base.todayDate || ""), todayDelta: Number(base.todayDelta) || 0,
         history: Array.isArray(base.history) ? base.history : [],
@@ -121,9 +123,9 @@ export default {
         "[内心]",
         fill(c.pThought, st),
         fill(c.pDelta, st),
-        fill(c.pRelation, st),
+        fill(st.relation ? c.pRelation : c.pRelationInit, st),
         "[/内心]",
-        fill(c.pStance, st),
+        fill(st.relation ? c.pStance : c.pStanceInit, st),
       ].filter(Boolean).join("\n");
       return p;
     });
@@ -147,7 +149,12 @@ export default {
       if (mr) {
         pend.relTo = mr[1].trim().slice(0, 12); pend.relReason = (mr[2] || "").trim().slice(0, 40);
         const st = load(cid);
-        if (pend.relTo && pend.relTo !== st.relation) {
+        if (pend.relTo && !st.relation) { // 第一次是TA按人设定的，不用确认
+          st.relationHistory.push({ at: Date.now(), from: "", to: pend.relTo, reason: pend.relReason || "TA自己定的" });
+          st.relation = pend.relTo;
+          save(cid, st);
+          ctx.ui.toast("TA说你们是「" + pend.relTo + "」", { durationMs: 4000 });
+        } else if (pend.relTo && pend.relTo !== st.relation) {
           st.pendingRelation = { to: pend.relTo, reason: pend.relReason, at: Date.now() };
           save(cid, st);
           ctx.ui.toast("关系可能变了：" + pend.relTo + "（去好感面板确认）", { durationMs: 4000 });
@@ -352,7 +359,7 @@ export default {
     function heroHtml(ch, st) {
       const tier = tierOf(st.score);
       const stg = stages();
-      const list = stg.includes(st.relation) ? stg : stg.concat([st.relation]);
+      const list = !st.relation || stg.includes(st.relation) ? stg : stg.concat([st.relation]);
       const idx = list.indexOf(st.relation);
       const R = 44, C = 2 * Math.PI * R;
       const ava = ch && ch.avatar ? `<img src="${esc(ch.avatar)}" alt="">` : esc((ch && ch.name || "?").slice(0, 1));
@@ -366,7 +373,7 @@ export default {
           </div>
           <div class="afl-who">
             <p class="afl-name">${esc(ch ? ch.name : "TA")}</p>
-            <div class="afl-pills"><span class="afl-pill"><i></i>${esc(tier.name)}</span><span class="afl-pill plain">${esc(st.relation)}</span></div>
+            <div class="afl-pills"><span class="afl-pill"><i></i>${esc(tier.name)}</span><span class="afl-pill plain">${esc(st.relation || "关系还没定")}</span></div>
             <div class="afl-big"><b>${st.score}</b><small>/ 100</small><em>${capNote}</em></div>
           </div>
         </div>
@@ -379,7 +386,7 @@ export default {
     function statusHtml(cid, st) {
       const tier = tierOf(st.score);
       const stg = stages();
-      const chips = (stg.includes(st.relation) ? stg : [st.relation].concat(stg)).map((s) => `<button class="afl-chip ${s === st.relation ? "on" : ""}" data-rel="${esc(s)}">${esc(s)}</button>`).join("")
+      const chips = (!st.relation || stg.includes(st.relation) ? stg : [st.relation].concat(stg)).map((s) => `<button class="afl-chip ${s === st.relation ? "on" : ""}" data-rel="${esc(s)}">${esc(s)}</button>`).join("")
         + `<button class="afl-chip ghost" data-a="customRel">＋ 手填</button>`;
       return `
         ${presenceCard(cid)}
@@ -392,6 +399,8 @@ export default {
         <div class="afl-card"><h4>此刻的分寸</h4><div class="afl-quote">${esc(tier.hint || "这一档还没写分寸提示")}</div><div class="afl-note"><span class="dot"></span>这段会注进提示词，告诉TA该怎么对你</div></div>
         <div class="afl-card"><h4>关系</h4><div class="afl-chips">${chips}</div>
           <div class="afl-inline" data-customrel hidden><input class="afl-input" type="text" data-k="relText" placeholder="自定义关系，12 字内" maxlength="12"><button class="afl-btn pri" data-a="saveRelText">确定</button></div>
+          <div class="afl-note"><span class="dot"></span>${st.relation ? "换了角色卡或想重来，点「让TA重新定」，下一轮TA按人设自己说" : "还没定：下一轮聊天TA会按人设自己说是什么关系"}</div>
+          ${st.relation ? `<div class="afl-inline"><button class="afl-btn" data-a="askRel">让TA重新定</button></div>` : ""}
         </div>
         <div class="afl-card"><h4>手动调整</h4><div class="afl-inline" style="margin-top:0">
           <div class="afl-step"><button data-a="minus">−</button><span>${st.score}</span><button data-a="plus">＋</button></div>
@@ -402,7 +411,7 @@ export default {
           <div class="afl-line"><div><div class="l">心里话里显示好感变化</div><div class="h">关掉就只看心里话</div></div>${sw("showDelta", bool("showDelta", true))}</div>
         </div>
         <div class="afl-card"><h4>最近变化</h4><ul class="afl-tl">${st.history.slice().reverse().slice(0, 12).map((h) => `<li class="${h.delta > 0 ? "up" : h.delta < 0 ? "down" : "zero"}"><span class="d">${h.delta > 0 ? "+" : ""}${h.delta}</span><span class="w">${esc(h.reason || "")}</span><span class="t">${fmt(h.at)}</span></li>`).join("") || "<li class='afl-empty'>还没有记录，聊两句就有了</li>"}</ul>
-          ${st.relationHistory.length ? `<div class="afl-path">关系走过：${st.relationHistory.map((r) => esc(r.from) + " → <b>" + esc(r.to) + "</b>").join("，")}</div>` : ""}
+          ${st.relationHistory.length ? `<div class="afl-path">关系走过：${st.relationHistory.map((r) => esc(r.from || "没定") + " → <b>" + esc(r.to || "没定") + "</b>").join("，")}</div>` : ""}
         </div>
         <div class="afl-foot"><button class="afl-btn danger" data-a="reset">重置这个角色</button></div>`;
     }
@@ -439,8 +448,10 @@ export default {
         <div class="afl-card"><h4>提示词</h4>
           ${ta("pThought", "心里话怎么写", "", 3)}
           ${ta("pDelta", "好感怎么判", "占位：{{maxUp}} {{maxDown}}", 4)}
+          ${ta("pRelationInit", "关系还没定时怎么让TA定", "第一轮用；TA写的关系直接采用，不用确认", 2)}
           ${ta("pRelation", "关系转折怎么判", "占位：{{stages}}", 3)}
           ${ta("pStance", "分寸怎么说", "占位：{{tier}} {{tierHint}} {{relation}} {{score}}", 3)}
+          ${ta("pStanceInit", "关系还没定时分寸怎么说", "", 2)}
         </div>
         <div class="afl-foot"><button class="afl-btn" data-a="resetCfg">恢复默认</button><button class="afl-btn pri" data-a="saveCfg">保存</button></div>`;
     }
@@ -485,6 +496,7 @@ export default {
             const s = load(cid);
             if (a === "accept" && s.pendingRelation) { s.relationHistory.push({ at: Date.now(), from: s.relation, to: s.pendingRelation.to, reason: s.pendingRelation.reason }); s.relation = s.pendingRelation.to; s.pendingRelation = null; }
             if (a === "dismiss") s.pendingRelation = null;
+            if (a === "askRel") { s.relationHistory.push({ at: Date.now(), from: s.relation, to: "", reason: "让TA重新定" }); s.relation = ""; s.pendingRelation = null; ctx.ui.toast("下一轮聊天TA会自己说"); }
             if (a === "saveRelText") {
               const v = el.querySelector("[data-k=relText]").value.trim();
               if (v && v !== s.relation) { s.relationHistory.push({ at: Date.now(), from: s.relation, to: v, reason: "手动改" }); s.relation = v; }
