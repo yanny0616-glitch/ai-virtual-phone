@@ -6,7 +6,7 @@ export default {
     id: "affection-ledger",
     name: "好感与关系",
     apiVersion: 1,
-    version: "1.4.0",
+    version: "1.4.1",
     author: "自制",
     description: "角色回复里自带心里话与好感变化量，插件累加成慢变的好感；关系按角色各自存，由TA按人设自己定，转折时可选经你确认或TA自己改。区间、提示词、数值都在面板里改。",
     permissions: ["chat.read", "chat.write", "ui", "storage"],
@@ -182,10 +182,12 @@ export default {
 
     // ── 气泡下：默认只有一个小折叠头，点开才看 ──
     ctx.ui.injectCSS(`
-      .afl-fold{display:inline-flex;align-items:center;gap:5px;margin-top:4px;padding:2px 9px 2px 7px;border-radius:999px;font-size:11px;line-height:18px;color:#d94f7c;background:rgba(217,79,124,.08);cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
-      .afl-fold:active{background:rgba(217,79,124,.16)}
-      .afl-fold b{font-weight:600}
-      .afl-fold i{font-style:normal;opacity:.6;font-size:10px}
+      .afl-fold{display:inline-flex;align-items:center;gap:6px;max-width:70%;min-width:0;margin-top:2px;padding:2px 0;color:var(--c-icon,#8e8e93);font-size:calc(12.5px*var(--app-text-scale,1));line-height:1.4;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
+      .afl-fold:active{opacity:.65}
+      .afl-fold .ic{flex:0 0 auto;opacity:.8;font-size:.95em}
+      .afl-fold .t{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .afl-fold .cv{flex:0 0 auto;opacity:.8;transition:transform .15s ease}
+      .afl-fold.open .cv{transform:rotate(90deg)}
       .afl-body{margin-top:6px;max-width:320px;padding:10px 12px 9px;border-radius:14px;border-left:3px solid #d94f7c;background:rgba(217,79,124,.06);font-size:12.5px;line-height:1.55;color:inherit}
       .afl-body .hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;font-size:10.5px;letter-spacing:.5px;opacity:.6}
       .afl-body .hd .lv{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:999px;background:rgba(217,79,124,.12);color:#d94f7c;opacity:1;font-weight:600;letter-spacing:0}
@@ -197,7 +199,6 @@ export default {
       .afl-body .tag.down{background:rgba(92,107,192,.12);color:#5c6bc0;opacity:1}
       .afl-body .tag.rel{background:rgba(150,90,220,.10);color:#8a5cd6;opacity:1}
       @media (prefers-color-scheme:dark){
-        .afl-fold{color:#f2a3bd;background:rgba(242,163,189,.12)}
         .afl-body{background:rgba(242,163,189,.08);border-left-color:#f2a3bd}
         .afl-body .hd .lv{color:#f2a3bd;background:rgba(242,163,189,.14)}
         .afl-body .tag{background:rgba(255,255,255,.07)}
@@ -330,7 +331,9 @@ export default {
       const render = () => {
         const open = opened.has(m.id);
         const showD = bool("showDelta", true);
-        fold.innerHTML = `💭 <b>心里话</b>${showD && pend.delta ? `<i>${pend.delta > 0 ? "+" : ""}${pend.delta}</i>` : ""}<i>${open ? "收起" : ""}</i>`;
+        const preview = String(pend.thought || "心里话").split("\n")[0].trim().slice(0, 40);
+        fold.classList.toggle("open", open);
+        fold.innerHTML = `<span class="ic">💭</span><span class="t">${esc(preview)}</span><span class="cv">›</span>`;
         body.hidden = !open;
         if (!open) return;
         const hasScore = Number.isFinite(Number(pend.score));
