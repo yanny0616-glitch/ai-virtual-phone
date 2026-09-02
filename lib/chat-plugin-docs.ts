@@ -138,7 +138,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 - \`ctx.ui.toast(text, opts?)\` 聊天顶部轻提示，默认约 2.4s 消失。做"识别中/加载中"这类进行中提示时传 \`{ durationMs: 0 }\` 让它常驻，用返回的 \`close()\` 在完成时手动关闭：\`const t = ctx.ui.toast("处理中…", { durationMs: 0 }); try { …await… } finally { t.close(); }\`
 - \`ctx.ui.slot(坑位名, (el, props) => { ...; return 可选清理函数 })\` —— 认领一块 **React 不管辖的裸 DOM 容器**，随便渲染：
   - "chat.header"：聊天标题栏下方（props: { sessionId, isGroup }）
-  - "chat.inputToolbar"：输入栏"+"面板下方（props: { isGroup }）
+  - "chat.inputToolbar"：输入栏"+"面板下方（props: { sessionId, isGroup }）
   - "message.footer"：每条文本气泡下方（props: { sessionId, message }）——注意会被多条消息各调用一次
   - "settings.section"：插件管理页的自定义设置区
 - \`ctx.ui.messageAction({ id, label, filter?, onSelect })\` —— 消息长按菜单加一项；onSelect(msg, { updateMessage, toast })

@@ -601,6 +601,7 @@ function normalizeCustomPanelHeight(value: unknown): string | undefined {
 const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     characterName: string;
     characterId: string;
+    sessionId: string;
     stickerCharacterIds?: string[];
     isGroup: boolean;
     isSpectator: boolean;
@@ -632,6 +633,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 }>(function ChatTextInputBar({
     characterName,
     characterId,
+    sessionId,
     stickerCharacterIds,
     isGroup,
     isSpectator,
@@ -894,7 +896,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                 </div>
             )}
             {showPlusMenu && (
-                <ChatPluginSlot name="chat.inputToolbar" slotProps={{ isGroup }} className="chat-plugin-input-toolbar" />
+                <ChatPluginSlot name="chat.inputToolbar" slotProps={{ sessionId, isGroup }} className="chat-plugin-input-toolbar" />
             )}
 
             {showEmojiPanel && (
@@ -6265,6 +6267,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 characterId={session.contactId}
 	                stickerCharacterIds={session.isGroup ? session.participantIds : undefined}
 	                isGroup={!!session.isGroup}
+	                sessionId={session.id}
 	                isSpectator={!!session.isGroup && !!session.isSpectator}
 	                muteUntilMs={session.isGroup && session.groupMutes?.[GROUP_SELF_KEY] ? new Date(session.groupMutes[GROUP_SELF_KEY]).getTime() : 0}
 	                isGenerating={isGenerating}

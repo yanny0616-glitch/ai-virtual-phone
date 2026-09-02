@@ -291,7 +291,7 @@ export default {
       if (props.isGroup) return;
       const b = document.createElement("button");
       b.type = "button"; b.className = "afl-tool"; b.textContent = "❤ 好感与关系";
-      b.onclick = () => openPanel();
+      b.onclick = () => openPanel(props.sessionId || currentSessionId);
       el.appendChild(b);
     });
     // 挂念写进变量池的此刻快照（presence）；没装挂念就没有这一行
@@ -389,9 +389,9 @@ export default {
         </div>
         <div class="afl-foot"><button class="afl-btn" data-a="resetCfg">恢复默认</button><button class="afl-btn pri" data-a="saveCfg">保存</button></div>`;
     }
-    function openPanel() {
-      const cid = charOf(currentSessionId);
-      if (!cid) { ctx.ui.toast("先进一个单聊"); return; }
+    function openPanel(sessionId) {
+      const cid = charOf(sessionId);
+      if (!cid) { ctx.ui.toast("这个面板只在单聊里用"); return; }
       const ch = ctx.data.characters.get(cid);
       let tab = "status";
       ctx.ui.openModal((el, api) => {
