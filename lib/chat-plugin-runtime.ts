@@ -447,7 +447,9 @@ class ChatPluginRuntime {
                 openModal: (mount) => {
                     const overlay = document.createElement("div");
                     overlay.dataset.chatPlugin = pluginId;
-                    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45)";
+                    // 桌面端把浮层关在手机壳里，不然遮罩铺满整个浏览器窗口、浮层按窗口高度撑开
+                    const shell = document.querySelector<HTMLElement>(".phone-shell");
+                    overlay.style.cssText = `position:${shell ? "absolute" : "fixed"};inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45)`;
                     const content = document.createElement("div");
                     // 默认卡片外观，插件可在 mount 里覆盖任意样式
                     content.style.cssText = "background:var(--c-card-bg,#fff);color:var(--c-text,#111);border-radius:16px;width:min(560px,100%);max-height:88vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.28)";
@@ -459,7 +461,7 @@ class ChatPluginRuntime {
                     };
                     const close = track(doClose); // once-guard + 插件禁用时自动关闭
                     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
-                    document.body.appendChild(overlay);
+                    (shell ?? document.body).appendChild(overlay);
                     try {
                         userCleanup = mount(content, { close });
                     } catch (e) {

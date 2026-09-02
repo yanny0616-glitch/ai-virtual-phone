@@ -177,10 +177,10 @@ export default {
       .afl-body .d.up{color:#d81b60}.afl-body .d.down{color:#5c6bc0}
 
       .afl-sheet{--rose:#d94f7c;--rose-2:#f2a3bd;--rose-soft:rgba(217,79,124,.10);--ink:#2a2226;--mute:rgba(42,34,38,.55);--line:rgba(42,34,38,.09);--paper:#fffaf7;--card:#fff;
-        width:min(94vw,400px);max-height:86vh;display:flex;flex-direction:column;border-radius:28px;overflow:hidden;background:var(--paper);color:var(--ink);font-size:13px;line-height:1.5;
+        width:min(100%,400px);max-height:100%;display:flex;flex-direction:column;border-radius:28px;overflow:hidden;background:var(--paper);color:var(--ink);font-size:13px;line-height:1.5;
         box-shadow:0 24px 60px rgba(60,20,40,.28);-webkit-font-smoothing:antialiased}
       .afl-sheet *{box-sizing:border-box}
-      .afl-hero{position:relative;padding:22px 20px 16px;overflow:hidden;background:radial-gradient(120% 90% at 10% 0%,#ffe4ec 0%,rgba(255,228,236,0) 60%),radial-gradient(90% 80% at 100% 10%,#efe1ff 0%,rgba(239,225,255,0) 55%),linear-gradient(180deg,#fff6f9 0%,#fffaf7 100%)}
+      .afl-hero{position:relative;flex:0 0 auto;padding:22px 20px 16px;overflow:hidden;background:radial-gradient(120% 90% at 10% 0%,#ffe4ec 0%,rgba(255,228,236,0) 60%),radial-gradient(90% 80% at 100% 10%,#efe1ff 0%,rgba(239,225,255,0) 55%),linear-gradient(180deg,#fff6f9 0%,#fffaf7 100%)}
       .afl-hero::before{content:"";position:absolute;right:-40px;top:-50px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(217,79,124,.16),rgba(217,79,124,0) 70%)}
       .afl-close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;border:0;background:rgba(42,34,38,.06);color:var(--ink);font-size:18px;line-height:30px;text-align:center;cursor:pointer}
       .afl-top{display:flex;align-items:center;gap:16px;position:relative}
@@ -207,7 +207,7 @@ export default {
       .afl-journey li.past b{border-color:var(--rose-2);background:var(--rose-2)}
       .afl-journey li.now b{border-color:var(--rose);background:var(--rose);box-shadow:0 0 0 4px rgba(217,79,124,.15)}
       .afl-journey li.now{color:var(--rose);font-weight:700}
-      .afl-tabs{display:flex;gap:4px;margin:14px 16px 0;padding:3px;border-radius:14px;background:rgba(42,34,38,.05)}
+      .afl-tabs{flex:0 0 auto;display:flex;gap:4px;margin:14px 16px 0;padding:3px;border-radius:14px;background:rgba(42,34,38,.05)}
       .afl-tabs button{flex:1;padding:8px 0;border-radius:11px;border:0;background:transparent;color:var(--mute);font-size:12.5px;font-weight:600;cursor:pointer}
       .afl-tabs button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.08)}
       .afl-scroll{overflow:auto;padding:12px 16px 20px;flex:1 1 auto;min-height:0}
@@ -443,7 +443,8 @@ export default {
       const ch = ctx.data.characters.get(cid);
       let tab = "status";
       ctx.ui.openModal((el, api) => {
-        el.style.cssText = "background:transparent;box-shadow:none;border-radius:0;width:auto;max-height:none;overflow:visible";
+        // 宿主给的容器只当透明壳，让底页自己做遮罩的直接子项，高度按遮罩算而不是按窗口
+        el.style.cssText = "display:contents";
         const paint = () => {
           const st = settleDecay(cid, load(cid));
           el.innerHTML = `<div class="afl-sheet">

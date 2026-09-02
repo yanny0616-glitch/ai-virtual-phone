@@ -144,7 +144,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 - \`ctx.ui.messageAction({ id, label, filter?, onSelect })\` —— 消息长按菜单加一项；onSelect(msg, { updateMessage, toast })
 - \`ctx.ui.messageKind(kind, (el, msg) => {})\` —— 注册自定义消息类型；配合 \`ctx.data.messages.push({ ..., mediaType: "plugin:" + kind, mediaData: {...} })\` 发出由你渲染的卡片消息
 - \`ctx.ui.injectCSS(css)\` —— 注入全局样式（禁用自动移除）
-- \`ctx.ui.openModal((el, { close }) => { ... })\` —— 打开一个**插件完全掌控的浮层**：宿主给全屏遮罩 + 一块居中裸容器（默认卡片外观，可覆盖），你在里面自由渲染任意界面（表单、按钮、列表都行）。点遮罩空白处或调 \`close()\` 关闭；插件禁用时自动关。适合做"配置浮层""详情弹窗"等独立界面，摆脱静态设置表单的框框。
+- \`ctx.ui.openModal((el, { close }) => { ... })\` —— 打开一个**插件完全掌控的浮层**：宿主给全屏遮罩 + 一块居中裸容器（默认卡片外观，可覆盖），你在里面自由渲染任意界面（表单、按钮、列表都行）。点遮罩空白处或调 \`close()\` 关闭；插件禁用时自动关。适合做"配置浮层""详情弹窗"等独立界面，摆脱静态设置表单的框框。浮层挂在手机壳内部（桌面端也只占手机那块），容器是遮罩的 flex 子项；想自己控制高度，把容器设成 \`display:contents\`，再给自己的根元素 \`max-height:100%\` 加内部滚动。
 
 ## ctx.system —— 系统
 
