@@ -86,6 +86,7 @@ import {
   synthesizeCustomAppSpeech,
   updateCustomAppCard,
   writeCustomAppChatContext,
+  writeCustomAppReplyGate,
   writeCustomAppCalendar,
   writeCustomAppHistoryMessage,
   writeCustomAppCharacterState,
@@ -452,6 +453,7 @@ html, body { min-height: 100%; }
       sendCard: function(payload){ return request('chat.sendCard', payload || {}); },
       setContext: function(payload){ return request('chat.setContext', typeof payload === 'string' ? { text: payload } : (payload || {})); },
       clearContext: function(payload){ return request('chat.clearContext', payload || {}); },
+      setReplyGate: function(payload){ return request('chat.setReplyGate', payload || {}); },
       updateCard: function(payload){ return request('chat.updateCard', payload || {}); },
       writeHistory: function(payload){ return request('chat.history', payload || {}); },
       pushHistory: function(payload){ return request('chat.history', payload || {}); },
@@ -1110,7 +1112,7 @@ export function CustomAppRunner({
           media: ["pick", "save", "put", "get", "revoke", "delete"],
           characters: ["list", "get", "readState", "writeState", "readRelations"],
           usage: ["readDaily", "readLogs", "readLogDetail"],
-          chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState", "setContext", "clearContext"],
+          chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState", "setContext", "clearContext", "setReplyGate"],
           memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
           notifications: ["create", "list", "markRead", "markAllRead", "getBadge", "setBadge", "incrementBadge", "clearBadge"],
           tasks: ["schedule", "list", "cancel"],
@@ -1752,6 +1754,11 @@ export function CustomAppRunner({
       requirePermission("chat.context");
       dropCustomAppChatContext(app, record);
       return { ok: true };
+    }
+
+    if (action === "chat.setReplyGate") {
+      requirePermission("chat.context");
+      return { ok: true, ...writeCustomAppReplyGate(app, record) };
     }
 
     if (action === "chat.updateCard") {

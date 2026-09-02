@@ -12,6 +12,7 @@ import {
   clearCustomAppChatContext,
   setCustomAppChatContext,
 } from "./custom-app-chat-context";
+import { normalizeReplyGate, setCustomAppReplyGate } from "./chat-reply-gate";
 import { buildCustomAppChatTags } from "./custom-app-tags";
 import { hydrateKvDb } from "./kv-db";
 import { loadCharacters } from "./character-storage";
@@ -168,6 +169,7 @@ const HOST_ACTION_PERMISSIONS: Record<string, CustomAppPermission[]> = {
   "chat.card": ["chat.sendCard"],
   "chat.setContext": ["chat.context"],
   "chat.clearContext": ["chat.context"],
+  "chat.setReplyGate": ["chat.context"],
   "chat.history": ["chat.write", "chat.sendMessage"],
   "chat.message": ["chat.write", "chat.sendMessage"],
   "chat.sendMessage": ["chat.write", "chat.sendMessage"],
@@ -1672,6 +1674,14 @@ export function writeCustomAppChatContext(app: InstalledCustomApp, record: Recor
   return { characterId, length: text.length };
 }
 
+export function writeCustomAppReplyGate(app: InstalledCustomApp, record: Record<string, unknown>): { characterId: string; active: boolean } {
+  const characterId = cleanText(record.characterId, 160);
+  if (!characterId) throw new Error("chat.setReplyGate 缺少 characterId。");
+  const gate = normalizeReplyGate(record.gate);
+  setCustomAppReplyGate(app.id, characterId, gate);
+  return { characterId, active: !!gate };
+}
+
 export function dropCustomAppChatContext(app: InstalledCustomApp, record: Record<string, unknown>): { ok: true } {
   clearCustomAppChatContext(
     app.id,
@@ -2468,6 +2478,8 @@ export async function executeCustomAppHostAction(
       return writeCustomAppChatContext(app, payload);
     case "chat.clearContext":
       return dropCustomAppChatContext(app, payload);
+    case "chat.setReplyGate":
+      return writeCustomAppReplyGate(app, payload);
     case "chat.updateCard":
       return updateCustomAppCard(app, payload);
     case "chat.history":

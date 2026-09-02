@@ -63,6 +63,7 @@ import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
+import { evaluateReplyGate, readReplyGate, readDeferredReply, writeDeferredReply } from "@/lib/chat-reply-gate";
 import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
 import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/shopping-gift-utils";
 import { settleShoppingPaymentRequest } from "@/lib/shopping-payment-request";
@@ -3881,6 +3882,47 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (shouldRunDeclineReply) await triggerReply();
     };
 
+    // 被动回复闸门：单聊里按 app（挂念）留下的作息判——睡着押到醒来再回、忙着偷空再回。
+    // 押后记录落 kv，中途离开聊天室也不丢：再进来接着等，过点了立刻补回。
+    const triggerReplyRef = useRef(triggerAIResponse);
+    triggerReplyRef.current = triggerAIResponse;
+    const deferTimerRef = useRef(0);
+    const clearDeferTimer = () => {
+        if (deferTimerRef.current) window.clearTimeout(deferTimerRef.current);
+        deferTimerRef.current = 0;
+    };
+    const armDeferredReply = (until: number) => {
+        clearDeferTimer();
+        deferTimerRef.current = window.setTimeout(() => {
+            deferTimerRef.current = 0;
+            const rec = readDeferredReply(session.id);
+            if (!rec || rec.firedAt) return;
+            writeDeferredReply(session.id, { ...rec, firedAt: Date.now() });
+            void triggerReplyRef.current();
+        }, Math.max(0, until - Date.now()));
+    };
+    const scheduleGatedReply = (text: string) => {
+        if (session.isGroup) { void triggerAIResponse(); return; }
+        const decision = evaluateReplyGate(readReplyGate(session.contactId), text);
+        if (decision.kind === "now") {
+            clearDeferTimer();
+            writeDeferredReply(session.id, decision.note ? { until: Date.now(), note: decision.note, firedAt: Date.now() } : null);
+            void triggerAIResponse();
+            return;
+        }
+        writeDeferredReply(session.id, { until: decision.until, note: decision.note });
+        setPendingGenerate(false);
+        armDeferredReply(decision.until);
+        const at = new Date(decision.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+        showChatToast(decision.reason === "sleep" ? `TA睡着了，${at} 醒来再回` : `TA正忙，${at} 左右再回`, 3000);
+    };
+    useEffect(() => {
+        const rec = readDeferredReply(session.id);
+        if (rec && !rec.firedAt) armDeferredReply(rec.until);
+        return clearDeferTimer;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session.id]);
+
     // 收起键盘（或关掉表情/加号面板）并安静 N 秒后自动触发回复，
     // 等价于替用户点一次「触发回复」。判定全在 hook 内部，配置关掉后与手动模式一致。
     useKeyboardDismissAutoSend(wrapperRef, {
@@ -3983,7 +4025,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             setPendingGenerate(true);
             // 按回复键发送：消息落库后立即触发模型回复（无论插件是否异步改写，
             // 都在消息真正写入后触发，避免回复基于旧上下文）
-            if (options?.autoReply) void triggerAIResponse();
+            if (options?.autoReply) scheduleGatedReply(currentText);
         };
 
         // 聊天插件织入点 user.beforeSend：无插件时走原同步路径，
