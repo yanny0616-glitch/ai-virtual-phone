@@ -7162,7 +7162,7 @@
   animation: chat-stream-cursor-blink 1s steps(2, start) infinite;
 }
 
-/* 插件「气泡旁边」坑位：绝对定位挂在气泡外侧，不占布局；对方消息在右、自己的在左 */
+/* 插件「气泡旁边」坑位：挂在 .chat-msg-content-wrap 上绝对定位到外侧，不占布局；对方消息在右、自己的在左 */
 .chat-plugin-message-side {
   position: absolute;
   top: 50%;
@@ -7175,7 +7175,7 @@
   white-space: nowrap;
 }
 .chat-plugin-message-side:empty { display: none; }
-.chat-bubble-role-user .chat-plugin-message-side {
+.chat-msg-wrapper[data-role="user"] .chat-plugin-message-side {
   left: auto;
   right: 100%;
   margin: 0 6px 0 0;

@@ -6027,7 +6027,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             )
                                         )}
                                         {!isSilentThought && !isEmptyBubble && <div
-                                            className={`chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%] ${isStandaloneHtmlPreview ? "chat-msg-content-wrap-html" : ""}`}
+                                            className={`chat-msg-content-wrap relative flex flex-col min-w-0 max-w-[70%] ${isStandaloneHtmlPreview ? "chat-msg-content-wrap-html" : ""}`}
                                             {...(isStandaloneHtmlPreview ? { "data-html": "true" } : {})}
                                         >
                                             {session.isGroup && msg.role !== "user" && (
@@ -6079,6 +6079,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 defaultTranslationExpanded={session.collapseBilingualTranslation !== false ? false : true}
                                             />
                                         </div>
+                                        {/* 插件「气泡旁边」坑位放在气泡外层：气泡本身 overflow:hidden，放里面会被裁掉 */}
+                                        <ChatPluginSlot name="message.side" slotProps={{ sessionId: msg.sessionId, message: msg }} className="chat-plugin-message-side" />
                                         </div>}
                                         {msg.role !== "user" && !isSilentThought && !isEmptyBubble && hasFoldedPanel && (
                                             <button

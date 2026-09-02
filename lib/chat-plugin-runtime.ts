@@ -449,7 +449,7 @@ class ChatPluginRuntime {
                     overlay.dataset.chatPlugin = pluginId;
                     // 桌面端把浮层关在手机壳里，不然遮罩铺满整个浏览器窗口、浮层按窗口高度撑开
                     const shell = document.querySelector<HTMLElement>(".phone-shell");
-                    overlay.style.cssText = `position:${shell ? "absolute" : "fixed"};inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:max(16px,calc(env(safe-area-inset-top,0px) + 8px)) 16px max(16px,calc(env(safe-area-inset-bottom,0px) + 8px));background:rgba(0,0,0,.45)`;
+                    overlay.style.cssText = `position:${shell ? "absolute" : "fixed"};inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:max(16px,calc(var(--safe-area-top,env(safe-area-inset-top,0px)) + 12px)) 16px max(16px,calc(var(--safe-area-bottom,env(safe-area-inset-bottom,0px)) + 8px));background:rgba(0,0,0,.45)`;
                     const content = document.createElement("div");
                     // 默认卡片外观，插件可在 mount 里覆盖任意样式
                     content.style.cssText = "background:var(--c-card-bg,#fff);color:var(--c-text,#111);border-radius:16px;width:min(560px,100%);max-height:100%;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.28)";

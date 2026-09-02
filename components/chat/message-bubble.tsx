@@ -131,7 +131,6 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
                 <>
                     {textBubble}
                     <ChatPluginSlot name="message.footer" slotProps={{ sessionId: msg.sessionId, message: msg }} className="chat-plugin-message-footer" />
-                    <ChatPluginSlot name="message.side" slotProps={{ sessionId: msg.sessionId, message: msg }} className="chat-plugin-message-side" />
                 </>
             );
         }
