@@ -20,13 +20,18 @@ export default {
     const DEFAULTS = {
       tiers: "0|陌生|还不熟，客气、有保留，不主动交心，不会撒娇也不会依赖\n15|熟人|聊得来的普通朋友，自然但有分寸，不说太私密的事\n35|在意|会惦记TA、会多问一句，愿意说心里话，但还留着一点面子\n60|亲近|很信任，会撒娇、会耍赖、会把坏情绪也给TA看\n80|离不开|TA是最重要的人，情绪被TA牵着走，会吃醋、会等消息",
       stages: "刚认识\n朋友\n暧昧\n恋人\n冷战\n分开了",
-      startScore: 10, maxStep: 3, dailyCap: 4, decayAfterDays: 3, decayPerDay: 1,
+      startScore: 10, maxUp: 3, maxDown: 3, dailyCap: 4, decayAfterDays: 3, decayPerDay: 1,
       pThought: "第一行起是心里话：回复前一瞬真实的念头、潜台词、没说出口的情绪、对这句话的第一反应。一两句，第一人称，不复述正文，不写任何数字。",
-      pDelta: "好感 变化|理由 —— 单独一行。这一轮你对TA的感觉变了多少：-{{maxStep}} 到 +{{maxStep}} 的整数。多数轮次是 0 或 ±1；只有特别打动或特别伤人才到更大。理由 12 字内写具体的事（如「记得我讨厌香菜」），不写「聊得开心」这种空话。你累、忙、心情差的时候更难被打动。",
+      pDelta: "好感 变化|理由 —— 单独一行。这一轮你对TA的感觉变了多少：-{{maxDown}} 到 +{{maxUp}} 之间的数，可以带小数（如 +0.5）。多数轮次是 0 或 ±1 以内；只有特别打动或特别伤人才到更大。理由 12 字内写具体的事（如「记得我讨厌香菜」），不写「聊得开心」这种空话。你累、忙、心情差的时候更难被打动。",
       pRelation: "关系→新关系|理由 —— 单独一行，只在两人关系真的发生转折时（表白被接受、说开了、决定不再联系、和好）才写；平时绝对不写这一行。可选的关系：{{stages}}。",
       pStance: "你现在对TA：{{tier}}（{{tierHint}}）；两人现在的关系：{{relation}}。说话的分寸按这个来，不要越过这个关系该有的界限，也不要冷淡得不像这个关系。",
     };
-    const cfg = () => Object.assign({}, DEFAULTS, ctx.system.storage.get("cfg") || {});
+    const cfg = () => {
+      const saved = ctx.system.storage.get("cfg") || {};
+      const c = Object.assign({}, DEFAULTS, saved);
+      if (saved.maxStep != null && saved.maxUp == null) { c.maxUp = Number(saved.maxStep) || c.maxUp; c.maxDown = Number(saved.maxStep) || c.maxDown; } // 旧配置只有一个上限
+      return c;
+    };
     const setCfg = (patch) => ctx.system.storage.set("cfg", Object.assign({}, ctx.system.storage.get("cfg") || {}, patch));
     const num = (k) => { const v = Number(cfg()[k]); return Number.isFinite(v) ? v : DEFAULTS[k]; };
     const bool = (k, d) => { const v = ctx.system.settings.get(k); return v === undefined ? d : !!v; };
@@ -43,7 +48,7 @@ export default {
     const fill = (tpl, st) => String(tpl)
       .replace(/\{\{tier\}\}/g, st.tier).replace(/\{\{tierHint\}\}/g, tierOf(st.score).hint || "")
       .replace(/\{\{relation\}\}/g, st.relation).replace(/\{\{score\}\}/g, String(st.score))
-      .replace(/\{\{maxStep\}\}/g, String(num("maxStep"))).replace(/\{\{stages\}\}/g, stages().join("、"));
+      .replace(/\{\{maxUp\}\}/g, String(num("maxUp"))).replace(/\{\{maxDown\}\}/g, String(num("maxDown"))).replace(/\{\{maxStep\}\}/g, String(Math.max(num("maxUp"), num("maxDown")))).replace(/\{\{stages\}\}/g, stages().join("、"));
 
     function charOf(sessionId) {
       const s = sessionId ? ctx.data.sessions.get(sessionId) : null;
@@ -65,7 +70,7 @@ export default {
       };
     }
     function save(cid, st) {
-      st.score = clamp(Math.round(st.score), 0, 100);
+      st.score = clamp(Math.round(st.score * 10) / 10, 0, 100);
       st.tier = tierOf(st.score).name;
       st.history = st.history.slice(-40);
       st.relationHistory = st.relationHistory.slice(-20);
@@ -85,18 +90,19 @@ export default {
       st.history.push({ at: Date.now(), delta: -drop, reason: "太久没联系" });
       return save(cid, st);
     }
+    const r1 = (v) => Math.round(v * 10) / 10;
     function applyDelta(cid, delta, reason, manual) {
       const st = load(cid);
-      const cap = num("dailyCap"), step = num("maxStep");
+      const cap = num("dailyCap"), up = num("maxUp"), down = num("maxDown");
       if (st.todayDate !== today()) { st.todayDate = today(); st.todayDelta = 0; }
-      let d = Math.round(delta);
+      let d = r1(Number(delta) || 0);
       if (!manual) {
-        d = clamp(d, -step, step);
-        if (d > 0) d = Math.max(0, Math.min(d, cap - st.todayDelta));
+        d = clamp(d, -down, up);
+        if (d > 0) d = r1(Math.max(0, Math.min(d, cap - st.todayDelta)));
       }
       if (d !== 0) {
         st.score += d;
-        if (!manual) st.todayDelta += Math.max(0, d);
+        if (!manual) st.todayDelta = r1(st.todayDelta + Math.max(0, d));
         st.history.push({ at: Date.now(), delta: d, reason: String(reason || "").slice(0, 40) });
       }
       st.updatedAt = Date.now();
@@ -124,7 +130,7 @@ export default {
 
     // ── 截标记：从正文删掉，结算好感，心里话暂存等落库时挂到消息上 ──
     const RE_BLOCK = /\[内心\]([\s\S]*?)\[\/内心\]/;
-    const RE_DELTA = /^\s*[\[（(]?好感\s*[:：]?\s*([+-]?\s*\d+)\s*[|｜：:]\s*([^\]\n]*)[\]）)]?\s*$/m;
+    const RE_DELTA = /^\s*[\[（(]?好感\s*[:：]?\s*([+-]?\s*\d+(?:\.\d+)?)\s*[|｜：:]\s*([^\]\n]*)[\]）)]?\s*$/m;
     const RE_REL = /^\s*[\[（(]?关系\s*(?:→|->|:|：)\s*([^|｜\]\n]+?)\s*(?:[|｜]\s*([^\]\n]*))?[\]）)]?\s*$/m;
     ctx.hooks.transform("llm.response", (p) => {
       if (!p.sessionId) return p;
@@ -170,90 +176,117 @@ export default {
       .afl-body .d{display:block;margin-top:3px;font-size:11px;opacity:.7}
       .afl-body .d.up{color:#d81b60}.afl-body .d.down{color:#5c6bc0}
 
-      .afl-sheet{--afl-rose:#e5527f;--afl-rose-soft:#fde8ef;--afl-ink:var(--c-text,#1c1a1f);--afl-mute:rgba(28,26,31,.55);--afl-line:rgba(28,26,31,.08);--afl-bg:var(--c-card-bg,#fff);
-        width:min(94vw,400px);max-height:84vh;display:flex;flex-direction:column;border-radius:24px;overflow:hidden;background:var(--afl-bg);color:var(--afl-ink);font-size:13px;line-height:1.5;
-        -webkit-font-smoothing:antialiased}
-      .afl-hero{position:relative;padding:18px 18px 14px;background:linear-gradient(160deg,#fff1f5 0%,#fde8ef 55%,#f6e4ff 100%);color:#1c1a1f}
-      .afl-hero .row{display:flex;align-items:center;gap:12px;padding-right:30px}
-      .afl-ava{width:52px;height:52px;border-radius:18px;flex:0 0 auto;overflow:hidden;background:#fff;box-shadow:0 4px 14px rgba(229,82,127,.18);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;color:#e5527f}
-      .afl-ava img{width:100%;height:100%;object-fit:cover}
-      .afl-name{font-size:17px;font-weight:700;letter-spacing:.2px;margin:0}
-      .afl-sub{font-size:12px;color:rgba(28,26,31,.6);margin-top:2px}
-      .afl-score{margin-left:auto;text-align:right}
-      .afl-score b{display:block;font-size:30px;font-weight:800;line-height:1;color:#e5527f;letter-spacing:-1px}
-      .afl-score i{font-style:normal;font-size:11px;color:rgba(28,26,31,.5)}
-      .afl-track{position:relative;height:10px;border-radius:6px;background:rgba(229,82,127,.14);margin:14px 0 6px;overflow:visible}
-      .afl-track>i{position:absolute;left:0;top:0;height:100%;border-radius:6px;background:linear-gradient(90deg,#f9a8c4,#e5527f);box-shadow:0 2px 8px rgba(229,82,127,.35)}
-      .afl-track>s{position:absolute;top:-2px;width:2px;height:14px;background:rgba(255,255,255,.9);border-radius:1px;text-decoration:none}
-      .afl-ticks{position:relative;height:14px;font-size:10px;color:rgba(28,26,31,.45)}
-      .afl-ticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
-      .afl-ticks span:first-child{transform:none}
-      .afl-ticks span.on{color:#e5527f;font-weight:600}
-      .afl-close{position:absolute;top:12px;right:12px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(255,255,255,.7);color:#1c1a1f;font-size:16px;line-height:28px;text-align:center;cursor:pointer}
-      .afl-tabs{display:flex;gap:4px;margin:12px 16px 0;padding:3px;border-radius:12px;background:var(--afl-line)}
-      .afl-tabs button{flex:1;padding:7px 0;border-radius:10px;border:0;background:transparent;color:var(--afl-mute);font-size:12.5px;font-weight:600;cursor:pointer}
-      .afl-tabs button.on{background:var(--afl-bg);color:var(--afl-ink);box-shadow:0 1px 4px rgba(0,0,0,.08)}
-      .afl-scroll{overflow:auto;padding:12px 16px 18px;flex:1 1 auto;min-height:0}
-      .afl-card{border:1px solid var(--afl-line);border-radius:16px;padding:12px 14px;margin:0 0 10px;background:var(--afl-bg)}
-      .afl-card.soft{background:var(--afl-rose-soft);border-color:transparent;color:#1c1a1f}
-      .afl-card h4{margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--afl-mute)}
-      .afl-presence{display:flex;gap:10px;align-items:flex-start}
-      .afl-presence .ic{font-size:18px;line-height:1.2;flex:0 0 auto}
-      .afl-presence .main{font-weight:600}
-      .afl-presence .meta{font-size:12px;color:var(--afl-mute);margin-top:2px}
-      .afl-presence .age{font-size:11px;color:var(--afl-mute);margin-top:4px}
-      .afl-chips{display:flex;flex-wrap:wrap;gap:6px}
-      .afl-chip{padding:5px 11px;border-radius:999px;border:1px solid var(--afl-line);background:transparent;color:var(--afl-ink);font-size:12px;cursor:pointer}
-      .afl-chip.on{background:#e5527f;border-color:#e5527f;color:#fff;font-weight:600}
-      .afl-chip.ghost{border-style:dashed;color:var(--afl-mute)}
-      .afl-inline{display:flex;gap:8px;align-items:center;margin-top:8px}
-      .afl-input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--afl-line);border-radius:10px;font-size:13px;background:var(--afl-bg);color:var(--afl-ink)}
-      .afl-input.num{flex:0 0 68px;text-align:center}
-      .afl-btn{padding:7px 12px;border-radius:10px;border:1px solid var(--afl-line);background:var(--afl-bg);color:var(--afl-ink);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
-      .afl-btn.pri{background:#e5527f;border-color:#e5527f;color:#fff}
-      .afl-btn.danger{color:#c62828}
+      .afl-sheet{--rose:#d94f7c;--rose-2:#f2a3bd;--rose-soft:rgba(217,79,124,.10);--ink:#2a2226;--mute:rgba(42,34,38,.55);--line:rgba(42,34,38,.09);--paper:#fffaf7;--card:#fff;
+        width:min(94vw,400px);max-height:86vh;display:flex;flex-direction:column;border-radius:28px;overflow:hidden;background:var(--paper);color:var(--ink);font-size:13px;line-height:1.5;
+        box-shadow:0 24px 60px rgba(60,20,40,.28);-webkit-font-smoothing:antialiased}
+      .afl-sheet *{box-sizing:border-box}
+      .afl-hero{position:relative;padding:22px 20px 16px;overflow:hidden;background:radial-gradient(120% 90% at 10% 0%,#ffe4ec 0%,rgba(255,228,236,0) 60%),radial-gradient(90% 80% at 100% 10%,#efe1ff 0%,rgba(239,225,255,0) 55%),linear-gradient(180deg,#fff6f9 0%,#fffaf7 100%)}
+      .afl-hero::before{content:"";position:absolute;right:-40px;top:-50px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(217,79,124,.16),rgba(217,79,124,0) 70%)}
+      .afl-close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;border:0;background:rgba(42,34,38,.06);color:var(--ink);font-size:18px;line-height:30px;text-align:center;cursor:pointer}
+      .afl-top{display:flex;align-items:center;gap:16px;position:relative}
+      .afl-ring{position:relative;width:96px;height:96px;flex:0 0 auto}
+      .afl-ring svg{position:absolute;inset:0;transform:rotate(-90deg)}
+      .afl-ring .ava{position:absolute;inset:10px;border-radius:50%;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;color:var(--rose);box-shadow:inset 0 0 0 1px rgba(42,34,38,.06)}
+      .afl-ring .ava img{width:100%;height:100%;object-fit:cover}
+      .afl-who{min-width:0;flex:1}
+      .afl-name{margin:0;font-size:20px;font-weight:700;letter-spacing:.3px;font-family:"Songti SC","Noto Serif SC",Georgia,serif}
+      .afl-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+      .afl-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;background:rgba(255,255,255,.75);border:1px solid rgba(217,79,124,.18);color:var(--rose)}
+      .afl-pill.plain{color:var(--ink);border-color:var(--line)}
+      .afl-pill i{width:6px;height:6px;border-radius:50%;background:var(--rose)}
+      .afl-big{margin-top:8px;display:flex;align-items:baseline;gap:6px}
+      .afl-big b{font-size:34px;font-weight:800;line-height:1;color:var(--rose);letter-spacing:-1.5px;font-variant-numeric:tabular-nums}
+      .afl-big small{font-size:11px;color:var(--mute)}
+      .afl-big em{font-style:normal;font-size:11px;color:var(--mute);margin-left:auto}
+      .afl-journey{position:relative;margin:18px 0 0;padding:0 2px}
+      .afl-journey .rail{position:absolute;left:8px;right:8px;top:7px;height:2px;background:var(--line)}
+      .afl-journey .rail>i{position:absolute;left:0;top:0;height:100%;background:linear-gradient(90deg,var(--rose-2),var(--rose))}
+      .afl-journey ul{list-style:none;margin:0;padding:0;display:flex;justify-content:space-between;position:relative}
+      .afl-journey li{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10.5px;color:var(--mute);width:16px;white-space:nowrap}
+      .afl-journey li b{width:16px;height:16px;border-radius:50%;background:var(--paper);border:2px solid var(--line);display:block}
+      .afl-journey li.past b{border-color:var(--rose-2);background:var(--rose-2)}
+      .afl-journey li.now b{border-color:var(--rose);background:var(--rose);box-shadow:0 0 0 4px rgba(217,79,124,.15)}
+      .afl-journey li.now{color:var(--rose);font-weight:700}
+      .afl-tabs{display:flex;gap:4px;margin:14px 16px 0;padding:3px;border-radius:14px;background:rgba(42,34,38,.05)}
+      .afl-tabs button{flex:1;padding:8px 0;border-radius:11px;border:0;background:transparent;color:var(--mute);font-size:12.5px;font-weight:600;cursor:pointer}
+      .afl-tabs button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.08)}
+      .afl-scroll{overflow:auto;padding:12px 16px 20px;flex:1 1 auto;min-height:0}
+      .afl-card{border:1px solid var(--line);border-radius:18px;padding:13px 15px;margin:0 0 10px;background:var(--card);box-shadow:0 1px 2px rgba(42,34,38,.03)}
+      .afl-card.soft{background:linear-gradient(135deg,#fff0f5,#fbe9ff);border-color:transparent}
+      .afl-card h4{margin:0 0 9px;font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--mute);display:flex;align-items:center;gap:6px}
+      .afl-card h4::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--rose)}
+      .afl-presence{display:flex;gap:12px;align-items:flex-start}
+      .afl-presence .ic{width:38px;height:38px;border-radius:12px;flex:0 0 auto;background:var(--rose-soft);display:flex;align-items:center;justify-content:center;color:var(--rose)}
+      .afl-presence .main{font-weight:600;font-size:14px}
+      .afl-presence .meta{font-size:12px;color:var(--mute);margin-top:2px;line-height:1.6}
+      .afl-presence .age{font-size:11px;color:var(--mute);margin-top:4px;opacity:.8}
+      .afl-quote{font-size:14px;line-height:1.7;font-family:"Songti SC","Noto Serif SC",Georgia,serif}
+      .afl-quote::before{content:"“";color:var(--rose);font-size:20px;line-height:0;margin-right:2px}
+      .afl-note{font-size:11.5px;color:var(--mute);margin-top:8px;display:flex;align-items:center;gap:6px}
+      .afl-note .dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--rose-2)}
+      .afl-chips{display:flex;flex-wrap:wrap;gap:7px}
+      .afl-chip{padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--paper);color:var(--ink);font-size:12px;cursor:pointer}
+      .afl-chip.on{background:var(--rose);border-color:var(--rose);color:#fff;font-weight:600;box-shadow:0 4px 12px rgba(217,79,124,.25)}
+      .afl-chip.ghost{border-style:dashed;color:var(--mute);background:transparent}
+      .afl-inline{display:flex;gap:8px;align-items:center;margin-top:10px}
+      .afl-input{flex:1;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:12px;font-size:13px;background:var(--paper);color:var(--ink)}
+      .afl-input.num{flex:0 0 74px;text-align:center;font-weight:700}
+      .afl-btn{padding:8px 14px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+      .afl-btn.pri{background:var(--rose);border-color:var(--rose);color:#fff;box-shadow:0 4px 12px rgba(217,79,124,.25)}
+      .afl-btn.danger{color:#c62828;background:transparent}
       .afl-btn:active{transform:scale(.97)}
-      .afl-step{display:inline-flex;align-items:center;border:1px solid var(--afl-line);border-radius:10px;overflow:hidden}
-      .afl-step button{width:34px;height:32px;border:0;background:transparent;color:var(--afl-ink);font-size:16px;cursor:pointer}
-      .afl-step span{min-width:36px;text-align:center;font-weight:700}
+      .afl-step{display:inline-flex;align-items:center;border-radius:12px;background:var(--rose-soft);padding:2px}
+      .afl-step button{width:36px;height:32px;border:0;border-radius:10px;background:transparent;color:var(--rose);font-size:18px;font-weight:700;cursor:pointer}
+      .afl-step button:active{background:rgba(255,255,255,.7)}
+      .afl-step span{min-width:44px;text-align:center;font-weight:800;color:var(--rose);font-variant-numeric:tabular-nums}
       .afl-pending{display:flex;flex-direction:column;gap:8px}
-      .afl-pending .t{font-weight:600}
-      .afl-pending .r{font-size:12px;color:rgba(28,26,31,.6)}
-      .afl-pending .acts{display:flex;gap:8px}
-      .afl-line{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--afl-line)}
+      .afl-pending .t{font-weight:700;font-size:14px}
+      .afl-pending .t b{color:var(--rose)}
+      .afl-pending .r{font-size:12.5px;color:var(--mute);font-family:"Songti SC","Noto Serif SC",Georgia,serif}
+      .afl-pending .acts{display:flex;gap:8px;margin-top:2px}
+      .afl-line{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
       .afl-line:first-of-type{border-top:0;padding-top:0}
-      .afl-line .l{font-size:13px}
-      .afl-line .h{font-size:11px;color:var(--afl-mute);margin-top:1px}
-      .afl-sw{position:relative;width:42px;height:24px;flex:0 0 auto}
+      .afl-line .l{font-size:13px;font-weight:600}
+      .afl-line .h{font-size:11px;color:var(--mute);margin-top:1px;font-weight:400}
+      .afl-sw{position:relative;width:44px;height:26px;flex:0 0 auto}
       .afl-sw input{opacity:0;width:0;height:0;position:absolute}
-      .afl-sw i{position:absolute;inset:0;border-radius:12px;background:rgba(28,26,31,.18);transition:background .15s}
-      .afl-sw i::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
-      .afl-sw input:checked+i{background:#e5527f}
+      .afl-sw i{position:absolute;inset:0;border-radius:13px;background:rgba(42,34,38,.16);transition:background .15s}
+      .afl-sw i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
+      .afl-sw input:checked+i{background:var(--rose)}
       .afl-sw input:checked+i::after{transform:translateX(18px)}
-      .afl-hist{list-style:none;margin:0;padding:0}
-      .afl-hist li{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--afl-line)}
-      .afl-hist li:first-child{border-top:0;padding-top:0}
-      .afl-hist .d{flex:0 0 auto;min-width:38px;text-align:center;padding:3px 6px;border-radius:8px;font-size:12px;font-weight:700;background:rgba(229,82,127,.12);color:#e5527f}
-      .afl-hist .d.down{background:rgba(92,107,192,.12);color:#5c6bc0}
-      .afl-hist .d.zero{background:var(--afl-line);color:var(--afl-mute)}
-      .afl-hist .w{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .afl-hist .t{flex:0 0 auto;font-size:11px;color:var(--afl-mute)}
-      .afl-empty{color:var(--afl-mute);font-size:12px;text-align:center;padding:6px 0}
-      .afl-path{font-size:12px;color:var(--afl-mute);margin-top:8px}
-      .afl-path b{color:var(--afl-ink);font-weight:600}
-      .afl-field{margin:0 0 10px}
-      .afl-field label{display:block;font-size:12px;font-weight:600;margin:0 0 4px}
-      .afl-field .h{font-size:11px;color:var(--afl-mute);margin:0 0 5px}
-      .afl-ta{width:100%;box-sizing:border-box;min-height:64px;padding:8px 10px;border:1px solid var(--afl-line);border-radius:10px;font-size:12px;line-height:1.5;font-family:inherit;background:var(--afl-bg);color:var(--afl-ink);resize:vertical}
-      .afl-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-      .afl-grid .cell{border:1px solid var(--afl-line);border-radius:12px;padding:8px 10px}
-      .afl-grid .cell label{display:block;font-size:11px;color:var(--afl-mute);margin-bottom:3px}
-      .afl-grid .cell input{width:100%;box-sizing:border-box;border:0;padding:0;font-size:16px;font-weight:700;background:transparent;color:var(--afl-ink)}
+      .afl-tl{list-style:none;margin:0;padding:0 0 0 14px;position:relative}
+      .afl-tl::before{content:"";position:absolute;left:3px;top:6px;bottom:6px;width:2px;background:var(--line);border-radius:1px}
+      .afl-tl li{position:relative;display:flex;align-items:center;gap:10px;padding:6px 0}
+      .afl-tl li::before{content:"";position:absolute;left:-14px;top:50%;width:8px;height:8px;margin-top:-4px;border-radius:50%;background:var(--rose-2);box-shadow:0 0 0 3px var(--card)}
+      .afl-tl li.down::before{background:#8e9bd8}
+      .afl-tl li.zero::before{background:rgba(42,34,38,.2)}
+      .afl-tl .d{flex:0 0 auto;min-width:42px;text-align:center;padding:3px 7px;border-radius:9px;font-size:12px;font-weight:800;background:var(--rose-soft);color:var(--rose);font-variant-numeric:tabular-nums}
+      .afl-tl li.down .d{background:rgba(92,107,192,.12);color:#5c6bc0}
+      .afl-tl li.zero .d{background:rgba(42,34,38,.06);color:var(--mute)}
+      .afl-tl .w{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .afl-tl .t{flex:0 0 auto;font-size:11px;color:var(--mute);font-variant-numeric:tabular-nums}
+      .afl-empty{color:var(--mute);font-size:12px;text-align:center;padding:8px 0}
+      .afl-path{font-size:12px;color:var(--mute);margin-top:10px}
+      .afl-path b{color:var(--ink);font-weight:600}
+      .afl-field{margin:0 0 12px}
+      .afl-field:last-child{margin-bottom:0}
+      .afl-field label{display:block;font-size:12.5px;font-weight:700;margin:0 0 3px}
+      .afl-field .h{font-size:11px;color:var(--mute);margin:0 0 6px}
+      .afl-ta{width:100%;min-height:68px;padding:9px 11px;border:1px solid var(--line);border-radius:12px;font-size:12px;line-height:1.55;font-family:inherit;background:var(--paper);color:var(--ink);resize:vertical}
+      .afl-ta:focus{outline:none;border-color:var(--rose-2);box-shadow:0 0 0 3px rgba(217,79,124,.12)}
+      .afl-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+      .afl-grid .cell{border:1px solid var(--line);border-radius:14px;padding:9px 12px;background:var(--paper)}
+      .afl-grid .cell label{display:block;font-size:11px;color:var(--mute);margin-bottom:2px}
+      .afl-grid .cell input{width:100%;border:0;padding:0;font-size:18px;font-weight:800;background:transparent;color:var(--rose);font-variant-numeric:tabular-nums}
+      .afl-grid .cell input:focus{outline:none}
       .afl-foot{display:flex;gap:8px;justify-content:flex-end;padding-top:4px}
       @media (prefers-color-scheme: dark){
-        .afl-sheet{--afl-mute:rgba(255,255,255,.55);--afl-line:rgba(255,255,255,.1);--afl-rose-soft:rgba(229,82,127,.16)}
-        .afl-card.soft{color:inherit}
-        .afl-pending .r{color:var(--afl-mute)}
+        .afl-sheet{--ink:#f3edf0;--mute:rgba(243,237,240,.55);--line:rgba(255,255,255,.1);--paper:#1e191c;--card:#262023;--rose-soft:rgba(217,79,124,.18)}
+        .afl-hero{background:radial-gradient(120% 90% at 10% 0%,rgba(217,79,124,.28) 0%,rgba(217,79,124,0) 60%),radial-gradient(90% 80% at 100% 10%,rgba(150,90,220,.25) 0%,rgba(150,90,220,0) 55%),var(--paper)}
+        .afl-pill{background:rgba(255,255,255,.08)}
+        .afl-ring .ava{background:#2a2327}
+        .afl-card.soft{background:linear-gradient(135deg,rgba(217,79,124,.18),rgba(150,90,220,.16))}
+        .afl-close{background:rgba(255,255,255,.1)}
       }
     `);
     const opened = new Set();
@@ -312,21 +345,35 @@ export default {
     const fmt = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
     const sw = (key, checked) => `<label class="afl-sw"><input type="checkbox" data-s="${key}" ${checked ? "checked" : ""}><i></i></label>`;
 
+    const ICON = {
+      clock: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+      moon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+    };
     function heroHtml(ch, st) {
-      const tiers = parseTiers();
       const tier = tierOf(st.score);
-      const ticks = tiers.map((t) => `<span class="${t.name === tier.name ? "on" : ""}" style="left:${t.min}%">${esc(t.name)}</span>`).join("");
-      const marks = tiers.filter((t) => t.min > 0).map((t) => `<s style="left:${t.min}%"></s>`).join("");
+      const stg = stages();
+      const list = stg.includes(st.relation) ? stg : stg.concat([st.relation]);
+      const idx = list.indexOf(st.relation);
+      const R = 44, C = 2 * Math.PI * R;
       const ava = ch && ch.avatar ? `<img src="${esc(ch.avatar)}" alt="">` : esc((ch && ch.name || "?").slice(0, 1));
+      const capNote = st.todayDate === today() && st.todayDelta ? `今天 +${st.todayDelta} / ${num("dailyCap")}` : "今天还没涨";
       return `<div class="afl-hero">
         <button class="afl-close" data-a="close" aria-label="关闭">×</button>
-        <div class="row">
-          <div class="afl-ava">${ava}</div>
-          <div><p class="afl-name">${esc(ch ? ch.name : "TA")}</p><div class="afl-sub">${esc(st.relation)} · ${esc(tier.name)}</div></div>
-          <div class="afl-score"><b>${st.score}</b><i>好感 / 100</i></div>
+        <div class="afl-top">
+          <div class="afl-ring">
+            <svg viewBox="0 0 96 96" width="96" height="96"><circle cx="48" cy="48" r="${R}" fill="none" stroke="rgba(217,79,124,.14)" stroke-width="5"/><circle cx="48" cy="48" r="${R}" fill="none" stroke="url(#aflg)" stroke-width="5" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - st.score / 100)}"/><defs><linearGradient id="aflg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f2a3bd"/><stop offset="1" stop-color="#d94f7c"/></linearGradient></defs></svg>
+            <div class="ava">${ava}</div>
+          </div>
+          <div class="afl-who">
+            <p class="afl-name">${esc(ch ? ch.name : "TA")}</p>
+            <div class="afl-pills"><span class="afl-pill"><i></i>${esc(tier.name)}</span><span class="afl-pill plain">${esc(st.relation)}</span></div>
+            <div class="afl-big"><b>${st.score}</b><small>/ 100</small><em>${capNote}</em></div>
+          </div>
         </div>
-        <div class="afl-track"><i style="width:${st.score}%"></i>${marks}</div>
-        <div class="afl-ticks">${ticks}</div>
+        <div class="afl-journey">
+          <div class="rail"><i style="width:${list.length > 1 ? (idx / (list.length - 1)) * 100 : 0}%"></i></div>
+          <ul>${list.map((n, i) => `<li class="${i < idx ? "past" : i === idx ? "now" : ""}" data-rel="${esc(n)}"><b></b><span>${esc(n)}</span></li>`).join("")}</ul>
+        </div>
       </div>`;
     }
     function statusHtml(cid, st) {
@@ -334,27 +381,26 @@ export default {
       const stg = stages();
       const chips = (stg.includes(st.relation) ? stg : [st.relation].concat(stg)).map((s) => `<button class="afl-chip ${s === st.relation ? "on" : ""}" data-rel="${esc(s)}">${esc(s)}</button>`).join("")
         + `<button class="afl-chip ghost" data-a="customRel">＋ 手填</button>`;
-      const capNote = st.todayDate === today() && st.todayDelta ? `今天已涨 ${st.todayDelta} / ${num("dailyCap")}` : "今天还没涨";
       return `
         ${presenceCard(cid)}
         ${st.pendingRelation ? `<div class="afl-card soft"><div class="afl-pending">
-          <div class="t">TA觉得关系变成了「${esc(st.pendingRelation.to)}」</div>
+          <div class="t">TA觉得，你们现在是<b>「${esc(st.pendingRelation.to)}」</b>了</div>
           ${st.pendingRelation.reason ? `<div class="r">${esc(st.pendingRelation.reason)}</div>` : ""}
           <div class="acts"><button class="afl-btn pri" data-a="accept">就是这样</button><button class="afl-btn" data-a="dismiss">没有变</button></div>
         </div></div>` : ""}
-        <div class="afl-card"><h4>分寸</h4><div>${esc(tier.hint || "（这一档还没写分寸提示）")}</div><div class="afl-path">${capNote}</div></div>
+        <div class="afl-card"><h4>此刻的分寸</h4><div class="afl-quote">${esc(tier.hint || "这一档还没写分寸提示")}</div><div class="afl-note"><span class="dot"></span>这段会注进提示词，告诉TA该怎么对你</div></div>
         <div class="afl-card"><h4>关系</h4><div class="afl-chips">${chips}</div>
           <div class="afl-inline" data-customrel hidden><input class="afl-input" type="text" data-k="relText" placeholder="自定义关系，12 字内" maxlength="12"><button class="afl-btn pri" data-a="saveRelText">确定</button></div>
         </div>
         <div class="afl-card"><h4>手动调整</h4><div class="afl-inline" style="margin-top:0">
           <div class="afl-step"><button data-a="minus">−</button><span>${st.score}</span><button data-a="plus">＋</button></div>
-          <input class="afl-input num" type="number" data-k="setScore" value="${st.score}" min="0" max="100"><button class="afl-btn" data-a="setScore">设为</button>
+          <input class="afl-input num" type="number" step="0.1" data-k="setScore" value="${st.score}" min="0" max="100"><button class="afl-btn" data-a="setScore">设为</button>
         </div></div>
         <div class="afl-card">
           <div class="afl-line"><div><div class="l">气泡下显示心里话</div><div class="h">折叠成一个 💭，点开才看</div></div>${sw("showThought", bool("showThought", true))}</div>
           <div class="afl-line"><div><div class="l">心里话里显示好感变化</div><div class="h">关掉就只看心里话</div></div>${sw("showDelta", bool("showDelta", true))}</div>
         </div>
-        <div class="afl-card"><h4>最近变化</h4><ul class="afl-hist">${st.history.slice().reverse().slice(0, 12).map((h) => `<li><span class="d ${h.delta > 0 ? "" : h.delta < 0 ? "down" : "zero"}">${h.delta > 0 ? "+" : ""}${h.delta}</span><span class="w">${esc(h.reason || "")}</span><span class="t">${fmt(h.at)}</span></li>`).join("") || "<li class='afl-empty'>还没有记录，聊两句就有了</li>"}</ul>
+        <div class="afl-card"><h4>最近变化</h4><ul class="afl-tl">${st.history.slice().reverse().slice(0, 12).map((h) => `<li class="${h.delta > 0 ? "up" : h.delta < 0 ? "down" : "zero"}"><span class="d">${h.delta > 0 ? "+" : ""}${h.delta}</span><span class="w">${esc(h.reason || "")}</span><span class="t">${fmt(h.at)}</span></li>`).join("") || "<li class='afl-empty'>还没有记录，聊两句就有了</li>"}</ul>
           ${st.relationHistory.length ? `<div class="afl-path">关系走过：${st.relationHistory.map((r) => esc(r.from) + " → <b>" + esc(r.to) + "</b>").join("，")}</div>` : ""}
         </div>
         <div class="afl-foot"><button class="afl-btn danger" data-a="reset">重置这个角色</button></div>`;
@@ -364,7 +410,7 @@ export default {
       if (!pr || typeof pr !== "object" || !pr.doing) return "";
       const ageMin = pr.at ? Math.round((Date.now() - Number(pr.at)) / 60000) : null;
       const meta = [pr.place ? "📍 " + pr.place : "", pr.mood ? "情绪 " + pr.mood : "", Number.isFinite(Number(pr.energy)) ? "精力 " + pr.energy + "%" : "", pr.next ? "接下来 " + pr.next : ""].filter(Boolean).map(esc).join(" · ");
-      return `<div class="afl-card"><h4>此刻</h4><div class="afl-presence"><div class="ic">${pr.asleep ? "😴" : "🕒"}</div><div>
+      return `<div class="afl-card"><h4>此刻</h4><div class="afl-presence"><div class="ic">${pr.asleep ? ICON.moon : ICON.clock}</div><div>
         <div class="main">${esc(pr.asleep ? "在睡觉" : "正在" + pr.doing)}${pr.step ? "<span style='font-weight:400;opacity:.7'>（" + esc(pr.step) + "）</span>" : ""}</div>
         ${meta ? `<div class="meta">${meta}</div>` : ""}
         ${ageMin != null && ageMin > 30 ? `<div class="age">${ageMin >= 120 ? Math.round(ageMin / 60) + " 小时" : ageMin + " 分钟"}前挂念同步的快照</div>` : ""}
@@ -373,10 +419,11 @@ export default {
     function settingsHtml() {
       const c = cfg();
       const ta = (k, label, help, rows) => `<div class="afl-field"><label>${label}</label>${help ? `<div class="h">${help}</div>` : ""}<textarea class="afl-ta" data-c="${k}" rows="${rows || 3}">${esc(c[k])}</textarea></div>`;
-      const cell = (k, label, min, max) => `<div class="cell"><label>${label}</label><input type="number" data-cn="${k}" value="${num(k)}" min="${min}" max="${max}"></div>`;
+      const cell = (k, label, min, max) => `<div class="cell"><label>${label}</label><input type="number" step="0.1" data-cn="${k}" value="${num(k)}" min="${min}" max="${max}"></div>`;
       return `
         <div class="afl-card"><h4>数值</h4><div class="afl-grid">
-          ${cell("maxStep", "单轮最多变化 ±", 1, 20)}${cell("dailyCap", "每天最多涨", 0, 50)}
+          ${cell("maxUp", "单轮最多涨", 0, 20)}${cell("maxDown", "单轮最多跌", 0, 20)}
+          ${cell("dailyCap", "每天最多涨", 0, 50)}
           ${cell("decayAfterDays", "几天不聊开始回落", 0, 60)}${cell("decayPerDay", "回落每天掉", 0, 20)}
           ${cell("startScore", "新角色起始好感", 0, 100)}
         </div></div>
@@ -384,7 +431,7 @@ export default {
         <div class="afl-card"><h4>关系阶段</h4>${ta("stages", "一行一个", "状态页里当作可选项，也会告诉模型有哪些", 4)}</div>
         <div class="afl-card"><h4>提示词</h4>
           ${ta("pThought", "心里话怎么写", "", 3)}
-          ${ta("pDelta", "好感怎么判", "占位：{{maxStep}}", 4)}
+          ${ta("pDelta", "好感怎么判", "占位：{{maxUp}} {{maxDown}}", 4)}
           ${ta("pRelation", "关系转折怎么判", "占位：{{stages}}", 3)}
           ${ta("pStance", "分寸怎么说", "占位：{{tier}} {{tierHint}} {{relation}} {{score}}", 3)}
         </div>
