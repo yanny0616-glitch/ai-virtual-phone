@@ -223,6 +223,51 @@ function textFromUnknownContent(content: unknown): string {
   return content == null ? "" : String(content);
 }
 
+/* ─── 模型调用用量账本（push_api_usage / push_api_limits）：几个云函数各有一份同样的副本 ─── */
+type UsageBudget = { day: string; tz: number; calls: number; tokens: number; dailyCalls: number; dailyTokens: number };
+function usageLocalDay(nowMs: number, tz: number): string {
+  const d = new Date(nowMs + tz * 60_000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+function extractUsage(providerKind: ProviderKind, data: unknown): { prompt: number; completion: number } {
+  const d = (data && typeof data === "object" ? data : {}) as Record<string, any>;
+  const n = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
+  if (providerKind === "gemini") {
+    const u = d.usageMetadata || {};
+    return { prompt: n(u.promptTokenCount), completion: n(u.candidatesTokenCount) };
+  }
+  const u = d.usage || {};
+  if (providerKind === "anthropic") {
+    return { prompt: n(u.input_tokens) + n(u.cache_creation_input_tokens) + n(u.cache_read_input_tokens), completion: n(u.output_tokens) };
+  }
+  return { prompt: n(u.prompt_tokens), completion: n(u.completion_tokens) };
+}
+async function usageBudget(rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string): Promise<UsageBudget> {
+  const limitsRes = await rest(`push_api_limits?user_id=eq.${encodeURIComponent(userId)}&select=daily_calls,daily_tokens,tz&limit=1`).catch(() => null);
+  const limits = limitsRes && limitsRes.ok ? (await limitsRes.json().catch(() => []) as { daily_calls?: number; daily_tokens?: number; tz?: number }[])[0] : undefined;
+  const tz = Number(limits?.tz) || 0;
+  const day = usageLocalDay(Date.now(), tz);
+  const rowsRes = await rest(`push_api_usage?user_id=eq.${encodeURIComponent(userId)}&day=eq.${encodeURIComponent(day)}&select=calls,prompt_tokens,completion_tokens`).catch(() => null);
+  const rows = rowsRes && rowsRes.ok ? await rowsRes.json().catch(() => []) as { calls: number; prompt_tokens: number; completion_tokens: number }[] : [];
+  let calls = 0, tokens = 0;
+  for (const r of rows) { calls += Number(r.calls) || 0; tokens += (Number(r.prompt_tokens) || 0) + (Number(r.completion_tokens) || 0); }
+  return { day, tz, calls, tokens, dailyCalls: Number(limits?.daily_calls) || 0, dailyTokens: Number(limits?.daily_tokens) || 0 };
+}
+function usageExceeded(b: UsageBudget): string {
+  if (b.dailyCalls > 0 && b.calls >= b.dailyCalls) return `今天的模型调用次数用完了（${b.calls}/${b.dailyCalls}）`;
+  if (b.dailyTokens > 0 && b.tokens >= b.dailyTokens) return `今天的 token 额度用完了（${b.tokens}/${b.dailyTokens}）`;
+  return "";
+}
+async function usageAdd(rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, tz: number, source: string,
+  providerKind: ProviderKind, data: unknown): Promise<void> {
+  const u = extractUsage(providerKind, data);
+  await rest("rpc/ai_phone_usage_add", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ p_user_id: userId, p_day: usageLocalDay(Date.now(), tz), p_source: source, p_calls: 1, p_prompt: u.prompt, p_completion: u.completion }),
+  }).catch(() => undefined);
+}
+
 function extractResponseText(providerKind: ProviderKind, data: unknown): string {
   if (providerKind === "anthropic") {
     const blocks = (data as { content?: unknown[] }).content;
@@ -571,7 +616,8 @@ function fillTemplate(body: Record<string, unknown>, providerKind: ProviderKind,
 }
 
 // 与 App generateJson 一致：第一次没拿到 JSON 就追加严格指令再试一次
-async function generateJsonWith(template: JobPayload, instruction: string, log: (line: string) => void): Promise<any> {
+async function generateJsonWith(template: JobPayload, instruction: string, log: (line: string) => void,
+  record?: (providerKind: ProviderKind, data: unknown) => Promise<void>): Promise<any> {
   const call = async (inst: string): Promise<string> => {
     const clone = JSON.parse(JSON.stringify(template.request)) as JobPayload["request"];
     if (!fillTemplate(clone.body, clone.providerKind, inst)) throw new Error("模板里找不到指令占位符");
@@ -580,7 +626,9 @@ async function generateJsonWith(template: JobPayload, instruction: string, log: 
     try {
       const response = await fetch(clone.url, { method: "POST", headers: clone.headers, body: JSON.stringify(clone.body), signal: controller.signal });
       if (!response.ok) throw new Error(`模型 HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 160)}`);
-      return extractResponseText(clone.providerKind, await response.json());
+      const data = await response.json();
+      if (record) await record(clone.providerKind, data);
+      return extractResponseText(clone.providerKind, data);
     } finally { clearTimeout(timeout); }
   };
   try { return parseModelJson(await call(instruction)); } catch (e) {
@@ -638,7 +686,9 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
     };
 
     // ── 生成TA的一天（与 App generateDay 同一份指令、同一套归一）
-    const raw = await generateJsonWith(tplDaily, instruction, log);
+    const budgetTz = (await usageBudget(rest, userId)).tz;
+    const record = (providerKind: ProviderKind, data: unknown) => usageAdd(rest, userId, budgetTz, "cloud-gen", providerKind, data);
+    const raw = await generateJsonWith(tplDaily, instruction, log, record);
     const dayFull = parseDayResult(raw, existing, settings, nowMs);
     const day: GuanianDay & Record<string, unknown> = {
       tz, mood: dayFull.mood, energy: dayFull.energy, location: dayFull.location, doing: dayFull.doing,
@@ -674,7 +724,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
       chatUsed = lines.length;
       if (lines.length) log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
       const candRows = cands.map(c => ({ time: c.time, justFinished: c.source, mood: c.mood || "", energy: guanianNow(day, c.fireAt, settings.quietStart, settings.quietEnd).energy }));
-      const parsed = await generateJsonWith(tplImpulse, buildImpulseInstruction(dayFull, candRows, lines, settings, String(context.bias || "")), log);
+      const parsed = await generateJsonWith(tplImpulse, buildImpulseInstruction(dayFull, candRows, lines, settings, String(context.bias || "")), log, record);
       const decisions: Decision[] = Array.isArray(parsed?.decisions) ? parsed.decisions : [];
 
       const wakePrefix = String(context.wakePrefix || "");
@@ -825,6 +875,8 @@ Deno.serve(async (req: Request) => {
     if (localDate > planDate) return later("gen: day passed");
     if (hhmm(nowMs, tz) < String(kit.autoGenAt || "07:30")) return later("gen: before autoGenAt");
     if ((Number(context.genTries) || 0) >= GEN_MAX_TRIES) return new Response("gen: gave up", { status: 200 });
+    const overUsage = usageExceeded(await usageBudget(rest, userId));
+    if (overUsage) return later("gen: usage cap");
     if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < 10 * 60_000) return new Response("gen: in progress", { status: 200 });
     // 先占坑：last_recheck_at 一写，cron 25 分钟内不会再派同一行
     const claim = await rest(
@@ -868,6 +920,8 @@ Deno.serve(async (req: Request) => {
   let selfReason = "";
   const blocked = await (async (): Promise<string> => {
     if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < gate("gateGapMin") * 60_000) return "离上次裁决还不够久";
+    const over = usageExceeded(await usageBudget(rest, userId));
+    if (over) return over;
     if ((plan.recheck_count || 0) >= gate("gateDailyCap")) return "今天的裁决次数用完了";
     if (!canJudge && !canImpulse) {
       if (pending.length === 0) return "今天没有还没到点的时刻，今日额度也满了";
@@ -1086,7 +1140,9 @@ Deno.serve(async (req: Request) => {
         signal: controller.signal,
       });
       if (!response.ok) return;
-      judgeText = extractResponseText(template.request.providerKind, await response.json());
+      const judgeData = await response.json();
+      await usageAdd(rest, userId, (await usageBudget(rest, userId)).tz, "cloud-recheck", template.request.providerKind, judgeData);
+      judgeText = extractResponseText(template.request.providerKind, judgeData);
     } catch {
       return;
     } finally {

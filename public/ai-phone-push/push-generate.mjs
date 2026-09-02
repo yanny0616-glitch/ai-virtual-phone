@@ -143,6 +143,51 @@ function textFromUnknownContent(content: unknown): string {
   return content == null ? "" : String(content);
 }
 
+/* ─── 模型调用用量账本（push_api_usage / push_api_limits）：几个云函数各有一份同样的副本 ─── */
+type UsageBudget = { day: string; tz: number; calls: number; tokens: number; dailyCalls: number; dailyTokens: number };
+function usageLocalDay(nowMs: number, tz: number): string {
+  const d = new Date(nowMs + tz * 60_000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+function extractUsage(providerKind: ProviderKind, data: unknown): { prompt: number; completion: number } {
+  const d = (data && typeof data === "object" ? data : {}) as Record<string, any>;
+  const n = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
+  if (providerKind === "gemini") {
+    const u = d.usageMetadata || {};
+    return { prompt: n(u.promptTokenCount), completion: n(u.candidatesTokenCount) };
+  }
+  const u = d.usage || {};
+  if (providerKind === "anthropic") {
+    return { prompt: n(u.input_tokens) + n(u.cache_creation_input_tokens) + n(u.cache_read_input_tokens), completion: n(u.output_tokens) };
+  }
+  return { prompt: n(u.prompt_tokens), completion: n(u.completion_tokens) };
+}
+async function usageBudget(rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string): Promise<UsageBudget> {
+  const limitsRes = await rest(`push_api_limits?user_id=eq.${encodeURIComponent(userId)}&select=daily_calls,daily_tokens,tz&limit=1`).catch(() => null);
+  const limits = limitsRes && limitsRes.ok ? (await limitsRes.json().catch(() => []) as { daily_calls?: number; daily_tokens?: number; tz?: number }[])[0] : undefined;
+  const tz = Number(limits?.tz) || 0;
+  const day = usageLocalDay(Date.now(), tz);
+  const rowsRes = await rest(`push_api_usage?user_id=eq.${encodeURIComponent(userId)}&day=eq.${encodeURIComponent(day)}&select=calls,prompt_tokens,completion_tokens`).catch(() => null);
+  const rows = rowsRes && rowsRes.ok ? await rowsRes.json().catch(() => []) as { calls: number; prompt_tokens: number; completion_tokens: number }[] : [];
+  let calls = 0, tokens = 0;
+  for (const r of rows) { calls += Number(r.calls) || 0; tokens += (Number(r.prompt_tokens) || 0) + (Number(r.completion_tokens) || 0); }
+  return { day, tz, calls, tokens, dailyCalls: Number(limits?.daily_calls) || 0, dailyTokens: Number(limits?.daily_tokens) || 0 };
+}
+function usageExceeded(b: UsageBudget): string {
+  if (b.dailyCalls > 0 && b.calls >= b.dailyCalls) return `今天的模型调用次数用完了（${b.calls}/${b.dailyCalls}）`;
+  if (b.dailyTokens > 0 && b.tokens >= b.dailyTokens) return `今天的 token 额度用完了（${b.tokens}/${b.dailyTokens}）`;
+  return "";
+}
+async function usageAdd(rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, tz: number, source: string,
+  providerKind: ProviderKind, data: unknown): Promise<void> {
+  const u = extractUsage(providerKind, data);
+  await rest("rpc/ai_phone_usage_add", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ p_user_id: userId, p_day: usageLocalDay(Date.now(), tz), p_source: source, p_calls: 1, p_prompt: u.prompt, p_completion: u.completion }),
+  }).catch(() => undefined);
+}
+
 function extractResponseText(providerKind: ProviderKind, data: unknown): string {
   if (providerKind === "anthropic") {
     const blocks = (data as { content?: unknown[] }).content;
@@ -1040,6 +1085,16 @@ Deno.serve(async (req: Request) => {
       } catch { /* 状态算不出来就按冻结快照发 */ }
     }
 
+    // 挂念挂的时刻受「一天最多调多少次模型」约束；聊天兜底之类不是挂念的不拦，只记账
+    const usageSource = guanianPlan.item ? "cloud-wake" : "cloud-chat";
+    const budget = await usageBudget(rest, job.user_id).catch(() => null);
+    if (guanianPlan.item && budget) {
+      const over = usageExceeded(budget);
+      if (over) {
+        await finish("done", `usage cap: ${over}`);
+        return;
+      }
+    }
     await progress("llm request started");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 300_000);
@@ -1060,6 +1115,7 @@ Deno.serve(async (req: Request) => {
       return;
     }
     const data = await llmResponse.json();
+    await usageAdd(rest, job.user_id, budget?.tz ?? 0, usageSource, payload.request.providerKind, data);
     let rawText = extractResponseText(payload.request.providerKind, data).trim();
     if (!rawText) {
       await finish("failed", "empty response");

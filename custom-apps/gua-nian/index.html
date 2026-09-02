@@ -178,6 +178,11 @@
     display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px;
     margin-left: 6px; vertical-align: 1px; letter-spacing: .5px;
   }
+  .badge.ok { background: rgba(42, 168, 118, .10); color: var(--good); border: 1px solid rgba(42, 168, 118, .3); }
+  .badge.warn { background: rgba(192, 138, 26, .10); color: var(--warn); border: 1px solid rgba(192, 138, 26, .3); }
+  .usage-bar { height: 6px; border-radius: 999px; background: rgba(160, 110, 100, .12); overflow: hidden; margin: 6px 0 2px; }
+  .usage-bar .fill { height: 100%; border-radius: 999px; background: var(--ac); transition: width .6s ease; }
+  .stat .num small { font-size: 11px; color: var(--tx3); font-weight: 500; }
   .badge.push { background: rgba(42, 168, 118, .10); color: var(--good); border: 1px solid rgba(42, 168, 118, .3); }
   .badge.local { background: rgba(192, 138, 26, .10); color: var(--warn); border: 1px solid rgba(192, 138, 26, .3); }
   .badge.off { background: rgba(160, 110, 100, .06); color: var(--tx3); border: 1px solid var(--line); }
@@ -536,6 +541,7 @@
   <div class="tabs" id="tabs" hidden>
     <button class="tab on" data-tab="today">今 天</button>
     <button class="tab" data-tab="archive">记 录</button>
+    <button class="tab" data-tab="usage">用 量</button>
     <button class="tab" data-tab="diag">诊 断</button>
   </div>
 
@@ -651,17 +657,81 @@
     throw new Error("模型没回 JSON，它说的是：「" + t.slice(0, 100) + (t.length > 100 ? "…" : "") + "」");
   }
   // 模型没按要求回 JSON 时（比如回了一段普通话），带更严的指令重试一次
-  // 一天的模型调用总额度：所有挂念的人合计，生成、编排、复核、改日程每次调用都记一笔；云端的不算
+  /* ================= 模型调用用量：本机（宿主统计）+ 云端（push_api_usage） ================= */
+  const USAGE_SRC = "custom_app:gua.nian";
+  const USAGE_LABEL = { app: "本机", "cloud-gen": "云端生成一天", "cloud-recheck": "云端复核", "cloud-wake": "云端到点发送", "cloud-chat": "聊天离线兜底（不计上限）" };
   function apiUseToday() {
     const u = S.settings && S.settings.apiUse;
     return u && u.date === todayStr() ? u : { date: todayStr(), n: 0 };
   }
+  // 本机今天的用量：宿主按来源统计（含 token）；宿主还没记上时用本地计数兜底
+  async function readLocalUsage(force) {
+    if (!force && S._useLocal && Date.now() - S._useLocal.at < 60000) return S._useLocal;
+    const out = { at: Date.now(), calls: apiUseToday().n, prompt: 0, completion: 0, days: [] };
+    try {
+      if (AiPhone.usage && AiPhone.usage.readDaily) {
+        const r = await AiPhone.usage.readDaily({ days: 7 });
+        out.days = (r && r.days || []).map((d) => {
+          const b = (d.bySource || {})[USAGE_SRC] || { calls: 0, promptTokens: 0, completionTokens: 0 };
+          return { date: d.date, calls: +b.calls || 0, prompt: +b.promptTokens || 0, completion: +b.completionTokens || 0 };
+        });
+        const td = out.days.find((d) => d.date === todayStr());
+        if (td) { out.calls = Math.max(out.calls, td.calls); out.prompt = td.prompt; out.completion = td.completion; }
+      }
+    } catch (e) { /* 没有 usage.read 权限或旧宿主：只有次数 */ }
+    S._useLocal = out;
+    return out;
+  }
+  // 云端账本：上报本机今天的用量和上限，再把最近几天各来源拉回来
+  async function syncUsageCloud(force) {
+    if (!cloudCfg()) return null;
+    if (!force && S._use && Date.now() - S._use.at < 5 * 60000) return S._use;
+    const local = await readLocalUsage(force);
+    try {
+      await cloudFetch("usage", { method: "POST", body: JSON.stringify({
+        limits: { dailyCalls: +S.settings.apiDailyCap || 0, dailyTokens: +S.settings.tokenDailyCap || 0, tz: -new Date().getTimezoneOffset() },
+        set: { day: todayStr(), source: "app", calls: local.calls, promptTokens: local.prompt, completionTokens: local.completion },
+      }) });
+      const r = await cloudFetch("usage", { method: "GET" }, { days: 7 });
+      S._use = { at: Date.now(), rows: Array.isArray(r.rows) ? r.rows : [], limits: r.limits || null };
+    } catch (e) {
+      if (!S._useWarned) { S._useWarned = true; await log(cur(), "云端用量账本读写失败（旧版云函数没有 usage 动作，重部署一次即可）：" + (e && e.message || e)); }
+      S._use = S._use || { at: Date.now(), rows: [], limits: null };
+    }
+    return S._use;
+  }
+  // 今天合计：本机用最新的本地数，云端各来源用账本里的（账本里的 app 行是自己上报的，不重复算）
+  function usageTotals() {
+    const local = S._useLocal || { calls: apiUseToday().n, prompt: 0, completion: 0 };
+    const rows = ((S._use && S._use.rows) || []).filter((r) => r.day === todayStr() && r.source !== "app");
+    let cloudCalls = 0, cloudTokens = 0, capCalls = 0, capTokens = 0;
+    for (const r of rows) {
+      const t = (+r.prompt_tokens || 0) + (+r.completion_tokens || 0);
+      cloudCalls += +r.calls || 0; cloudTokens += t;
+      if (r.source !== "cloud-chat") { capCalls += +r.calls || 0; capTokens += t; }
+    }
+    const localCalls = Math.max(local.calls, apiUseToday().n), localTokens = local.prompt + local.completion;
+    return { localCalls, localTokens, cloudCalls, cloudTokens, rows,
+      calls: localCalls + capCalls, tokens: localTokens + capTokens,
+      capCalls: +S.settings.apiDailyCap || 0, capTokens: +S.settings.tokenDailyCap || 0 };
+  }
+  function usageOver() {
+    const t = usageTotals();
+    if (t.capCalls > 0 && t.calls >= t.capCalls) return "今天的模型调用次数用完了（" + t.calls + "/" + t.capCalls + "），明天再来，或去设置里调高";
+    if (t.capTokens > 0 && t.tokens >= t.capTokens) return "今天的 token 额度用完了（" + fmtTok(t.tokens) + "/" + fmtTok(t.capTokens) + "），明天再来，或去设置里调高";
+    return "";
+  }
+  const fmtTok = (n) => n >= 1000000 ? (n / 1000000).toFixed(2) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
   async function spendApi(cx) {
-    const cap = +(S.settings && S.settings.apiDailyCap) || 0;
-    const u = apiUseToday();
-    if (cap > 0 && u.n >= cap) throw new Error("今天的模型调用额度用完了（" + u.n + "/" + cap + "），明天再来，或去设置里调高");
-    S.settings.apiUse = { date: u.date, n: u.n + 1 };
+    await readLocalUsage(false);
+    const over = usageOver();
+    if (over) throw new Error(over);
+    S.settings.apiUse = { date: todayStr(), n: apiUseToday().n + 1 };
+    if (S._useLocal) S._useLocal.calls = Math.max(S._useLocal.calls, S.settings.apiUse.n);
     try { S.settings = await AiPhone.db.update("settings", S.settings.id, { apiUse: S.settings.apiUse }); } catch (e) { /* 记不上也不拦 */ }
+    // 宿主的用量统计在回复落库后才更新：过几秒再读一次并上报云端
+    clearTimeout(S._useTimer);
+    S._useTimer = setTimeout(() => { readLocalUsage(true).then(() => syncUsageCloud(true)).catch(() => { /* 已记日志 */ }); }, 8000);
   }
   async function generateJson(cx, req) {
     await spendApi(cx);
@@ -843,8 +913,9 @@
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
     characterIds: [],    // 挂念的人（可以多位）
-    apiDailyCap: 40,     // 所有人合计一天最多调多少次模型（0=不限）；云端生成/复核不计入
-    apiUse: null,        // 今天已调用 { date, n }
+    apiDailyCap: 40,     // 本机 + 云端合计一天最多调多少次模型（0=不限）
+    tokenDailyCap: 0,    // 本机 + 云端合计一天最多多少 token（0=不限）
+    apiUse: null,        // 今天本机已调用 { date, n }（宿主统计落后时的兜底计数）
     quota: 3,            // 每天最多主动几次
     minGapMin: 60,       // 相邻两次起念最小间隔（分钟，0=不限制）
     maxUnanswered: 2,    // 未回应降速：TA连续 N 轮主动未被回后今天不再主动（0=关闭）
@@ -2004,6 +2075,7 @@
     }
     if (S.tab === "archive") { renderArchive(); return; }
     if (S.tab === "diag") { renderDiag(); return; }
+    if (S.tab === "usage") { renderUsage(); return; }
     if (!cx.day) {
       v.innerHTML =
         '<div class="card empty"><div class="art">🌅</div>' +
@@ -2125,7 +2197,7 @@
       '<div class="strip">' +
       tag(wait.length ? (reach.length === wait.length ? "待发的都离线可达" : "离线可达 " + reach.length + " / " + wait.length) : "没有待发", wait.length && reach.length === wait.length ? "ok" : (wait.length ? "warn" : "")) +
       tag(cloudRecheckOn() ? "云端复核 · 每半小时" : (cloudCfg() ? "云端复核关着" : "没配云"), cloudRecheckOn() ? "ok" : "") +
-      (S.settings.apiDailyCap > 0 ? tag("模型调用 " + apiUseToday().n + "/" + S.settings.apiDailyCap, apiUseToday().n >= S.settings.apiDailyCap ? "warn" : "") : "") +
+      (() => { const t = usageTotals(); return tag("模型调用 " + t.calls + (t.capCalls ? "/" + t.capCalls : "") + " · " + fmtTok(t.tokens) + (t.capTokens ? "/" + fmtTok(t.capTokens) : "") + " token", usageOver() ? "warn" : ""); })() +
       (c.day && c.day.by === "cloud" ? tag("今天由云端生成", "cool") : (cloudGenOn() ? tag("明天云端生成 " + esc(S.settings.autoGenAt || SET_DEF.autoGenAt), "") : "")) +
       tag(c.plan && c.plan.recheckAt ? "本机复核 " + esc(fmtHM(c.plan.recheckAt)) : "本机还没复核过", "") +
       (adj.length || imp.length ? tag([adj.length ? "复核改了 " + adj.length + " 处" : "", imp.length ? "临时起念 " + imp.length : ""].filter(Boolean).join(" · "), "cool") : "") +
@@ -2708,6 +2780,41 @@
     ] },
   ];
 
+  async function renderUsage() {
+    const v = $("#view");
+    const req = (S._usageReq = (S._usageReq || 0) + 1);
+    v.innerHTML = '<div class="card empty"><div class="art">⏳</div><p>正在统计…</p></div>';
+    await readLocalUsage(true);
+    await syncUsageCloud(false);
+    if (S.tab !== "usage" || req !== S._usageReq) return;
+    const t = usageTotals();
+    const stat = (n, cap) => '<div class="stat"><div class="num">' + n + '</div><div class="cap">' + cap + "</div></div>";
+    const bar = (n, cap) => cap > 0 ? '<div class="usage-bar"><div class="fill" style="width:' + Math.min(100, Math.round(n / cap * 100)) + '%"></div></div>' : "";
+    let html = '<div class="card"><div class="sec-head"><span class="t">今 日 用 量</span>' +
+      '<span class="badge' + (usageOver() ? " warn" : (t.capCalls || t.capTokens ? " ok" : "")) + '">' + (usageOver() ? "到上限了" : (t.capCalls || t.capTokens ? "额度内" : "没设上限")) + "</span></div>" +
+      '<div class="stats four">' + stat(t.calls + (t.capCalls ? "<small>/" + t.capCalls + "</small>" : ""), "调 用") + stat(fmtTok(t.tokens) + (t.capTokens ? "<small>/" + fmtTok(t.capTokens) + "</small>" : ""), "token") +
+      stat(t.localCalls, "本 机") + stat(t.cloudCalls, "云 端") + "</div>" +
+      bar(t.calls, t.capCalls) + bar(t.tokens, t.capTokens) +
+      '<div class="archive-note">上限在设置「模型调用」里改。本机按次和 token 都由宿主统计；云端由云函数记账，聊天离线兜底的调用只记不限。</div></div>';
+    const srcRows = [{ source: "app", calls: t.localCalls, prompt: (S._useLocal || {}).prompt || 0, completion: (S._useLocal || {}).completion || 0 }]
+      .concat(t.rows.map((r) => ({ source: r.source, calls: +r.calls || 0, prompt: +r.prompt_tokens || 0, completion: +r.completion_tokens || 0 })));
+    html += '<div class="card"><div class="sec-head"><span class="t">按 来 源</span></div>' +
+      srcRows.map((r) => '<div class="diag-item"><b>' + esc(USAGE_LABEL[r.source] || r.source) + "</b> " + r.calls + " 次 · " + fmtTok(r.prompt) + " 入 / " + fmtTok(r.completion) + " 出</div>").join("") +
+      (cloudCfg() ? "" : '<div class="archive-note">没配云连接，只有本机的数。</div>') + "</div>";
+    const byDay = {};
+    for (const d of ((S._useLocal || {}).days || [])) byDay[d.date] = { calls: d.calls, tokens: d.prompt + d.completion };
+    for (const r of ((S._use || {}).rows || [])) {
+      if (r.source === "app") continue;
+      const x = byDay[r.day] = byDay[r.day] || { calls: 0, tokens: 0 };
+      x.calls += +r.calls || 0; x.tokens += (+r.prompt_tokens || 0) + (+r.completion_tokens || 0);
+    }
+    const days = Object.keys(byDay).sort().reverse().slice(0, 7);
+    html += '<div class="card"><div class="sec-head"><span class="t">最 近 7 天</span></div>' +
+      (days.length ? days.map((d) => '<div class="diag-item"><b>' + esc(d.slice(5)) + "</b> " + byDay[d].calls + " 次 · " + fmtTok(byDay[d].tokens) + " token" + (d === todayStr() ? ' <span class="badge cool">今天</span>' : "") + "</div>").join("")
+        : '<div class="archive-note">还没有记录。</div>') + "</div>";
+    v.innerHTML = html;
+  }
+
   async function renderDiag() {
     const cx = cur();
     const v = $("#view");
@@ -2938,8 +3045,10 @@
   const SET_SECTIONS = [
     { id: "base", name: "基本", groups: [
       { title: "挂念的人", sub: "可以多选，每位各有自己的一天", fields: [{ type: "chars" }] },
-      { title: "模型调用", fields: [{ type: "stepper", key: "apiDailyCap", min: 0, max: 200, step: 5, label: "一天最多", unit: "次" }],
-        hint: "所有挂念的人合计。生成一天、编排、复核、改日程每次调用都算一笔；用完当天就不再调，明天自动归零。0 = 不限。云端生成和复核不计入。" },
+      { title: "模型调用", fields: [
+        { type: "stepper", key: "apiDailyCap", min: 0, max: 500, step: 5, label: "一天最多", unit: "次" },
+        { type: "stepper", key: "tokenDailyCap", min: 0, max: 5000000, step: 50000, label: "一天最多", unit: "token" },
+      ], hint: "本机和云端、所有挂念的人合计。生成一天、编排、复核、改日程，以及云端的生成、复核、到点发送，每次调用都记一笔；到了上限当天就不再调，明天自动归零。0 = 不限。「用量」页能看明细。" },
       { title: "免打扰时段", sub: "这段时间TA不会来找你", fields: [{ type: "timeRange", keys: ["quietStart", "quietEnd"] }] },
       { title: "自动生成TA的一天", fields: [
         { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }, { key: "cloudGen", label: "浏览器关着也生成（云端）" }] },
@@ -3174,6 +3283,7 @@
       await syncChatContext(cx, true);
       if (!added.includes(cx.character.id)) await uploadPlanCloud(cx, false); // 刚打开云复核开关的话，今天的计划立刻寄存一份
     }
+    syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
     render();
     toast("已保存");
   }
@@ -3230,6 +3340,7 @@
         await adoptCloudDay(cx);
         uploadGenKitCloud(cx).catch(() => { /* 已在函数内记日志 */ });
       }
+      syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
       // 先收浏览器关着这段时间云端替TA做的决定，再按最新聊天做本地复核
       // 打开小手机本身就是一次复核时机：按你们最新的聊天，让TA重新想想今天。
       // 两步必须串行：都会重写 plan，并行的话后写的会盖掉前一个的结果。几个人也串着来，模型调用不并发。

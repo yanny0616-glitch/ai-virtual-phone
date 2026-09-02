@@ -18,7 +18,8 @@ begin
         'ai_phone_cloud_meta',
         'push_server_config', 'push_subscriptions', 'push_jobs', 'push_outbox',
         'push_shortcut_commands', 'push_bridge_config', 'push_bridge_snapshots',
-        'push_screen_sessions', 'push_screen_threads', 'push_chat_mirror'
+        'push_screen_sessions', 'push_screen_threads', 'push_chat_mirror',
+        'push_recheck_plans', 'push_api_usage', 'push_api_limits'
       ])
   ) into has_unknown_public_table;
 
@@ -34,7 +35,7 @@ create table if not exists public.ai_phone_cloud_meta (
   updated_at timestamptz not null default now()
 );
 insert into public.ai_phone_cloud_meta (id, schema_version, updated_at)
-values ('personal-cloud', 5, now())
+values ('personal-cloud', 6, now())
 on conflict (id) do update set schema_version = excluded.schema_version, updated_at = excluded.updated_at;
 
 create table if not exists public.push_server_config (
@@ -197,6 +198,43 @@ create table if not exists public.push_chat_mirror (
 create index if not exists push_chat_mirror_char_idx
   on public.push_chat_mirror (user_id, character_id, message_at desc);
 
+-- 模型调用用量账本：按「用户 / 本地日期 / 来源」累加次数与 token。来源：app（小手机本机，由 App 上报）、
+-- cloud-recheck / cloud-gen / cloud-wake（云函数自己记）。挂念的用量页和「一天最多调多少次」都看这张表。
+create table if not exists public.push_api_usage (
+  user_id text not null,
+  day text not null,
+  source text not null,
+  calls integer not null default 0,
+  prompt_tokens bigint not null default 0,
+  completion_tokens bigint not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, day, source)
+);
+-- 上限与时区：App 保存设置时写；云函数调模型前先看今天合计有没有超。tz 是本地时区偏移（分钟），
+-- 云端只有 UTC，「今天」得靠它换算。
+create table if not exists public.push_api_limits (
+  user_id text primary key,
+  daily_calls integer not null default 0,
+  daily_tokens bigint not null default 0,
+  tz integer not null default 0,
+  updated_at timestamptz not null default now()
+);
+-- 原子累加：几个云函数可能同时记账，读改写会互相覆盖。
+create or replace function public.ai_phone_usage_add(
+  p_user_id text, p_day text, p_source text, p_calls integer, p_prompt bigint, p_completion bigint
+) returns void
+language sql
+security invoker
+as $$
+  insert into public.push_api_usage (user_id, day, source, calls, prompt_tokens, completion_tokens, updated_at)
+  values (p_user_id, p_day, p_source, p_calls, p_prompt, p_completion, now())
+  on conflict (user_id, day, source) do update
+    set calls = public.push_api_usage.calls + excluded.calls,
+        prompt_tokens = public.push_api_usage.prompt_tokens + excluded.prompt_tokens,
+        completion_tokens = public.push_api_usage.completion_tokens + excluded.completion_tokens,
+        updated_at = now();
+$$;
+
 -- 云端动态复核：App 编排时把当天计划和判断上下文传上来，浏览器关着时由
 -- push-recheck 定时重判。items 里的 wakeId 对应 push_jobs 的 timedwake:<wakeId>，撤销/点亮直接改那边；
 -- decisions 是还没被 App 取走的云端裁决，App 下次打开时合并进本地轨迹。
@@ -339,10 +377,14 @@ alter table public.push_bridge_config enable row level security;
 alter table public.push_bridge_snapshots enable row level security;
 alter table public.push_screen_threads enable row level security;
 alter table public.push_chat_mirror enable row level security;
+alter table public.push_api_usage enable row level security;
+alter table public.push_api_limits enable row level security;
 alter table public.push_recheck_plans enable row level security;
 
 -- 聊天镜像只由网关的 service_role 读写；anon/authenticated 无任何权限。
 revoke all on table public.push_chat_mirror from public, anon, authenticated;
+revoke all on table public.push_api_usage from public, anon, authenticated;
+revoke all on table public.push_api_limits from public, anon, authenticated;
 
 -- 屏幕速聊表和 RPC 只由 Edge Function 的 service_role 使用；客户端角色没有表级权限。
 revoke all on table public.push_screen_threads from public, anon, authenticated;
@@ -362,7 +404,9 @@ grant select, insert, update, delete on table
   public.push_bridge_snapshots,
   public.push_screen_threads,
   public.push_chat_mirror,
-  public.push_recheck_plans
+  public.push_recheck_plans,
+  public.push_api_usage,
+  public.push_api_limits
 to service_role;
 
 revoke all on function public.ai_phone_screen_chat_begin(text, text, text, text, integer) from public, anon, authenticated;
@@ -460,4 +504,5 @@ select cron.schedule('ai-phone-personal-push-cron-cleanup', '0 3 * * *', $CRON$
   delete from cron.job_run_details where end_time < now() - interval '3 days';
   delete from public.push_chat_mirror where message_at < now() - interval '60 days';
   delete from public.push_recheck_plans where updated_at < now() - interval '7 days';
+  delete from public.push_api_usage where updated_at < now() - interval '90 days';
 $CRON$);

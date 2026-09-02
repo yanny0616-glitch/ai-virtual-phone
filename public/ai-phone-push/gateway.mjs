@@ -622,6 +622,7 @@ Deno.serve(async (request: Request) => {
           ...(schemaVersion >= 3 ? ["screen-chat-continuous"] : []),
           ...(schemaVersion >= 4 ? ["chat-mirror"] : []),
           ...(schemaVersion >= 5 ? ["recheck-plan"] : []),
+          ...(schemaVersion >= 6 ? ["usage"] : []),
           // 部署了本版网关即支持（纯代码能力，不依赖 schema）
           "job-status",
         ],
@@ -885,6 +886,61 @@ Deno.serve(async (request: Request) => {
           headers: { Prefer: "return=minimal" },
         });
         if (!del.ok) return json({ ok: false, error: `数据库返回 HTTP ${del.status}` }, 500);
+        return json({ ok: true });
+      }
+    }
+
+    if (action === "usage") {
+      // 模型调用用量：GET 看最近几天各来源的次数/token 和上限；POST 由 App 上报本机用量（整行覆盖）和上限
+      if (request.method === "GET") {
+        const days = Math.max(1, Math.min(30, Number(url.searchParams.get("days")) || 7));
+        const since = new Date(Date.now() - days * 86_400_000 - 86_400_000);
+        const sinceDay = `${since.getUTCFullYear()}-${String(since.getUTCMonth() + 1).padStart(2, "0")}-${String(since.getUTCDate()).padStart(2, "0")}`;
+        const rows = await readJson<Record<string, unknown>[]>(await rest(
+          `push_api_usage?user_id=eq.${OWNER_ID}&day=gte.${encodeURIComponent(sinceDay)}`
+          + "&select=day,source,calls,prompt_tokens,completion_tokens,updated_at&order=day.desc",
+        ));
+        const limits = await readJson<Record<string, unknown>[]>(await rest(
+          `push_api_limits?user_id=eq.${OWNER_ID}&select=daily_calls,daily_tokens,tz,updated_at&limit=1`,
+        ));
+        return json({ ok: true, rows, limits: limits[0] ?? null });
+      }
+      if (request.method === "POST") {
+        const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        if (body.limits && typeof body.limits === "object") {
+          const l = body.limits as Record<string, unknown>;
+          const save = await rest("push_api_limits?on_conflict=user_id", {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify([{
+              user_id: OWNER_ID,
+              daily_calls: Math.max(0, Math.floor(Number(l.dailyCalls) || 0)),
+              daily_tokens: Math.max(0, Math.floor(Number(l.dailyTokens) || 0)),
+              tz: Math.max(-840, Math.min(840, Math.floor(Number(l.tz) || 0))),
+              updated_at: new Date().toISOString(),
+            }]),
+          });
+          if (!save.ok) return json({ ok: false, error: `写入上限失败 HTTP ${save.status}` }, 500);
+        }
+        if (body.set && typeof body.set === "object") {
+          // 本机用量由宿主统计，App 定期把今天的绝对值整行写过来，不做累加
+          const u = body.set as Record<string, unknown>;
+          const day = cleanText(u.day, 10).replace(/[^0-9-]/g, "");
+          const source = cleanText(u.source, 40).replace(/[^A-Za-z0-9_-]/g, "") || "app";
+          if (!day) return json({ ok: false, error: "缺少 day。" }, 400);
+          const save = await rest("push_api_usage?on_conflict=user_id,day,source", {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify([{
+              user_id: OWNER_ID, day, source,
+              calls: Math.max(0, Math.floor(Number(u.calls) || 0)),
+              prompt_tokens: Math.max(0, Math.floor(Number(u.promptTokens) || 0)),
+              completion_tokens: Math.max(0, Math.floor(Number(u.completionTokens) || 0)),
+              updated_at: new Date().toISOString(),
+            }]),
+          });
+          if (!save.ok) return json({ ok: false, error: `写入用量失败 HTTP ${save.status}` }, 500);
+        }
         return json({ ok: true });
       }
     }

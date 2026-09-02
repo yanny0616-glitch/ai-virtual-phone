@@ -488,10 +488,11 @@ function isToolFlowHistoryMessage(message: ChatMessage): boolean {
 /** 日志分流：工坊（appId === "qa"）经聊天引擎发出的调用（答疑 Agent 原生工具循环）归工坊环，
  *  其余归底层调用日志环。channel 不能硬编码——工坊的 Agent 循环复用 sendLLMToolStreamRequest，
  *  旧逻辑靠 characterName === "工坊" 分流，改成显式字段后必须从 appId 派生，否则工坊记录漏进主环。 */
-function apiLogChannelFor(options?: { appId?: string }): { source: "chat" | "qa"; channel: "chat" | "qa" } {
-    return options?.appId === "qa"
-        ? { source: "qa", channel: "qa" }
-        : { source: "chat", channel: "chat" };
+function apiLogChannelFor(options?: { appId?: string }): { source: "chat" | "qa" | `custom_app:${string}`; channel: "chat" | "qa" } {
+    if (options?.appId === "qa") return { source: "qa", channel: "qa" };
+    // 自定义 APP 的调用单独记来源，APP 自己的用量页（usage.readDaily 的 bySource）才分得出哪些是它花的
+    if (options?.appId?.startsWith("custom_app:")) return { source: options.appId as `custom_app:${string}`, channel: "chat" };
+    return { source: "chat", channel: "chat" };
 }
 
 export function appendEmptyGenerateGuardMessage(
