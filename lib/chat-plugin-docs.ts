@@ -123,7 +123,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
   - scope: "global"（默认）| "session"（传 sessionId）| "character"（传 characterId）
   - 插件自己的私有数据请用 ctx.system.storage，不要放变量池
   - 自定义 APP（如挂念）通过 \`AiPhone.variables\` 读写的是同一个池：想让 APP 拿到的数放这里，变量名两边约好
-  - 宿主自己也读两个约定变量（scope character）画**角色在线状态**（聊天列表头像上的点 + 聊天页标题下的小字）：\`presence\` = { asleep, busy, doing, label?, at }（APP 写的此刻快照，超过 6 小时没刷新算「离开」）；\`presenceOverride\` = { state: "online"|"busy"|"sleep"|"away"|"hidden", label? }（手动锁定，优先）。插件写这两个就能改角色的在线状态
+  - 宿主自己也读两个约定变量（scope character）画**角色在线状态**（聊天列表头像上的点 + 聊天页标题下的小字）：\`presence\` = { asleep, busy, doing, label?, at }（APP 写的此刻快照；APP 若还用 chat.setReplyGate 留了作息，宿主按作息实时判睡着/忙碌，快照只补「正在做什么」；只有过期快照才算「离开」）；\`presenceOverride\` = { state: "online"|"busy"|"sleep"|"away"|"hidden", label? }（手动锁定，优先）。插件写这两个就能改角色的在线状态
 
 ## ctx.ai —— LLM 裸通道
 

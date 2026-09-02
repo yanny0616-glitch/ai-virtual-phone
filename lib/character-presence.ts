@@ -3,10 +3,13 @@
 // （scope character）：
 //   presence          挂念这类 APP 写的此刻快照 { asleep, busy, doing, label, at }
 //   presenceOverride  用户在插件面板里锁定的 { state, label }，优先于快照
-// 两者都没有 = 在线。快照太久没刷新（APP 没开）不敢说在线，算「离开」。
+// 快照只是 APP 同步那一刻的样子；真正的作息（睡眠窗 + 今天的忙时段）APP 已经用
+// chat.setReplyGate 留在宿主里了，这里按当前时间实时算，APP 不开也能准时变色。
+// 什么都没有 = 在线；只有一份过期快照 = 「离开」。
 
 import { useSyncExternalStore } from "react";
 import { getChatPluginVar, CHAT_PLUGIN_VARS_CHANGED_EVENT } from "./chat-plugin-storage";
+import { readReplyGate } from "./chat-reply-gate";
 
 export type PresenceState = "online" | "busy" | "sleep" | "away" | "hidden";
 
@@ -31,6 +34,32 @@ function asState(v: unknown): PresenceState | null {
     return v === "online" || v === "busy" || v === "sleep" || v === "away" || v === "hidden" ? v : null;
 }
 
+function hm(d: Date): string {
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+function ymd(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** 按宿主里存的作息实时判：睡着 / 忙着（带标题）/ 空着；没有作息返回 null */
+function liveFromGate(characterId: string, nowMs: number): CharacterPresence | null {
+    const gate = readReplyGate(characterId);
+    if (!gate) return null;
+    const now = new Date(nowMs);
+    const cur = hm(now);
+    const sleep = gate.sleep;
+    if (sleep && sleep.bed !== sleep.wake) {
+        const asleep = sleep.bed > sleep.wake ? (cur >= sleep.bed || cur < sleep.wake) : (cur >= sleep.bed && cur < sleep.wake);
+        if (asleep) return { state: "sleep", label: PRESENCE_LABELS.sleep };
+    }
+    const busy = gate.busy;
+    if (busy && busy.date === ymd(now)) {
+        const win = busy.windows.find(w => cur >= w.from && cur < w.to);
+        if (win) return { state: "busy", label: win.title ? `${PRESENCE_LABELS.busy} · ${win.title}` : PRESENCE_LABELS.busy };
+    }
+    return { state: "online", label: "" };
+}
+
 export function readCharacterPresence(characterId: string, nowMs = Date.now()): CharacterPresence {
     if (!characterId) return ONLINE;
     const ov = getChatPluginVar("presenceOverride", "character", characterId);
@@ -42,15 +71,27 @@ export function readCharacterPresence(characterId: string, nowMs = Date.now()): 
         }
     }
     const pr = getChatPluginVar("presence", "character", characterId);
-    if (!pr || typeof pr !== "object") return ONLINE;
-    const p = pr as { asleep?: unknown; busy?: unknown; doing?: unknown; label?: unknown; at?: unknown; state?: unknown };
-    const at = Number(p.at) || 0;
-    if (at && nowMs - at > STALE_MS) return { state: "away", label: PRESENCE_LABELS.away };
+    const p = pr && typeof pr === "object" ? pr as { asleep?: unknown; busy?: unknown; doing?: unknown; label?: unknown; at?: unknown; state?: unknown } : null;
+    const at = p ? Number(p.at) || 0 : 0;
+    const fresh = !!p && (!at || nowMs - at <= STALE_MS);
+
+    const live = liveFromGate(characterId, nowMs);
+    if (live) {
+        // 作息说空着、快照又新鲜，就把快照里「正在做什么」带上，光一个绿点太干
+        if (live.state === "online" && fresh && p) {
+            const custom = String(p.label ?? "").trim();
+            const doing = String(p.doing ?? "").trim();
+            return { state: "online", label: custom || (doing && !p.asleep ? doing : "") };
+        }
+        return live;
+    }
+    if (!p) return ONLINE;
+    if (!fresh) return { state: "away", label: PRESENCE_LABELS.away };
     const explicit = asState(p.state);
     const state: PresenceState = explicit ?? (p.asleep ? "sleep" : p.busy ? "busy" : "online");
     const custom = String(p.label ?? "").trim();
     const doing = String(p.doing ?? "").trim();
-    if (state === "online") return { state, label: custom };
+    if (state === "online") return { state, label: custom || doing };
     return { state, label: custom || (doing ? `${PRESENCE_LABELS[state]} · ${doing}` : PRESENCE_LABELS[state]) };
 }
 
