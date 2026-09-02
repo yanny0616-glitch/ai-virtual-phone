@@ -388,6 +388,7 @@ export default {
           ${st.pendingRelation.reason ? `<div class="r">${esc(st.pendingRelation.reason)}</div>` : ""}
           <div class="acts"><button class="afl-btn pri" data-a="accept">就是这样</button><button class="afl-btn" data-a="dismiss">没有变</button></div>
         </div></div>` : ""}
+        <div class="afl-card"><h4>在线状态</h4><div class="afl-chips">${presenceChips(cid)}</div><div class="afl-note"><span class="dot"></span>聊天列表的小点和标题下的小字都跟这个走；「自动」按挂念的作息判</div></div>
         <div class="afl-card"><h4>此刻的分寸</h4><div class="afl-quote">${esc(tier.hint || "这一档还没写分寸提示")}</div><div class="afl-note"><span class="dot"></span>这段会注进提示词，告诉TA该怎么对你</div></div>
         <div class="afl-card"><h4>关系</h4><div class="afl-chips">${chips}</div>
           <div class="afl-inline" data-customrel hidden><input class="afl-input" type="text" data-k="relText" placeholder="自定义关系，12 字内" maxlength="12"><button class="afl-btn pri" data-a="saveRelText">确定</button></div>
@@ -404,6 +405,12 @@ export default {
           ${st.relationHistory.length ? `<div class="afl-path">关系走过：${st.relationHistory.map((r) => esc(r.from) + " → <b>" + esc(r.to) + "</b>").join("，")}</div>` : ""}
         </div>
         <div class="afl-foot"><button class="afl-btn danger" data-a="reset">重置这个角色</button></div>`;
+    }
+    const PRESENCE_STATES = [["", "自动"], ["online", "在线"], ["busy", "忙碌"], ["sleep", "睡觉"], ["away", "离开"], ["hidden", "隐身"]];
+    function presenceChips(cid) {
+      const ov = ctx.data.variables.get("presenceOverride", "character", cid);
+      const cur = ov && typeof ov === "object" && ov.state ? String(ov.state) : "";
+      return PRESENCE_STATES.map(([v, label]) => `<button class="afl-chip ${v === cur ? "on" : ""}" data-pres="${v}">${label}</button>`).join("");
     }
     function presenceCard(cid) {
       const pr = ctx.data.variables.get("presence", "character", cid);
@@ -453,6 +460,12 @@ export default {
             <div class="afl-scroll">${tab === "status" ? statusHtml(cid, st) : settingsHtml()}</div>
           </div>`;
           el.querySelectorAll("[data-t]").forEach((b) => b.addEventListener("click", () => { tab = b.getAttribute("data-t"); paint(); }));
+          el.querySelectorAll("[data-pres]").forEach((b) => b.addEventListener("click", () => {
+            const v = b.getAttribute("data-pres");
+            if (v) ctx.data.variables.set("presenceOverride", { state: v, at: Date.now() }, "character", cid);
+            else ctx.data.variables.unset("presenceOverride", "character", cid);
+            paint();
+          }));
           el.querySelectorAll("[data-rel]").forEach((b) => b.addEventListener("click", () => {
             const v = b.getAttribute("data-rel"), s = load(cid);
             if (v && v !== s.relation) { s.relationHistory.push({ at: Date.now(), from: s.relation, to: v, reason: "手动改" }); s.relation = v; save(cid, s); }
