@@ -63,7 +63,7 @@ import type { UserIdentity } from "@/components/settings/user-identity";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
 
-type Level = "global" | "character" | "app";
+type Level = "global" | "character" | "app" | "appDefault";
 type SingleBindingField = "apiConfigId" | "voiceConfigId" | "presetId" | "userIdentityId";
 type MultiBindingField = "worldBookIds" | "regexIds";
 type BindingField = SingleBindingField | MultiBindingField;
@@ -269,6 +269,13 @@ export function BindingManager() {
                 setLevel("character");
                 setSelectedAppId(null);
             });
+        } else if (level === "appDefault") {
+            const appLabel = selectedAppId ? getAppLabel(selectedAppId) : "";
+            setSubpageTitle(`${appLabel} · 应用默认`);
+            setOverrideBack(() => () => {
+                setLevel("global");
+                setSelectedAppId(null);
+            });
         }
     }, [level, selectedCharId, selectedAppId, characters, customApps, setSubpageTitle, setOverrideBack]);
 
@@ -299,6 +306,20 @@ export function BindingManager() {
         persist(setCharacterBinding(config, newBinding));
     };
 
+    const updateAppDefaultSlot = (field: keyof BindingSlot, value: string | string[] | undefined) => {
+        if (!selectedAppId) return;
+        const appDefaults = { ...(config.appDefaults ?? {}) };
+        appDefaults[selectedAppId] = { ...(appDefaults[selectedAppId] ?? {}), [field]: value || undefined };
+        persist({ ...config, appDefaults });
+    };
+
+    const resetAppDefaultBinding = () => {
+        if (!selectedAppId) return;
+        const appDefaults = { ...(config.appDefaults ?? {}) };
+        delete appDefaults[selectedAppId];
+        persist({ ...config, appDefaults });
+    };
+
     const resetAppBinding = () => {
         if (!selectedAppId) return;
         const binding = getCharacterBinding(config, selectedCharId);
@@ -310,6 +331,7 @@ export function BindingManager() {
 
     const getCurrentSlot = (): BindingSlot => {
         if (level === "global") return config.globalDefaults;
+        if (level === "appDefault") return (selectedAppId && config.appDefaults?.[selectedAppId]) || {};
         const binding = getCharacterBinding(config, selectedCharId);
         if (level === "character") return binding.defaults;
         if (level === "app" && selectedAppId) return binding.appOverrides[selectedAppId] || {};
@@ -330,6 +352,7 @@ export function BindingManager() {
     const getInheritedSlot = (): BindingSlot => {
         if (level === "global") return {};
         const inherited = mergeSlotInto({}, config.globalDefaults);
+        if (level === "appDefault") return inherited;
         const binding = getCharacterBinding(config, selectedCharId);
         if (level === "character") return inherited;
         mergeSlotInto(inherited, binding.defaults);
@@ -346,7 +369,7 @@ export function BindingManager() {
     };
 
     const getInheritLabel = (): string => {
-        if (level === "character") return "继承全局";
+        if (level === "character" || level === "appDefault") return "继承全局";
         if (level === "app") return "继承上级绑定";
         return "";
     };
@@ -355,6 +378,7 @@ export function BindingManager() {
         if (level === "global") updateGlobalSlot(field, value);
         else if (level === "character") updateCharDefaultSlot(field, value);
         else if (level === "app") updateAppSlot(field, value);
+        else if (level === "appDefault") updateAppDefaultSlot(field, value);
     };
 
     // Count how many fields are overridden in an app slot
@@ -623,6 +647,43 @@ export function BindingManager() {
             </div>
         );
     };
+
+    const renderAppGrid = (getSlot: (appId: string) => BindingSlot, target: "app" | "appDefault") => (
+        <div className="binding-app-grid">
+            {appOverrideEntries.map(app => {
+                const overrideCount = countOverrides(getSlot(app.id), app.id);
+                return (
+                    <button
+                        key={app.id}
+                        onClick={() => {
+                            setSelectedAppId(app.id);
+                            setActiveSlotSheetField(null);
+                            setLevel(target);
+                        }}
+                        className="g-card binding-app-card"
+                        style={bindingAccentStyle(app.color)}
+                        aria-label={`${app.label}应用绑定`}
+                    >
+                        <span className="binding-app-icon">
+                            {app.iconDataUrl ? (
+                                <img src={app.iconDataUrl} alt="" className="binding-app-icon-image" />
+                            ) : (
+                                <IconGlyph id={app.iconId} className="binding-app-icon-glyph" />
+                            )}
+                        </span>
+                        <span className="binding-app-label">
+                            {app.label}
+                        </span>
+                        {overrideCount > 0 && (
+                            <span className="binding-app-badge">
+                                {overrideCount}
+                            </span>
+                        )}
+                    </button>
+                );
+            })}
+        </div>
+    );
 
     const renderGlobalSlotCards = () => (
         renderBindingSlotCards(config.globalDefaults, "未设置", setActiveGlobalSheetField)
@@ -980,6 +1041,12 @@ export function BindingManager() {
                     </section>
 
                     <section className="flex flex-col gap-3">
+                        <p className="settings-menu-section-title">App Defaults</p>
+                        <span className="menu-desc">按应用统一绑定，所有角色共用；角色专属里对同一应用的绑定仍优先。</span>
+                        {renderAppGrid(appId => config.appDefaults?.[appId] ?? {}, "appDefault")}
+                    </section>
+
+                    <section className="flex flex-col gap-3">
                         <p className="settings-menu-section-title">Auxiliary API</p>
                         <div className="flex flex-col gap-3">
                             {renderAuxSelect("memorySummaryApiConfigId", "记忆总结 API")}
@@ -1006,42 +1073,27 @@ export function BindingManager() {
 
                     <section className="flex flex-col gap-3">
                         <p className="settings-menu-section-title">App Bindings</p>
-                        <div className="binding-app-grid">
-                            {appOverrideEntries.map(app => {
-                                const appSlot = getAppSpecificSlot(app.id);
-                                const overrideCount = countOverrides(appSlot, app.id);
-                                return (
-                                    <button
-                                        key={app.id}
-                                        onClick={() => {
-                                            setSelectedAppId(app.id);
-                                            setActiveSlotSheetField(null);
-                                            setLevel("app");
-                                        }}
-                                        className="g-card binding-app-card"
-                                        style={bindingAccentStyle(app.color)}
-                                        aria-label={`${app.label}应用绑定`}
-                                    >
-                                        <span className="binding-app-icon">
-                                            {app.iconDataUrl ? (
-                                                <img src={app.iconDataUrl} alt="" className="binding-app-icon-image" />
-                                            ) : (
-                                                <IconGlyph id={app.iconId} className="binding-app-icon-glyph" />
-                                            )}
-                                        </span>
-                                        <span className="binding-app-label">
-                                            {app.label}
-                                        </span>
-                                        {overrideCount > 0 && (
-                                            <span className="binding-app-badge">
-                                                {overrideCount}
-                                            </span>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                        {renderAppGrid(getAppSpecificSlot, "app")}
                     </section>
+                </>
+            )}
+
+            {/* Level 2b: App defaults shared by every character */}
+            {level === "appDefault" && (
+                <>
+                    <section className="flex flex-col gap-3">
+                        <p className="settings-menu-section-title">App Defaults</p>
+                        {renderBindingSlotCards(currentSlot, inheritLabel, setActiveSlotSheetField, {
+                            includeRegex: canBindRegexInApp(selectedAppId),
+                        })}
+                    </section>
+
+                    <button
+                        onClick={resetAppDefaultBinding}
+                        className="ui-btn ui-btn-soft-danger flex justify-center"
+                    >
+                        <RotateCcw size={16} /> 重置此应用默认
+                    </button>
                 </>
             )}
 
