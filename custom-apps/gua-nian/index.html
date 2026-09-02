@@ -897,6 +897,7 @@
   async function readRecentChat(cx, limit) {
     try {
       const r = await AiPhone.chat.readHistory({ characterId: cx.character.id, limit: limit || 60 });
+      if (r && r.sessionId) cx._session = r.sessionId; // 云端预约记录只认会话 id，撤孤儿预约时靠它认人
       return (r && r.messages || [])
         .filter((m) => !m.isRetracted && (m.role === "user" || m.role === "assistant"))
         .map((m) => ({ role: m.role, t: new Date(m.createdAt).getTime() || 0, c: String(m.content || "").replace(/\s+/g, " ").trim() }))
@@ -1637,6 +1638,20 @@
       done[w.wakeId] = 1;
       try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ }
     }
+    // 离线推送关着的时候撤销不会发到云端，之前挂上去的会留成孤儿照发；
+    // 云端记录里没有角色 id，只能按会话 id 认，所以得先读过一次聊天记录
+    if (!cloudCfg() || !cx._session) return;
+    try {
+      const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", limit: "20" });
+      let n = 0;
+      for (const j of (jr && jr.jobs) || []) {
+        const id = /^timedwake:(timed_wake_capp_.+)$/.exec(String(j.triggerKey || ""));
+        if (!id || j.status !== "pending" || j.sessionId !== cx._session || done[id[1]]) continue;
+        done[id[1]] = 1; n++;
+        try { await AiPhone.push.cancelWake(id[1]); } catch (e) { /* 宿主本地没登记也没关系，云端那条会被删 */ }
+      }
+      if (n) await log(cx, "撤掉云端残留的 " + n + " 条旧预约");
+    } catch (e) { /* 云端查不到就算了 */ }
   }
 
   // 哨兵预约：云端复核和自发起念都要借一条已挂预约里冻着的模型凭据当模板，
