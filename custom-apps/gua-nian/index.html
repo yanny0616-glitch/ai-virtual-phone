@@ -926,6 +926,7 @@
             busyMaxHoldMin: S.settings.busyMaxHoldMin,
             sleepMode: S.settings.sleepMode,
             sleepWakeProb: S.settings.sleepWakeProb,
+            affection: S.aff || null,
             day: dayForCloud(),
           },
           items: S.plan.items.map((w) => ({
@@ -1724,8 +1725,42 @@
       await log("回复闸门同步失败（不影响其余功能）：" + (e && e.message || e));
     }
   }
+  // 好感与关系由聊天插件「好感与关系」写在共享变量池里（scope character，name affection）；
+  // 这里只读：寄给云端当分寸，此刻行露一个小标签。没装插件或宿主太老就是 null。
+  async function refreshAffection() {
+    S.aff = null;
+    if (!S.character || !AiPhone.variables || !AiPhone.variables.get) return;
+    try {
+      const v = await AiPhone.variables.get("affection", { scope: "character", characterId: S.character.id });
+      if (v && typeof v === "object" && (v.tier || v.relation)) {
+        S.aff = { score: +v.score || 0, tier: String(v.tier || ""), relation: String(v.relation || "") };
+      }
+    } catch (e) { /* 变量池不可用就当没有 */ }
+  }
+  // 反向也给一份：TA此刻的状态快照写进变量池 presence，聊天插件面板拿去显示。
+  // 只是编排/同步那一刻的快照，带 at 让读的一方知道新不新。
+  async function publishPresence() {
+    if (!S.character || !AiPhone.variables || !AiPhone.variables.set) return;
+    try {
+      const opts = { scope: "character", characterId: S.character.id };
+      if (!S.day) { await AiPhone.variables.unset("presence", opts); return; }
+      const now = Date.now(), ph = phaseAt(S.day, now), sw = sleepWindow(S.day), nx = nextSched(S.day, now);
+      await AiPhone.variables.set("presence", {
+        at: now,
+        asleep: ph.kind === "sleep",
+        doing: ph.kind === "sleep" ? "睡觉" : (currentDoing() || S.day.doing || ""),
+        step: currentStep() || "",
+        place: ph.kind === "sleep" ? "" : currentPlace(),
+        mood: (moodNow(S.day, now).text || S.day.mood || ""),
+        energy: Math.round(energyAt(S.day, now)),
+        next: nx ? nx.time + " " + nx.title : (ph.kind === "pre" && sw ? sw.bed + " 睡觉" : (ph.kind === "sleep" && sw ? sw.wake + " 起床" : "")),
+      }, opts);
+    } catch (e) { /* 变量池不可用就算了 */ }
+  }
   async function syncChatContext(force) {
     await syncReplyGate();
+    await refreshAffection();
+    await publishPresence();
     if (!S.character || !AiPhone.chat || !AiPhone.chat.setContext) return;
     const on = !!(S.settings && S.settings.injectChat) && !!S.day;
     const text = on ? chatContextText() : "";
@@ -1824,8 +1859,10 @@
   }
   function nowLineHtml(day, doing) {
     const loc = doing === "睡觉" ? "" : (currentPlace() || String(day.location || ""));
+    const aff = S.aff ? [S.aff.tier, S.aff.relation].filter(Boolean).join(" · ") : "";
     return '<span class="doing"><span class="live"></span>' + esc(doing ? "正在" + doing : day.doing) + "</span>" +
-      (loc ? '<span class="loc">📍 ' + esc(loc) + "</span>" : "");
+      (loc ? '<span class="loc">📍 ' + esc(loc) + "</span>" : "") +
+      (aff ? '<span class="loc">❤ ' + esc(aff) + "</span>" : "");
   }
   function kv(label, value, cls) {
     const col = cls && cls.indexOf("col") >= 0;

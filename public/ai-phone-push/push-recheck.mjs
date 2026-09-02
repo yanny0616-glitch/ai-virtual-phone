@@ -47,6 +47,8 @@ type PlanContext = {
   gateMinMsgs?: number;
   selfImpulseCap?: number;
   selfUsed?: number;
+  /** 聊天插件「好感与关系」算出来的分寸，App 编排时寄来；没装插件就没有 */
+  affection?: { score?: number; tier?: string; relation?: string } | null;
   day?: GuanianDay;
   [key: string]: unknown;
 };
@@ -64,6 +66,10 @@ function guanianAsleep(day: GuanianDay, hm: string, quietStart?: string, quietEn
   const wake = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(quietEnd || "");
   if (!bed || !wake || bed === wake) return false;
   return bed < wake ? (hm >= bed && hm < wake) : (hm >= bed || hm < wake);
+}
+function affectionLine(aff: { tier?: string; relation?: string } | null | undefined): string {
+  if (!aff || (!aff.tier && !aff.relation)) return "";
+  return `你对用户：${aff.tier || "说不上"}；两人现在的关系：${aff.relation || "没定"}。想不想找TA、找了说什么，都按这个分寸来。`;
 }
 type GuanianNow = { hm: string; doing: string; step: string; mood: string; energy: number; next: string; done: GuanianSched | null; asleep: boolean };
 
@@ -553,6 +559,7 @@ Deno.serve(async (req: Request) => {
       `你现在是「${characterName}」，在盘算今天剩下的时间要不要主动联系用户。现在是本地时间 ${hhmm(nowMs, offsetMin)}。`,
       context.bias ? `你的性格倾向：${context.bias}` : "",
       stateLine,
+      affectionLine(context.affection),
       `规矩：今天最多主动 ${context.quota ?? 3} 次（已点亮 ${litCount} 次）；`
       + `${context.quietStart || "23:00"}–${context.quietEnd || "07:00"} 不打扰；两次之间至少隔 ${context.minGapMin ?? 90} 分钟。`,
       "",

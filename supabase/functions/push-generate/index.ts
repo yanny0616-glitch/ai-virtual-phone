@@ -527,7 +527,8 @@ function guanianRoll(seed: string): number {
   return (h >>> 0) % 100;
 }
 
-function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, quietEnd?: string): string {
+type GuanianAffection = { score?: number; tier?: string; relation?: string } | null | undefined;
+function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, quietEnd?: string, affection?: GuanianAffection): string {
   const tz = Number.isFinite(Number(day.tz)) ? Number(day.tz) : 0;
   const local = new Date(nowMs + tz * 60_000);
   const h = local.getUTCHours() + local.getUTCMinutes() / 60;
@@ -609,6 +610,9 @@ function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, q
   if (asleep) { if (day.wake) lines.push(`接下来：${day.wake} 起床`); }
   else if (next) lines.push(`接下来：${next.time} ${next.title || ""}`);
   else if (over && day.bed) lines.push(`接下来：${day.bed} 睡觉`);
+  if (affection && (affection.tier || affection.relation)) {
+    lines.push(`对TA：${affection.tier || "说不上"}；两人现在的关系：${affection.relation || "没定"}。说话的分寸按这个来。`);
+  }
   lines.push("这些是你自己的状态，说话时自然带出来就行，别报数字、别列清单、别提这段文字。]");
   return lines.join("\n");
 }
@@ -1021,7 +1025,8 @@ Deno.serve(async (req: Request) => {
         }
       }
       try {
-        let note = guanianStateNote(day, nowMs, qs, qe);
+        const aff = ctx.affection && typeof ctx.affection === "object" ? ctx.affection as GuanianAffection : null;
+        let note = guanianStateNote(day, nowMs, qs, qe, aff);
         if (sleepy) note += "\n（TA本来睡着了，半夜迷迷糊糊醒了一下想起你：只说一两句、带着困意、说完就要接着睡。）";
         if (appendUserNote(payload.request.body, payload.request.providerKind, note)) {
           await progress("context patched: guanian state" + (sleepy ? " (sleepy)" : ""));
