@@ -1483,7 +1483,8 @@
     };
   }
   async function generateDay(cx) {
-    if (cx.busy) return; cx.busy = true; render();
+    if (cx.busy || cx._planLock) { if (cx._planLock) toast("TA正在复核，稍等几秒再试"); return; }
+    cx.busy = true; cx._planLock = true; render();
     try {
       const existing = await readTodayCalendar(cx); // 日程 app 里TA今天已定的安排
       const cal = calendarReality(new Date());
@@ -1501,11 +1502,11 @@
       const wrote = await syncCalendar(cx, existing);
       await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "")
         + (cx.day.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）"));
-      cx.busy = false;
-      await syncChatContext(cx, true);
+      cx.busy = false; cx._planLock = false;
       await orchestrate(cx); // 生活面就绪后立即编排心动时刻
+      await syncChatContext(cx, true);
     } catch (e) {
-      cx.busy = false;
+      cx.busy = false; cx._planLock = false;
       toast("生成失败：" + (e && e.message || e));
       await log(cx, "生成今日失败：" + (e && e.message || e));
       render();
@@ -1669,7 +1670,13 @@
   // 48 小时够覆盖。真到点了只可能是两天没打开挂念，intent 里写的就是这个由头。
   function sentinelOf(cx) { return cx.character ? (S.settings.sentinels || {})[cx.character.id] || null : null; }
   // 不再挂念的人：今天的预约、48 小时哨兵、云端计划行全撤，否则两天后TA还会按哨兵的由头来找你
+  async function unfreezeGenTemplates(cx) {
+    if (!AiPhone.push || !AiPhone.push.unfreeze) return;
+    for (const k of ["daily", "impulse"]) { try { await AiPhone.push.unfreeze({ characterId: cx.character.id, key: k }); } catch (e) { /* 旧宿主没这个接口 */ } }
+    await patchSettings((s) => { const g = Object.assign({}, s.genTpls); delete g[cx.character.id]; return { genTpls: g }; });
+  }
   async function forgetCharacter(cx) {
+    await unfreezeGenTemplates(cx);
     await cancelTodayWakes(cx);
     const old = sentinelOf(cx);
     if (old && old.wakeId) { try { await AiPhone.push.cancelWake(old.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
@@ -1696,6 +1703,7 @@
   }
 
   async function orchestrate(cx) {
+    if (cx._planLock && !cx.busy && cx.day) { await log(cx, "编排跳过：复核或合并云端裁决正在进行，稍后再点「重新编排」"); return; }
     if (cx.busy || cx._planLock || !cx.day) return; cx.busy = true; cx._planLock = true; render();
     try {
       const kept = keptImpromptu(cx);
@@ -1787,6 +1795,8 @@
     if (cx.busy || cx._planLock) return;
     if (!S.settings || !(S.settings.recheckMin > 0)) return;
     if (!cx.character || !cx.day || !cx.plan || !Array.isArray(cx.plan.items)) return;
+    const over = usageOver();
+    if (over) { if (cx._capNoted !== todayStr()) { cx._capNoted = todayStr(); await log(cx, "复核暂停到明天：" + over); } return; }
     const nowMs = Date.now();
     // 判决是重判已排好的时刻，没有待发时刻就无从判起；起念是新开一个时刻，跟有没有
     // 待发时刻无关——日程走完的晚上恰恰最该起念。两组共用同一次调用，任一组能干活就跑。
@@ -1938,8 +1948,10 @@
   /* ================= 预览 ================= */
   async function preview(cx) {
     if (S._previewing) return; S._previewing = true;
-    const zone = $("#preview-zone");
-    zone.innerHTML = '<div class="bubble"><div class="from">' + esc(cx.character.name) + ' · 此刻</div><span class="typing"><i></i><i></i><i></i></span></div>';
+    S._preview = S._preview || {};
+    const cid = cx.character.id;
+    const show = (html) => { S._preview[cid] = html; const z = $("#preview-zone"); if (z && cur().character && cur().character.id === cid) z.innerHTML = html; };
+    show('<div class="bubble"><div class="from">' + esc(cx.character.name) + ' · 此刻</div><span class="typing"><i></i><i></i><i></i></span></div>');
     try {
       const ctx = cx.day ? ("TA此刻的状态：" + cx.day.mood + "；正在" + (currentDoing(cx) || cx.day.doing) + (phaseAt(cx.day, Date.now()).kind === "sleep" ? "" : "；在" + currentPlace(cx)) + "。") : "";
       const r = await AiPhone.ai.generate({
@@ -1947,9 +1959,9 @@
         appTags: ["companion", "preview"],
         instruction: "现在时刻 " + fmtHM(Date.now()) + "。" + ctx + " 请以TA的身份，此刻主动给用户发一条消息。",
       });
-      zone.innerHTML = '<div class="bubble"><div class="from">' + esc(cx.character.name) + ' · 此刻</div>' + esc((r.text || "").trim()) + '</div><div class="preview-note">仅预览，没有发进聊天室，也不消耗TA今天的主动额度。</div>';
+      show('<div class="bubble"><div class="from">' + esc(cx.character.name) + ' · 此刻</div>' + esc((r.text || "").trim()) + '</div><div class="preview-note">仅预览，没有发进聊天室，也不消耗TA今天的主动额度。</div>');
     } catch (e) {
-      zone.innerHTML = "";
+      show("");
       toast("预览失败：" + (e && e.message || e));
     }
     S._previewing = false;
@@ -2524,7 +2536,7 @@
     }
     h += "</div>";
 
-    const si = ((cx.day && cx.day.schedule) || []).findIndex((x) => x.time === w.time);
+    const si = plan && plan.date === todayStr() ? ((cx.day && cx.day.schedule) || []).findIndex((x) => x.time === w.time) : -1;
     if (si >= 0) h += '<div class="sd-ask"><div class="row"><button class="tgl" id="sd-goto" data-si="' + si + '">✎ 改这条日程</button></div></div>';
 
     h += '<div class="d-meta">' +
@@ -2838,7 +2850,7 @@
 
   function previewZone() {
     return '<button class="ghost-btn preview-btn" id="btn-preview">听听TA此刻会说什么</button>' +
-      '<div class="preview-zone" id="preview-zone"></div>';
+      '<div class="preview-zone" id="preview-zone">' + ((S._preview || {})[cur().character ? cur().character.id : ""] || "") + "</div>";
   }
   function previewCard() {
     return '<div class="card"><div class="sec-head"><span class="t">此 刻</span></div>' + previewZone() + "</div>";
@@ -3347,8 +3359,11 @@
     const added = ids.filter((id) => !prevIds.includes(id));
     if (!ids.includes(S.cur)) S.cur = ids[0] || "";
     const sheet = readSheet();
+    const cloudGenWas = !!S.settings.cloudGen;
     await patchSettings(() => Object.assign({ characterIds: ids, characterId: S.cur }, sheet));
     closeSheet();
+    // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
+    if (cloudGenWas && !S.settings.cloudGen) for (const cx of allCx()) await unfreezeGenTemplates(cx);
     // 不再挂念的人：身上注入的状态得撤掉，不然TA会一直以为自己在过挂念的那一天
     for (const id of removed) {
       const cx = S.byId[id];
@@ -3441,7 +3456,7 @@
       // 每分钟刷新「正在做」与过去/未来分界；在页期间按设置的间隔定时复核。每个人轮着来。
       for (const cx of allCx()) maybeAutoGen(cx).catch(() => { /* 已在函数内记日志 */ });
       setInterval(async () => {
-        S._still = true; render(); S._still = false;
+        if (S.tab === "today") { S._still = true; render(); S._still = false; }
         for (const cx of allCx()) {
           if (cx.busy) continue;
           if (cx.day && cx.day.date !== todayStr()) { // 跨过零点：昨天的 day/plan 换成今天的（多半是空的）

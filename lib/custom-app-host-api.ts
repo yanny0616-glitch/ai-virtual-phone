@@ -196,6 +196,7 @@ const HOST_ACTION_PERMISSIONS: Record<string, CustomAppPermission[]> = {
   "bridge.send": ["bridge.send"],
   "push.wake": ["push.wake"],
   "push.freeze": ["push.wake"],
+  "push.unfreeze": ["push.wake"],
 };
 
 function emitHostStateUpdated(): void {
@@ -2540,6 +2541,24 @@ function rememberCustomAppTemplate(appId: string, characterId: string, key: stri
   kvSet(CUSTOM_APP_TEMPLATE_REGISTRY_KEY, JSON.stringify(next));
 }
 
+function forgetCustomAppTemplates(appId: string, characterId?: string, key?: string): number {
+  const all = loadCustomAppTemplateRegistry();
+  const next = all.filter(item => !(item.appId === appId && (!characterId || item.characterId === characterId) && (!key || item.key === key)));
+  if (next.length !== all.length) kvSet(CUSTOM_APP_TEMPLATE_REGISTRY_KEY, JSON.stringify(next));
+  return all.length - next.length;
+}
+
+/** APP 不再需要云端模板（关掉了对应功能、不再跟这个角色）：登记簿里删掉，宿主不再替它重冻，服务端那条也撤。 */
+export async function unfreezeCustomAppTemplate(app: InstalledCustomApp, record: Record<string, unknown>): Promise<{ ok: boolean; removed: number }> {
+  const characterId = cleanText(record.characterId, 160);
+  const key = cleanText(record.key, 40);
+  if (!characterId) throw new Error("push.unfreeze 需要 characterId。");
+  const removed = forgetCustomAppTemplates(app.id, characterId, key || undefined);
+  if (key) cancelBailoutKey(`capptpl:${app.id}:${characterId}:${key}`);
+  else await cancelBailoutPrefix(`capptpl:${app.id}:${characterId}:`);
+  return { ok: true, removed };
+}
+
 export async function refreshCustomAppTemplatesForCharacter(characterId: string): Promise<number> {
   const entries = loadCustomAppTemplateRegistry().filter(item => item.characterId === characterId);
   if (entries.length === 0) return 0;
@@ -2597,6 +2616,8 @@ export async function cancelAllCustomAppTimedWakes(appId: string): Promise<numbe
   const ids = loadTimedWakeSchedules().filter(item => item.id.startsWith(prefix)).map(item => item.id);
   for (const id of ids) removeTimedWakeSchedule(id);
   await cancelBailoutPrefix(`timedwake:${prefix}`);
+  forgetCustomAppTemplates(appId);
+  await cancelBailoutPrefix(`capptpl:${appId}:`);
   if (ids.length > 0) emitHostStateUpdated();
   return ids.length;
 }
@@ -2685,6 +2706,8 @@ export async function executeCustomAppHostAction(
       return scheduleCustomAppTimedWake(app, payload);
     case "push.freeze":
       return freezeCustomAppTemplate(app, payload);
+    case "push.unfreeze":
+      return unfreezeCustomAppTemplate(app, payload);
     default:
       throw new Error(`未知后台动作：${actionType}`);
   }
@@ -2699,7 +2722,8 @@ function customAppHostActionNeedsChatStorage(actionType: string): boolean {
     || actionType === "chat.reply"
     || actionType === "chat.contact"
     || actionType === "push.wake"
-    || actionType === "push.freeze";
+    || actionType === "push.freeze"
+    || actionType === "push.unfreeze";
 }
 
 function customAppHostActionNeedsSettingsStorage(actionType: string): boolean {

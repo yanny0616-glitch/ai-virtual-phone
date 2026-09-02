@@ -1539,7 +1539,7 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                         : "每个角色同时仅保留一条，新建会替换旧的。关掉后台由服务端接管生成并推送（需开启离线推送）。")}
                 </p>
 
-                {(timedSchedules.length > 0 || idleRules.length > 0) && (
+                {(timedSchedules.some(schedule => !schedule.id.startsWith("timed_wake_capp_")) || idleRules.length > 0) && (
                     <>
                         <p className="menu-group-desc mx-2">已排期</p>
                         <div className="menu-group">
@@ -1558,7 +1558,7 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                                     </div>
                                 );
                             })}
-                            {timedSchedules.map(schedule => {
+                            {timedSchedules.filter(schedule => !schedule.id.startsWith("timed_wake_capp_")).map(schedule => {
                                 const charName = loadCharacters().find(c => c.id === schedule.characterId)?.name ?? "未知角色";
                                 return (
                                     <div key={schedule.id} className="menu-item">

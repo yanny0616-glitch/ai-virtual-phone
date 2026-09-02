@@ -1270,6 +1270,8 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "",
   "需 `push.wake` 权限；`armed: false` 的原因和 `push.wake` 相同（没开离线推送等）。宿主会记住冻过的模板：该角色每次回复之后（记忆可能已更新）停 3 分钟自动重冻一遍，APP 不用一直开着。",
   "",
+  "不再需要时调 `AiPhone.push.unfreeze({ characterId, key })`（不传 key 就撤这个角色的全部模板）：登记簿里删掉，宿主不再在角色回复后替你重冻，服务端那条也撤。关掉对应功能、不再跟这个角色时都该调，否则模板会一直续到你卸载。",
+  "",
   "### 5.23.3 用量按 APP 分开记",
   "",
   "`ai.generate` 的每次调用在宿主用量统计里的来源是 `custom_app:<appId>`，`AiPhone.usage.readDaily()` 返回的 `days[].bySource[\"custom_app:<appId>\"]` 就是本 APP 自己花的次数和 token（需 `usage.read` 权限）。做「今日 xx/xx」这种额度面板时按这个键取，别把用户的聊天算进去。",
