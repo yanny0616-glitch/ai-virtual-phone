@@ -452,7 +452,7 @@ class ChatPluginRuntime {
                     overlay.style.cssText = `position:${shell ? "absolute" : "fixed"};inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45)`;
                     const content = document.createElement("div");
                     // 默认卡片外观，插件可在 mount 里覆盖任意样式
-                    content.style.cssText = "background:var(--c-card-bg,#fff);color:var(--c-text,#111);border-radius:16px;width:min(560px,100%);max-height:88vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.28)";
+                    content.style.cssText = "background:var(--c-card-bg,#fff);color:var(--c-text,#111);border-radius:16px;width:min(560px,100%);max-height:100%;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.28)";
                     overlay.appendChild(content);
                     let userCleanup: Disposable | void;
                     const doClose = () => {
