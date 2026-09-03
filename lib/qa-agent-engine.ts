@@ -348,25 +348,46 @@ async function requestQaCompletion(
         });
     };
     try {
-        const streamRequest = buildProviderRequest(apiConfig, null, messages, { stream: true, maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
-        const result = await streamQaProviderRequest(streamRequest, { signal: options?.signal }, options?.callbacks);
-        if (!result.content.trim()) throw new Error("LLM 返回了空内容");
-        logQaCall({ model: apiConfig.defaultModel, messages: streamRequest.messagesForLog, rawResponse: result.content, reasoning: result.reasoning });
-        return result;
-    } catch (streamError) {
-        if (options?.signal?.aborted) throw streamError;
-        await options?.callbacks?.onStreamFallback?.(formatQaErrorMessage(streamError));
-        const request = buildProviderRequest(apiConfig, null, messages, { maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
-        const response = await fetchLlmPayload(request, { signal: options?.signal });
-        if (!response.ok) throw new Error(`API ${response.status}: ${await response.text()}`);
-        const parsed = parseProviderResponse(request.providerKind, await response.json());
-        const content = stripHallucinatedTimestamps(parsed.content || "").trim();
-        if (!content) throw new Error("LLM 返回了空内容");
-        const visible = stripThinkBlocks(content);
-        if (visible) await options?.callbacks?.onDelta?.(visible);
-        logQaCall({ model: apiConfig.defaultModel, messages: request.messagesForLog, rawResponse: content, reasoning: parsed.reasoning });
-        return { content, reasoning: parsed.reasoning || "" };
+      try {
+          const streamRequest = buildProviderRequest(apiConfig, null, messages, { stream: true, maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
+          const result = await streamQaProviderRequest(streamRequest, { signal: options?.signal }, options?.callbacks);
+          if (!result.content.trim()) throw new Error("LLM 返回了空内容");
+          logQaCall({ model: apiConfig.defaultModel, messages: streamRequest.messagesForLog, rawResponse: result.content, reasoning: result.reasoning });
+          return result;
+      } catch (streamError) {
+          if (options?.signal?.aborted) throw streamError;
+          await options?.callbacks?.onStreamFallback?.(formatQaErrorMessage(streamError));
+          const request = buildProviderRequest(apiConfig, null, messages, { maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
+          const response = await fetchLlmPayload(request, { signal: options?.signal });
+          if (!response.ok) throw new Error(`API ${response.status}: ${await response.text()}`);
+          const parsed = parseProviderResponse(request.providerKind, await response.json());
+          const content = stripHallucinatedTimestamps(parsed.content || "").trim();
+          if (!content) throw new Error("LLM 返回了空内容");
+          const visible = stripThinkBlocks(content);
+          if (visible) await options?.callbacks?.onDelta?.(visible);
+          logQaCall({ model: apiConfig.defaultModel, messages: request.messagesForLog, rawResponse: content, reasoning: parsed.reasoning });
+          return { content, reasoning: parsed.reasoning || "" };
+      }
+    } catch (error) {
+        if (!options?.signal?.aborted) logQaFailure(apiConfig, messages, error);
+        throw error;
     }
+}
+
+/** 流式与非流式都失败时留一条记录：否则工坊「调用记录」里这一轮完全不存在 */
+function logQaFailure(apiConfig: ApiConfig, messages: LlmRequestMessage[], error: unknown): void {
+    pushApiLog({
+        characterName: "工坊",
+        source: "qa",
+        channel: "qa",
+        model: apiConfig.defaultModel,
+        messages: messages.map(m => ({
+            role: m.role,
+            content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
+        })),
+        rawResponse: `[调用失败] ${error instanceof Error ? error.message : String(error)}`,
+        failed: true,
+    });
 }
 
 /** 单轮问答（无工具），保留给简单场景。 */

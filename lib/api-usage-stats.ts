@@ -4,7 +4,10 @@
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 
 export type ApiUsageBucket = {
+    /** 成功返回的次数；失败的走 failedCalls，混在一起算「平均每次多少 token」就废了 */
     calls: number;
+    /** 报错的次数（HTTP 非 2xx、网络失败、超时、空回复）。老数据没有这个字段，读回来兜 0 */
+    failedCalls: number;
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
@@ -41,13 +44,15 @@ function localDateKey(date: Date): string {
 }
 
 function emptyBucket(): ApiUsageBucket {
-    return { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    return { calls: 0, failedCalls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 }
 
 type UsageDelta = { prompt: number; completion: number; total: number; cacheRead: number; cacheWrite: number };
 
-function addInto(target: ApiUsageBucket, delta: UsageDelta): void {
-    target.calls += 1;
+function addInto(target: ApiUsageBucket, delta: UsageDelta, failed: boolean): void {
+    // 失败不计进 calls，但 token 照加：空回复、被截断这类失败照样是计费的。
+    if (failed) target.failedCalls = (target.failedCalls || 0) + 1;
+    else target.calls += 1;
     target.promptTokens += delta.prompt;
     target.completionTokens += delta.completion;
     target.totalTokens += delta.total;
@@ -73,6 +78,8 @@ function saveDays(days: ApiUsageDay[]): void {
 export function recordApiUsage(input: {
     model?: string;
     source?: string;
+    /** 这次调用是失败的（报错/超时/空回复）：只累加 failedCalls，不记 token */
+    failed?: boolean;
     characterId?: string;
     characterName?: string;
     usage?: {
@@ -120,10 +127,11 @@ export function recordApiUsage(input: {
         if (!day.bySource[source]) day.bySource[source] = emptyBucket();
         if (!day.byCharacter[characterKey]) day.byCharacter[characterKey] = { ...emptyBucket(), name: characterName || undefined };
         else if (characterName) day.byCharacter[characterKey].name = characterName;
-        addInto(day, delta);
-        addInto(day.byModel[model], delta);
-        addInto(day.bySource[source], delta);
-        addInto(day.byCharacter[characterKey], delta);
+        const failed = input.failed === true;
+        addInto(day, delta, failed);
+        addInto(day.byModel[model], delta, failed);
+        addInto(day.bySource[source], delta, failed);
+        addInto(day.byCharacter[characterKey], delta, failed);
         saveDays(days);
     } catch { /* 统计失败不影响主流程 */ }
 }

@@ -181,6 +181,7 @@ export async function simpleLLMCall(
                 model: config.defaultModel,
                 messages: messages.map(m => ({ role: m.role, content: m.content })),
                 rawResponse: `[API 错误 ${res.status}] ${errText.slice(0, 2000)}`,
+                failed: true,
             });
             return { content: null, error: `API 错误 ${res.status}: ${errText.slice(0, 200)}` };
         }
@@ -198,6 +199,7 @@ export async function simpleLLMCall(
             messages: messages.map(m => ({ role: m.role, content: m.content })),
             rawResponse: content ?? describeEmptyLLMResponse(data, finishReason, wasTruncated, config),
             usage: extractUsage(data),
+            failed: !content,
         });
         if (!content) {
             console.warn("[simpleLLMCall] Empty response. Keys:", JSON.stringify(Object.keys(data || {})),
@@ -214,6 +216,7 @@ export async function simpleLLMCall(
             model: config.defaultModel,
             messages: messages.map(m => ({ role: m.role, content: m.content })),
             rawResponse: `[请求失败] ${err instanceof Error ? err.message : String(err)}`,
+            failed: true,
         });
         return { content: null, error: `请求失败: ${err instanceof Error ? err.message : String(err)}` };
     }

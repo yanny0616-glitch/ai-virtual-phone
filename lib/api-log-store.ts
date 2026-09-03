@@ -24,8 +24,13 @@ export type DebugInfo = {
     };
     /** 模型思维链（reasoning/CoT）原文，独立于回复内容存储，避免被清洗吞掉 */
     reasoning?: string;
-    /** 调用来源：chat=聊天引擎、background=simpleLLMCall 后台功能（具体功能名看 characterName 标签）、qa=工坊答疑引擎 */
-    source?: "chat" | "background" | "qa" | `custom_app:${string}`;
+    /** 调用来源。取值就是发起方的 appId：chat / xiaohongshu / moments / group_chat / checkphone_* 等，
+     *  外加 background（simpleLLMCall 后台功能，具体功能名看 characterName 标签）、qa（工坊答疑）、
+     *  custom_app:<id>（自定义 APP）。用量页按它分栏，所以不能再把各 APP 合并成 chat */
+    source?: string;
+    /** 这次调用失败了（HTTP 非 2xx、网络错误、超时、空回复）。失败也要留痕，
+     *  否则「为什么没回复」在日志与用量页里都查不到 */
+    failed?: boolean;
     /** 归属通道：qa 进工坊专用环，其余进底层调用日志环。分流只认这个显式字段，不看角色名 */
     channel?: "chat" | "qa";
 };
@@ -147,6 +152,7 @@ export function pushApiLog(entry: Omit<DebugInfo, "id" | "timestamp">): void {
     recordApiUsage({
         model: entry.model,
         source: entry.source,
+        failed: entry.failed,
         usage: entry.usage,
         characterId: entry.characterId,
         characterName: entry.characterName,

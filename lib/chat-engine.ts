@@ -488,11 +488,37 @@ function isToolFlowHistoryMessage(message: ChatMessage): boolean {
 /** 日志分流：工坊（appId === "qa"）经聊天引擎发出的调用（答疑 Agent 原生工具循环）归工坊环，
  *  其余归底层调用日志环。channel 不能硬编码——工坊的 Agent 循环复用 sendLLMToolStreamRequest，
  *  旧逻辑靠 characterName === "工坊" 分流，改成显式字段后必须从 appId 派生，否则工坊记录漏进主环。 */
-function apiLogChannelFor(options?: { appId?: string }): { source: "chat" | "qa" | `custom_app:${string}`; channel: "chat" | "qa" } {
+function apiLogChannelFor(options?: { appId?: string }): { source: string; channel: "chat" | "qa" } {
     if (options?.appId === "qa") return { source: "qa", channel: "qa" };
-    // 自定义 APP 的调用单独记来源，APP 自己的用量页（usage.readDaily 的 bySource）才分得出哪些是它花的
-    if (options?.appId?.startsWith("custom_app:")) return { source: options.appId as `custom_app:${string}`, channel: "chat" };
-    return { source: "chat", channel: "chat" };
+    // source 就是 appId 原文（xiaohongshu / moments / group_chat / custom_app:<id> …）：
+    // 用量页要能分出每个 APP 各花了多少，全部并成 "chat" 就只剩一坨。channel 仍只分两个日志环。
+    return { source: options?.appId || "chat", channel: "chat" };
+}
+
+/** 失败的调用也写一条日志：原来四条请求路径都在 pushApiLog 之前就抛出去了，
+ *  日志面板与用量页因此只看得见成功的调用，报错的整条消失。
+ *  用户主动中止（点了停止）不算失败，不记。 */
+function logLlmFailure(
+    request: { messagesForLog: { role: string; content: unknown; marker?: string }[] },
+    config: ApiConfig,
+    meta: { characterName?: string; characterId?: string } | undefined,
+    options: { appId?: string; signal?: AbortSignal } | undefined,
+    error: unknown,
+): void {
+    if (options?.signal?.aborted) return;
+    pushApiLog({
+        characterName: meta?.characterName,
+        characterId: meta?.characterId,
+        ...apiLogChannelFor(options),
+        model: config.defaultModel,
+        messages: request.messagesForLog.map(m => ({
+            role: m.role,
+            content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
+            marker: m.marker,
+        })),
+        rawResponse: `[调用失败] ${error instanceof Error ? error.message : String(error)}`,
+        failed: true,
+    });
 }
 
 export function appendEmptyGenerateGuardMessage(
@@ -878,6 +904,7 @@ export async function sendLLMStreamRequest(
         }
         return { content: rawOutput, rawResponse, providerKind: request.providerKind };
     } catch (error: unknown) {
+        logLlmFailure(request, config, meta, options, error);
         if (error instanceof DOMException && (error as DOMException).name === "AbortError") {
             if (options?.signal?.aborted) throw error;
             throw new ChatEngineError("AI 流式回复超时（500秒），请重试。");
@@ -1015,6 +1042,7 @@ export async function sendLLMRequest(
         });
         return applyOutputRegex(rawOutput, regexes, { macroEngine, activeTags });
     } catch (error: unknown) {
+        logLlmFailure(request, config, meta, options, error);
         if (error instanceof DOMException && (error as DOMException).name === "AbortError") {
             throw new ChatEngineError("AI 回复超时（500秒），请重试。");
         }
@@ -1242,6 +1270,7 @@ export async function sendLLMToolStreamRequest(
             providerKind: request.providerKind,
         };
     } catch (error: unknown) {
+        logLlmFailure(request, config, meta, options, error);
         if (error instanceof DOMException && error.name === "AbortError") {
             if (options?.signal?.aborted) throw error;
             throw new ChatEngineError("AI 原生动作流式回复超时（500秒），请重试。");
@@ -1350,6 +1379,7 @@ export async function sendLLMToolRequest(
             usage: parsed.usage,
         };
     } catch (error: unknown) {
+        logLlmFailure(request, config, meta, options, error);
         if (error instanceof DOMException && error.name === "AbortError") {
             if (options?.signal?.aborted) throw error;
             throw new ChatEngineError("AI 原生动作回复超时（500秒），请重试。");
