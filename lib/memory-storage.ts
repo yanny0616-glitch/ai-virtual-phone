@@ -3,7 +3,7 @@
 
 import type { MemoryEntry, MemoryConfig } from "./memory-types";
 import { DEFAULT_MEMORY_CONFIG } from "./memory-types";
-import { kvGet, kvSet, registerKvMigration, registerDynamicPrefix } from "./kv-db";
+import { kvGet, kvSet, kvRemove, registerKvMigration, registerDynamicPrefix } from "./kv-db";
 import { openIndexedDbAtLeast } from "./idb-open";
 
 // ── Long-term memory DB (unchanged from v1) ──
@@ -230,6 +230,24 @@ export function getLastSummarizedTimestamp(characterId: string): string | null {
 export function setLastSummarizedTimestamp(characterId: string, ts: string): void {
     if (typeof window === "undefined") return;
     kvSet(LAST_SUMMARY_TS_PREFIX + characterId, ts);
+}
+
+/**
+ * 删掉长期记忆后把进度水位线退回到剩余条目覆盖的最晚时间；
+ * 一条都不剩就清掉，下次「接着上次总结」从头开始。
+ * 只认自动总结生成的条目（metadata.timeSpan 为「起 ~ 止」ISO 时间）。
+ */
+export async function rollbackSummaryWatermark(characterId: string): Promise<void> {
+    if (typeof window === "undefined") return;
+    const entries = await loadMemoryEntriesByType(characterId, "long_term");
+    let latest = "";
+    for (const entry of entries) {
+        const span = typeof entry.metadata?.timeSpan === "string" ? entry.metadata.timeSpan : "";
+        const end = span.split(" ~ ")[1]?.trim() ?? "";
+        if (end && end > latest) latest = end;
+    }
+    if (latest) kvSet(LAST_SUMMARY_TS_PREFIX + characterId, latest);
+    else kvRemove(LAST_SUMMARY_TS_PREFIX + characterId);
 }
 
 export function getCoreMemoryCounter(characterId: string): number {

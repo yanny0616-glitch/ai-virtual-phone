@@ -20,6 +20,7 @@ import {
     getMemoryCountByType,
     getLastSummarizedTimestamp,
     getLastCoreSummarizedTimestamp,
+    rollbackSummaryWatermark,
 } from "@/lib/memory-storage";
 import { hydrateChatStorage } from "@/lib/chat-storage";
 import { loadNativeTimeline, type NativeTimelineEntry } from "@/lib/short-term-assembler";
@@ -319,7 +320,9 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
     };
 
     const handleDeleteEntry = async (id: string) => {
+        const wasLongTerm = longTermEntries.some(e => e.id === id);
         await deleteMemoryEntry(id);
+        if (wasLongTerm && selectedCharId) await rollbackSummaryWatermark(selectedCharId);
         setCoreEntries(prev => prev.filter(e => e.id !== id));
         setLongTermEntries(prev => prev.filter(e => e.id !== id));
         setEntryMenuId(null);
@@ -329,6 +332,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
     const handleClearEntries = async (type: "core" | "long_term") => {
         if (!selectedCharId) return;
         await deleteCharacterMemoriesByType(selectedCharId, type);
+        if (type === "long_term") await rollbackSummaryWatermark(selectedCharId);
         if (type === "core") setCoreEntries([]);
         else setLongTermEntries([]);
         loadCharacterList();
