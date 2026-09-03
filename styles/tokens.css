@@ -358,41 +358,6 @@
   --c-calendar-sel-bg: #3B2A31;
 }
 
-/* 暖桃：与「挂念」APP 同色系（fork 自加主题） */
-[data-calendar-theme="peach"] {
-  --c-calendar-bg: #FDF7F2;
-  --c-calendar-surface: #F6E9E1;
-  --c-calendar-surface-2: #EFDDD2;
-  --c-calendar-sheet: #FFFDFB;
-  --c-calendar-ink: #453038;
-  --c-calendar-sub: #93777F;
-  --c-calendar-faint: #C4ACB3;
-  --c-calendar-today: #F0714B;
-  --c-calendar-sel-bg: #453038;
-  --c-calendar-sel-fg: #FFF9F5;
-  --c-calendar-scrim: rgba(69, 48, 56, 0.35);
-  --c-calendar-hair: rgba(160, 110, 100, 0.16);
-  --c-calendar-glass: rgba(255, 251, 247, 0.72);
-  --c-calendar-glass-edge: rgba(255, 255, 255, 0.95);
-  --c-calendar-glass-hi: rgba(255, 255, 255, 1);
-  --c-calendar-ev-blue-bg: #DCE9F2;
-  --c-calendar-ev-blue-fg: #3D6A8A;
-  --c-calendar-ev-green-bg: #E2EDD6;
-  --c-calendar-ev-green-fg: #55763B;
-  --c-calendar-ev-amber-bg: #FBE7C9;
-  --c-calendar-ev-amber-fg: #A5651F;
-  --c-calendar-ev-rose-bg: #FADEDF;
-  --c-calendar-ev-rose-fg: #C25566;
-  --c-calendar-ev-violet-bg: #E9E0F0;
-  --c-calendar-ev-violet-fg: #75589C;
-  --c-calendar-ev-teal-bg: #D8ECE5;
-  --c-calendar-ev-teal-fg: #35786A;
-  --c-calendar-ev-slate-bg: #ECE4DE;
-  --c-calendar-ev-slate-fg: #6B5F58;
-  --c-calendar-ev-lilac-bg: #F3E1EE;
-  --c-calendar-ev-lilac-fg: #9A5589;
-}
-
 /* ── Adventure Mode ── */
 :root {
   /* 暗夜古卷 (default) */

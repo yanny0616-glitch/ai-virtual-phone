@@ -1224,23 +1224,6 @@
   background: linear-gradient(180deg, #FBF3F5 55%, #FFD9E8 55%, #FFD9E8 70%, #F0DCF5 70%, #F0DCF5 85%, #FFE8CC 85%);
 }
 
-.calendar-theme-swatch[data-theme-id="peach"] {
-  background: linear-gradient(180deg, #FDF7F2 55%, #FBE7C9 55%, #FBE7C9 70%, #FADEDF 70%, #FADEDF 85%, #D8ECE5 85%);
-}
-
-/* 暖桃主题专属：珊瑚渐变 FAB + 奶油列头行 */
-[data-calendar-theme="peach"] .calendar-fab-primary {
-  background: linear-gradient(135deg, #FF9C77, #F2704B);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.45);
-  box-shadow: 0 6px 18px rgba(240, 113, 75, 0.35),
-    inset 0 1.5px 1.5px rgba(255, 255, 255, 0.55);
-}
-
-[data-calendar-theme="peach"] .calendar-tl-headrow {
-  background: #FBF1EA;
-}
-
 .calendar-theme-css-label {
   font-size: calc(13px * var(--app-text-scale, 1));
   font-weight: 700;
