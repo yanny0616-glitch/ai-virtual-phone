@@ -1068,6 +1068,7 @@
       if (sw) { try { await AiPhone.push.cancelWake(sw); } catch (e) { /* 已触发的取消失败可忽略 */ } }
       await lockCloud(cx);
       cx.owner = { id: myDev(), name: myDevName() };
+      S._diagCache = {};
       await log(cx, "接管：今天改由「" + myDevName() + "」负责，已撤掉「" + from + "」挂的预约");
       cx.busy = false;
       toast("今天改由这台负责");
@@ -1148,6 +1149,7 @@
   async function uploadPlanCloud(cx, resetDecisions) {
     if (!cloudRecheckOn() || !cx.character || !cx.plan || !Array.isArray(cx.plan.items)) return;
     if (!owns(cx)) return; // 只读的那台别把自己的计划盖到管事那台的行上
+    S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
       await cloudFetch("recheck-plan", {
         method: "POST",
@@ -2977,12 +2979,15 @@
       { id: "logs", title: "运行日志" },
     ] },
     { title: "云 端", cloud: true, cards: [
-      { id: "lock", title: "今天谁在管" },
+      // 自己在管是常态，只在「连接与聊天镜像」里占一行；别的设备在管才单独出一张（要动手的状态）
+      { id: "lock", title: "今天谁在管", when: (cx) => !!(cx.owner && cx.owner.id) && !owns(cx) },
       { id: "cloud", title: "连接与聊天镜像" },
       { id: "jobs", title: "预约与降速" },
       { id: "recheck", title: "动态复核" },
     ] },
   ];
+  const CLOUD_DIAG_IDS = { lock: 1, cloud: 1, jobs: 1, recheck: 1 };
+  const DIAG_TTL = 60000;
 
   async function renderUsage() {
     const v = $("#view");
@@ -3034,7 +3039,7 @@
       it.classList.toggle("open", !!on);
       bd.hidden = !on;
     };
-    const fill = (id, html, sum, tone) => {
+    const fillRaw = (id, html, sum, tone) => {
       if (!alive()) return;
       const bd = $("#diag-" + id), sm = $("#dgs-" + id);
       if (!bd) return;
@@ -3042,7 +3047,21 @@
       if (sm) { sm.className = "sm" + (tone ? " " + tone : ""); sm.textContent = sum || ""; }
       setOpen(id, id in S._diagOpen ? S._diagOpen[id] : (tone === "warn" || tone === "bad"));
     };
+    // 云端那几张卡每进一次诊断页就各发一次请求，页签来回切就重复发。
+    // 结果连同摘要缓存 60 秒；计划一变（uploadPlanCloud）或接管过就整份作废。
+    const ckey = (id) => id + ":" + cx.character.id;
+    const fill = (id, html, sum, tone) => {
+      if (CLOUD_DIAG_IDS[id]) S._diagCache[ckey(id)] = { at: Date.now(), html: html, sum: sum, tone: tone };
+      fillRaw(id, html, sum, tone);
+    };
+    const diagRestore = (id) => {
+      const c = S._diagCache[ckey(id)];
+      if (!c || Date.now() - c.at >= DIAG_TTL) return false;
+      fillRaw(id, c.html, c.sum, c.tone);
+      return true;
+    };
 
+    S._diagCache = S._diagCache || {};
     const logItems = (S.logs && S.logs.items || []).slice().reverse();
     const planItems = (cx.plan && cx.plan.items) || [];
 
@@ -3053,7 +3072,7 @@
         ? '<div class="card"><div class="archive-note">没接云连接：云端复核、浏览器关着也生成、设备锁都停着，只有本机这些还在跑。</div>' +
           '<div class="dg-act"><button class="tgl" id="btn-diag-cloudset">去设置</button></div></div>'
         : '<div class="card dg">' +
-          g.cards.map((c) =>
+          g.cards.filter((c) => !c.when || c.when(cx)).map((c) =>
             '<div class="dg-item" id="dgi-' + c.id + '">' +
               '<button class="dg-hd" data-dg="' + c.id + '"><span class="nm">' + esc(c.title) + "</span>" +
               '<span class="sm" id="dgs-' + c.id + '">读取中…</span><span class="cv">›</span></button>' +
@@ -3091,30 +3110,24 @@
       };
     }
 
-    // 设备锁：今天由哪台设备负责编排和预约。只读的那台从这里接手。
+    // 设备锁：今天由哪台设备负责编排和预约。自己在管时那行由「连接与聊天镜像」带出来，
+    // 别的设备在管才单独出一张卡（这是唯一需要动手的状态）。
     (async () => {
-      if (!cloudCfg()) {
-        fill("lock", '<div class="archive-note">没接云连接，不上锁：预约只挂在这台本机上，不会和别的设备撞车。</div>', "不上锁", "");
-        return;
-      }
+      if (!cloudCfg() || diagRestore("lock")) return;
+      const before = cx.owner && cx.owner.id || "";
       cx._ownAt = Date.now();
       await readOwner(cx);
       if (!alive()) return;
-      const act = '<div class="dg-act"><button class="tgl" id="btn-takeover"' + (cx.busy ? " disabled" : "") + ">改用这台</button></div>";
-      if (!cx.owner || !cx.owner.id) {
-        fill("lock", '<div class="archive-note">今天还没人生成，谁先在自己那台生成或编排，今天就归谁管。</div>', "还没定", "");
-      } else if (owns(cx)) {
-        fill("lock", '<div class="diag-item"><b>这台（' + esc(myDevName()) + "）在管</b> 生成、编排、复核、预约和云端都从这台走</div>" +
-          '<div class="archive-note">别的设备打开挂念只能看，不会再挂一套预约。零点之后重新认：明天谁先生成谁管。</div>',
-          "这台在管", "ok");
-      } else {
-        fill("lock", '<div class="diag-item"><b>' + esc(ownerLabel(cx)) + " 在管</b> 这台只看不动</div>" +
-          '<div class="archive-note">两台一起排会在服务端挂出两套预约，谁也撤不掉谁的，到点发两遍、扣两份额度。' +
-          "「改用这台」会先撤掉那台今天挂的预约和 48 小时哨兵，再把今天接过来。</div>" + act,
-          ownerLabel(cx) + " 在管", "warn");
-        const to = $("#btn-takeover");
-        if (to) to.onclick = () => takeOver(cur());
-      }
+      // 锁换了主：这张卡在不在都是按旧值渲染的，整页重画一次
+      if ((cx.owner && cx.owner.id || "") !== before) { S._diagCache = {}; renderDiag(); return; }
+      if (owns(cx)) return;
+      fill("lock", '<div class="diag-item"><b>' + esc(ownerLabel(cx)) + " 在管</b> 这台只看不动</div>" +
+        '<div class="archive-note">两台一起排会在服务端挂出两套预约，谁也撤不掉谁的，到点发两遍、扣两份额度。' +
+        "「改用这台」会先撤掉那台今天挂的预约和 48 小时哨兵，再把今天接过来。</div>" +
+        '<div class="dg-act"><button class="tgl" id="btn-takeover"' + (cx.busy ? " disabled" : "") + ">改用这台</button></div>",
+        ownerLabel(cx) + " 在管", "warn");
+      const to = $("#btn-takeover");
+      if (to) to.onclick = () => takeOver(cur());
     })();
 
     // 系统里真实挂着的今日唤醒（和计划对照，是排查「为什么没推」的关键）
@@ -3151,8 +3164,10 @@
         tone = extra ? "warn" : "ok";
       }
       if (cloudArmed.length) {
-        html += '<div class="archive-note">另有 ' + cloudArmed.length + ' 个时刻是云端复核点亮的（' +
-          esc(cloudArmed.map((it) => it.time).join("、")) + '），只挂在云上，本地这张表里看不到，属正常。</div>';
+        html += '<details class="fold"><summary><span class="t">云端点亮</span><span class="sm">' +
+          cloudArmed.length + " 个 · " + esc(cloudArmed.map((it) => it.time).join("、")) +
+          '</span><span class="cv">›</span></summary>' +
+          '<div class="archive-note">这几个时刻是云端复核点亮的，预约只挂在云上，本地这张表里查不到，属正常。</div></details>';
       }
       fill("wakes", html, sum, tone);
     })();
@@ -3167,13 +3182,19 @@
 
     // 云端几块异步补上（不阻塞页面；期间切走则丢弃结果）
     (async () => {
+      const done = [diagRestore("cloud"), diagRestore("jobs"), diagRestore("recheck")];
+      if (done.every(Boolean)) return;
       let caps = [], mySession = "";
       try {
         const h = await cloudFetch("health", { method: "GET" });
         caps = h.capabilities || [];
         const ver = "云函数 v" + String(h.schemaVersion || "?");
         const mir = caps.indexOf("chat-mirror") >= 0;
-        let mHtml = '<div class="diag-item"><b>连接</b> 正常 · ' + esc(ver) + "</div>";
+        // 设备锁的常态（自己在管 / 还没定）就在这里占一行，不单独占一张卡
+        const lockLine = !cx.owner || !cx.owner.id
+          ? '<div class="diag-item"><b>今天谁在管</b> 还没定 · 谁先生成或编排就归谁</div>'
+          : owns(cx) ? '<div class="diag-item"><b>今天谁在管</b> 这台（' + esc(myDevName()) + "）</div>" : "";
+        let mHtml = lockLine + '<div class="diag-item"><b>连接</b> 正常 · ' + esc(ver) + "</div>";
         if (!mir) {
           mHtml += '<div class="diag-item"><b>镜像</b> 云函数版本偏旧，还不支持聊天镜像。去小手机「设置 → 云服务部署」重新部署一次离线推送。</div>';
           fill("cloud", mHtml, ver + " · 镜像不支持", "warn");
