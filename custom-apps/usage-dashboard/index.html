@@ -132,6 +132,52 @@
   .tag.in { color: var(--in); }
   .tag.out { color: var(--out); }
   .tag.cache { color: var(--cache); }
+  /* 筛选：一行按钮 + 当前条件摘要 */
+  .filterbar {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+  }
+  .fbtn {
+    flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--panel-line); background: var(--panel); color: var(--text);
+    font: inherit; font-size: 13px; font-weight: 550; padding: 8px 14px; border-radius: 10px;
+  }
+  .fbtn[data-on] { background: var(--accent); border-color: transparent; color: #fff; }
+  .fbtn i { font-style: normal; font-size: 11px; opacity: .8; }
+  .fsum {
+    flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .freset {
+    flex: 0 0 auto; border: 0; background: transparent; color: var(--accent);
+    font: inherit; font-size: 12px; font-weight: 600; padding: 4px 2px;
+  }
+  /* 筛选浮层里的选项：能换行，不横向溢出把后面的切掉 */
+  .fgrid { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+  .fchip {
+    display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--panel-line); background: var(--panel); color: var(--text);
+    font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 10px;
+  }
+  .fchip[data-on] { background: var(--accent); border-color: transparent; color: #fff; }
+  .fchip i { font-style: normal; font-size: 11px; opacity: .55; }
+  .fchip[data-on] i { opacity: .8; }
+  .fdone {
+    width: 100%; border: 0; background: var(--accent); color: #fff;
+    font: inherit; font-size: 14px; font-weight: 600; padding: 12px; border-radius: 12px;
+    margin-top: 4px;
+  }
+  /* 排行行里的失败数：单独一个标，别贴在「N 次」后面被读成乘号 */
+  .row .failn {
+    flex: 0 0 auto; font-size: 11px; font-weight: 600; color: var(--fail);
+    background: color-mix(in srgb, var(--fail) 14%, transparent);
+    padding: 1.5px 6px; border-radius: 6px;
+  }
+  .tag.model { max-width: 44vw; overflow: hidden; text-overflow: ellipsis; }
+  .tag.num { font-variant-numeric: tabular-nums; }
+  .tag.num.cached::before {
+    content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--cache); margin-right: 5px; vertical-align: 1px;
+  }
   .pager {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     margin-top: 10px; padding: 0 2px;
@@ -247,6 +293,7 @@
     logFailedOnly: false,
     sourceNames: {},   // 宿主给的 appId -> 显示名
     logPage: 0,
+    sheetMode: "",     // "filter" 时关掉浮层要重新拉日志
     daysData: [],
     logs: [],
     logTotal: 0,
@@ -269,6 +316,12 @@
     return String(n);
   }
   function num(v) { return Math.max(0, Math.floor(Number(v) || 0)); }
+  // "google/gemini-2.5-pro" → "gemini-2.5-pro"：厂商前缀在列表里只占地方
+  function shortModel(m) {
+    var s = String(m || "未知模型");
+    var i = s.lastIndexOf("/");
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
   function pad(n) { return n < 10 ? "0" + n : String(n); }
   function shortTime(iso) {
     var d = new Date(iso);
@@ -370,20 +423,22 @@
           ? '<span><i class="dot" style="background:var(--cache)"></i>缓存命中 <b>' + fmt(t.cacheRead) + '</b></span>'
           : "") +
       '</div></div>';
-    html += '<div class="card"><div class="k">成功调用</div><div class="v">' + t.calls + '<small>次</small></div></div>';
-    html += '<div class="card"><div class="k">平均每次</div><div class="v">' + (t.calls ? fmt(Math.round(t.total / t.calls)) : "0") + '<small>tok</small></div></div>';
-    if (t.failed) {
-      // 失败的 token 也算进总量（空回复照样计费），所以平均值只除以成功次数
-      html += '<div class="card wide fail"><div class="k">失败调用</div><div class="v">' + t.failed + '<small>次</small></div>' +
-        '<div class="split"><span>报错 / 超时 / 空回复，去「调用日志」页点「只看失败」逐条查</span></div></div>';
-    }
+    // 半格卡按需拼：失败为 0 时不占位；数目为奇数时最后一张撑满整行，免得右边空一块
+    var half = [];
+    half.push('<div class="k">成功调用</div><div class="v">' + t.calls + '<small>次</small></div>');
+    // 失败的 token 也算进总量（空回复照样计费），所以平均值只除以成功次数
+    if (t.failed) half.push('<div class="k">失败调用</div><div class="v">' + t.failed + '<small>次</small></div>|fail');
+    half.push('<div class="k">平均每次</div><div class="v">' + (t.calls ? fmt(Math.round(t.total / t.calls)) : "0") + '<small>tok</small></div>');
     if (t.cacheRead || t.cacheWrite) {
       var hitRate = t.prompt ? Math.round(t.cacheRead / t.prompt * 100) : 0;
-      html += '<div class="card wide"><div class="k">提示缓存</div>' +
-        '<div class="v">' + hitRate + '<small>% 输入命中</small></div>' +
-        '<div class="split"><span>命中 <b>' + fmt(t.cacheRead) + '</b>（约 1/10 计费）</span>' +
-        '<span>写入 <b>' + fmt(t.cacheWrite) + '</b>（约 1.25 倍）</span></div></div>';
+      half.push('<div class="k">提示缓存</div><div class="v">' + hitRate + '<small>% 输入命中</small></div>' +
+        '<div class="split"><span>写入 ' + fmt(t.cacheWrite) + '</span></div>');
     }
+    half.forEach(function (body, i) {
+      var parts = body.split("|fail");
+      var wide = (half.length % 2 === 1 && i === half.length - 1) ? " wide" : "";
+      html += '<div class="card' + (parts.length > 1 ? " fail" : "") + wide + '">' + parts[0] + '</div>';
+    });
     html += '</div>';
 
     // 柱状图
@@ -434,7 +489,8 @@
           '<span class="fill" style="width:' + pct + '%"></span>' +
           (tappable ? avatarHtml(item.key, label, true) : "") +
           '<span class="name">' + esc(label) + '</span>' +
-          '<span class="calls">' + item.calls + ' 次' + (item.failed ? '<b class="fx"> ✕' + item.failed + '</b>' : "") + '</span>' +
+          (item.failed ? '<span class="failn">失败 ' + item.failed + '</span>' : "") +
+          '<span class="calls">' + item.calls + ' 次</span>' +
           '<span class="num">' + fmt(item.total) + '</span>' +
           (tappable ? '<span class="chev">›</span>' : "") +
           '</' + (tappable ? "button" : "div") + '>';
@@ -470,57 +526,91 @@
   }
 
   // ---------- 日志页 ----------
+  // 条件多了以后三条横滚按钮会占掉大半屏，还会横向溢出把选项切掉；
+  // 收成一行「筛选」+ 当前条件摘要，选项进浮层。
+  function activeFilters() {
+    var out = [];
+    if (state.logFilterSource) out.push(sourceLabel(state.logFilterSource));
+    if (state.logFilterCharacter) {
+      var c = mergeBuckets(state.daysData, "byCharacter").filter(function (x) { return x.key === state.logFilterCharacter; })[0];
+      out.push(c ? bucketLabel("character", c) : state.logFilterCharacter.replace(/^name:/, ""));
+    }
+    if (state.logFailedOnly) out.push("只看失败");
+    return out;
+  }
+
   function renderLogsFilter() {
-    // 老数据只有 name: 桶，早先把它们过滤掉会让筛选栏整条空掉，现在一并列出。
+    var picked = activeFilters();
+    var html = '<div class="filterbar">' +
+      '<button class="fbtn" id="open-filter"' + (picked.length ? ' data-on="1"' : "") + '>筛选' +
+      (picked.length ? '<i>' + picked.length + '</i>' : "") + '</button>' +
+      '<span class="fsum">' + (picked.length ? esc(picked.join(" · ")) : "全部记录") + '</span>' +
+      (picked.length ? '<button class="freset" id="reset-filter">清除</button>' : "") +
+      '</div>';
+    el("logs-filter").innerHTML = html;
+    el("open-filter").addEventListener("click", openFilterSheet);
+    var reset = el("reset-filter");
+    if (reset) reset.addEventListener("click", function () {
+      state.logFilterSource = ""; state.logFilterCharacter = ""; state.logFailedOnly = false;
+      loadLogs();
+    });
+  }
+
+  // 筛选浮层：复用日志详情那块浮层，关掉时才重新拉数据，选的过程中不来回请求
+  function openFilterSheet() {
+    state.sheetMode = "filter";
+    el("sheet-title").textContent = "筛选";
+    paintFilterSheet();
+    el("sheet").setAttribute("data-open", "1");
+    el("sheet").scrollTop = 0;
+  }
+
+  function paintFilterSheet() {
     var chars = mergeBuckets(state.daysData, "byCharacter");
     var sources = mergeBuckets(state.daysData, "bySource");
     var totalFailed = 0;
     sources.forEach(function (s) { totalFailed += s.failed; });
 
-    var html = '<div class="seg sub" style="overflow-x:auto" id="seg-source">';
-    html += '<button data-source=""' + (state.logFilterSource ? "" : ' data-on="1"') + ' style="flex:0 0 auto;padding:0 12px">全部来源</button>';
+    var html = "";
+    if (totalFailed) {
+      html += '<p class="sec">只看失败的调用</p><div class="fgrid">' +
+        '<button class="fchip" data-fail="0"' + (state.logFailedOnly ? "" : ' data-on="1"') + '>全部</button>' +
+        '<button class="fchip" data-fail="1"' + (state.logFailedOnly ? ' data-on="1"' : "") + '>失败 ' + totalFailed + '</button>' +
+        '</div>';
+    }
+
+    html += '<p class="sec">来源</p><div class="fgrid">';
+    html += '<button class="fchip" data-source=""' + (state.logFilterSource ? "" : ' data-on="1"') + '>全部</button>';
     sources.forEach(function (s) {
-      html += '<button data-source="' + esc(s.key) + '"' + (state.logFilterSource === s.key ? ' data-on="1"' : "") +
-        ' style="flex:0 0 auto;padding:0 12px">' + esc(sourceLabel(s.key)) + '</button>';
+      html += '<button class="fchip" data-source="' + esc(s.key) + '"' + (state.logFilterSource === s.key ? ' data-on="1"' : "") +
+        '>' + esc(sourceLabel(s.key)) + '<i>' + s.calls + '</i></button>';
     });
     html += '</div>';
 
-    if (totalFailed) {
-      html += '<div class="seg sub" id="seg-fail"><button data-fail="1"' + (state.logFailedOnly ? ' data-on="1"' : "") +
-        '>只看失败（' + totalFailed + '）</button>' +
-        '<button data-fail="0"' + (state.logFailedOnly ? "" : ' data-on="1"') + '>全部</button></div>';
-    }
-
     if (chars.length) {
-      html += '<div class="seg sub" style="overflow-x:auto" id="seg-char">';
-      html += '<button data-char=""' + (state.logFilterCharacter ? "" : ' data-on="1"') + ' style="flex:0 0 auto;padding:0 12px">全部角色</button>';
+      html += '<p class="sec">角色 / 功能</p><div class="fgrid">';
+      html += '<button class="fchip" data-char=""' + (state.logFilterCharacter ? "" : ' data-on="1"') + '>全部</button>';
       chars.forEach(function (c) {
         var label = bucketLabel("character", c);
-        html += '<button class="chip" data-char="' + esc(c.key) + '"' + (state.logFilterCharacter === c.key ? ' data-on="1"' : "") +
-          ' style="flex:0 0 auto;padding:0 12px">' + avatarHtml(c.key, label) + '<span>' + esc(label) + '</span></button>';
+        html += '<button class="fchip" data-char="' + esc(c.key) + '"' + (state.logFilterCharacter === c.key ? ' data-on="1"' : "") +
+          '>' + avatarHtml(c.key, label) + '<span>' + esc(label) + '</span><i>' + c.calls + '</i></button>';
       });
       html += '</div>';
     }
-    el("logs-filter").innerHTML = html;
 
-    Array.prototype.forEach.call(document.querySelectorAll("#seg-source button"), function (btn) {
-      btn.addEventListener("click", function () {
-        state.logFilterSource = btn.getAttribute("data-source");
-        loadLogs();
-      });
+    html += '<button class="fdone" id="filter-done">看结果</button>';
+    el("sheet-body").innerHTML = html;
+
+    Array.prototype.forEach.call(document.querySelectorAll("#sheet-body [data-source]"), function (b) {
+      b.addEventListener("click", function () { state.logFilterSource = b.getAttribute("data-source"); paintFilterSheet(); });
     });
-    Array.prototype.forEach.call(document.querySelectorAll("#seg-fail button"), function (btn) {
-      btn.addEventListener("click", function () {
-        state.logFailedOnly = btn.getAttribute("data-fail") === "1";
-        loadLogs();
-      });
+    Array.prototype.forEach.call(document.querySelectorAll("#sheet-body [data-char]"), function (b) {
+      b.addEventListener("click", function () { state.logFilterCharacter = b.getAttribute("data-char"); paintFilterSheet(); });
     });
-    Array.prototype.forEach.call(document.querySelectorAll("#seg-char button"), function (btn) {
-      btn.addEventListener("click", function () {
-        state.logFilterCharacter = btn.getAttribute("data-char");
-        loadLogs();
-      });
+    Array.prototype.forEach.call(document.querySelectorAll("#sheet-body [data-fail]"), function (b) {
+      b.addEventListener("click", function () { state.logFailedOnly = b.getAttribute("data-fail") === "1"; paintFilterSheet(); });
     });
+    el("filter-done").addEventListener("click", closeDetail);
   }
 
   function renderLogs() {
@@ -539,6 +629,8 @@
     var html = '<div class="rows">';
     pageLogs.forEach(function (log) {
       var u = log.usage || {};
+      // 列表只给一个总数，输入/输出/缓存的拆分在详情页看
+      var tokenTotal = num(u.total_tokens) || (num(u.prompt_tokens) + num(u.completion_tokens));
       var who = log.characterName || "未标注";
       html += '<button class="log" data-id="' + esc(log.id) + '">' +
         '<span class="l1">' + avatarHtml(log.characterId || ("name:" + who), who) +
@@ -547,10 +639,8 @@
         '<span class="l2">' +
           (log.failed ? '<span class="tag fail">失败</span>' : "") +
           '<span class="tag">' + esc(log.sourceName || sourceLabel(log.source)) + '</span>' +
-          '<span class="tag">' + esc(log.model || "未知模型") + '</span>' +
-          (u.prompt_tokens ? '<span class="tag in">↑' + fmt(u.prompt_tokens) + '</span>' : "") +
-          (u.completion_tokens ? '<span class="tag out">↓' + fmt(u.completion_tokens) + '</span>' : "") +
-          (u.cache_read_tokens ? '<span class="tag cache">缓存 ' + fmt(u.cache_read_tokens) + '</span>' : "") +
+          '<span class="tag model">' + esc(shortModel(log.model)) + '</span>' +
+          (tokenTotal ? '<span class="tag num' + (u.cache_read_tokens ? " cached" : "") + '">' + fmt(tokenTotal) + '</span>' : "") +
         '</span>' +
         (log.preview ? '<span class="l3">' + esc(log.preview) + '</span>' : "") +
         '</button>';
@@ -583,6 +673,7 @@
 
   // ---------- 详情 ----------
   function openDetail(id) {
+    state.sheetMode = "detail";
     el("sheet-title").textContent = "载入中…";
     el("sheet-body").innerHTML = '<div class="empty-note">读取中…</div>';
     el("sheet").setAttribute("data-open", "1");
@@ -654,7 +745,10 @@
     });
   }
 
-  function closeDetail() { el("sheet").setAttribute("data-open", "0"); }
+  function closeDetail() {
+    el("sheet").setAttribute("data-open", "0");
+    if (state.sheetMode === "filter") { state.sheetMode = ""; loadLogs(); }
+  }
 
   // ---------- 载入 ----------
   function switchTab(tab) {
