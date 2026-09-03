@@ -218,21 +218,11 @@
 (function () {
   "use strict";
 
-  var SOURCE_LABEL = {
-    chat: "聊天", group_chat: "群聊", xiaohongshu: "小红书", moments: "朋友圈",
-    story: "剧情", diary: "手记", reading: "阅读", music: "音乐", vn: "漫卷",
-    adventure: "冒险", dwelling: "栖所", shopping: "购物", shopping_search: "购物搜索",
-    calendar: "日历", cocreate: "共创", game: "游戏", resources: "资源集市",
-    mascot: "桌宠", add_friend: "加好友", checkphone: "查手机",
-    background: "后台功能", qa: "工坊"
-  };
-  // 没收录的 id 原样显示，不猜——猜错比看见 id 更难排查
+  // 来源名由宿主随 readDaily / readLogs 下发（state.sourceNames），这里不再自带映射表：
+  // 宿主新增内置 APP、用户装了新的自定义 APP，名字都能自动跟上。
   function sourceLabel(key) {
     if (!key) return "聊天";
-    if (SOURCE_LABEL[key]) return SOURCE_LABEL[key];
-    if (key.indexOf("checkphone_") === 0) return "查手机 · " + key.slice(11);
-    if (key.indexOf("custom_app:") === 0) return "APP · " + key.slice(11);
-    return key;
+    return state.sourceNames[key] || key;
   }
   var state = {
     tab: "stats",
@@ -242,6 +232,7 @@
     logFilterCharacter: "",// 角色 key（id 或 name:xxx）
     logFilterSource: "",
     logFailedOnly: false,
+    sourceNames: {},   // 宿主给的 appId -> 显示名
     daysData: [],
     logs: [],
     logTotal: 0,
@@ -537,7 +528,7 @@
         '<span class="when">' + esc(shortTime(log.timestamp)) + '</span></span>' +
         '<span class="l2">' +
           (log.failed ? '<span class="tag fail">失败</span>' : "") +
-          '<span class="tag">' + esc(sourceLabel(log.source)) + '</span>' +
+          '<span class="tag">' + esc(log.sourceName || sourceLabel(log.source)) + '</span>' +
           '<span class="tag">' + esc(log.model || "未知模型") + '</span>' +
           (u.prompt_tokens ? '<span class="tag in">↑' + fmt(u.prompt_tokens) + '</span>' : "") +
           (u.completion_tokens ? '<span class="tag out">↓' + fmt(u.completion_tokens) + '</span>' : "") +
@@ -666,6 +657,8 @@
   function loadStats() {
     return AiPhone.usage.readDaily({ days: state.days }).then(function (res) {
       state.daysData = (res && res.days) || [];
+      // 老宿主不下发 sourceNames，那就退回显示 id，不至于整页空白
+      if (res && res.sourceNames) state.sourceNames = res.sourceNames;
       if (state.selectedDate && !state.daysData.some(function (d) { return d.date === state.selectedDate; })) {
         state.selectedDate = null;
       }

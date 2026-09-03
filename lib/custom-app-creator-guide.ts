@@ -996,6 +996,8 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "",
   "需 `usage.read`。`days` 默认 7，最大 180（宿主最多保留 180 天）。统计在每次模型调用写日志时累加，与「底层调用大模型日志」那 150 条的环无关，所以翻不到的历史调用一样会计入用量。",
   "",
+  "返回值除了 `days` 还有 `sourceNames`：`{ xiaohongshu: \"小红书\", \"custom_app:xxx\": \"某某APP\" }`，宿主解析好的显示名。**别在 APP 里自己维护 id→名字 的表**，宿主新增内置 APP 或用户装了新 APP 时那张表一定会过期，直接用 `sourceNames[key] || key`。`readLogs` 的每条也带 `sourceName`。",
+  "",
   "**`bySource` 的键就是发起方的 appId**：`chat`、`group_chat`、`xiaohongshu`、`moments`、`story`、`diary`、`reading`、`vn`、`adventure`、`dwelling`、`shopping`、`checkphone_*`、`calendar`、`mascot` 等，外加 `background`（记忆总结、图片生成这类后台调用，具体功能名看 `byCharacter` 里 `name:` 开头的键）、`qa`（工坊）、`custom_app:<id>`（自定义 APP）。别把键写死成三个，新 APP 随时会多出来，按拿到的键遍历。",
   "",
   "**`calls` 只算成功的，`failedCalls` 是报错的**（HTTP 非 2xx、网络失败、超时、空回复）。失败照样可能计费（比如模型返回空内容但已经吃掉了输入 token），所以 token 数把两者都算进去了；要算「平均每次多少 token」请除以 `calls`，不要除以两者之和。老数据没有 `failedCalls` 字段，读回来兜 0。",

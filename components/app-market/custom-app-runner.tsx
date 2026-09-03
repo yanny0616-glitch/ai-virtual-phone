@@ -16,6 +16,7 @@ import { registerCustomAppToolExecutor, type CustomAppToolExecutorPayload } from
 import { updateInstalledCustomAppFromMarket } from "@/lib/custom-app-market-update";
 import { loadCharacters } from "@/lib/character-storage";
 import { getApiUsageDays } from "@/lib/api-usage-stats";
+import { resolveUsageSourceName, resolveUsageSourceNames } from "@/lib/usage-source-names";
 import { getApiLogs } from "@/lib/api-log-store";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { ensureSettingsStorageHydrated } from "@/lib/settings-storage";
@@ -1655,7 +1656,11 @@ export function CustomAppRunner({
     if (action === "usage.readDaily") {
       requirePermission("usage.read");
       // 只给计数，不给提示词原文和回复原文——日志里那些比聊天记录还敏感。
-      return { days: getApiUsageDays({ days: Number(record.days ?? 7) }) };
+      const days = getApiUsageDays({ days: Number(record.days ?? 7) });
+      // 名字跟数据一起给：APP 自己维护 id→中文名 的表，一有新 APP 就会露出英文 id
+      const sources = new Set<string>();
+      for (const day of days) for (const key of Object.keys(day.bySource || {})) sources.add(key);
+      return { days, sourceNames: resolveUsageSourceNames(sources) };
     }
     if (action === "usage.readLogs") {
       requirePermission("usage.read");
@@ -1687,6 +1692,7 @@ export function CustomAppRunner({
           characterId: log.characterId,
           model: log.model,
           source: log.source || "chat",
+          sourceName: resolveUsageSourceName(log.source || "chat"),
           usage: log.usage,
           messageCount: log.messages?.length ?? 0,
           hasReasoning: Boolean(log.reasoning),

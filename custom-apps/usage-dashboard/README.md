@@ -9,7 +9,7 @@
 
 只读宿主的两个接口，不自己记账：
 
-- `AiPhone.usage.readDaily({ days })` —— 按天的累加桶。`bySource` 的键就是发起方的 appId（`chat` / `xiaohongshu` / `moments` / `checkphone_*` / `custom_app:<id>` …），常见的在 `SOURCE_LABEL` 里翻成中文，没收录的原样显示 id。
+- `AiPhone.usage.readDaily({ days })` —— 按天的累加桶，外加 `sourceNames`（appId → 显示名）。名字由宿主解析后一起下发，APP 不自带映射表，所以新增内置 APP 或用户装了新的自定义 APP，来源名都能自动跟上。
 - `AiPhone.usage.readLogs({ source, characterId, failedOnly })` / `readLogDetail({ id })` —— 日志列表与单条原文。
 
 `calls` 只算成功的，`failedCalls` 是报错、超时、空回复的次数。失败照样可能计费（空回复也吃掉了输入 token），token 数把两者都算进去了，所以「平均每次」除的是 `calls`。
