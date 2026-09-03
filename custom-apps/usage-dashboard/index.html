@@ -94,6 +94,7 @@
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
 
   .sec { font-size: 12px; color: var(--faint); margin: 0 0 8px 2px; letter-spacing: .5px; }
+  .hintline { font-size: 12px; line-height: 1.5; color: var(--faint); margin: 0 0 14px; padding: 8px 10px; background: var(--panel); border-radius: 10px; }
 
   .chart {
     padding: 14px 12px 10px; border-radius: 13px; margin-bottom: 14px;
@@ -313,6 +314,7 @@
     daysData: [],
     logs: [],
     logTotal: 0,
+    facets: null,     // 筛选面板用的计数，从未筛选的日志现算
     charById: {},   // 角色卡 id -> { name, avatar }
     charByName: {}  // 角色名 -> { name, avatar }，给没有 id 的老数据兜底
   };
@@ -388,7 +390,47 @@
         out[key].cacheWrite += num(b.cacheWriteTokens);
       });
     });
+    // 有的调用路径没传角色卡 id，宿主只能落成 "name:沈屿"，同一个人会裂成两条。
+    // 同名的 id 桶在就并过去，并不掉的（后台功能）原样留着。
+    if (field === "byCharacter") {
+      var nameToId = {};
+      Object.keys(out).forEach(function (k) {
+        if (k.indexOf("name:") !== 0 && out[k].name) nameToId[out[k].name] = k;
+      });
+      Object.keys(out).forEach(function (k) {
+        if (k.indexOf("name:") !== 0) return;
+        var id = nameToId[k.slice(5)];
+        if (!id) return;
+        ["calls", "failed", "prompt", "completion", "total", "cacheRead", "cacheWrite"].forEach(function (f) {
+          out[id][f] += out[k][f];
+        });
+        delete out[k];
+      });
+    }
     return Object.keys(out).map(function (k) { return out[k]; }).sort(function (a, b) { return b.total - a.total; });
+  }
+
+  // 筛选面板的计数必须跟日志同一批数据算：统计是按天范围的，日志只留最近 150 条，
+  // 拿统计的数字去标日志筛选，会出现「小红书 0」还能点、点了结果却不空这种对不上。
+  function tallyFacets(logs) {
+    var nameToId = {};
+    logs.forEach(function (l) { if (l.characterId && l.characterName) nameToId[l.characterName] = l.characterId; });
+    var sources = {}, chars = {}, failed = 0;
+    logs.forEach(function (l) {
+      var src = l.source || "chat";
+      if (!sources[src]) sources[src] = { key: src, name: l.sourceName, calls: 0 };
+      sources[src].calls += 1;
+      var cname = l.characterName || "";
+      var ckey = l.characterId || nameToId[cname] || (cname ? "name:" + cname : "name:未标注");
+      if (!chars[ckey]) chars[ckey] = { key: ckey, name: cname, calls: 0 };
+      if (cname) chars[ckey].name = cname;
+      chars[ckey].calls += 1;
+      if (l.failed) failed += 1;
+    });
+    function list(o) {
+      return Object.keys(o).map(function (k) { return o[k]; }).sort(function (a, b) { return b.calls - a.calls; });
+    }
+    return { sources: list(sources), chars: list(chars), failed: failed, total: logs.length };
   }
 
   function scopeDays() {
@@ -579,17 +621,28 @@
     state.sheetMode = "filter";
     el("sheet-title").textContent = "筛选";
     paintFilterSheet();
+    AiPhone.usage.readLogs({ limit: 200 }).then(function (res) {
+      state.facets = tallyFacets((res && res.logs) || []);
+      if (state.sheetMode === "filter") paintFilterSheet();
+    }).catch(function () {
+      state.facets = { sources: [], chars: [], failed: 0, total: 0 };
+      if (state.sheetMode === "filter") paintFilterSheet();
+    });
     el("sheet").setAttribute("data-open", "1");
     el("sheet").scrollTop = 0;
   }
 
   function paintFilterSheet() {
-    var chars = mergeBuckets(state.daysData, "byCharacter");
-    var sources = mergeBuckets(state.daysData, "bySource");
-    var totalFailed = 0;
-    sources.forEach(function (s) { totalFailed += s.failed; });
+    var facets = state.facets;
+    if (!facets) {
+      el("sheet-body").innerHTML = '<div class="empty-note">读取中…</div>';
+      return;
+    }
+    var chars = facets.chars;
+    var sources = facets.sources;
+    var totalFailed = facets.failed;
 
-    var html = "";
+    var html = '<p class="hintline">这里的次数按最近 ' + facets.total + ' 条调用日志算，和统计页按天的数字对不上是正常的。</p>';
     if (totalFailed) {
       html += '<p class="sec">只看失败的调用</p><div class="fgrid">' +
         '<button class="fchip" data-fail="0"' + (state.logFailedOnly ? "" : ' data-on="1"') + '>全部</button>' +
@@ -601,7 +654,7 @@
     html += '<button class="fchip" data-source=""' + (state.logFilterSource ? "" : ' data-on="1"') + '>全部</button>';
     sources.forEach(function (s) {
       html += '<button class="fchip" data-source="' + esc(s.key) + '"' + (state.logFilterSource === s.key ? ' data-on="1"' : "") +
-        '>' + esc(sourceLabel(s.key)) + '<i>' + s.calls + '</i></button>';
+        '>' + esc(s.name || sourceLabel(s.key)) + '<i>' + s.calls + '</i></button>';
     });
     html += '</div>';
 
