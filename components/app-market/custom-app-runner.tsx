@@ -164,8 +164,10 @@ ${body}
   --ai-phone-app-safe-left: ${embedded ? "0px" : "16px"};
   --ai-phone-app-safe-right: ${embedded ? "0px" : "16px"};
 }
-html, body { min-height: 100%; }
-* { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+/* 沙盒 iframe 是独立文档，styles/base.css 的全局保护进不来，这里逐项对齐。 */
+html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none; touch-action: pan-x pan-y; }
+* { -webkit-tap-highlight-color: transparent; box-sizing: border-box; scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { display: none; }
 </style>
 <script>
 (function(){
