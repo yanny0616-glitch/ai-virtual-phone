@@ -35,6 +35,7 @@ registerKvMigration(USAGE_KEY);
 
 /** 一条日记录几百字节，半年也就几十 KB，可以放心保留更久。 */
 const MAX_DAYS = 180;
+export const USAGE_MAX_DAYS = MAX_DAYS;
 
 function localDateKey(date: Date): string {
     const y = date.getFullYear();

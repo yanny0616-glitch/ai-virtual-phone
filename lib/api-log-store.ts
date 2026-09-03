@@ -36,12 +36,16 @@ export type DebugInfo = {
 };
 
 // 原为 50，但聊天请求与 18 处 simpleLLMCall 后台调用共享一个环，很容易把刚才的聊天记录挤掉，
-// 因此扩容；配合单条截断与体积预算控制总占用。
-const MAX_API_LOGS = 150;
+// 因此扩容；配合单条截断与体积预算控制总占用。用户可在「用量」APP 里调，默认仍是 150。
+const DEFAULT_API_LOGS = 150;
+export const API_LOG_CAPACITY_OPTIONS = [50, 150, 300, 500] as const;
+const MIN_API_LOGS = 50;
+const MAX_API_LOGS_CAP = 500;
 // 工坊环容量：只有答疑引擎写入，量小，维持原值。
 const MAX_QA_API_LOGS = 50;
 // 单环序列化字符预算：超预算时从最旧开始丢弃，控制 IndexedDB 常驻体积与序列化开销。
-const MAX_API_LOGS_SERIALIZED_CHARS = 2 * 1024 * 1024;
+// 按条数等比放大，否则用户把容量调到 500 也会被 2MB 预算提前砍回一百多条。
+const API_LOG_CHARS_PER_ENTRY = Math.floor(2 * 1024 * 1024 / DEFAULT_API_LOGS);
 const MAX_QA_LOGS_SERIALIZED_CHARS = 1024 * 1024;
 // 记忆总结类调用的完整 prompt 动辄几十 KB，写日志前先截断，控制每次 push 的 parse/stringify 写放大与常驻体积。
 const MAX_LOG_MESSAGE_CHARS = 4000;
@@ -50,9 +54,11 @@ const MAX_LOG_RESPONSE_CHARS = 8000;
 const MAX_LOG_METADATA_CHARS = 200;
 
 const API_LOGS_KEY = "ai_phone_api_logs_v1";
+const API_LOG_CAPACITY_KEY = "ai_phone_api_log_capacity_v1";
 // 工坊（QA 助手）专用调用记录，与聊天页「底层调用大模型日志」彻底隔离。
 const QA_LOGS_KEY = "ai_phone_qa_api_logs_v1";
 registerKvMigration(API_LOGS_KEY);
+registerKvMigration(API_LOG_CAPACITY_KEY);
 registerKvMigration(QA_LOGS_KEY);
 
 function _loadLogs(key: string): DebugInfo[] {
@@ -139,6 +145,28 @@ function trimLogsForStorage(logs: DebugInfo[], maxCount: number, maxSerializedCh
 export function getApiLogs(): DebugInfo[] { return _loadLogs(API_LOGS_KEY); }
 export function clearApiLogs(): void { try { kvRemove(API_LOGS_KEY); } catch { } }
 
+export function getApiLogCapacity(): number {
+    try {
+        const raw = typeof window !== "undefined" ? kvGet(API_LOG_CAPACITY_KEY) : null;
+        const value = Math.floor(Number(raw));
+        if (!Number.isFinite(value) || value <= 0) return DEFAULT_API_LOGS;
+        return Math.max(MIN_API_LOGS, Math.min(MAX_API_LOGS_CAP, value));
+    } catch { return DEFAULT_API_LOGS; }
+}
+
+/** 改容量立刻按新上限裁一次：调小了要马上腾出空间，不能等下一次写日志 */
+export function setApiLogCapacity(value: number): number {
+    const next = Math.max(MIN_API_LOGS, Math.min(MAX_API_LOGS_CAP, Math.floor(Number(value)) || DEFAULT_API_LOGS));
+    try {
+        kvSet(API_LOG_CAPACITY_KEY, String(next));
+        const logs = _loadLogs(API_LOGS_KEY);
+        if (logs.length > next) {
+            _saveLogs(API_LOGS_KEY, trimLogsForStorage(logs, next, next * API_LOG_CHARS_PER_ENTRY));
+        }
+    } catch { /* 存不下就维持原样，读的时候会退回默认值 */ }
+    return next;
+}
+
 export function getQaApiLogs(): DebugInfo[] { return _loadLogs(QA_LOGS_KEY); }
 export function clearQaApiLogs(): void { try { kvRemove(QA_LOGS_KEY); } catch { } }
 
@@ -146,9 +174,9 @@ export function pushApiLog(entry: Omit<DebugInfo, "id" | "timestamp">): void {
     // 分流只认显式 channel 字段，不看角色名——避免角色恰好叫「工坊」时被误分类。
     const isQa = entry.channel === "qa";
     const key = isQa ? QA_LOGS_KEY : API_LOGS_KEY;
-    const maxCount = isQa ? MAX_QA_API_LOGS : MAX_API_LOGS;
-    const maxSerializedChars = isQa ? MAX_QA_LOGS_SERIALIZED_CHARS : MAX_API_LOGS_SERIALIZED_CHARS;
-    // 日志环只留最近 150 条，按天的用量必须在写日志时就记下来，不能靠翻日志累加。
+    const maxCount = isQa ? MAX_QA_API_LOGS : getApiLogCapacity();
+    const maxSerializedChars = isQa ? MAX_QA_LOGS_SERIALIZED_CHARS : maxCount * API_LOG_CHARS_PER_ENTRY;
+    // 日志环是定长的，按天的用量必须在写日志时就记下来，不能靠翻日志累加。
     recordApiUsage({
         model: entry.model,
         source: entry.source,

@@ -65,6 +65,10 @@
     font: inherit; font-size: 12px; padding: 4px 7px; border-radius: 7px; white-space: nowrap;
   }
   .daypick button[data-on="1"] { background: var(--panel-2); color: var(--text); font-weight: 600; }
+  .gear {
+    align-self: center; border: 0; background: transparent; color: var(--faint);
+    font-size: 15px; line-height: 1; padding: 4px 2px 4px 6px; cursor: pointer;
+  }
 
   .seg {
     display: flex; gap: 4px; padding: 3px;
@@ -256,6 +260,7 @@
     <button data-days="7">7天</button>
     <button data-days="30">30天</button>
   </div>
+  <button class="gear" id="open-settings" aria-label="设置">⚙</button>
 </div>
 
 <div class="app">
@@ -286,6 +291,8 @@
   "use strict";
 
   var LOG_PAGE_SIZE = 20;
+  // 一次把宿主留着的日志全取回来，本地分页；宿主上限最高 500 条
+  var LOG_FETCH_LIMIT = 500;
 
   // 来源名由宿主随 readDaily / readLogs 下发（state.sourceNames），这里不再自带映射表：
   // 宿主新增内置 APP、用户装了新的自定义 APP，名字都能自动跟上。
@@ -314,7 +321,9 @@
     daysData: [],
     logs: [],
     logTotal: 0,
-    facets: null,     // 筛选面板用的计数，从未筛选的日志现算
+    facetLogs: null,  // 未筛选的原始日志，筛选面板拿它现算各组候选项
+    logCapacity: 0,   // 宿主保留的日志条数上限
+    capacityOptions: null,
     charById: {},   // 角色卡 id -> { name, avatar }
     charByName: {}  // 角色名 -> { name, avatar }，给没有 id 的老数据兜底
   };
@@ -412,25 +421,26 @@
 
   // 筛选面板的计数必须跟日志同一批数据算：统计是按天范围的，日志只留最近 150 条，
   // 拿统计的数字去标日志筛选，会出现「小红书 0」还能点、点了结果却不空这种对不上。
-  function tallyFacets(logs) {
-    var nameToId = {};
-    logs.forEach(function (l) { if (l.characterId && l.characterName) nameToId[l.characterName] = l.characterId; });
-    var sources = {}, chars = {}, failed = 0;
+  // 同一个角色可能有的日志带 id、有的只有名字，先建名字→id 的对照，统一归到 id 那条。
+  function charKeyOf(log, nameToId) {
+    var cname = log.characterName || "";
+    return log.characterId || nameToId[cname] || (cname ? "name:" + cname : "name:未标注");
+  }
+  function buildNameToId(logs) {
+    var m = {};
+    logs.forEach(function (l) { if (l.characterId && l.characterName) m[l.characterName] = l.characterId; });
+    return m;
+  }
+  function tallyBy(logs, pick) {
+    var out = {};
     logs.forEach(function (l) {
-      var src = l.source || "chat";
-      if (!sources[src]) sources[src] = { key: src, name: l.sourceName, calls: 0 };
-      sources[src].calls += 1;
-      var cname = l.characterName || "";
-      var ckey = l.characterId || nameToId[cname] || (cname ? "name:" + cname : "name:未标注");
-      if (!chars[ckey]) chars[ckey] = { key: ckey, name: cname, calls: 0 };
-      if (cname) chars[ckey].name = cname;
-      chars[ckey].calls += 1;
-      if (l.failed) failed += 1;
+      var it = pick(l);
+      if (!it) return;
+      if (!out[it.key]) out[it.key] = { key: it.key, name: it.name, calls: 0 };
+      if (it.name) out[it.key].name = it.name;
+      out[it.key].calls += 1;
     });
-    function list(o) {
-      return Object.keys(o).map(function (k) { return o[k]; }).sort(function (a, b) { return b.calls - a.calls; });
-    }
-    return { sources: list(sources), chars: list(chars), failed: failed, total: logs.length };
+    return Object.keys(out).map(function (k) { return out[k]; }).sort(function (a, b) { return b.calls - a.calls; });
   }
 
   function scopeDays() {
@@ -621,11 +631,11 @@
     state.sheetMode = "filter";
     el("sheet-title").textContent = "筛选";
     paintFilterSheet();
-    AiPhone.usage.readLogs({ limit: 200 }).then(function (res) {
-      state.facets = tallyFacets((res && res.logs) || []);
+    AiPhone.usage.readLogs({ limit: LOG_FETCH_LIMIT }).then(function (res) {
+      state.facetLogs = (res && res.logs) || [];
       if (state.sheetMode === "filter") paintFilterSheet();
     }).catch(function () {
-      state.facets = { sources: [], chars: [], failed: 0, total: 0 };
+      state.facetLogs = [];
       if (state.sheetMode === "filter") paintFilterSheet();
     });
     el("sheet").setAttribute("data-open", "1");
@@ -633,16 +643,30 @@
   }
 
   function paintFilterSheet() {
-    var facets = state.facets;
-    if (!facets) {
+    var all = state.facetLogs;
+    if (!all) {
       el("sheet-body").innerHTML = '<div class="empty-note">读取中…</div>';
       return;
     }
-    var chars = facets.chars;
-    var sources = facets.sources;
-    var totalFailed = facets.failed;
+    var nameToId = buildNameToId(all);
+    // 级联：每一组的候选项只按「其他组已经选中的条件」过滤后的日志来算，
+    // 所以选了来源=挂念，下面就只剩挂念真的调用过的角色，不会再列出根本匹配不到的。
+    function narrow(skip) {
+      return all.filter(function (l) {
+        if (skip !== "source" && state.logFilterSource && (l.source || "chat") !== state.logFilterSource) return false;
+        if (skip !== "char" && state.logFilterCharacter && charKeyOf(l, nameToId) !== state.logFilterCharacter) return false;
+        if (skip !== "fail" && state.logFailedOnly && !l.failed) return false;
+        return true;
+      });
+    }
+    var sources = tallyBy(narrow("source"), function (l) { return { key: l.source || "chat", name: l.sourceName }; });
+    var chars = tallyBy(narrow("char"), function (l) { return { key: charKeyOf(l, nameToId), name: l.characterName || "" }; });
+    var failScope = narrow("fail");
+    var totalFailed = 0;
+    failScope.forEach(function (l) { if (l.failed) totalFailed += 1; });
+    var matched = narrow("").length;
 
-    var html = '<p class="hintline">这里的次数按最近 ' + facets.total + ' 条调用日志算，和统计页按天的数字对不上是正常的。</p>';
+    var html = '<p class="hintline">按最近 ' + all.length + ' 条调用日志算，和统计页按天的数字对不上是正常的。<br>当前条件匹配 ' + matched + ' 条。</p>';
     if (totalFailed) {
       html += '<p class="sec">只看失败的调用</p><div class="fgrid">' +
         '<button class="fchip" data-fail="0"' + (state.logFailedOnly ? "" : ' data-on="1"') + '>全部</button>' +
@@ -669,11 +693,16 @@
       html += '</div>';
     }
 
-    html += '<button class="fdone" id="filter-done">看结果</button>';
+    html += '<button class="fdone" id="filter-done">看结果（' + matched + '）</button>';
     el("sheet-body").innerHTML = html;
 
     Array.prototype.forEach.call(document.querySelectorAll("#sheet-body [data-source]"), function (b) {
-      b.addEventListener("click", function () { state.logFilterSource = b.getAttribute("data-source"); paintFilterSheet(); });
+      b.addEventListener("click", function () {
+        state.logFilterSource = b.getAttribute("data-source");
+        // 换来源后原来选的角色可能在这个来源里根本没调用过，留着只会筛出空列表
+        if (state.logFilterCharacter && !narrow("").length) state.logFilterCharacter = "";
+        paintFilterSheet();
+      });
     });
     Array.prototype.forEach.call(document.querySelectorAll("#sheet-body [data-char]"), function (b) {
       b.addEventListener("click", function () { state.logFilterCharacter = b.getAttribute("data-char"); paintFilterSheet(); });
@@ -816,9 +845,66 @@
     });
   }
 
+  function openSettingsSheet() {
+    state.sheetMode = "settings";
+    el("sheet-title").textContent = "设置";
+    el("sheet-body").innerHTML = '<div class="empty-note">读取中…</div>';
+    el("sheet").setAttribute("data-open", "1");
+    el("sheet").scrollTop = 0;
+    if (!AiPhone.usage.getSettings) { paintSettingsSheet(null); return; }
+    AiPhone.usage.getSettings().then(paintSettingsSheet).catch(function () { paintSettingsSheet(null); });
+  }
+
+  function paintSettingsSheet(cfg) {
+    if (!cfg) {
+      el("sheet-body").innerHTML = '<div class="empty-note">这台宿主还不支持改日志条数，<br>更新到最新版本再来。</div>';
+      return;
+    }
+    state.logCapacity = cfg.logCapacity;
+    state.capacityOptions = cfg.logCapacityOptions || [cfg.logCapacity];
+    var html = '<p class="sec">调用日志保留条数</p><div class="fgrid">';
+    state.capacityOptions.forEach(function (n) {
+      html += '<button class="fchip" data-cap="' + n + '"' + (n === cfg.logCapacity ? ' data-on="1"' : "") + '>' + n + ' 条</button>';
+    });
+    html += '</div>';
+    html += '<p class="hintline">现在存着 ' + cfg.logCount + ' 条。<br>' +
+      '每写一条日志都要把整份重新序列化一遍，条数调大会让每次模型调用多花一点时间和存储；' +
+      '调小会立刻丢掉超出的旧日志，丢了找不回来。</p>';
+    html += '<p class="sec">按天用量统计</p>' +
+      '<p class="hintline">自动保留最近 ' + (cfg.maxDays || 180) + ' 天，不占日志的额度，也不用调。' +
+      '翻不到的旧调用照样计在统计里。</p>';
+    html += '<button class="fdone" id="settings-done">完成</button>';
+    el("sheet-body").innerHTML = html;
+    Array.prototype.forEach.call(document.querySelectorAll("#sheet-body [data-cap]"), function (b) {
+      b.addEventListener("click", function () {
+        var next = Number(b.getAttribute("data-cap"));
+        if (next === state.logCapacity) return;
+        el("sheet-body").innerHTML = '<div class="empty-note">保存中…</div>';
+        AiPhone.usage.setSettings({ logCapacity: next }).then(function (res) {
+          state.logCapacity = (res && res.logCapacity) || next;
+          state.facetLogs = null;
+          if (state.tab === "logs") loadLogs();
+          updateFoot();
+          return AiPhone.usage.getSettings();
+        }).then(paintSettingsSheet).catch(function (err) {
+          el("sheet-body").innerHTML = '<div class="empty-note">保存失败：' +
+            esc(err && err.message ? err.message : String(err)) +
+            '<br><br>需要「修改调用日志的保留条数」权限。</div>';
+        });
+      });
+    });
+    el("settings-done").addEventListener("click", closeDetail);
+  }
+
+  function updateFoot() {
+    el("foot").innerHTML = "统计最多保留 180 天，调用日志留最近 " +
+      (state.logCapacity || 150) + " 条（可在右上角设置里改）。<br>缓存命中/写入的 token 已计入输入，不要重复相加。";
+  }
+
   function closeDetail() {
     el("sheet").setAttribute("data-open", "0");
     if (state.sheetMode === "filter") { state.sheetMode = ""; loadLogs(); }
+    else state.sheetMode = "";
   }
 
   // ---------- 载入 ----------
@@ -836,7 +922,7 @@
     state.logPage = 0;
     renderLogsFilter();
     el("logs-body").innerHTML = '<div class="rows"><div class="empty-note">读取中…</div></div>';
-    var payload = { limit: 200 };
+    var payload = { limit: LOG_FETCH_LIMIT };
     if (state.logFilterCharacter) {
       if (state.logFilterCharacter.indexOf("name:") === 0) payload.characterName = state.logFilterCharacter.slice(5);
       else payload.characterId = state.logFilterCharacter;
@@ -866,7 +952,7 @@
       else if (first.date === last.date) state.rangeText = last.date === todayStr() ? "今日" : first.date.slice(5);
       else state.rangeText = first.date.slice(5) + " – " + last.date.slice(5);
       renderStats();
-      el("foot").innerHTML = "统计最多保留 180 天，调用日志只留最近 150 条。<br>缓存命中/写入的 token 已计入输入，不要重复相加。";
+      updateFoot();
     });
   }
 
@@ -885,6 +971,7 @@
     });
   });
   el("sheet-back").addEventListener("click", closeDetail);
+  el("open-settings").addEventListener("click", openSettingsSheet);
 
   // 角色目录拿不到也不挡主流程：头像退化成首字色块，数字照常显示。
   function loadCharacters() {
@@ -909,6 +996,13 @@
     }, Math.max(1000, next.getTime() - now.getTime()));
   }
   armMidnightRefresh();
+
+  if (AiPhone.usage.getSettings) {
+    AiPhone.usage.getSettings().then(function (cfg) {
+      state.logCapacity = cfg && cfg.logCapacity;
+      updateFoot();
+    }).catch(function () { });
+  }
 
   loadCharacters().then(loadStats).catch(function (err) {
     el("stats-body").innerHTML = '<div class="rows"><div class="empty-note">读取失败：' +

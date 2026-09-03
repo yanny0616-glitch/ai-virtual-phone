@@ -15,9 +15,9 @@ import { permissionLabelWithContext } from "@/lib/custom-app-permission-labels";
 import { registerCustomAppToolExecutor, type CustomAppToolExecutorPayload } from "@/lib/custom-app-tool-runtime";
 import { updateInstalledCustomAppFromMarket } from "@/lib/custom-app-market-update";
 import { loadCharacters } from "@/lib/character-storage";
-import { getApiUsageDays } from "@/lib/api-usage-stats";
+import { getApiUsageDays, USAGE_MAX_DAYS } from "@/lib/api-usage-stats";
 import { resolveUsageSourceName, resolveUsageSourceNames } from "@/lib/usage-source-names";
-import { getApiLogs } from "@/lib/api-log-store";
+import { getApiLogs, getApiLogCapacity, setApiLogCapacity, API_LOG_CAPACITY_OPTIONS } from "@/lib/api-log-store";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { ensureSettingsStorageHydrated } from "@/lib/settings-storage";
 import { getPwaHostedSafeArea, PWA_DISPLAY_MODE_CHANGED_EVENT } from "@/lib/pwa-display-mode";
@@ -473,7 +473,9 @@ html, body { min-height: 100%; }
     usage: {
       readDaily: function(payload){ return request('usage.readDaily', payload || {}); },
       readLogs: function(payload){ return request('usage.readLogs', payload || {}); },
-      readLogDetail: function(payload){ return request('usage.readLogDetail', payload || {}); }
+      readLogDetail: function(payload){ return request('usage.readLogDetail', payload || {}); },
+      getSettings: function(){ return request('usage.getSettings', {}); },
+      setSettings: function(payload){ return request('usage.setSettings', payload || {}); }
     },
     variables: {
       get: function(name, opts){ return request('variables.get', Object.assign({ name: name }, opts || {})).then(function(r){ return r && r.value; }); },
@@ -1126,7 +1128,7 @@ export function CustomAppRunner({
           media: ["pick", "save", "put", "get", "revoke", "delete"],
           characters: ["list", "get", "readState", "writeState", "readRelations"],
           variables: ["get", "set", "update", "unset"],
-          usage: ["readDaily", "readLogs", "readLogDetail"],
+          usage: ["readDaily", "readLogs", "readLogDetail", "getSettings", "setSettings"],
           chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState", "setContext", "clearContext", "setReplyGate"],
           memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
           notifications: ["create", "list", "markRead", "markAllRead", "getBadge", "setBadge", "incrementBadge", "clearBadge"],
@@ -1665,7 +1667,8 @@ export function CustomAppRunner({
     if (action === "usage.readLogs") {
       requirePermission("usage.read");
       // 列表只出元信息；提示词和回复原文要另外申请 usage.logs 再逐条取。
-      const limit = Math.max(1, Math.min(200, Math.floor(Number(record.limit ?? 50)) || 50));
+      // 上限跟着日志环容量走：用户把容量调到 500，APP 一次也得取得完，否则分页翻不到底。
+      const limit = Math.max(1, Math.min(getApiLogCapacity(), Math.floor(Number(record.limit ?? 50)) || 50));
       const wantCharacterId = record.characterId ? String(record.characterId) : "";
       // 按名字筛是给老日志兜底：characterId 是后加的字段，之前落库的记录只有名字。
       const wantCharacterName = record.characterName ? String(record.characterName) : "";
@@ -1699,6 +1702,20 @@ export function CustomAppRunner({
           failed: Boolean(log.failed),
         })),
       };
+    }
+    if (action === "usage.getSettings") {
+      requirePermission("usage.read");
+      return {
+        logCapacity: getApiLogCapacity(),
+        logCapacityOptions: [...API_LOG_CAPACITY_OPTIONS],
+        logCount: getApiLogs().length,
+        maxDays: USAGE_MAX_DAYS,
+      };
+    }
+    if (action === "usage.setSettings") {
+      requirePermission("usage.settings");
+      const next = setApiLogCapacity(Number(record.logCapacity));
+      return { logCapacity: next, logCount: getApiLogs().length };
     }
     if (action === "usage.readLogDetail") {
       requirePermission("usage.logs");
