@@ -251,9 +251,9 @@
 <div class="topbar">
   <h1>用量</h1>
   <div class="daypick" id="seg-days">
-    <button data-days="7" data-on="1">7天</button>
+    <button data-days="1" data-on="1">今日</button>
+    <button data-days="7">7天</button>
     <button data-days="30">30天</button>
-    <button data-days="90">90天</button>
   </div>
 </div>
 
@@ -292,9 +292,15 @@
     if (!key) return "聊天";
     return state.sourceNames[key] || key;
   }
+  function todayStr() {
+    var d = new Date();
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+  function pad2(n) { return n < 10 ? "0" + n : String(n); }
+
   var state = {
     tab: "stats",
-    days: 7,
+    days: 1,
     rank: "character",     // character | model | source
     selectedDate: null,    // 柱状图点选的某一天
     logFilterCharacter: "",// 角色 key（id 或 name:xxx）
@@ -424,7 +430,7 @@
     var html = "";
 
     html += '<div class="cards">';
-    html += '<div class="card wide"><div class="k">' + (state.selectedDate ? esc(state.selectedDate) : esc(state.rangeText || ("共 " + state.days + " 天"))) + ' · 总 TOKEN</div>' +
+    html += '<div class="card wide"><div class="k">' + (state.selectedDate ? esc(state.selectedDate) : esc(state.rangeText || (state.days === 1 ? "今日" : "共 " + state.days + " 天"))) + ' · 总 TOKEN</div>' +
       '<div class="v">' + fmt(t.total) + '</div>' +
       '<div class="split">' +
         '<span><i class="dot" style="background:var(--in)"></i>输入 <b>' + fmt(t.prompt) + '</b></span>' +
@@ -451,29 +457,31 @@
     });
     html += '</div>';
 
-    // 柱状图
-    html += '<p class="sec">每日用量' + (state.selectedDate ? '（已选中 ' + esc(state.selectedDate) + '，再点一次取消）' : '（点柱子看单天）') + '</p>';
-    html += '<div class="chart"><div class="bars" id="bars">';
-    state.daysData.forEach(function (d) {
-      var total = num(d.totalTokens);
-      var h = maxTotal ? Math.max(2, Math.round(total / maxTotal * 128)) : 2;
-      var p = num(d.promptTokens), c = num(d.completionTokens);
-      var sum = p + c;
-      var inH = sum ? Math.round(h * p / sum) : 0;
-      var on = state.selectedDate === d.date ? "1" : "0";
-      html += '<div class="bar' + (total ? "" : " empty") + '" data-date="' + esc(d.date) + '" data-on="' + on + '" title="' + esc(d.date) + ' · ' + total + '">' +
-        (total
-          ? '<div class="stack" style="height:' + h + 'px"><div class="in" style="height:' + inH + 'px"></div><div class="out" style="height:' + (h - inH) + 'px"></div></div>'
-          : '<div class="stack"></div>') +
-        '</div>';
-    });
-    html += '</div><div class="xaxis">';
-    var step = Math.max(1, Math.ceil(state.daysData.length / 7));
-    state.daysData.forEach(function (d, i) {
-      var show = (state.daysData.length - 1 - i) % step === 0;
-      html += '<span>' + (show ? esc(d.date.slice(5).replace("-", "/")) : "") + '</span>';
-    });
-    html += '</div></div>';
+    // 柱状图：只有一天时退化成单根柱子，没有信息量，直接不画
+    if (state.daysData.length > 1) {
+      html += '<p class="sec">每日用量' + (state.selectedDate ? '（已选中 ' + esc(state.selectedDate) + '，再点一次取消）' : '（点柱子看单天）') + '</p>';
+      html += '<div class="chart"><div class="bars" id="bars">';
+      state.daysData.forEach(function (d) {
+        var total = num(d.totalTokens);
+        var h = maxTotal ? Math.max(2, Math.round(total / maxTotal * 128)) : 2;
+        var p = num(d.promptTokens), c = num(d.completionTokens);
+        var sum = p + c;
+        var inH = sum ? Math.round(h * p / sum) : 0;
+        var on = state.selectedDate === d.date ? "1" : "0";
+        html += '<div class="bar' + (total ? "" : " empty") + '" data-date="' + esc(d.date) + '" data-on="' + on + '" title="' + esc(d.date) + ' · ' + total + '">' +
+          (total
+            ? '<div class="stack" style="height:' + h + 'px"><div class="in" style="height:' + inH + 'px"></div><div class="out" style="height:' + (h - inH) + 'px"></div></div>'
+            : '<div class="stack"></div>') +
+          '</div>';
+      });
+      html += '</div><div class="xaxis">';
+      var step = Math.max(1, Math.ceil(state.daysData.length / 7));
+      state.daysData.forEach(function (d, i) {
+        var show = (state.daysData.length - 1 - i) % step === 0;
+        html += '<span>' + (show ? esc(d.date.slice(5).replace("-", "/")) : "") + '</span>';
+      });
+      html += '</div></div>';
+    }
 
     // 排行
     var kinds = [["character", "按角色卡"], ["model", "按模型"], ["source", "按来源"]];
@@ -801,7 +809,9 @@
         state.selectedDate = null;
       }
       var first = state.daysData[0], last = state.daysData[state.daysData.length - 1];
-      state.rangeText = first && last ? first.date.slice(5) + " – " + last.date.slice(5) : "";
+      if (!first || !last) state.rangeText = "";
+      else if (first.date === last.date) state.rangeText = last.date === todayStr() ? "今日" : first.date.slice(5);
+      else state.rangeText = first.date.slice(5) + " – " + last.date.slice(5);
       renderStats();
       el("foot").innerHTML = "统计最多保留 180 天，调用日志只留最近 150 条。<br>缓存命中/写入的 token 已计入输入，不要重复相加。";
     });
@@ -835,6 +845,17 @@
       }).catch(function () { });
     } catch (e) { return Promise.resolve(); }
   }
+
+  // 跨 0 点自动换到新的一天，省得用户看着昨天的数字以为没统计。
+  function armMidnightRefresh() {
+    var now = new Date();
+    var next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 3, 0);
+    setTimeout(function () {
+      armMidnightRefresh();
+      loadStats().catch(function () { });
+    }, Math.max(1000, next.getTime() - now.getTime()));
+  }
+  armMidnightRefresh();
 
   loadCharacters().then(loadStats).catch(function (err) {
     el("stats-body").innerHTML = '<div class="rows"><div class="empty-note">读取失败：' +
