@@ -660,7 +660,16 @@
   // 模型没按要求回 JSON 时（比如回了一段普通话），带更严的指令重试一次
   /* ================= 模型调用用量：本机（宿主统计）+ 云端（push_api_usage） ================= */
   const USAGE_SRC = "custom_app:gua.nian";
-  const USAGE_LABEL = { app: "本机", "cloud-gen": "云端生成一天", "cloud-recheck": "云端复核", "cloud-wake": "云端到点发送", "cloud-chat": "聊天离线兜底（不计上限）" };
+  const USAGE_LABEL = { app: "本机（旧记录）", "cloud-gen": "云端生成一天", "cloud-recheck": "云端复核", "cloud-wake": "云端到点发送", "cloud-chat": "聊天离线兜底（不计上限）" };
+  // 云端账本按 (天, 来源) 存绝对值，整行覆盖。两台设备都报 source="app" 就会互相把对方的数清掉，
+  // 合计和日上限跟着失真。所以本机那行的来源带上设备 id：各占一行，云函数照旧把当天所有行相加。
+  function myUsageSrc() { return "app-" + myDev(); }
+  function isDeviceSrc(src) { return /^app(-|$)/.test(String(src || "")); }
+  function usageLabel(src) {
+    if (src === myUsageSrc()) return "本机（" + myDevName() + "）";
+    if (isDeviceSrc(src) && src !== "app") return "另一台设备";
+    return USAGE_LABEL[src] || src;
+  }
   function apiUseToday() {
     const u = S.settings && S.settings.apiUse;
     return u && u.date === todayStr() ? u : { date: todayStr(), n: 0 };
@@ -689,9 +698,16 @@
     if (!force && S._use && Date.now() - S._use.at < 5 * 60000) return S._use;
     const local = await readLocalUsage(force);
     try {
+      // 0.9.6 之前本机那行统一叫 "app"。留着它会和新的 app-<设备> 行一起被云端上限
+      // 重复计一遍，所以每次启动清零一次（清不掉就最多多算今天这一天）。
+      if (!S._legacyZeroed) {
+        S._legacyZeroed = true;
+        try { await cloudFetch("usage", { method: "POST", body: JSON.stringify({ set: { day: todayStr(), source: "app", calls: 0, promptTokens: 0, completionTokens: 0 } }) }); }
+        catch (e) { /* 旧云函数没有 usage 动作，下面那次 POST 会一起报错 */ }
+      }
       await cloudFetch("usage", { method: "POST", body: JSON.stringify({
         limits: { dailyCalls: +S.settings.apiDailyCap || 0, dailyTokens: +S.settings.tokenDailyCap || 0, tz: -new Date().getTimezoneOffset() },
-        set: { day: todayStr(), source: "app", calls: local.calls, promptTokens: local.prompt, completionTokens: local.completion },
+        set: { day: todayStr(), source: myUsageSrc(), calls: local.calls, promptTokens: local.prompt, completionTokens: local.completion },
       }) });
       const r = await cloudFetch("usage", { method: "GET" }, { days: 7 });
       S._use = { at: Date.now(), rows: Array.isArray(r.rows) ? r.rows : [], limits: r.limits || null };
@@ -701,18 +717,21 @@
     }
     return S._use;
   }
-  // 今天合计：本机用最新的本地数，云端各来源用账本里的（账本里的 app 行是自己上报的，不重复算）
+  // 今天合计：本机用最新的本地数（自己那行是自己报的，不从账本里再算一遍），
+  // 云端各来源和另一台设备的本机数都用账本里的。旧的 "app" 行已清零，一律不算。
   function usageTotals() {
     const local = S._useLocal || { calls: apiUseToday().n, prompt: 0, completion: 0 };
-    const rows = ((S._use && S._use.rows) || []).filter((r) => r.day === todayStr() && r.source !== "app");
-    let cloudCalls = 0, cloudTokens = 0, capCalls = 0, capTokens = 0;
+    const mine = myUsageSrc();
+    const rows = ((S._use && S._use.rows) || []).filter((r) => r.day === todayStr() && r.source !== mine && r.source !== "app");
+    let cloudCalls = 0, cloudTokens = 0, otherCalls = 0, otherTokens = 0, capCalls = 0, capTokens = 0;
     for (const r of rows) {
       const t = (+r.prompt_tokens || 0) + (+r.completion_tokens || 0);
-      cloudCalls += +r.calls || 0; cloudTokens += t;
+      if (isDeviceSrc(r.source)) { otherCalls += +r.calls || 0; otherTokens += t; }
+      else { cloudCalls += +r.calls || 0; cloudTokens += t; }
       if (r.source !== "cloud-chat") { capCalls += +r.calls || 0; capTokens += t; }
     }
     const localCalls = Math.max(local.calls, apiUseToday().n), localTokens = local.prompt + local.completion;
-    return { localCalls, localTokens, cloudCalls, cloudTokens, rows,
+    return { localCalls, localTokens, cloudCalls, cloudTokens, otherCalls, otherTokens, rows,
       calls: localCalls + capCalls, tokens: localTokens + capTokens,
       capCalls: +S.settings.apiDailyCap || 0, capTokens: +S.settings.tokenDailyCap || 0 };
   }
@@ -930,6 +949,8 @@
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
     characterIds: [],    // 挂念的人（可以多位）
+    deviceId: "",        // 本机随机 id：电脑和手机同时开着时，云端计划行靠它认「今天谁负责」
+    deviceName: "",      // 本机叫什么（按 UA 猜，只给自己看）
     apiDailyCap: 40,     // 本机 + 云端合计一天最多调多少次模型（0=不限）
     tokenDailyCap: 0,    // 本机 + 云端合计一天最多多少 token（0=不限）
     apiUse: null,        // 今天本机已调用 { date, n }（宿主统计落后时的兜底计数）
@@ -989,6 +1010,86 @@
     }
     return data;
   }
+  /* ---- 设备锁：电脑和手机同时开着挂念时，一天里只有一台负责编排、预约和云端 ----
+     两台各自编排，服务端就挂出两套 push_jobs（预约 id 带本机随机后缀，登记簿也各存各的），
+     谁也撤不掉谁的，到点发两遍、扣两份额度；云端裁决还只能被先打开的那台取走一次。
+     锁记在当天云端计划行的 context.owner 里，粒度就是那一行（角色 + 日期），零点自然释放。
+     没接云端就不上锁：预约只在本机挂着，不存在两台互相看不见的问题。 */
+  function myDev() { return (S.settings && S.settings.deviceId) || ""; }
+  function myDevName() { return (S.settings && S.settings.deviceName) || "本机"; }
+  function owns(cx) {
+    if (!cloudCfg()) return true;
+    const o = cx && cx.owner;
+    return !o || !o.id || o.id === myDev();
+  }
+  function ownerLabel(cx) { return (cx && cx.owner && cx.owner.name) || "另一台设备"; }
+  // 从云端计划行读锁。GET 不调模型，编排/生成前都刷一次。
+  async function readOwner(cx) {
+    if (!cloudCfg() || !cx.character) return null;
+    try {
+      const r = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() });
+      const c = (r && r.plan && r.plan.context) || {};
+      cx.owner = c.owner ? { id: String(c.owner), name: String(c.ownerName || "") } : null;
+    } catch (e) { /* 读不到就按没锁算，别把离线的这台也锁死 */ }
+    return cx.owner;
+  }
+  function lockCloud(cx) {
+    return cloudFetch("recheck-plan", { method: "POST", body: JSON.stringify({
+      characterId: cx.character.id, planDate: todayStr(), ownerOnly: true,
+      owner: myDev(), ownerName: myDevName(),
+    }) });
+  }
+  // 拿锁：没人占就写上自己；已经是别人的返回 false，调用方必须停手。
+  // 当天还没有计划行时网关只回不写（空行会被 cron 派出去白跑一轮），
+  // 真正的锁跟着第一次 uploadPlanCloud / uploadGenKitCloud 的 context.owner 落地。
+  async function claimOwner(cx) {
+    if (!cloudCfg()) return true;
+    await readOwner(cx);
+    if (!owns(cx)) return false;
+    if (!cx.owner || cx.owner.id !== myDev()) {
+      try { await lockCloud(cx); } catch (e) { /* 行还没建：等第一次上传计划时带上 */ }
+      cx.owner = { id: myDev(), name: myDevName() };
+    }
+    return true;
+  }
+  // 只读的那台要接手：先撤掉原来那台挂在服务端的预约（含 48 小时哨兵），再把锁抢过来。
+  // 撤预约只认 id 前缀、不查本机登记簿，所以手机能撤掉电脑挂的那些。
+  async function takeOver(cx) {
+    if (cx.busy || cx._planLock) return;
+    const from = ownerLabel(cx);
+    cx.busy = true; render();
+    try {
+      let sw = "";
+      try {
+        const r = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() });
+        sw = String((r && r.plan && r.plan.context && r.plan.context.sentinelWakeId) || "");
+      } catch (e) { /* 读不到哨兵就算了：那条 48 小时后只会问候一句 */ }
+      await cancelTodayWakes(cx);
+      if (sw) { try { await AiPhone.push.cancelWake(sw); } catch (e) { /* 已触发的取消失败可忽略 */ } }
+      await lockCloud(cx);
+      cx.owner = { id: myDev(), name: myDevName() };
+      await log(cx, "接管：今天改由「" + myDevName() + "」负责，已撤掉「" + from + "」挂的预约");
+      cx.busy = false;
+      toast("今天改由这台负责");
+      if (!await adoptCloudDay(cx) && cx.day) await orchestrate(cx);
+      render();
+    } catch (e) {
+      cx.busy = false; render();
+      await log(cx, "接管失败：" + (e && e.message || e));
+      toast("接管失败：" + (e && e.message || e));
+    }
+  }
+
+  // 只读设备的横幅：说清是哪台在管，并给一条接手的路
+  function lockBanner(cx) {
+    if (owns(cx)) return "";
+    return '<div class="card"><div class="sec-head"><span class="t">只 读</span>' +
+      '<span class="badge warn">' + esc(ownerLabel(cx)) + " 在管</span></div>" +
+      '<div class="archive-note">今天由「' + esc(ownerLabel(cx)) + "」负责编排、预约和云端，这台只看不动——" +
+      "两台一起排会在服务端挂出两套预约，谁也撤不掉谁的，到点发两遍。</div>" +
+      '<div class="dg-act"><button class="tgl" id="btn-takeover"' + (cx.busy ? " disabled" : "") + ">改用这台</button></div></div>";
+  }
+
   /* ---- 云端动态复核：把计划寄存到云上，浏览器关着时由 push-recheck 重判 ---- */
   function cloudRecheckOn() {
     return !!(cloudCfg() && S.settings && S.settings.cloudRecheck);
@@ -1050,11 +1151,13 @@
             sleepMode: S.settings.sleepMode,
             sleepWakeProb: S.settings.sleepWakeProb,
             affection: cx.aff || null,
+            owner: myDev(), ownerName: myDevName(),
             day: dayForCloud(cx),
     };
   }
   async function uploadPlanCloud(cx, resetDecisions) {
     if (!cloudRecheckOn() || !cx.character || !cx.plan || !Array.isArray(cx.plan.items)) return;
+    if (!owns(cx)) return; // 只读的那台别把自己的计划盖到管事那台的行上
     try {
       await cloudFetch("recheck-plan", {
         method: "POST",
@@ -1106,7 +1209,7 @@
   // 把「生成明天」需要的一切算好寄上去：指令文本由本地同一个 buildDayInstruction 生成，
   // 云端不再自己拼提示词，所以生成内容和本地一字不差。今天还没生成且没到点的话，今天也寄一份。
   async function uploadGenKitCloud(cx, force) {
-    if (!cloudGenOn() || !cx.character || !S.settings) return;
+    if (!cloudGenOn() || !cx.character || !S.settings || !owns(cx)) return;
     if (!force && Date.now() - (cx._kitAt || 0) < 20 * 60000) return;
     cx._kitAt = Date.now();
     const tpl = await freezeGenTemplates(cx, false);
@@ -1141,6 +1244,7 @@
   // 云端生成好了今天：把它当成自己生成的接过来——落库、写回系统日程、接管预约，再走正常的复核流程。
   async function adoptCloudDay(cx) {
     if (!cloudGenOn() || !cx.character || cx.day || cx.busy || cx._planLock) return false;
+    if (!owns(cx)) return false; // 接管云端生成会接手那批预约，只有管事那台能做
     let data;
     try { data = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() }); }
     catch (e) { return false; }
@@ -1184,7 +1288,7 @@
   // 并发跑的话，后写的那个手里是 await 之前取的旧 items，会把先写的成果整份盖回去
   // ——被盖掉的新预约还挂在服务端，到点就成了任何计划里都查不到的发送。
   async function pullCloudDecisions(cx) {
-    if (cx.busy || cx._planLock) return 0;
+    if (cx.busy || cx._planLock || !owns(cx)) return 0; // 裁决取走就没了，只有管事那台能取
     cx._planLock = true;
     try { return await pullCloudDecisionsBody(cx); } finally { cx._planLock = false; }
   }
@@ -1300,7 +1404,21 @@
       missing.genTpls = Object.assign({}, S.settings.genTpls, { [S.settings.genTpl.characterId]: S.settings.genTpl });
       missing.genTpl = null;
     }
+    // 本机 id 只生成一次：换浏览器或清了应用数据就是另一台设备，靠横幅上的「改用这台」找回来
+    if (!S.settings.deviceId) {
+      missing.deviceId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      missing.deviceName = guessDeviceName();
+    }
     if (Object.keys(missing).length) S.settings = await AiPhone.db.update("settings", S.settings.id, missing);
+  }
+  // 设备名只给自己看：横幅上要写「今天由『手机 Safari』负责」，光一串随机 id 认不出是哪台
+  function guessDeviceName() {
+    const ua = navigator.userAgent || "";
+    const plat = /iPhone|iPod/.test(ua) ? "手机" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "安卓机"
+      : /Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "电脑" : "设备";
+    const br = /Edg\//.test(ua) ? "Edge" : /CriOS|Chrome/.test(ua) ? "Chrome" : /Firefox/.test(ua) ? "Firefox"
+      : /Safari/.test(ua) ? "Safari" : "";
+    return br ? plat + " " + br : plat;
   }
   // settings 是一行整体覆盖写：两个人同时冻模板/换哨兵，各自拿内存里的旧字典改一格再写回，
   // 后写的把先写的那格盖掉，丢的哨兵 id 从此撤不掉。所有后台写都排队，写时再取最新值。
@@ -1364,7 +1482,7 @@
   /* ================= 核心：生成今天 ================= */
   // 到点自动生成。一天只试一次：失败了留给用户手动按，别每分钟烧一次模型调用。
   async function maybeAutoGen(cx) {
-    if (!S.settings || !S.settings.autoGen || !cx.character || cx.day || cx.busy) return;
+    if (!S.settings || !S.settings.autoGen || !cx.character || cx.day || cx.busy || !owns(cx)) return;
     const at = S.settings.autoGenAt || SET_DEF.autoGenAt;
     if (fmtHM(Date.now()) < at) return;
     if (cx._autoGenDay === todayStr()) return;
@@ -1484,6 +1602,7 @@
   }
   async function generateDay(cx) {
     if (cx.busy || cx._planLock) { if (cx._planLock) toast("TA正在复核，稍等几秒再试"); return; }
+    if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要在这台排就先点「改用这台」"); render(); return; }
     cx.busy = true; cx._planLock = true; render();
     try {
       const existing = await readTodayCalendar(cx); // 日程 app 里TA今天已定的安排
@@ -1704,7 +1823,9 @@
 
   async function orchestrate(cx) {
     if (cx._planLock && !cx.busy && cx.day) { await log(cx, "编排跳过：复核或合并云端裁决正在进行，稍后再点「重新编排」"); return; }
-    if (cx.busy || cx._planLock || !cx.day) return; cx.busy = true; cx._planLock = true; render();
+    if (cx.busy || cx._planLock || !cx.day) return;
+    if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要在这台排就先点「改用这台」"); render(); return; }
+    cx.busy = true; cx._planLock = true; render();
     try {
       const kept = keptImpromptu(cx);
       const keptTimes = {}, keptIds = {};
@@ -1792,7 +1913,7 @@
   // 按最新聊天重审今天还没到点的时刻——未回应降速是硬规则，聊崩了会取消，
   // 聊出没聊完的话头时可以临时起一个新念头。
   async function recheck(cx, trigger) {
-    if (cx.busy || cx._planLock) return;
+    if (cx.busy || cx._planLock || !owns(cx)) return;
     if (!S.settings || !(S.settings.recheckMin > 0)) return;
     if (!cx.character || !cx.day || !cx.plan || !Array.isArray(cx.plan.items)) return;
     const over = usageOver();
@@ -2165,7 +2286,7 @@
     if (S.tab === "diag") { renderDiag(); return; }
     if (S.tab === "usage") { renderUsage(); return; }
     if (!cx.day) {
-      v.innerHTML =
+      v.innerHTML = lockBanner(cx) +
         '<div class="card empty"><div class="art">🌅</div>' +
         '<p>TA的今天还是一张白纸。<br>生成TA今天的状态与日程，<br>再看看TA会在哪些时刻想起你。'
         + (nightBridge(cx) ? '<br><span style="color:var(--tx3)">' + esc("眼下按昨天的作息：" + nightBridge(cx).doing + (nightBridge(cx).next ? "，" + nightBridge(cx).next : "")) + "</span>" : "")
@@ -2176,7 +2297,7 @@
     }
 
     const ctx = { day: cx.day, plan: cx.plan, settings: S.settings, character: cx.character, now: Date.now() };
-    v.innerHTML = PANELS.filter((p) => p.when(ctx)).map((p) => p.html(ctx)).join("");
+    v.innerHTML = lockBanner(cx) + PANELS.filter((p) => p.when(ctx)).map((p) => p.html(ctx)).join("");
     requestAnimationFrame(() => { document.querySelectorAll(".fill").forEach((el) => { el.style.width = el.dataset.w + "%"; }); });
     v.querySelectorAll(".tl-item.sched").forEach((el) => {
       el.onclick = () => { const i = +el.dataset.si; if (i >= 0) openSchedDetail(i); };
@@ -2885,18 +3006,20 @@
     let html = '<div class="card"><div class="sec-head"><span class="t">今 日 用 量</span>' +
       '<span class="badge' + (usageOver() ? " warn" : (t.capCalls || t.capTokens ? " ok" : "")) + '">' + (usageOver() ? "到上限了" : (t.capCalls || t.capTokens ? "额度内" : "没设上限")) + "</span></div>" +
       '<div class="stats four">' + stat(t.calls + (t.capCalls ? "<small>/" + t.capCalls + "</small>" : ""), "调 用") + stat(fmtTok(t.tokens) + (t.capTokens ? "<small>/" + fmtTok(t.capTokens) + "</small>" : ""), "token") +
-      stat(t.localCalls, "本 机") + stat(t.cloudCalls, "云 端") + "</div>" +
+      stat(t.localCalls + (t.otherCalls ? "<small>+" + t.otherCalls + "</small>" : ""), "本 机") + stat(t.cloudCalls, "云 端") + "</div>" +
       bar(t.calls, t.capCalls) + bar(t.tokens, t.capTokens) +
-      '<div class="archive-note">上限在设置「模型调用」里改。本机按次和 token 都由宿主统计；云端由云函数记账，聊天离线兜底的调用只记不限。</div></div>';
-    const srcRows = [{ source: "app", calls: t.localCalls, prompt: (S._useLocal || {}).prompt || 0, completion: (S._useLocal || {}).completion || 0 }]
-      .concat(t.rows.map((r) => ({ source: r.source, calls: +r.calls || 0, prompt: +r.prompt_tokens || 0, completion: +r.completion_tokens || 0 })));
+      '<div class="archive-note">上限在设置「模型调用」里改。本机按次和 token 都由宿主统计；云端由云函数记账，聊天离线兜底的调用只记不限。'
+      + (t.otherCalls ? "「本机」后面的 +" + t.otherCalls + " 是另一台设备今天调的，也占同一份上限。" : "") + "</div></div>";
+    const srcRows = [{ source: myUsageSrc(), calls: t.localCalls, prompt: (S._useLocal || {}).prompt || 0, completion: (S._useLocal || {}).completion || 0 }]
+      .concat(t.rows.map((r) => ({ source: r.source, calls: +r.calls || 0, prompt: +r.prompt_tokens || 0, completion: +r.completion_tokens || 0 }))
+        .filter((r) => r.calls || r.prompt || r.completion));
     html += '<div class="card"><div class="sec-head"><span class="t">按 来 源</span></div>' +
-      srcRows.map((r) => '<div class="diag-item"><b>' + esc(USAGE_LABEL[r.source] || r.source) + "</b> " + r.calls + " 次 · " + fmtTok(r.prompt) + " 入 / " + fmtTok(r.completion) + " 出</div>").join("") +
+      srcRows.map((r) => '<div class="diag-item"><b>' + esc(usageLabel(r.source)) + "</b> " + r.calls + " 次 · " + fmtTok(r.prompt) + " 入 / " + fmtTok(r.completion) + " 出</div>").join("") +
       (cloudCfg() ? "" : '<div class="archive-note">没配云连接，只有本机的数。</div>') + "</div>";
     const byDay = {};
     for (const d of ((S._useLocal || {}).days || [])) byDay[d.date] = { calls: d.calls, tokens: d.prompt + d.completion };
     for (const r of ((S._use || {}).rows || [])) {
-      if (r.source === "app") continue;
+      if (r.source === myUsageSrc() || r.source === "app") continue; // 自己那行已经在 byDay 里了
       const x = byDay[r.day] = byDay[r.day] || { calls: 0, tokens: 0 };
       x.calls += +r.calls || 0; x.tokens += (+r.prompt_tokens || 0) + (+r.completion_tokens || 0);
     }
@@ -3130,6 +3253,7 @@
     const rg = $("#btn-regen"); if (rg) rg.onclick = () => generateDay(cur());
     const rp = $("#btn-replan"); if (rp) rp.onclick = () => orchestrate(cur());
     const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur());
+    const to = $("#btn-takeover"); if (to) to.onclick = () => takeOver(cur());
   }
 
   /* ================= 设置弹层：schema 驱动 =================
@@ -3435,10 +3559,14 @@
       for (const cx of allCx()) await loadDayAndPlan(cx);
       render();
       for (const cx of allCx()) {
+        // 先认锁：另一台在管的话，下面的接管、寄原料、复核、取裁决全都不该做
+        cx._ownAt = Date.now();
+        await readOwner(cx);
         await syncChatContext(cx, true);
         await adoptCloudDay(cx);
         uploadGenKitCloud(cx).catch(() => { /* 已在函数内记日志 */ });
       }
+      render();
       syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
       // 先收浏览器关着这段时间云端替TA做的决定，再按最新聊天做本地复核
       // 打开小手机本身就是一次复核时机：按你们最新的聊天，让TA重新想想今天。
@@ -3462,6 +3590,13 @@
           if (cx.day && cx.day.date !== todayStr()) { // 跨过零点：昨天的 day/plan 换成今天的（多半是空的）
             await loadDayAndPlan(cx).then(() => { render(); return syncChatContext(cx, true); }).catch(() => { /* 已在函数内记日志 */ });
             continue;
+          }
+          // 另一台点了「改用这台」的话，这台得自己发现锁没了（10 分钟一次，GET 不花额度）
+          if (Date.now() - (cx._ownAt || 0) > 10 * 60000) {
+            cx._ownAt = Date.now();
+            const was = owns(cx);
+            await readOwner(cx).catch(() => { /* 读不到按没锁算 */ });
+            if (was !== owns(cx)) render();
           }
           await maybeAutoGen(cx).catch(() => { /* 已在函数内记日志 */ });
           await syncChatContext(cx).catch(() => { /* 已在函数内记日志 */ });
