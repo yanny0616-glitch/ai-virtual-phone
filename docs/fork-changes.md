@@ -1,7 +1,7 @@
 # Fork 改动清单
 
 相对 upstream `xiaolongbao0709/ai-virtual-phone` 的全部改动。
-主文档见 [../CLAUDE.md](../CLAUDE.md)，构建纪律和部署链路都在那边。
+主文档见 `/root/vibe-coding/float/CLAUDE.md`（**在仓库外**，故意不提交；构建纪律和部署链路都在那边）。
 
 > 加了新功能就在这里补一段，**别往 CLAUDE.md 里堆**。
 
