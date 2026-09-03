@@ -1320,6 +1320,35 @@
     color: var(--mix-prose);
 }
 
+/* 正文里的 HTML 片段：沙盒框，透明底，占满一行，不吃首行缩进 */
+.mix-html-block {
+    margin: 0 0 15px;
+    text-indent: 0;
+}
+
+.mix-html-block:last-child {
+    margin-bottom: 0;
+}
+
+/* 代码块：等宽、可横向滚，不吃首行缩进 */
+.mix-code {
+    margin: 0 0 15px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.32);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(var(--mix-prose-rgb), 0.9);
+    font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    text-indent: 0;
+    white-space: pre;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.mix-code:last-child {
+    margin-bottom: 0;
+}
+
 /* 首行缩进两字，书籍排版。场景过场行（.mix-scene）是同级的另一种段，不吃缩进 */
 .mix-para {
     margin: 0 0 15px;
@@ -2564,6 +2593,24 @@
     padding: 10px 12px;
     border-radius: 14px;
     background: var(--mix-panel);
+    /* 长按拖动排序：不让系统弹出选中/长按菜单；竖向滚动仍交给浏览器，长按成立后再由脚本拦 */
+    touch-action: pan-y;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.mix-stack-list[data-dragging="true"] {
+    touch-action: none;
+}
+
+.mix-stack-row[data-dragging="true"] {
+    position: relative;
+    z-index: 2;
+    transition: box-shadow 0.18s ease, background 0.18s ease;
+    background: var(--mix-panel-2);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(141, 123, 245, 0.35);
 }
 
 .mix-stack-order {
@@ -3258,7 +3305,9 @@
     vertical-align: -0.18em;
     width: 1.5em;
     height: 1.5em;
-    margin-left: 0.35em;
+    /* 前面是全角「」」，字形自带右半边留白，这里不再加左边距（甚至往回收一点）；
+       右边补一格，别贴着后面的叙述 */
+    margin: 0 0.3em 0 -0.08em;
     border: 1px solid rgba(141, 123, 245, 0.35);
     border-radius: 999px;
     background: rgba(141, 123, 245, 0.14);
@@ -3293,4 +3342,25 @@
 @keyframes mix-say-pulse {
     0%, 100% { transform: scale(1); opacity: 0.55; }
     50% { transform: scale(1.1); opacity: 1; }
+}
+
+/* ── 信任模式机括的坑位 ── */
+/* 每轮下方 / 最新一轮之下：一块普通的块级容器，机括自己排版 */
+.mix-trusted-slot {
+    text-indent: 0;
+}
+
+.mix-trusted-turn:empty {
+    display: none;
+}
+
+/* 悬浮层：铺满对局画面的透明层，机括画的元素自己定位；层本身不挡点击，元素挡 */
+.mix-trusted-float {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.mix-trusted-float > * {
+    pointer-events: auto;
 }
