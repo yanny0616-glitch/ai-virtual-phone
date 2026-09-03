@@ -52,6 +52,8 @@ const LEGACY_THEME_MAP: Record<string, string> = {
   orange: "cream",
   honey: "cream",
   melon: "mint",
+  // 暖桃挪去 APP 自定义 CSS 后不再是可选主题，落到同为暖色的 cream，别把选过它的设备甩回冷白
+  peach: "cream",
 };
 
 export const CALENDAR_THEME_IDS = ["light", "dark", "cream", "mint", "mist", "sakura"] as const;

@@ -95,7 +95,7 @@ export function recordApiUsage(input: {
         const prompt = Math.max(0, Math.floor(input.usage?.prompt_tokens ?? 0));
         const completion = Math.max(0, Math.floor(input.usage?.completion_tokens ?? 0));
         // 有些服务商只给 total，有些只给分项：两边互相兜底，避免总量凭空少一半。
-        const total = Math.max(0, Math.floor(input.usage?.total_tokens ?? (prompt + completion)));
+        const total = Math.max(0, Math.floor(input.usage?.total_tokens || (prompt + completion)));
         const delta: UsageDelta = {
             prompt,
             completion,
@@ -139,7 +139,8 @@ export function recordApiUsage(input: {
 
 /** 含今天，缺的天补零；返回的是旧到新，调用方需要新到旧要自己再排。 */
 export function getApiUsageDays(options?: { days?: number }): ApiUsageDay[] {
-    const want = Math.max(1, Math.min(MAX_DAYS, Math.floor(options?.days ?? 7)));
+    const asked = Math.floor(Number(options?.days ?? 7));
+    const want = Number.isFinite(asked) ? Math.max(1, Math.min(MAX_DAYS, asked)) : 7;
     const stored = new Map(loadDays().map(day => [day.date, day]));
     const result: ApiUsageDay[] = [];
     const cursor = new Date();

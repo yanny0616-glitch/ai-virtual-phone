@@ -69,8 +69,8 @@ function _loadLogs(key: string): DebugInfo[] {
         return Array.isArray(parsed) ? parsed as DebugInfo[] : [];
     } catch { return []; }
 }
-function _saveLogs(key: string, logs: DebugInfo[]): void {
-    try { kvSet(key, JSON.stringify(logs)); } catch { /* 日志失败不影响主流程 */ }
+function _saveLogs(key: string, json: string): void {
+    try { kvSet(key, json); } catch { /* 日志失败不影响主流程 */ }
 }
 
 function truncateForLog(text: string, limit: number): string {
@@ -125,24 +125,28 @@ function truncateEntryForLog(entry: Omit<DebugInfo, "id" | "timestamp">): Omit<D
     };
 }
 
-function trimLogsForStorage(logs: DebugInfo[], maxCount: number, maxSerializedChars: number): DebugInfo[] {
+/** 裁到条数与体积预算内，直接返回序列化结果：每条只 stringify 一次，保存时不再把整个环重来一遍 */
+function trimLogsForStorage(logs: DebugInfo[], maxCount: number, maxSerializedChars: number): string {
     const candidates = logs.slice(-maxCount);
-    const newestFirst: DebugInfo[] = [];
+    const chunksNewestFirst: string[] = [];
     let serializedChars = 2; // []
 
-    // 每条只序列化一次，避免超预算时反复 stringify 整个日志环造成主线程卡顿。
     for (let index = candidates.length - 1; index >= 0; index -= 1) {
-        const entryChars = JSON.stringify(candidates[index]).length;
-        const separatorChars = newestFirst.length > 0 ? 1 : 0;
-        if (serializedChars + separatorChars + entryChars > maxSerializedChars) break;
-        newestFirst.push(candidates[index]);
-        serializedChars += separatorChars + entryChars;
+        const chunk = JSON.stringify(candidates[index]);
+        const separatorChars = chunksNewestFirst.length > 0 ? 1 : 0;
+        if (serializedChars + separatorChars + chunk.length > maxSerializedChars) break;
+        chunksNewestFirst.push(chunk);
+        serializedChars += separatorChars + chunk.length;
     }
 
-    return newestFirst.reverse();
+    return `[${chunksNewestFirst.reverse().join(",")}]`;
 }
 
 export function getApiLogs(): DebugInfo[] { return _loadLogs(API_LOGS_KEY); }
+/** 日志环序列化后的字符数。kv 里存的就是字符串，直接量长度，不用再 stringify 一遍 */
+export function getApiLogStorageChars(): number {
+    try { return (kvGet(API_LOGS_KEY) || "[]").length; } catch { return 0; }
+}
 export function clearApiLogs(): void { try { kvRemove(API_LOGS_KEY); } catch { } }
 
 export function getApiLogCapacity(): number {

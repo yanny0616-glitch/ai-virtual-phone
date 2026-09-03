@@ -141,7 +141,6 @@
   .log .who { font-size: 13.5px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .log .when { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
   .log .l2 { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .log .l3 { margin-top: 5px; font-size: 12px; color: var(--dim); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
   .tag { font-size: 10.5px; padding: 1.5px 6px; border-radius: 6px; background: var(--panel-2); color: var(--dim); white-space: nowrap; }
   .tag.in { color: var(--in); }
@@ -431,6 +430,22 @@
     logs.forEach(function (l) { if (l.characterId && l.characterName) m[l.characterName] = l.characterId; });
     return m;
   }
+  // 统计只覆盖选中的天数，选中的角色落在范围外时 byCharacter 里就没有它，只能另找名字
+  function characterNameOf(key) {
+    if (!key) return "";
+    if (key.indexOf("name:") === 0) return key.slice(5);
+    var known = state.charById[key];
+    if (known && known.name) return known.name;
+    var b = mergeBuckets(state.daysData, "byCharacter").filter(function (x) { return x.key === key; })[0];
+    return (b && b.name) || "";
+  }
+  // sourceNames 只随 readDaily 下发，天数范围外的来源会露出 custom_app:xxx 原始 id；
+  // readLogs 每条都带 sourceName，顺手补进表里
+  function learnSourceNames(logs) {
+    (logs || []).forEach(function (l) {
+      if (l && l.source && l.sourceName) state.sourceNames[l.source] = l.sourceName;
+    });
+  }
   function tallyBy(logs, pick) {
     var out = {};
     logs.forEach(function (l) {
@@ -603,7 +618,7 @@
     if (state.logFilterSource) out.push(sourceLabel(state.logFilterSource));
     if (state.logFilterCharacter) {
       var c = mergeBuckets(state.daysData, "byCharacter").filter(function (x) { return x.key === state.logFilterCharacter; })[0];
-      out.push(c ? bucketLabel("character", c) : state.logFilterCharacter.replace(/^name:/, ""));
+      out.push(c ? bucketLabel("character", c) : (characterNameOf(state.logFilterCharacter) || "已删除的角色"));
     }
     if (state.logFailedOnly) out.push("只看失败");
     return out;
@@ -633,6 +648,7 @@
     paintFilterSheet();
     AiPhone.usage.readLogs({ limit: LOG_FETCH_LIMIT }).then(function (res) {
       state.facetLogs = (res && res.logs) || [];
+      learnSourceNames(state.facetLogs);
       if (state.sheetMode === "filter") paintFilterSheet();
     }).catch(function () {
       state.facetLogs = [];
@@ -718,7 +734,7 @@
       el("logs-body").innerHTML = '<div class="rows"><div class="empty-note">' +
         (state.logFilterCharacter || state.logFilterSource || state.logFailedOnly
           ? "当前筛选下没有调用记录。<br>换个角色、来源，或取消「只看失败」。"
-          : "还没有调用记录。<br>宿主只保留最近 150 条底层调用。") +
+          : "还没有调用记录。<br>宿主只保留最近 " + (state.logCapacity || 150) + " 条底层调用。") +
         '</div></div>';
       return;
     }
@@ -742,7 +758,6 @@
           '<span class="tag model">' + esc(shortModel(log.model)) + '</span>' +
           (tokenTotal ? '<span class="tag num' + (u.cache_read_tokens ? " cached" : "") + '">' + fmt(tokenTotal) + '</span>' : "") +
         '</span>' +
-        (log.preview ? '<span class="l3">' + esc(log.preview) + '</span>' : "") +
         '</button>';
     });
     html += '</div>';
@@ -851,7 +866,7 @@
     el("sheet-body").innerHTML = '<div class="empty-note">读取中…</div>';
     el("sheet").setAttribute("data-open", "1");
     el("sheet").scrollTop = 0;
-    if (!AiPhone.usage.getSettings) { paintSettingsSheet(null); return; }
+    if (!(AiPhone.usage && AiPhone.usage.getSettings)) { paintSettingsSheet(null); return; }
     AiPhone.usage.getSettings().then(paintSettingsSheet).catch(function () { paintSettingsSheet(null); });
   }
 
@@ -867,7 +882,13 @@
       html += '<button class="fchip" data-cap="' + n + '"' + (n === cfg.logCapacity ? ' data-on="1"' : "") + '>' + n + ' 条</button>';
     });
     html += '</div>';
-    html += '<p class="hintline">现在存着 ' + cfg.logCount + ' 条。<br>' +
+    var sizeText = "";
+    if (cfg.logChars) {
+      var mb = cfg.logChars / 1048576;
+      sizeText = "、约 " + (mb >= 0.1 ? mb.toFixed(2) + " MB" : Math.round(cfg.logChars / 1024) + " KB") +
+        "（平均 " + Math.round(cfg.logChars / Math.max(1, cfg.logCount)) + " 字符/条）";
+    }
+    html += '<p class="hintline">现在存着 ' + cfg.logCount + ' 条' + sizeText + '。<br>' +
       '每写一条日志都要把整份重新序列化一遍，条数调大会让每次模型调用多花一点时间和存储；' +
       '调小会立刻丢掉超出的旧日志，丢了找不回来。</p>';
     html += '<p class="sec">按天用量统计</p>' +
@@ -925,13 +946,20 @@
     var payload = { limit: LOG_FETCH_LIMIT };
     if (state.logFilterCharacter) {
       if (state.logFilterCharacter.indexOf("name:") === 0) payload.characterName = state.logFilterCharacter.slice(5);
-      else payload.characterId = state.logFilterCharacter;
+      else {
+        payload.characterId = state.logFilterCharacter;
+        // 同名老日志没有 id，宿主要靠名字才筛得出来，否则列表比筛选面板的计数少
+        var legacyName = characterNameOf(state.logFilterCharacter);
+        if (legacyName) payload.characterName = legacyName;
+      }
     }
     if (state.logFilterSource) payload.source = state.logFilterSource;
     if (state.logFailedOnly) payload.failedOnly = true;
     AiPhone.usage.readLogs(payload).then(function (res) {
       state.logs = (res && res.logs) || [];
+      learnSourceNames(state.logs);
       state.logTotal = (res && res.total) || state.logs.length;
+      renderLogsFilter();
       renderLogs();
     }).catch(function (err) {
       el("logs-body").innerHTML = '<div class="rows"><div class="empty-note">读取失败：' +
@@ -997,7 +1025,7 @@
   }
   armMidnightRefresh();
 
-  if (AiPhone.usage.getSettings) {
+  if (AiPhone.usage && AiPhone.usage.getSettings) {
     AiPhone.usage.getSettings().then(function (cfg) {
       state.logCapacity = cfg && cfg.logCapacity;
       updateFoot();

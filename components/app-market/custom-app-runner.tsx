@@ -16,8 +16,8 @@ import { registerCustomAppToolExecutor, type CustomAppToolExecutorPayload } from
 import { updateInstalledCustomAppFromMarket } from "@/lib/custom-app-market-update";
 import { loadCharacters } from "@/lib/character-storage";
 import { getApiUsageDays, USAGE_MAX_DAYS } from "@/lib/api-usage-stats";
-import { resolveUsageSourceName, resolveUsageSourceNames } from "@/lib/usage-source-names";
-import { getApiLogs, getApiLogCapacity, setApiLogCapacity, API_LOG_CAPACITY_OPTIONS } from "@/lib/api-log-store";
+import { resolveUsageSourceNames } from "@/lib/usage-source-names";
+import { getApiLogs, getApiLogCapacity, setApiLogCapacity, getApiLogStorageChars, API_LOG_CAPACITY_OPTIONS } from "@/lib/api-log-store";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { ensureSettingsStorageHydrated } from "@/lib/settings-storage";
 import { getPwaHostedSafeArea, PWA_DISPLAY_MODE_CHANGED_EVENT } from "@/lib/pwa-display-mode";
@@ -1688,16 +1688,19 @@ export function CustomAppRunner({
         if (wantFailedOnly && !log.failed) return false;
         return true;
       });
+      // 逐条 resolve 会把整个已装 APP 大对象反复读出来解析，500 条能把主线程卡死
+      const page = logs.slice(0, limit);
+      const sourceNames = resolveUsageSourceNames(page.map(log => log.source || "chat"));
       return {
         total: logs.length,
-        logs: logs.slice(0, limit).map(log => ({
+        logs: page.map(log => ({
           id: log.id,
           timestamp: log.timestamp,
           characterName: log.characterName,
           characterId: log.characterId,
           model: log.model,
           source: log.source || "chat",
-          sourceName: resolveUsageSourceName(log.source || "chat"),
+          sourceName: sourceNames[log.source || "chat"],
           usage: log.usage,
           messageCount: log.messages?.length ?? 0,
           hasReasoning: Boolean(log.reasoning),
@@ -1711,6 +1714,7 @@ export function CustomAppRunner({
         logCapacity: getApiLogCapacity(),
         logCapacityOptions: [...API_LOG_CAPACITY_OPTIONS],
         logCount: getApiLogs().length,
+        logChars: getApiLogStorageChars(),
         maxDays: USAGE_MAX_DAYS,
       };
     }
