@@ -5,7 +5,7 @@
 
 > 加了新功能就在这里补一段，**别往 CLAUDE.md 里堆**。
 
-`git diff upstream/main...main` 共 23 个提交、56 个文件（2026-08-30 核对）。分三类：
+`git diff upstream/main...main` 共 139 个提交、130 个文件（2026-09-03 核对）。
 
 ## A. 部署基础设施（upstream 没有，纯自建）
 
@@ -103,15 +103,17 @@
 生成角色今日生活面（与系统日程 `calendar.read/write` 互通，写回条目 id 带 `guanian_` 前缀）
 → 候选时刻 → AI 动机复核 → `push.wake` 预约 → 面板可预览「她此刻会说什么」+ 全量诊断日志。
 
-## G. 日历内置「暖桃」主题（2026-08-31）
+## G. 日历「暖桃」主题：加了又挪走（2026-08-31 → 09-03）
 
-日历主题弹窗加了第 7 个内置主题 `peach`（暖桃），与「挂念」APP 同一暖桃色系，
-免去用户手动粘自定义 CSS：
+一度做成第 7 个内置主题 `peach`，与「挂念」APP 同色系。**09-03 `95d28b5` 已从源码移除**：
+只是一组配色变量加两条规则，日历设置里的「自定义 CSS」框就能承载，不值得占
+`styles/tokens.css` 的位置——那个文件每次合上游都是撞车点。
 
-- `lib/calendar-storage.ts` — `CALENDAR_THEME_IDS` 增加 `"peach"`
-- `components/calendar-app.tsx` — `CALENDAR_THEMES` 增加 `{ id: "peach", name: "暖桃" }`
-- `styles/tokens.css` — `[data-calendar-theme="peach"]` 全量 token（含 hair/glass/scrim 与八色事件色板，整体偏暖降饱和）
-- `styles/calendar.css` — peach 缩略色块 + 主题专属珊瑚渐变 FAB、奶油色时间轴列头行
+- 现在 `CALENDAR_THEME_IDS` 里没有 `peach`，`components/calendar-app.tsx` 的
+  `CALENDAR_THEMES` 也没有；配色靠用户自己粘进日历的自定义 CSS 恢复
+- `lib/calendar-storage.ts` 的 `LEGACY_THEME_MAP` 补了 `peach: "cream"`（`5b11bd9`）：
+  已经选中暖桃的设备落到同为暖色的 cream，不会被 `normalizeCalendarTheme` 甩回冷白的 light。
+  **以后再删主题，删一个就往这张表里补一条**
 
 ## H. 离线推送·到点补上下文（2026-08-31）
 
@@ -332,3 +334,108 @@
 - 正文里**不写当前钟点**：挂念关着的时候这段不会刷新，写死的时间会变成假话；
   快照时刻放进 label，渲染成【挂念 · 14:32 的状态】，角色对着提示词里的真实时间
   自己能看出这份状态旧了多少
+
+## R. 聊天插件体系（2026-09-01 ~ 09-02）
+
+方向：**宿主只留钩子，规则进官方插件**。改行为先看现有钩子够不够，不够再在宿主开坑位。
+
+- **官方插件随宿主发布**（`6fdc32a`）：`chat-plugins/*.js` 构建时复制到 `public/chat-plugins/`
+  并生成 `index.json`（`scripts/build-chat-plugins-dist.mjs`，挂在 package.json 的构建里，
+  dist 目录进 .gitignore）；`lib/chat-plugin-official.ts` 是清单，扩展插件页多一个「官方插件」区，
+  已装的官方插件启动时对照版本静默升级（`components/chat-plugin-bootstrap.tsx`），用户不必手动导入文件
+- **坑位**（`lib/chat-plugin-types.ts` / `components/chat/chat-plugin-slot.tsx`）：新增「气泡旁边」
+  （`4a24422`）、输入栏工具坑位带 `sessionId`（`2918f68`）、「+」面板的插件按钮并进内置按钮网格（`5e8fb25`）
+- **浮层**：关进手机壳、高度按遮罩算而不是窗口 88vh（`256e9d9` / `7aa1dff`），
+  遮罩上下留白算进安全区，灵动岛机型不再压住面板顶部（`40e21d2` / `8c48c45`）
+- **共享变量池**（`dba5aad`）：插件的 `ctx.data.variables` 与自定义 APP 的
+  `AiPhone.variables.get/set/update/unset`（权限走 `chat.context`）读写同一个池，
+  两边不用各算一份；创作指南（`lib/custom-app-creator-guide.ts`）与插件文档（`lib/chat-plugin-docs.ts`）各补一节
+- **宿主坑位与钩子**：`chat.presence` / `list.avatar` 坑位、`variables.changed` 事件、
+  replyGate 只读接口（`833b511`）；`moments.beforePost` / `moments.schedule`（`e1c25b4`）
+
+## S. 官方插件「好感与关系」（`chat-plugins/affection-ledger.js`，1.0 → 1.5.1）
+
+原来的自带状态区让模型每轮自报一个 0–100 的绝对值，没有来由也不累积。改成：
+同一次回复的 `[内心]` 块里带心里话、好感变化量（`-3～+3|理由`）、只在转折点出现的 `关系→x`，
+插件截下来累加——**每日封顶、闲置回落，关系要在面板确认才变**。
+
+- 展示形态迭代：气泡下折叠头 → 带当时好感/区间/关系的卡片（`059abfa`）→ 折叠头照内置思维链
+  的样子（`e437f5a`）→ 气泡旁图标 + 底部面板（`4a24422`）
+- 面板：玫瑰色底页（`b4cc6da`），区间、关系阶段、提示词、数值都能改（`cd830ce`），
+  涨跌上限分开、允许小数（`9358a69`），去掉预设关系列表、加「关系变化时TA自己改」开关（`48b28dd`），
+  关系由角色按人设自己定、不再默认「刚认识」（`01c5444`），可锁定角色在线状态（`6ad0ec7`）
+- 结果写变量池 `affection` 供「挂念」读；面板反过来显示挂念写的 `presence` 快照
+- `1.5.1`（`3013578`）：模型漏写 `[/内心]`、写成【内心】或干脆不打标记时也能截掉，不再漏进正文
+
+## T. 官方插件「在线状态」与「朋友圈节奏」（2026-09-02 ~ 09-03）
+
+- **在线状态**：先做在宿主里——列表头像点变色、聊天页标题下一行小字（`e940f9d`）、
+  按宿主里的作息实时算而不等 APP 同步（`f56b91b`）、挂念的此刻快照带 `busy` 标记（`d24e120` / `f2e9dc3`）。
+  `833b511` 整个挪进 `chat-plugins/presence-status.js`，宿主只留 `chat.presence` / `list.avatar`
+  两个坑位加 `lib/character-presence.ts`
+- **朋友圈节奏**（`e1c25b4`）：`chat-plugins/moments-rhythm.js`，宿主在 `lib/moments-engine.ts` /
+  `moments-storage.ts` 上开 `moments.beforePost` / `moments.schedule` 钩子。
+  插件每小时按作息、精力、当天的事掷骰子决定发不发，**不再到点必发**
+- 顺带：导入 PNG 角色卡时压缩头像（`833b511`）
+
+## U. 押后被动回复（2026-09-01）
+
+`lib/chat-reply-gate.ts`（新）+ SDK `AiPhone.chat.setReplyGate`（权限 `chat.context`）：
+自定义 APP 可以按角色作息把被动回复押后——睡着押到醒来，忙着偷空再回（`e8ce793`）。
+到点由桌面壳触发，聊天室没开也照样后台生成，不必守着聊天窗（`f3482ce`）。
+
+## V. 「挂念」0.8.2 → 0.9.7（2026-09-01 ~ 09-03）
+
+- `0.8.2`–`0.8.6`：到点补状态、自发起念、哨兵预约、睡眠窗、精力公式修正、日程带地点与好感联动、
+  此刻快照写变量池、页签吸顶、心动时刻不卡整点（锚点与等待分钟数在区间里随机）
+- `0.9.0`（`7aa6f27`）：**云端生成TA的一天**。宿主新增 `push.freeze`——把与 `ai.generate` 同源的
+  提示词请求冻成 `kind=template` 的 `push_jobs`，不到点发送，只给云函数换占位符后调用。
+  同时修掉网关 `recheck-plan` 的 context 白名单停在 0.5.0 的 bug（`sentinelWakeId`/`day`/`affection`/
+  门禁等全在入口被丢掉，云端复核一直半瞎跑）
+- `0.9.1`（`e9080a4`）：**可以同时挂念几个人**。运行时状态从「当前角色」一份改成按角色的字典
+  （`ctxOf` / `cur` / `allCx`），面板只读 `cur()`，后台循环按人轮着跑；`apiDailyCap` 所有人合计的日调用上限
+- `0.9.2`（`03763d4`）：**schema 6** — `push_api_usage`（rpc `ai_phone_usage_add` 原子累加）、
+  `push_api_limits`；网关加 `usage` 动作；push-generate / push-recheck 调用前查预算、调用后记账。
+  宿主侧：自定义 APP 的调用在用量统计里来源记为 `custom_app:<appId>`
+- `0.9.3`–`0.9.6`：日程详情「这条日程已经不在了」、零点后按昨天作息撑到今天生成、
+  重排时按会话 id 撤掉云端残留的旧预约、整体 review 三批修复
+- `0.9.7`（`a64bb98`）：**设备锁**。电脑和手机同时开着会各自编排、挂出两套 `push_jobs`，到点发两遍扣两份额度。
+  锁记在当天云端计划行的 `context.owner` 里，粒度就是「角色 + 日期」那一行，零点自然释放；
+  网关加 `ownerOnly` 分支只 PATCH 锁不动 items/decisions；云端用量本机行改成 `app-<设备id>`，两台不再互相覆盖
+- 宿主配套：`18ba1b6` 自动续冻模板（kv `custom_app_templates_v1`，角色每次回复后按角色去抖 3 分钟重冻，
+  否则模板烤着旧记忆要等 APP 再被打开才更新）；`2807cf5` 聊天镜像跟着本地变
+  （删除按 id 删、编辑/整批重生成按 id 覆盖，否则云端起念会看到已删的句子）
+
+## W. 「用量」自定义 APP（`custom-apps/usage-dashboard/`，2.2.0 → 2.8.1，2026-09-03）
+
+**不进构建**——和挂念一样是打成 zip 在 APP 市场手动装的，zip 放在 `/root/vibe-coding/gua-nian-releases/`。
+仓库里这份是正本，改完要重打 zip 才到得了手机。
+
+- `2.2.0`（`d2e3fcf`）进仓库：来源细分到各 APP、失败调用单独统计，`usage.readLogs` 补 `failed` 与 `failedOnly`。
+  同时**撤回**宿主自带日志面板的分页与筛选改动（`95f8cb7`）——和这个 APP 的日志页重复
+- `2.3.0`（`10413ab`）：来源名改由宿主下发（`lib/usage-source-names.ts`），APP 不再自带 id→名字 映射表，
+  新增内置 APP 或用户装了自定义 APP 都能自动跟上
+- `2.4.0`–`2.7.1`：日志每页 20 条上下翻页、筛选收进浮层、天数选择挪进顶栏、
+  天数改「今日/7天/30天」默认今日且跨 0 点自动刷新、筛选计数改按日志算并合并同名角色
+- `2.8.0`（`0cbbeb9`）：**日志保留条数可调**（50/150/300/500）。宿主 `api-log-store` 的 150 改成存 kv 的配置，
+  序列化预算按条数等比放大；调小立刻裁掉超出的旧日志；新权限 `usage.settings` 配
+  `usage.getSettings` / `usage.setSettings`；`readLogs` 的 limit 上限跟着容量走（原来写死 200，容量 500 时翻不到底）
+- `2.8.1`（`5b11bd9`）：代码审查查出的 8 处修复 + 设置页显示日志实际占用（宿主 `getApiLogStorageChars()`
+  → `usage.getSettings` 的 `logChars`）。其中两处值得记住：
+  APP 里 `AiPhone.usage.xxx` 必须先判 `AiPhone.usage` 本身存在，否则老宿主上整页白屏；
+  `usage.readLogs` 不能逐条 `resolveUsageSourceName`，那会把整个已装 APP 大对象解析 N 次
+- ⚠️ **待定**：容量选 500 时序列化预算约 6.7MB，每次模型调用都要整环写一次 IndexedDB。
+  要不要压个绝对天花板、或者干脆砍掉 500 这一档，等实测占用出来再定
+  （设置页那行「约 X MB / 平均 Y 字符/条」就是为这个加的）
+
+## X. 宿主杂项修复（2026-09-02 ~ 09-03）
+
+- `e5eed3d` 修 Anthropic 反代与应用默认 API 绑定
+- `f5fce49` 绑定管理：全局页新增「App Defaults」应用格子，可按应用设默认绑定给所有角色共用
+  （数据层的 `appDefaults` 早就有、解析时也读，就是没有编辑入口）。解析顺序不变
+- `e621ec1` 记忆库：删掉长期记忆条目后，总结进度退回剩余条目的最晚时间，下次能重新总结那段
+- `04fc394` 小卷加预设条目不再打乱用户拖出来的顺序——和 B.4 是同一条纪律，**写 `prompt_order` 必须走 `buildDisplayedPrompts`**
+- `166cbab` 桌面：拖拽与翻页期间停掉实时模糊，几何只算一次
+- `44088b2` 沙盒 APP 注入样式补齐 `styles/base.css` 的四项全局保护（橡皮筋回弹露白底、
+  双击/捏合缩放、滚动条、body 默认 8px 外边距）——iframe 是独立文档，宿主的 base.css 进不去
+- `630f57e` 把版本号升到 1.0.0，当天 `4fc35cd` 回滚了
