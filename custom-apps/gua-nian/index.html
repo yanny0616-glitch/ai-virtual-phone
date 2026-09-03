@@ -1919,6 +1919,10 @@
     if (!canJudge && !canImpulse) return;
     cx._planLock = true;
     try {
+      // 必须先并再判：下面那次 uploadPlanCloud 会整行盖掉计划行的 items，
+      // 云端点亮回填的 wakeId 跟着没，那条预约就撤不掉了，到点照发。
+      const pulled = await pullCloudDecisionsBody(cx).catch(() => 0);
+      if (pulled) render();
       const since = cx.plan.recheckAt || cx.plan.plannedAt || 0;
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
@@ -2753,6 +2757,7 @@
     try { await syncCalendar(cx, await readTodayCalendar(cx)); } catch (e) { await log(cx, "日程改动写回系统日程失败：" + (e && e.message || e)); }
     await log(cx, note);
     await syncChatContext(cx);
+    await pullCloudDecisions(cx); // 同 recheck：不先并会把云端回填的 wakeId 盖掉
     await uploadPlanCloud(cx, false);
     render();
     toast(planStale === false ? note : note + "；心动时刻还是按旧日程排的，要跟上就点「♥ 重新编排」");
@@ -3547,7 +3552,10 @@
     for (const cx of allCx()) {
       cx._ctx = null; // 开关可能变了，强制重写一次（包括关掉时写空串撤销）
       await syncChatContext(cx, true);
-      if (!added.includes(cx.character.id)) await uploadPlanCloud(cx, false); // 刚打开云复核开关的话，今天的计划立刻寄存一份
+      if (!added.includes(cx.character.id)) {
+        await pullCloudDecisions(cx); // 同 recheck：不先并会把云端回填的 wakeId 盖掉
+        await uploadPlanCloud(cx, false); // 刚打开云复核开关的话，今天的计划立刻寄存一份
+      }
     }
     syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
     render();
