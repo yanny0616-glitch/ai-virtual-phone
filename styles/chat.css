@@ -6672,66 +6672,6 @@
   color: var(--c-danger, #e5484d);
 }
 
-/* ── 底层调用日志：筛选 chips 与行内标记 ── */
-/* 横滚而不是换行堆叠：来源可能有二三十个，铺开会把列表挤到屏幕外 */
-.api-log-chiprow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.api-log-chiprow::-webkit-scrollbar { display: none; }
-.api-log-chiprow-label {
-  flex-shrink: 0;
-  padding-right: 2px;
-  font-size: calc(11px * var(--app-text-scale, 1));
-  color: var(--c-text);
-  opacity: 0.55;
-}
-.api-log-chip {
-  flex-shrink: 0;
-  padding: 4px 10px;
-  border: 1px solid var(--c-card-border, #e2e5ea);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--c-text);
-  font-size: calc(11.5px * var(--app-text-scale, 1));
-  line-height: 1.4;
-  white-space: nowrap;
-  user-select: none;
-}
-.api-log-chip i {
-  font-style: normal;
-  opacity: 0.5;
-  margin-left: 2px;
-}
-.api-log-chip[data-on] {
-  background: var(--c-icon-active);
-  border-color: transparent;
-  color: #fff;
-}
-.api-log-chip[data-on] i { opacity: 0.75; }
-.api-log-chip:active { opacity: 0.65; }
-.api-log-badge {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--c-text) 8%, transparent);
-  color: var(--c-text);
-  font-size: calc(11px * var(--app-text-scale, 1));
-  line-height: 1.5;
-  opacity: 0.75;
-  white-space: nowrap;
-}
-.api-log-badge[data-tone="fail"] {
-  background: color-mix(in srgb, var(--c-danger, #e5484d) 14%, transparent);
-  color: var(--c-danger, #e5484d);
-  font-weight: 600;
-  opacity: 1;
-}
-
 /* ── 底层调用日志：「查看原始」按钮 + 思维链 / 真实原始响应 ── */
 .api-log-raw-tag {
   display: inline-flex;

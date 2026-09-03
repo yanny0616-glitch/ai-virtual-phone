@@ -624,87 +624,46 @@ function FollowUpSettingsEditor({ onBack }: { onBack: () => void }) {
 /* ══════════════════════════════════════════
    API Log Viewer (sub-page)
    ══════════════════════════════════════════ */
-// 一页 20 条：150 条全平铺时展开一条要滚很久，长列表在手机上也卡
-const API_LOG_PAGE_SIZE = 20;
-
-/** 日志里的 source 是发起方的 appId，直接显示英文 id 没法看，这里翻成人话。
- *  没收录的 id 原样显示，不做兜底猜测——猜错比显示 id 更难排查。 */
-const API_LOG_SOURCE_LABELS: Record<string, string> = {
-    chat: "聊天", group_chat: "群聊", xiaohongshu: "小红书", moments: "朋友圈",
-    story: "剧情", diary: "手记", reading: "阅读", music: "音乐", vn: "漫卷",
-    adventure: "冒险", dwelling: "栖所", shopping: "购物", shopping_search: "购物搜索",
-    calendar: "日历", cocreate: "共创", game: "游戏", resources: "资源集市",
-    mascot: "桌宠", add_friend: "加好友", checkphone: "查手机",
-    background: "后台功能", qa: "工坊",
-};
-
-function apiLogSourceLabel(source?: string): string {
-    if (!source) return "未标注";
-    if (API_LOG_SOURCE_LABELS[source]) return API_LOG_SOURCE_LABELS[source];
-    if (source.startsWith("checkphone_")) return `查手机 · ${source.slice("checkphone_".length)}`;
-    if (source.startsWith("custom_app:")) return `APP · ${source.slice("custom_app:".length)}`;
-    return source;
-}
-
 function ApiLogViewer({ onBack }: { onBack: () => void }) {
     const [logs, setLogs] = useState<DebugInfo[]>([]);
     const [expandedId, setExpandedId] = useState<string | null>(null);
-    // 筛选：来源（appId）与标签（角色名 / 后台功能名）各选一个，null = 不限
-    const [sourceFilter, setSourceFilter] = useState<string | null>(null);
-    const [nameFilter, setNameFilter] = useState<string | null>(null);
-    const [failedOnly, setFailedOnly] = useState(false);
-    const [page, setPage] = useState(0);
+    // 来源过滤：hiddenSources 里记录被取消勾选的来源；空集 = 全部显示
+    const [hiddenSources, setHiddenSources] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         setLogs([...getApiLogs()].reverse());
     }, []);
 
-    // 来源与标签的可选项都按出现次数排序：常用的排前面，不用横着找很久
-    const byCount = (map: Map<string, number>) =>
-        [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    const sourceOptions = useMemo(() => {
-        const counts = new Map<string, number>();
-        for (const log of logs) {
-            const key = log.source || "chat";
-            counts.set(key, (counts.get(key) ?? 0) + 1);
-        }
-        return byCount(counts);
+    // 从日志里提取所有来源（聊天角色名 / 记忆总结·角色名 等标签）
+    const allSources = useMemo(() => {
+        const set = new Set<string>();
+        for (const log of logs) set.add(log.characterName || "未标注来源");
+        return [...set].sort();
     }, [logs]);
-    const nameOptions = useMemo(() => {
-        const counts = new Map<string, number>();
-        for (const log of logs) {
-            const key = log.characterName || "未标注";
-            counts.set(key, (counts.get(key) ?? 0) + 1);
-        }
-        return byCount(counts);
-    }, [logs]);
-    const failedCount = useMemo(() => logs.filter(log => log.failed).length, [logs]);
 
-    const pick = <T,>(setter: (v: T) => void, value: T) => { setter(value); setPage(0); setExpandedId(null); };
-
-    const visibleLogs = useMemo(() => logs.filter(log => {
-        if (failedOnly && !log.failed) return false;
-        if (sourceFilter && (log.source || "chat") !== sourceFilter) return false;
-        if (nameFilter && (log.characterName || "未标注") !== nameFilter) return false;
-        return true;
-    }), [logs, sourceFilter, nameFilter, failedOnly]);
-
-    const pageCount = Math.max(1, Math.ceil(visibleLogs.length / API_LOG_PAGE_SIZE));
-    // 过滤变化后条数会缩水，停在越界的页码上会显示空白列表
-    const safePage = Math.min(page, pageCount - 1);
-    const pagedLogs = visibleLogs.slice(safePage * API_LOG_PAGE_SIZE, (safePage + 1) * API_LOG_PAGE_SIZE);
-    const goToPage = (next: number) => {
-        setPage(Math.max(0, Math.min(pageCount - 1, next)));
-        setExpandedId(null);
+    const toggleSource = (source: string) => {
+        setHiddenSources(prev => {
+            const next = new Set(prev);
+            if (next.has(source)) next.delete(source); else next.add(source);
+            return next;
+        });
     };
+
+    // 全部勾选 = 清空隐藏集；全部取消 = 隐藏所有来源
+    const allChecked = hiddenSources.size === 0;
+    const toggleAll = () => {
+        if (allChecked) setHiddenSources(new Set(allSources));
+        else setHiddenSources(new Set());
+    };
+
+    const visibleLogs = useMemo(() => {
+        if (hiddenSources.size === 0) return logs;
+        return logs.filter(log => !hiddenSources.has(log.characterName || "未标注来源"));
+    }, [logs, hiddenSources]);
 
     const handleClear = () => {
         clearApiLogs();
         setLogs([]);
-        setPage(0);
-        setSourceFilter(null);
-        setNameFilter(null);
-        setFailedOnly(false);
     };
 
     const formatTime = (ts: string) => {
@@ -721,48 +680,29 @@ function ApiLogViewer({ onBack }: { onBack: () => void }) {
                     </div>
                 ) : (
                     <>
-                        {/* 筛选：一行概览 + 两排横滚 chips。原来是一片复选框，来源多了以后整屏都是勾选框 */}
+                        {/* 显示设置：来源过滤复选框（查看原始回复请逐条展开，或到聊天界面点消息旁的「AI 原始回复」按钮） */}
                         <div className="menu-group">
-                            <div className="px-4 py-3 flex flex-col gap-2.5">
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="ts-12 text-[var(--c-text)] opacity-70">
-                                        共 {logs.length} 条{failedCount > 0 ? ` · 失败 ${failedCount} 条` : ""}
-                                    </span>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        {failedCount > 0 && (
-                                            <button type="button" className="api-log-chip" data-on={failedOnly ? "" : undefined}
-                                                onClick={() => pick(setFailedOnly, !failedOnly)}>只看失败</button>
-                                        )}
-                                        {(sourceFilter || nameFilter || failedOnly) && (
-                                            <button type="button" className="ui-bare-btn ts-12 font-semibold text-[var(--c-icon-active)]"
-                                                onClick={() => { pick(setSourceFilter, null); setNameFilter(null); setFailedOnly(false); }}>
-                                                重置
-                                            </button>
-                                        )}
-                                    </div>
+                            <div className="px-4 py-3 flex flex-col gap-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="menu-label">来源过滤</span>
+                                    <button
+                                        type="button"
+                                        className="ui-bare-btn ts-12 font-semibold text-[var(--c-icon-active)]"
+                                        onClick={toggleAll}
+                                    >
+                                        {allChecked ? "全不选" : "全选"}
+                                    </button>
                                 </div>
-
-                                <div className="api-log-chiprow">
-                                    <span className="api-log-chiprow-label">来源</span>
-                                    <button type="button" className="api-log-chip" data-on={sourceFilter === null ? "" : undefined}
-                                        onClick={() => pick(setSourceFilter, null)}>全部</button>
-                                    {sourceOptions.map(([src, count]) => (
-                                        <button key={src} type="button" className="api-log-chip" data-on={sourceFilter === src ? "" : undefined}
-                                            onClick={() => pick(setSourceFilter, src)}>
-                                            {apiLogSourceLabel(src)} <i>{count}</i>
-                                        </button>
-                                    ))}
-                                </div>
-
-                                <div className="api-log-chiprow">
-                                    <span className="api-log-chiprow-label">标签</span>
-                                    <button type="button" className="api-log-chip" data-on={nameFilter === null ? "" : undefined}
-                                        onClick={() => pick(setNameFilter, null)}>全部</button>
-                                    {nameOptions.map(([name, count]) => (
-                                        <button key={name} type="button" className="api-log-chip" data-on={nameFilter === name ? "" : undefined}
-                                            onClick={() => pick(setNameFilter, name)}>
-                                            {name} <i>{count}</i>
-                                        </button>
+                                <div className="flex flex-wrap gap-x-3 gap-y-2">
+                                    <label className="flex items-center gap-1.5 ts-12 cursor-pointer select-none">
+                                        <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                                        <span>全部</span>
+                                    </label>
+                                    {allSources.map(src => (
+                                        <label key={src} className="flex items-center gap-1.5 ts-12 cursor-pointer select-none">
+                                            <input type="checkbox" checked={!hiddenSources.has(src)} onChange={() => toggleSource(src)} />
+                                            <span className="max-w-[140px] truncate">{src}</span>
+                                        </label>
                                     ))}
                                 </div>
                             </div>
@@ -770,11 +710,11 @@ function ApiLogViewer({ onBack }: { onBack: () => void }) {
 
                         {visibleLogs.length === 0 ? (
                             <div className="ui-empty">
-                                <span className="menu-desc">当前筛选下没有调用记录</span>
+                                <span className="menu-desc">当前来源过滤下没有调用记录</span>
                             </div>
                         ) : (
                         <div className="flex flex-col gap-3">
-                            {pagedLogs.map(log => {
+                            {visibleLogs.map(log => {
                                 const isOpen = expandedId === log.id;
                                 return (
                                     <div key={log.id} className="menu-group">
@@ -784,13 +724,11 @@ function ApiLogViewer({ onBack }: { onBack: () => void }) {
                                         >
                                             <div className="menu-label-group">
                                                 <div className="flex items-center gap-2 flex-wrap">
-                                                    {log.failed && <span className="api-log-badge" data-tone="fail">失败</span>}
                                                     {log.characterName && (
                                                         <span className="ts-11 font-semibold text-white bg-[var(--c-icon-active)] rounded-[4px] px-[6px] py-[1px] shrink-0">
                                                             {log.characterName}
                                                         </span>
                                                     )}
-                                                    <span className="api-log-badge">{apiLogSourceLabel(log.source)}</span>
                                                     <span className="menu-label font-semibold">{formatTime(log.timestamp)}</span>
                                                     <span className="menu-desc">{log.messages.length} 条消息</span>
                                                 </div>
@@ -860,20 +798,6 @@ function ApiLogViewer({ onBack }: { onBack: () => void }) {
                                 );
                             })}
                         </div>
-                        )}
-
-                        {visibleLogs.length > API_LOG_PAGE_SIZE && (
-                            <div className="menu-group mt-3">
-                                <div className="px-4 py-3 flex items-center justify-between gap-3">
-                                    <button type="button" className="ui-btn ui-btn-outline px-4"
-                                        disabled={safePage === 0} onClick={() => goToPage(safePage - 1)}>上一页</button>
-                                    <span className="ts-12 text-[var(--c-text)] opacity-70 whitespace-nowrap">
-                                        第 {safePage + 1} / {pageCount} 页
-                                    </span>
-                                    <button type="button" className="ui-btn ui-btn-outline px-4"
-                                        disabled={safePage >= pageCount - 1} onClick={() => goToPage(safePage + 1)}>下一页</button>
-                                </div>
-                            </div>
                         )}
 
                         {/* Clear button */}
