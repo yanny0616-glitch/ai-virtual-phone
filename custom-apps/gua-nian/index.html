@@ -2976,7 +2976,7 @@
       { id: "wakes", title: "系统唤醒对照" },
       { id: "logs", title: "运行日志" },
     ] },
-    { title: "云 端", cards: [
+    { title: "云 端", cloud: true, cards: [
       { id: "lock", title: "今天谁在管" },
       { id: "cloud", title: "连接与聊天镜像" },
       { id: "jobs", title: "预约与降速" },
@@ -3046,15 +3046,21 @@
     const logItems = (S.logs && S.logs.items || []).slice().reverse();
     const planItems = (cx.plan && cx.plan.items) || [];
 
+    // 没接云连接时云端那几张全是「未配置」，四行说同一件事：折成一行，留个去设置的入口
     v.innerHTML = DIAG_GROUPS.map((g) =>
-      '<div class="dg-g">' + g.title + '</div><div class="card dg">' +
-      g.cards.map((c) =>
-        '<div class="dg-item" id="dgi-' + c.id + '">' +
-          '<button class="dg-hd" data-dg="' + c.id + '"><span class="nm">' + esc(c.title) + "</span>" +
-          '<span class="sm" id="dgs-' + c.id + '">读取中…</span><span class="cv">›</span></button>' +
-          '<div class="dg-bd" id="diag-' + c.id + '" hidden><div class="archive-note">读取中…</div></div>' +
-        "</div>").join("") + "</div>").join("") +
+      '<div class="dg-g">' + g.title + "</div>" +
+      (g.cloud && !cloudCfg()
+        ? '<div class="card"><div class="archive-note">没接云连接：云端复核、浏览器关着也生成、设备锁都停着，只有本机这些还在跑。</div>' +
+          '<div class="dg-act"><button class="tgl" id="btn-diag-cloudset">去设置</button></div></div>'
+        : '<div class="card dg">' +
+          g.cards.map((c) =>
+            '<div class="dg-item" id="dgi-' + c.id + '">' +
+              '<button class="dg-hd" data-dg="' + c.id + '"><span class="nm">' + esc(c.title) + "</span>" +
+              '<span class="sm" id="dgs-' + c.id + '">读取中…</span><span class="cv">›</span></button>' +
+              '<div class="dg-bd" id="diag-' + c.id + '" hidden><div class="archive-note">读取中…</div></div>' +
+            "</div>").join("") + "</div>")).join("") +
       '<div class="archive-note">日志最多保留 120 条，只存在本地，不上传。</div>';
+    const cs = $("#btn-diag-cloudset"); if (cs) cs.onclick = () => { S._setTab = "cloud"; openSheet(); };
 
     v.querySelectorAll(".dg-hd").forEach((b) => {
       b.onclick = () => {
