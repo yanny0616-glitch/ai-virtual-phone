@@ -1665,6 +1665,7 @@ export function CustomAppRunner({
       // 按名字筛是给老日志兜底：characterId 是后加的字段，之前落库的记录只有名字。
       const wantCharacterName = record.characterName ? String(record.characterName) : "";
       const wantSource = record.source ? String(record.source) : "";
+      const wantFailedOnly = record.failedOnly === true;
       const logs = [...getApiLogs()].reverse().filter(log => {
         if (wantCharacterId) {
           const matchesCurrentId = log.characterId === wantCharacterId;
@@ -1674,6 +1675,7 @@ export function CustomAppRunner({
           return false;
         }
         if (wantSource && (log.source || "chat") !== wantSource) return false;
+        if (wantFailedOnly && !log.failed) return false;
         return true;
       });
       return {
@@ -1688,6 +1690,7 @@ export function CustomAppRunner({
           usage: log.usage,
           messageCount: log.messages?.length ?? 0,
           hasReasoning: Boolean(log.reasoning),
+          failed: Boolean(log.failed),
         })),
       };
     }

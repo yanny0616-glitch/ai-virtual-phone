@@ -1028,6 +1028,8 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "",
   "日志按时间倒序（最新在前），只覆盖宿主保留的最近 150 条底层调用，工坊的调用记录不在里面。想看更久以前的总量请用 `usage.readDaily`。",
   "",
+  "筛选参数：`characterId` / `characterName` / `source`（appId，取值同 `bySource` 的键）/ `failedOnly: true`（只要报错的那些）。列表每条都带 `source` 与 `failed`，失败的记录 `usage` 通常为空。",
+  "",
   "**`usage.logs` 是重权限**：日志里是原封不动发给模型的东西，包含角色卡人设、世界书、预设提示词和完整聊天上下文，比聊天记录本身更全。只有确实要做「查看这次到底发了什么」的 APP 才申请它，安装时用户会看到明确提示。",
   "",
   "### 5.19 读取记忆",

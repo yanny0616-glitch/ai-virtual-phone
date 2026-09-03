@@ -1,0 +1,714 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>用量</title>
+<style>
+  :root {
+    --bg: #0d0f14;
+    --panel: rgba(255,255,255,.045);
+    --panel-2: rgba(255,255,255,.07);
+    --panel-line: rgba(255,255,255,.09);
+    --text: #eaeef6;
+    --dim: rgba(234,238,246,.5);
+    --faint: rgba(234,238,246,.3);
+    --in: #5aa9ff;
+    --out: #ffb057;
+    --cache: #4ecfa0;
+    --accent: #7c8cff;
+    --fail: #ff6b6b;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6fa;
+      --panel: rgba(15,20,35,.035);
+      --panel-2: rgba(15,20,35,.06);
+      --panel-line: rgba(15,20,35,.09);
+      --text: #171a22;
+      --dim: rgba(23,26,34,.55);
+      --faint: rgba(23,26,34,.33);
+      --in: #2f7fe0;
+      --out: #d9822b;
+      --cache: #1f9d6f;
+      --accent: #5a63d8;
+      --fail: #d64545;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; min-height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app {
+    min-height: 100dvh;
+    padding: calc(var(--ai-phone-app-bar-top, 56px) + 46px) 16px var(--ai-phone-app-safe-bottom, 24px);
+  }
+
+  /* 顶栏与宿主右上角胶囊同排：左侧是空的，只避开右边 */
+  .topbar {
+    position: fixed;
+    top: var(--ai-phone-app-bar-top, 56px);
+    left: 16px;
+    right: var(--ai-phone-app-bar-clear-right, 96px);
+    min-height: var(--ai-phone-app-bar-height, 30px);
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    z-index: 5;
+  }
+  .topbar h1 { margin: 0; font-size: 19px; letter-spacing: .5px; font-weight: 650; }
+  .topbar .sub { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .seg {
+    display: flex; gap: 4px; padding: 3px;
+    background: var(--panel); border: 1px solid var(--panel-line);
+    border-radius: 11px; margin-bottom: 12px;
+  }
+  .seg button {
+    flex: 1; min-height: 34px; border: 0; border-radius: 8px;
+    background: transparent; color: var(--dim);
+    font: inherit; font-size: 13px; font-weight: 550;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .seg button[data-on="1"] { background: var(--accent); color: #fff; }
+  .seg.sub button[data-on="1"] { background: var(--panel-2); color: var(--text); }
+
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .card {
+    padding: 12px 13px; border-radius: 13px;
+    background: var(--panel); border: 1px solid var(--panel-line);
+  }
+  .card.wide { grid-column: 1 / -1; }
+  .card .k { font-size: 11px; color: var(--faint); letter-spacing: .4px; }
+  .card .v { margin-top: 3px; font-size: 21px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .card .v small { font-size: 12px; font-weight: 400; color: var(--dim); margin-left: 3px; }
+  .split { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 5px; font-size: 12px; color: var(--dim); }
+  .split b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+
+  .sec { font-size: 12px; color: var(--faint); margin: 0 0 8px 2px; letter-spacing: .5px; }
+
+  .chart {
+    padding: 14px 12px 10px; border-radius: 13px; margin-bottom: 14px;
+    background: var(--panel); border: 1px solid var(--panel-line);
+    overflow-x: auto;
+  }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 132px; }
+  .bar { flex: 1 0 auto; min-width: 9px; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+  .bar .stack { display: flex; flex-direction: column-reverse; border-radius: 4px; overflow: hidden; min-height: 2px; }
+  .bar .in  { background: var(--in); }
+  .bar .out { background: var(--out); }
+  .bar.empty .stack { background: var(--panel-line); height: 2px; }
+  .bar[data-on="1"] { outline: 1.5px solid var(--accent); outline-offset: 2px; border-radius: 5px; }
+  .xaxis { display: flex; gap: 4px; margin-top: 7px; }
+  .xaxis span { flex: 1 0 auto; min-width: 9px; text-align: center; font-size: 9px; color: var(--faint); }
+
+  .rows { border-radius: 13px; overflow: hidden; background: var(--panel); border: 1px solid var(--panel-line); }
+  .row { display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-top: 1px solid var(--panel-line); text-align: left; width: 100%; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; color: inherit; font: inherit; }
+  .row:first-child { border-top: 0; }
+  .row.tap:active { background: var(--panel-2); }
+  .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .row .num { font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .row .calls { font-size: 11px; color: var(--faint); min-width: 44px; text-align: right; }
+  .row .chev { color: var(--faint); font-size: 15px; margin-left: -2px; }
+
+  /* 排行条：名字下方一条按占比的底纹，一眼看出谁吃得多 */
+  .rank { position: relative; }
+  .rank .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--panel-2); border-radius: 0; }
+  .rank > * { position: relative; }
+
+  /* 日志列表 */
+  .log { display: block; width: 100%; text-align: left; padding: 11px 13px; border: 0; border-top: 1px solid var(--panel-line); background: transparent; color: inherit; font: inherit; }
+  .log:first-child { border-top: 0; }
+  .log:active { background: var(--panel-2); }
+  .log .l1 { display: flex; align-items: center; gap: 8px; }
+  .log .who { font-size: 13.5px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log .when { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+  .log .l2 { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .log .l3 { margin-top: 5px; font-size: 12px; color: var(--dim); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .tag { font-size: 10.5px; padding: 1.5px 6px; border-radius: 6px; background: var(--panel-2); color: var(--dim); white-space: nowrap; }
+  .tag.in { color: var(--in); }
+  .tag.out { color: var(--out); }
+  .tag.cache { color: var(--cache); }
+  .tag.fail { color: var(--fail); background: color-mix(in srgb, var(--fail) 15%, transparent); font-weight: 600; }
+  .card.fail .v { color: var(--fail); }
+  .row .calls .fx { color: var(--fail); font-weight: 600; }
+
+  /* 详情：盖在整页上的抽屉 */
+  .sheet { position: fixed; inset: 0; z-index: 20; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch; display: none; }
+  .sheet[data-open="1"] { display: block; }
+  .sheet .inner { padding: calc(var(--ai-phone-app-bar-top, 56px) + 46px) 16px calc(var(--ai-phone-app-safe-bottom, 24px) + 20px); }
+  .sheet-bar {
+    position: fixed; top: var(--ai-phone-app-bar-top, 56px); left: 16px;
+    right: var(--ai-phone-app-bar-clear-right, 96px);
+    min-height: var(--ai-phone-app-bar-height, 30px);
+    display: flex; align-items: center; gap: 8px; z-index: 21;
+  }
+  .back { border: 1px solid var(--panel-line); background: var(--panel); color: var(--text); font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 9px; }
+  .sheet-bar .t { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .kv { border-radius: 13px; overflow: hidden; background: var(--panel); border: 1px solid var(--panel-line); margin-bottom: 14px; }
+  .kv .r { display: flex; gap: 12px; padding: 10px 13px; border-top: 1px solid var(--panel-line); font-size: 13px; }
+  .kv .r:first-child { border-top: 0; }
+  .kv .r .k { color: var(--faint); flex: 0 0 84px; font-size: 12.5px; }
+  .kv .r .v { flex: 1; min-width: 0; word-break: break-word; font-variant-numeric: tabular-nums; }
+
+  .msg { border-radius: 12px; background: var(--panel); border: 1px solid var(--panel-line); margin-bottom: 8px; overflow: hidden; }
+  .msg > summary { list-style: none; cursor: pointer; padding: 10px 13px; display: flex; align-items: center; gap: 8px; }
+  .msg > summary::-webkit-details-marker { display: none; }
+  .msg .role { font-size: 11px; padding: 1.5px 7px; border-radius: 6px; background: var(--panel-2); color: var(--dim); flex: 0 0 auto; }
+  .msg .peek { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg .len { font-size: 10.5px; color: var(--faint); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  .msg pre {
+    margin: 0; padding: 0 13px 12px; white-space: pre-wrap; word-break: break-word;
+    font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
+  }
+
+  /* 圆形小头像：拿不到图就退化成首字色块，不留空洞 */
+  .av {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+    object-fit: cover; background: var(--panel-2);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10.5px; font-weight: 650; color: var(--dim); overflow: hidden;
+  }
+  .av.lg { width: 26px; height: 26px; font-size: 12px; }
+  .seg.sub button .av { margin-right: 6px; vertical-align: -6px; }
+  .seg.sub button.chip { display: inline-flex; align-items: center; gap: 6px; }
+
+  .empty-note { padding: 26px 16px; text-align: center; color: var(--faint); font-size: 12.5px; line-height: 1.75; }
+  .foot { margin-top: 16px; text-align: center; font-size: 11px; color: var(--faint); line-height: 1.7; }
+</style>
+
+<div class="topbar">
+  <h1>用量</h1>
+  <span class="sub" id="range-label"></span>
+</div>
+
+<div class="app">
+  <div class="seg" id="tabs">
+    <button data-tab="stats" data-on="1">统计</button>
+    <button data-tab="logs">调用日志</button>
+  </div>
+
+  <div id="view-stats">
+    <div class="seg sub" id="seg-days">
+      <button data-days="7" data-on="1">7 天</button>
+      <button data-days="30">30 天</button>
+      <button data-days="90">90 天</button>
+    </div>
+    <div id="stats-body"></div>
+  </div>
+
+  <div id="view-logs" hidden>
+    <div id="logs-filter"></div>
+    <div id="logs-body"></div>
+  </div>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<div class="sheet" id="sheet"><div class="sheet-bar">
+  <button class="back" id="sheet-back">‹ 返回</button>
+  <span class="t" id="sheet-title"></span>
+</div><div class="inner" id="sheet-body"></div></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var SOURCE_LABEL = {
+    chat: "聊天", group_chat: "群聊", xiaohongshu: "小红书", moments: "朋友圈",
+    story: "剧情", diary: "手记", reading: "阅读", music: "音乐", vn: "漫卷",
+    adventure: "冒险", dwelling: "栖所", shopping: "购物", shopping_search: "购物搜索",
+    calendar: "日历", cocreate: "共创", game: "游戏", resources: "资源集市",
+    mascot: "桌宠", add_friend: "加好友", checkphone: "查手机",
+    background: "后台功能", qa: "工坊"
+  };
+  // 没收录的 id 原样显示，不猜——猜错比看见 id 更难排查
+  function sourceLabel(key) {
+    if (!key) return "聊天";
+    if (SOURCE_LABEL[key]) return SOURCE_LABEL[key];
+    if (key.indexOf("checkphone_") === 0) return "查手机 · " + key.slice(11);
+    if (key.indexOf("custom_app:") === 0) return "APP · " + key.slice(11);
+    return key;
+  }
+  var state = {
+    tab: "stats",
+    days: 7,
+    rank: "character",     // character | model | source
+    selectedDate: null,    // 柱状图点选的某一天
+    logFilterCharacter: "",// 角色 key（id 或 name:xxx）
+    logFilterSource: "",
+    logFailedOnly: false,
+    daysData: [],
+    logs: [],
+    logTotal: 0,
+    charById: {},   // 角色卡 id -> { name, avatar }
+    charByName: {}  // 角色名 -> { name, avatar }，给没有 id 的老数据兜底
+  };
+
+  // ---------- 工具 ----------
+  function el(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fmt(n) {
+    n = Number(n) || 0;
+    if (n >= 1000000) return (n / 1000000).toFixed(n >= 10000000 ? 0 : 1) + "M";
+    if (n >= 10000) return (n / 1000).toFixed(0) + "K";
+    if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+    return String(n);
+  }
+  function num(v) { return Math.max(0, Math.floor(Number(v) || 0)); }
+  function pad(n) { return n < 10 ? "0" + n : String(n); }
+  function shortTime(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    var now = new Date();
+    var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    var hm = pad(d.getHours()) + ":" + pad(d.getMinutes());
+    return sameDay ? hm : (d.getMonth() + 1) + "/" + d.getDate() + " " + hm;
+  }
+  function fullTime(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso || "");
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+      " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+  // 桶 key 可能是角色卡 id，也可能是 "name:<名字>"（老数据/后台功能）
+  function charOf(key, fallbackName) {
+    if (!key) return null;
+    if (key.indexOf("name:") === 0) return state.charByName[key.slice(5)] || null;
+    return state.charById[key] || (fallbackName ? state.charByName[fallbackName] : null);
+  }
+  function avatarHtml(key, name, big) {
+    var info = charOf(key, name);
+    var cls = "av" + (big ? " lg" : "");
+    if (info && info.avatar) {
+      return '<img class="' + cls + '" src="' + esc(info.avatar) + '" alt="">';
+    }
+    return '<span class="' + cls + '">' + esc(String(name || "?").slice(0, 1)) + '</span>';
+  }
+
+  function toast(msg) { try { AiPhone.ui.toast(msg); } catch (e) { /* 宿主没给 ui.toast 就算了 */ } }
+
+  // 桶：把若干天的同名分组合并成一个
+  function mergeBuckets(list, field) {
+    var out = {};
+    list.forEach(function (day) {
+      var group = day[field] || {};
+      Object.keys(group).forEach(function (key) {
+        var b = group[key] || {};
+        if (!out[key]) out[key] = { key: key, name: b.name, calls: 0, failed: 0, prompt: 0, completion: 0, total: 0, cacheRead: 0, cacheWrite: 0 };
+        if (b.name) out[key].name = b.name;
+        out[key].calls += num(b.calls);
+        out[key].failed += num(b.failedCalls);
+        out[key].prompt += num(b.promptTokens);
+        out[key].completion += num(b.completionTokens);
+        out[key].total += num(b.totalTokens);
+        out[key].cacheRead += num(b.cacheReadTokens);
+        out[key].cacheWrite += num(b.cacheWriteTokens);
+      });
+    });
+    return Object.keys(out).map(function (k) { return out[k]; }).sort(function (a, b) { return b.total - a.total; });
+  }
+
+  function scopeDays() {
+    if (!state.selectedDate) return state.daysData;
+    return state.daysData.filter(function (d) { return d.date === state.selectedDate; });
+  }
+
+  function totals(list) {
+    var t = { calls: 0, failed: 0, prompt: 0, completion: 0, total: 0, cacheRead: 0, cacheWrite: 0 };
+    list.forEach(function (d) {
+      t.calls += num(d.calls);
+      t.failed += num(d.failedCalls);
+      t.prompt += num(d.promptTokens);
+      t.completion += num(d.completionTokens);
+      t.total += num(d.totalTokens);
+      t.cacheRead += num(d.cacheReadTokens);
+      t.cacheWrite += num(d.cacheWriteTokens);
+    });
+    return t;
+  }
+
+  function bucketLabel(kind, item) {
+    if (kind === "source") return sourceLabel(item.key);
+    if (kind === "character") {
+      if (item.name) return item.name;
+      if (item.key.indexOf("name:") === 0) return item.key.slice(5);
+      return "已删除的角色";
+    }
+    return item.key;
+  }
+
+  // ---------- 统计页 ----------
+  function renderStats() {
+    var scope = scopeDays();
+    var t = totals(scope);
+    var maxTotal = 0;
+    state.daysData.forEach(function (d) { maxTotal = Math.max(maxTotal, num(d.totalTokens)); });
+
+    var html = "";
+
+    html += '<div class="cards">';
+    html += '<div class="card wide"><div class="k">' + (state.selectedDate ? esc(state.selectedDate) : "共 " + state.days + " 天") + ' · 总 TOKEN</div>' +
+      '<div class="v">' + fmt(t.total) + '</div>' +
+      '<div class="split">' +
+        '<span><i class="dot" style="background:var(--in)"></i>输入 <b>' + fmt(t.prompt) + '</b></span>' +
+        '<span><i class="dot" style="background:var(--out)"></i>输出 <b>' + fmt(t.completion) + '</b></span>' +
+        (t.cacheRead || t.cacheWrite
+          ? '<span><i class="dot" style="background:var(--cache)"></i>缓存命中 <b>' + fmt(t.cacheRead) + '</b></span>'
+          : "") +
+      '</div></div>';
+    html += '<div class="card"><div class="k">成功调用</div><div class="v">' + t.calls + '<small>次</small></div></div>';
+    html += '<div class="card"><div class="k">平均每次</div><div class="v">' + (t.calls ? fmt(Math.round(t.total / t.calls)) : "0") + '<small>tok</small></div></div>';
+    if (t.failed) {
+      // 失败的 token 也算进总量（空回复照样计费），所以平均值只除以成功次数
+      html += '<div class="card wide fail"><div class="k">失败调用</div><div class="v">' + t.failed + '<small>次</small></div>' +
+        '<div class="split"><span>报错 / 超时 / 空回复，去「调用日志」页点「只看失败」逐条查</span></div></div>';
+    }
+    if (t.cacheRead || t.cacheWrite) {
+      var hitRate = t.prompt ? Math.round(t.cacheRead / t.prompt * 100) : 0;
+      html += '<div class="card wide"><div class="k">提示缓存</div>' +
+        '<div class="v">' + hitRate + '<small>% 输入命中</small></div>' +
+        '<div class="split"><span>命中 <b>' + fmt(t.cacheRead) + '</b>（约 1/10 计费）</span>' +
+        '<span>写入 <b>' + fmt(t.cacheWrite) + '</b>（约 1.25 倍）</span></div></div>';
+    }
+    html += '</div>';
+
+    // 柱状图
+    html += '<p class="sec">每日用量' + (state.selectedDate ? '（已选中 ' + esc(state.selectedDate) + '，再点一次取消）' : '（点柱子看单天）') + '</p>';
+    html += '<div class="chart"><div class="bars" id="bars">';
+    state.daysData.forEach(function (d) {
+      var total = num(d.totalTokens);
+      var h = maxTotal ? Math.max(2, Math.round(total / maxTotal * 128)) : 2;
+      var p = num(d.promptTokens), c = num(d.completionTokens);
+      var sum = p + c;
+      var inH = sum ? Math.round(h * p / sum) : 0;
+      var on = state.selectedDate === d.date ? "1" : "0";
+      html += '<div class="bar' + (total ? "" : " empty") + '" data-date="' + esc(d.date) + '" data-on="' + on + '" title="' + esc(d.date) + ' · ' + total + '">' +
+        (total
+          ? '<div class="stack" style="height:' + h + 'px"><div class="in" style="height:' + inH + 'px"></div><div class="out" style="height:' + (h - inH) + 'px"></div></div>'
+          : '<div class="stack"></div>') +
+        '</div>';
+    });
+    html += '</div><div class="xaxis">';
+    var step = Math.max(1, Math.ceil(state.daysData.length / 7));
+    state.daysData.forEach(function (d, i) {
+      var show = (state.daysData.length - 1 - i) % step === 0;
+      html += '<span>' + (show ? esc(d.date.slice(5).replace("-", "/")) : "") + '</span>';
+    });
+    html += '</div></div>';
+
+    // 排行
+    var kinds = [["character", "按角色卡"], ["model", "按模型"], ["source", "按来源"]];
+    html += '<div class="seg sub" id="seg-rank">';
+    kinds.forEach(function (k) {
+      html += '<button data-rank="' + k[0] + '"' + (state.rank === k[0] ? ' data-on="1"' : "") + '>' + k[1] + '</button>';
+    });
+    html += '</div>';
+
+    var field = state.rank === "character" ? "byCharacter" : state.rank === "model" ? "byModel" : "bySource";
+    var items = mergeBuckets(scope, field);
+    var top = items.length ? items[0].total : 0;
+    if (!items.length) {
+      html += '<div class="rows"><div class="empty-note">这段时间没有记录。</div></div>';
+    } else {
+      html += '<div class="rows">';
+      items.forEach(function (item) {
+        var pct = top ? Math.round(item.total / top * 100) : 0;
+        var tappable = state.rank === "character";
+        var label = bucketLabel(state.rank, item);
+        html += '<' + (tappable ? "button" : "div") + ' class="row rank' + (tappable ? " tap" : "") + '"' +
+          (tappable ? ' data-character="' + esc(item.key) + '" data-charname="' + esc(label) + '"' : "") + '>' +
+          '<span class="fill" style="width:' + pct + '%"></span>' +
+          (tappable ? avatarHtml(item.key, label, true) : "") +
+          '<span class="name">' + esc(label) + '</span>' +
+          '<span class="calls">' + item.calls + ' 次' + (item.failed ? '<b class="fx"> ✕' + item.failed + '</b>' : "") + '</span>' +
+          '<span class="num">' + fmt(item.total) + '</span>' +
+          (tappable ? '<span class="chev">›</span>' : "") +
+          '</' + (tappable ? "button" : "div") + '>';
+      });
+      html += '</div>';
+      if (state.rank === "character") {
+        html += '<p class="sec" style="margin:8px 0 0 2px">点角色卡 → 只看它的调用日志</p>';
+      }
+    }
+
+    el("stats-body").innerHTML = html;
+
+    Array.prototype.forEach.call(document.querySelectorAll("#bars .bar"), function (bar) {
+      bar.addEventListener("click", function () {
+        var date = bar.getAttribute("data-date");
+        state.selectedDate = state.selectedDate === date ? null : date;
+        renderStats();
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#seg-rank button"), function (btn) {
+      btn.addEventListener("click", function () {
+        state.rank = btn.getAttribute("data-rank");
+        renderStats();
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-character]"), function (btn) {
+      btn.addEventListener("click", function () {
+        // key 是 "name:xxx" 时按角色名筛：characterId 是后加字段，之前的日志只有名字。
+        state.logFilterCharacter = btn.getAttribute("data-character");
+        switchTab("logs");
+      });
+    });
+  }
+
+  // ---------- 日志页 ----------
+  function renderLogsFilter() {
+    // 老数据只有 name: 桶，早先把它们过滤掉会让筛选栏整条空掉，现在一并列出。
+    var chars = mergeBuckets(state.daysData, "byCharacter");
+    var sources = mergeBuckets(state.daysData, "bySource");
+    var totalFailed = 0;
+    sources.forEach(function (s) { totalFailed += s.failed; });
+
+    var html = '<div class="seg sub" style="overflow-x:auto" id="seg-source">';
+    html += '<button data-source=""' + (state.logFilterSource ? "" : ' data-on="1"') + ' style="flex:0 0 auto;padding:0 12px">全部来源</button>';
+    sources.forEach(function (s) {
+      html += '<button data-source="' + esc(s.key) + '"' + (state.logFilterSource === s.key ? ' data-on="1"' : "") +
+        ' style="flex:0 0 auto;padding:0 12px">' + esc(sourceLabel(s.key)) + '</button>';
+    });
+    html += '</div>';
+
+    if (totalFailed) {
+      html += '<div class="seg sub" id="seg-fail"><button data-fail="1"' + (state.logFailedOnly ? ' data-on="1"' : "") +
+        '>只看失败（' + totalFailed + '）</button>' +
+        '<button data-fail="0"' + (state.logFailedOnly ? "" : ' data-on="1"') + '>全部</button></div>';
+    }
+
+    if (chars.length) {
+      html += '<div class="seg sub" style="overflow-x:auto" id="seg-char">';
+      html += '<button data-char=""' + (state.logFilterCharacter ? "" : ' data-on="1"') + ' style="flex:0 0 auto;padding:0 12px">全部角色</button>';
+      chars.forEach(function (c) {
+        var label = bucketLabel("character", c);
+        html += '<button class="chip" data-char="' + esc(c.key) + '"' + (state.logFilterCharacter === c.key ? ' data-on="1"' : "") +
+          ' style="flex:0 0 auto;padding:0 12px">' + avatarHtml(c.key, label) + '<span>' + esc(label) + '</span></button>';
+      });
+      html += '</div>';
+    }
+    el("logs-filter").innerHTML = html;
+
+    Array.prototype.forEach.call(document.querySelectorAll("#seg-source button"), function (btn) {
+      btn.addEventListener("click", function () {
+        state.logFilterSource = btn.getAttribute("data-source");
+        loadLogs();
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#seg-fail button"), function (btn) {
+      btn.addEventListener("click", function () {
+        state.logFailedOnly = btn.getAttribute("data-fail") === "1";
+        loadLogs();
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#seg-char button"), function (btn) {
+      btn.addEventListener("click", function () {
+        state.logFilterCharacter = btn.getAttribute("data-char");
+        loadLogs();
+      });
+    });
+  }
+
+  function renderLogs() {
+    if (!state.logs.length) {
+      el("logs-body").innerHTML = '<div class="rows"><div class="empty-note">' +
+        (state.logFilterCharacter || state.logFilterSource || state.logFailedOnly
+          ? "当前筛选下没有调用记录。<br>换个角色、来源，或取消「只看失败」。"
+          : "还没有调用记录。<br>宿主只保留最近 150 条底层调用。") +
+        '</div></div>';
+      return;
+    }
+    var html = '<div class="rows">';
+    state.logs.forEach(function (log) {
+      var u = log.usage || {};
+      var who = log.characterName || "未标注";
+      html += '<button class="log" data-id="' + esc(log.id) + '">' +
+        '<span class="l1">' + avatarHtml(log.characterId || ("name:" + who), who) +
+        '<span class="who">' + esc(who) + '</span>' +
+        '<span class="when">' + esc(shortTime(log.timestamp)) + '</span></span>' +
+        '<span class="l2">' +
+          (log.failed ? '<span class="tag fail">失败</span>' : "") +
+          '<span class="tag">' + esc(sourceLabel(log.source)) + '</span>' +
+          '<span class="tag">' + esc(log.model || "未知模型") + '</span>' +
+          (u.prompt_tokens ? '<span class="tag in">↑' + fmt(u.prompt_tokens) + '</span>' : "") +
+          (u.completion_tokens ? '<span class="tag out">↓' + fmt(u.completion_tokens) + '</span>' : "") +
+          (u.cache_read_tokens ? '<span class="tag cache">缓存 ' + fmt(u.cache_read_tokens) + '</span>' : "") +
+        '</span>' +
+        (log.preview ? '<span class="l3">' + esc(log.preview) + '</span>' : "") +
+        '</button>';
+    });
+    html += '</div>';
+    if (state.logTotal > state.logs.length) {
+      html += '<p class="sec" style="margin:8px 0 0 2px">共 ' + state.logTotal + ' 条，显示最近 ' + state.logs.length + ' 条</p>';
+    }
+    el("logs-body").innerHTML = html;
+
+    Array.prototype.forEach.call(document.querySelectorAll(".log"), function (btn) {
+      btn.addEventListener("click", function () { openDetail(btn.getAttribute("data-id")); });
+    });
+  }
+
+  // ---------- 详情 ----------
+  function openDetail(id) {
+    el("sheet-title").textContent = "载入中…";
+    el("sheet-body").innerHTML = '<div class="empty-note">读取中…</div>';
+    el("sheet").setAttribute("data-open", "1");
+
+    AiPhone.usage.readLogDetail({ id: id }).then(function (log) {
+      if (!log) {
+        el("sheet-title").textContent = "已不存在";
+        el("sheet-body").innerHTML = '<div class="empty-note">这条记录已被新调用挤出日志环。</div>';
+        return;
+      }
+      el("sheet-title").textContent = log.characterName || "调用详情";
+      var u = log.usage || {};
+      var html = "";
+
+      html += '<p class="sec">参数</p><div class="kv">';
+      html += '<div class="r"><span class="k">时间</span><span class="v">' + esc(fullTime(log.timestamp)) + '</span></div>';
+      var dWho = log.characterName || "未标注";
+      html += '<div class="r"><span class="k">角色</span><span class="v" style="display:flex;align-items:center;gap:7px">' +
+        avatarHtml(log.characterId || ("name:" + dWho), dWho) + '<span>' + esc(dWho) + '</span></span></div>';
+      html += '<div class="r"><span class="k">模型</span><span class="v">' + esc(log.model || "未知") + '</span></div>';
+      html += '<div class="r"><span class="k">来源</span><span class="v">' + esc(SOURCE_LABEL[log.source] || log.source || "聊天") + '</span></div>';
+      html += '<div class="r"><span class="k">消息数</span><span class="v">' + (log.messages ? log.messages.length : 0) + ' 条</span></div>';
+      html += '</div>';
+
+      html += '<p class="sec">用量与缓存</p><div class="kv">';
+      if (u.prompt_tokens || u.completion_tokens || u.total_tokens) {
+        html += '<div class="r"><span class="k">输入</span><span class="v">' + num(u.prompt_tokens) + '</span></div>';
+        html += '<div class="r"><span class="k">输出</span><span class="v">' + num(u.completion_tokens) + '</span></div>';
+        html += '<div class="r"><span class="k">合计</span><span class="v">' + num(u.total_tokens) + '</span></div>';
+        if (u.cache_read_tokens || u.cache_write_tokens) {
+          var rate = u.prompt_tokens ? Math.round(num(u.cache_read_tokens) / num(u.prompt_tokens) * 100) : 0;
+          html += '<div class="r"><span class="k">缓存命中</span><span class="v">' + num(u.cache_read_tokens) + '（占输入 ' + rate + '%，约 1/10 计费）</span></div>';
+          html += '<div class="r"><span class="k">缓存写入</span><span class="v">' + num(u.cache_write_tokens) + '（约 1.25 倍计费）</span></div>';
+        } else {
+          html += '<div class="r"><span class="k">缓存</span><span class="v">这次没有命中或写入</span></div>';
+        }
+      } else {
+        html += '<div class="r"><span class="k">用量</span><span class="v">服务商这次没回 usage</span></div>';
+      }
+      html += '</div>';
+
+      html += '<p class="sec">发给模型的原始消息（点开看全文）</p>';
+      (log.messages || []).forEach(function (m) {
+        var text = String(m.content || "");
+        html += '<details class="msg"><summary>' +
+          '<span class="role">' + esc(m.role || "?") + '</span>' +
+          '<span class="peek">' + esc(text.slice(0, 60)) + '</span>' +
+          '<span class="len">' + text.length + '</span>' +
+          '</summary><pre>' + esc(text) + '</pre></details>';
+      });
+
+      if (log.reasoning) {
+        html += '<p class="sec">思维链</p><details class="msg"><summary>' +
+          '<span class="role">think</span><span class="peek">' + esc(log.reasoning.slice(0, 60)) + '</span>' +
+          '<span class="len">' + log.reasoning.length + '</span></summary><pre>' + esc(log.reasoning) + '</pre></details>';
+      }
+
+      html += '<p class="sec">模型回复原文</p><details class="msg" open><summary>' +
+        '<span class="role">raw</span><span class="peek">' + esc(String(log.rawResponse || "").slice(0, 60)) + '</span>' +
+        '<span class="len">' + String(log.rawResponse || "").length + '</span></summary>' +
+        '<pre>' + esc(log.rawResponse || "") + '</pre></details>';
+
+      el("sheet-body").innerHTML = html;
+      el("sheet").scrollTop = 0;
+    }).catch(function (err) {
+      el("sheet-title").textContent = "读取失败";
+      el("sheet-body").innerHTML = '<div class="empty-note">' + esc(err && err.message ? err.message : String(err)) +
+        '<br><br>需要「读取模型调用日志原文」权限，可在 APP 详情里检查。</div>';
+    });
+  }
+
+  function closeDetail() { el("sheet").setAttribute("data-open", "0"); }
+
+  // ---------- 载入 ----------
+  function switchTab(tab) {
+    state.tab = tab;
+    Array.prototype.forEach.call(document.querySelectorAll("#tabs button"), function (btn) {
+      btn.setAttribute("data-on", btn.getAttribute("data-tab") === tab ? "1" : "0");
+    });
+    el("view-stats").hidden = tab !== "stats";
+    el("view-logs").hidden = tab !== "logs";
+    if (tab === "logs") { renderLogsFilter(); loadLogs(); }
+  }
+
+  function loadLogs() {
+    renderLogsFilter();
+    el("logs-body").innerHTML = '<div class="rows"><div class="empty-note">读取中…</div></div>';
+    var payload = { limit: 100 };
+    if (state.logFilterCharacter) {
+      if (state.logFilterCharacter.indexOf("name:") === 0) payload.characterName = state.logFilterCharacter.slice(5);
+      else payload.characterId = state.logFilterCharacter;
+    }
+    if (state.logFilterSource) payload.source = state.logFilterSource;
+    if (state.logFailedOnly) payload.failedOnly = true;
+    AiPhone.usage.readLogs(payload).then(function (res) {
+      state.logs = (res && res.logs) || [];
+      state.logTotal = (res && res.total) || state.logs.length;
+      renderLogs();
+    }).catch(function (err) {
+      el("logs-body").innerHTML = '<div class="rows"><div class="empty-note">读取失败：' +
+        esc(err && err.message ? err.message : String(err)) + '</div></div>';
+    });
+  }
+
+  function loadStats() {
+    return AiPhone.usage.readDaily({ days: state.days }).then(function (res) {
+      state.daysData = (res && res.days) || [];
+      if (state.selectedDate && !state.daysData.some(function (d) { return d.date === state.selectedDate; })) {
+        state.selectedDate = null;
+      }
+      var first = state.daysData[0], last = state.daysData[state.daysData.length - 1];
+      el("range-label").textContent = first && last ? first.date.slice(5) + " – " + last.date.slice(5) : "";
+      renderStats();
+      el("foot").innerHTML = "统计最多保留 180 天，调用日志只留最近 150 条。<br>缓存命中/写入的 token 已计入输入，不要重复相加。";
+    });
+  }
+
+  // ---------- 事件 ----------
+  Array.prototype.forEach.call(document.querySelectorAll("#tabs button"), function (btn) {
+    btn.addEventListener("click", function () { switchTab(btn.getAttribute("data-tab")); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#seg-days button"), function (btn) {
+    btn.addEventListener("click", function () {
+      state.days = Number(btn.getAttribute("data-days"));
+      state.selectedDate = null;
+      Array.prototype.forEach.call(document.querySelectorAll("#seg-days button"), function (b) {
+        b.setAttribute("data-on", b === btn ? "1" : "0");
+      });
+      loadStats();
+    });
+  });
+  el("sheet-back").addEventListener("click", closeDetail);
+
+  // 角色目录拿不到也不挡主流程：头像退化成首字色块，数字照常显示。
+  function loadCharacters() {
+    try {
+      return AiPhone.characters.list().then(function (list) {
+        (list || []).forEach(function (c) {
+          var info = { name: c.name, avatar: c.avatar };
+          if (c.id) state.charById[c.id] = info;
+          if (c.name) state.charByName[c.name] = info;
+        });
+      }).catch(function () { });
+    } catch (e) { return Promise.resolve(); }
+  }
+
+  loadCharacters().then(loadStats).catch(function (err) {
+    el("stats-body").innerHTML = '<div class="rows"><div class="empty-note">读取失败：' +
+      esc(err && err.message ? err.message : String(err)) +
+      '<br><br>需要「读取模型调用用量统计」权限。</div></div>';
+  });
+})();
+</script>
