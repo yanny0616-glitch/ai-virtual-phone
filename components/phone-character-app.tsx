@@ -915,7 +915,12 @@ function CharListView({
         if (!data) return onNotice("未在 PNG 中找到角色数据");
         let avatar = "";
         try {
-          avatar = await fileToDataUrl(file);
+          avatar = await fileToDataUrl(file, {
+            maxSize: 1280,
+            quality: 0.86,
+            maxBytes: CHARACTER_AVATAR_MAX_BYTES,
+            fallbacks: CHARACTER_AVATAR_COMPRESSION_FALLBACKS,
+          });
         } catch (e) {
           console.error("Failed to read image file data", e);
         }

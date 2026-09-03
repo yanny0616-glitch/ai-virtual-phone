@@ -1122,7 +1122,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "",
   "变量名要和插件那边约好；没有变更通知，APP 需要时自己读一次。",
   "",
-  "宿主自己也读两个约定变量画**角色在线状态**（聊天列表头像上的点 + 聊天页标题下的小字）：`presence` = `{ asleep, busy, doing, label?, at }` 是 APP 写的此刻快照。APP 若同时用 `chat.setReplyGate` 留了作息，宿主按作息**实时**判睡着 / 忙碌，APP 不开也准时变色，快照只补「正在做什么」；没有作息、快照又超过 6 小时没刷新才算「离开」，`presenceOverride` = `{ state, label? }` 是用户手动锁定的，优先级更高，APP 不要碰。state 取值 online / busy / sleep / away / hidden。",
+  "官方插件「在线状态」读两个约定变量画**角色在线状态**（聊天列表头像上的点 + 聊天页标题下的小字）：`presence` = `{ asleep, busy, doing, label?, at }` 是 APP 写的此刻快照。APP 若同时用 `chat.setReplyGate` 留了作息，插件按作息**实时**判睡着 / 忙碌，APP 不开也准时变色，快照只补「正在做什么」；没有作息、快照又超过 6 小时没刷新才算「离开」，`presenceOverride` = `{ state, label? }` 是用户手动锁定的，优先级更高，APP 不要碰。state 取值 online / busy / sleep / away / hidden。",
   "",
   "注意：`chat.sendCard({ historyText })` 和 `chat.writeHistory` 作为聊天室历史的一部分，也会进入短期记忆事件流。因此，如果已经使用 `chat.sendCard` 或 `chat.writeHistory` 写入同一事件，就无需再重复调用 `memory.addTimeline`。",
   "",

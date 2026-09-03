@@ -110,6 +110,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 | message.deleted | 消息被删除 | { id, sessionId } |
 | llm.streamChunk | 流式回复分片（高频，勿做重活） | { chunk, sessionId?, purpose } |
 | plugins.changed | 插件列表/启停变化 | {} |
+| variables.changed | 共享变量池有写入（插件或自定义 APP 都算） | { name, scope, targetId? } |
 
 ## ctx.data —— 数据
 
@@ -123,7 +124,8 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
   - scope: "global"（默认）| "session"（传 sessionId）| "character"（传 characterId）
   - 插件自己的私有数据请用 ctx.system.storage，不要放变量池
   - 自定义 APP（如挂念）通过 \`AiPhone.variables\` 读写的是同一个池：想让 APP 拿到的数放这里，变量名两边约好
-  - 宿主自己也读两个约定变量（scope character）画**角色在线状态**（聊天列表头像上的点 + 聊天页标题下的小字）：\`presence\` = { asleep, busy, doing, label?, at }（APP 写的此刻快照；APP 若还用 chat.setReplyGate 留了作息，宿主按作息实时判睡着/忙碌，快照只补「正在做什么」；只有过期快照才算「离开」）；\`presenceOverride\` = { state: "online"|"busy"|"sleep"|"away"|"hidden", label? }（手动锁定，优先）。插件写这两个就能改角色的在线状态
+  - 官方插件「在线状态」读两个约定变量（scope character）画**角色在线状态**（聊天列表头像上的点 + 聊天页标题下的小字）：\`presence\` = { asleep, busy, doing, label?, at }（APP 写的此刻快照；APP 若还用 chat.setReplyGate 留了作息，按作息实时判睡着/忙碌，快照只补「正在做什么」；只有过期快照才算「离开」）；\`presenceOverride\` = { state: "online"|"busy"|"sleep"|"away"|"hidden", label? }（手动锁定，优先）。别的插件写这两个就能改角色的在线状态
+- \`ctx.data.replyGate.get(characterId)\` → 自定义 APP 用 chat.setReplyGate 留在宿主的作息 { sleep?: { bed, wake, … }, busy?: { date, windows: [{ from, to, title }], … } } 或 null，只读
 
 ## ctx.ai —— LLM 裸通道
 
@@ -139,6 +141,8 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 - \`ctx.ui.toast(text, opts?)\` 聊天顶部轻提示，默认约 2.4s 消失。做"识别中/加载中"这类进行中提示时传 \`{ durationMs: 0 }\` 让它常驻，用返回的 \`close()\` 在完成时手动关闭：\`const t = ctx.ui.toast("处理中…", { durationMs: 0 }); try { …await… } finally { t.close(); }\`
 - \`ctx.ui.slot(坑位名, (el, props) => { ...; return 可选清理函数 })\` —— 认领一块 **React 不管辖的裸 DOM 容器**，随便渲染：
   - "chat.header"：聊天标题栏下方（props: { sessionId, isGroup }）
+  - "chat.presence"：聊天页标题名字下面那一行，只在单聊出现（props: { sessionId, characterId }）
+  - "list.avatar"：聊天列表每行头像上的角标层，只在单聊行出现（props: { sessionId, characterId }）；容器盖满头像且 pointer-events:none，自己 absolute 定位放点或徽章
   - "chat.inputToolbar"：输入栏"+"面板的网格里，和内置按钮排在一起（props: { sessionId, isGroup }）。想和内置按钮长得一样，用这段结构：\`<div class="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer"><div class="chat-plus-icon-box">图标</div><span class="ts-11">标签</span></div>\`
   - "message.footer"：每条文本气泡下方（props: { sessionId, message }）——注意会被多条消息各调用一次
   - "message.side"：每条文本气泡旁边，贴着气泡垂直居中（对方消息在右、自己的在左），只放一个小图标之类；气泡本身有长按菜单，图标的 pointerdown 记得 stopPropagation

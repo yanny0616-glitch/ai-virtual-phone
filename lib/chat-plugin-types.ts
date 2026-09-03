@@ -17,6 +17,7 @@
 
 import type { ChatMessage, ChatSession, ChatContact } from "./chat-storage";
 import type { Character } from "./character-types";
+import type { ReplyGate } from "./chat-reply-gate";
 
 /** 反注册函数：撤销对应的注册动作 */
 export type Disposable = () => void;
@@ -132,6 +133,7 @@ export type ChatPluginTransformPayloadMap = {
  *   message.deleted    消息被删除
  *   llm.streamChunk    流式分片（高频，勿做重活）
  *   plugins.changed    插件列表/启停状态变化
+ *   variables.changed  共享变量池有写入（插件或自定义 APP 都算）
  */
 export type ChatPluginEventPoint =
     | "app.ready"
@@ -140,7 +142,8 @@ export type ChatPluginEventPoint =
     | "message.updated"
     | "message.deleted"
     | "llm.streamChunk"
-    | "plugins.changed";
+    | "plugins.changed"
+    | "variables.changed";
 
 export type ChatPluginEventPayloadMap = {
     "app.ready": Record<string, never>;
@@ -150,6 +153,7 @@ export type ChatPluginEventPayloadMap = {
     "message.deleted": { id: string; sessionId?: string };
     "llm.streamChunk": { chunk: string; sessionId?: string; purpose: string };
     "plugins.changed": Record<string, never>;
+    "variables.changed": { name: string; scope: ChatPluginVarScope; targetId?: string };
 };
 
 // ── UI 坑位 ────────────────────────────────────────────────
@@ -157,6 +161,8 @@ export type ChatPluginEventPayloadMap = {
 /**
  * DOM 坑位：宿主把一个 React 不管辖的裸 HTMLElement 交给插件，插件自由渲染。
  *   chat.header        聊天室标题栏下方（每会话一个）
+ *   chat.presence      聊天室标题名字下面那一行（单聊；props 带 characterId）
+ *   list.avatar        聊天列表每行头像上的角标层（单聊；props 带 characterId；容器盖满头像，pointer-events:none）
  *   chat.inputToolbar  输入栏"+"扩展面板内（插件工具按钮区）
  *   message.footer     每条文本消息气泡下方
  *   message.side       每条文本消息气泡旁边（对方消息在右侧、自己的在左侧），放小图标用
@@ -164,6 +170,8 @@ export type ChatPluginEventPayloadMap = {
  */
 export type ChatPluginSlotName =
     | "chat.header"
+    | "chat.presence"
+    | "list.avatar"
     | "chat.inputToolbar"
     | "message.footer"
     | "message.side"
@@ -172,6 +180,8 @@ export type ChatPluginSlotName =
 export type ChatPluginSlotProps = {
     sessionId?: string;
     isGroup?: boolean;
+    /** chat.presence / list.avatar 坑位携带该单聊对方的角色 id */
+    characterId?: string;
     /** message.footer / message.side 坑位携带当前消息 */
     message?: ChatMessage;
 };
@@ -260,6 +270,10 @@ export type ChatPluginContext = {
             set(name: string, value: unknown, scope?: ChatPluginVarScope, targetId?: string): void;
             update(name: string, patch: Record<string, unknown>, scope?: ChatPluginVarScope, targetId?: string): Record<string, unknown>;
             unset(name: string, scope?: ChatPluginVarScope, targetId?: string): void;
+        };
+        /** 自定义 APP 用 chat.setReplyGate 留在宿主里的作息（睡眠窗 + 当天忙时段），只读 */
+        replyGate: {
+            get(characterId: string): ReplyGate | null;
         };
     };
 

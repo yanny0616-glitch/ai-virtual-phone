@@ -88,7 +88,6 @@ import { GROUP_SELF_KEY, canGroupAdminAct, applyGroupAdminAction, buildGroupAdmi
 import { extractTextToolDirectiveText } from "@/lib/text-tool-protocol";
 import { emitChatPluginEvent, getChatPluginHookBus, runChatPluginTransform } from "@/lib/chat-plugin-hooks";
 import { CHAT_PLUGIN_TOAST_EVENT, getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
-import { useCharacterPresence } from "@/lib/character-presence";
 import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
 
 // ── Call system message detection ──────────────────────────
@@ -1091,7 +1090,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [isGenerating, setIsGenerating] = useState(false);
     const [offlineMode, setOfflineMode] = useState(false);
     const [theaterMode, setTheaterMode] = useState(() => kvGet(CHAT_THEATER_MODE_PREFIX + session.id) === "1");
-    const presence = useCharacterPresence(session.isGroup ? null : session.contactId);
     const [offlineTurns, setOfflineTurns] = useState<ChatOfflineTurn[]>([]);
     const [offlineVisibleCount, setOfflineVisibleCount] = useState(OFFLINE_INITIAL_LOAD);
     const [pendingOfflineUserText, setPendingOfflineUserText] = useState("");
@@ -5472,10 +5470,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 {offlineMode ? "线下生成中" : "对方正在输入"}<span className="chat-typing-dots"><i/><i/><i/></span>
                             </span>
                         )}
-                        {!session.isGroup && presence.state !== "hidden" && (
-                            <span className="chat-presence-line" data-state={presence.state}>
-                                <i /> {presence.label || "在线"}
-                            </span>
+                        {!session.isGroup && (
+                            <ChatPluginSlot name="chat.presence" slotProps={{ sessionId: session.id, characterId: session.contactId }} className="chat-plugin-presence" />
                         )}
                     </span>
                     <span className="page-header-right">

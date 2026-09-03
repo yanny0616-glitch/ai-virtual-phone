@@ -19,6 +19,8 @@ import { getChatPluginHookBus } from "./chat-plugin-hooks";
 import { loadChatPluginModule } from "./chat-plugin-loader";
 import {
     CHAT_PLUGINS_CHANGED_EVENT,
+    CHAT_PLUGIN_VARS_CHANGED_EVENT,
+    type ChatPluginVarsChangedDetail,
     getChatPluginVar,
     setChatPluginVar,
     unsetChatPluginVar,
@@ -29,6 +31,7 @@ import {
     setChatPluginPromptFragment,
     updateChatPluginSettings,
 } from "./chat-plugin-storage";
+import { readReplyGate } from "./chat-reply-gate";
 import type {
     ChatPluginContext,
     ChatPluginMessageAction,
@@ -128,6 +131,10 @@ class ChatPluginRuntime {
 
         const bus = getChatPluginHookBus();
         bus.onAutoDisable = (pluginId) => { void this.stopPlugin(pluginId); };
+        window.addEventListener(CHAT_PLUGIN_VARS_CHANGED_EVENT, (e) => {
+            const d = (e as CustomEvent<ChatPluginVarsChangedDetail>).detail;
+            if (d) bus.emitEvent("variables.changed", d);
+        });
 
         for (const installed of loadChatPlugins()) {
             if (installed.enabled) await this.startPlugin(installed);
@@ -368,6 +375,9 @@ class ChatPluginRuntime {
                         return next;
                     },
                     unset: (name, scope = "global", targetId) => unsetChatPluginVar(name, scope, targetId),
+                },
+                replyGate: {
+                    get: (characterId) => readReplyGate(characterId),
                 },
             },
 
