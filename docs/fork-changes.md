@@ -404,13 +404,19 @@
   网关加 `ownerOnly` 分支只 PATCH 锁不动 items/decisions；云端用量本机行改成 `app-<设备id>`，两台不再互相覆盖
 - 宿主配套：`18ba1b6` 自动续冻模板（kv `custom_app_templates_v1`，角色每次回复后按角色去抖 3 分钟重冻，
   否则模板烤着旧记忆要等 APP 再被打开才更新）；`2807cf5` 聊天镜像跟着本地变
-  （删除按 id 删、编辑/整批重生成按 id 覆盖，否则云端起念会看到已删的句子）
+  （`lib/chat-storage.ts` 新增 `CHAT_MESSAGE_EDITED_EVENT`，镜像客户端多听 deleted / edited / batch-replaced；
+  网关 `chat-mirror` POST 改 merge-duplicates，`deleted:true` 的按 id 删。否则云端起念会看到已删的句子）
 
 ## W. 「用量」自定义 APP（`custom-apps/usage-dashboard/`，2.2.0 → 2.8.1，2026-09-03）
 
 **不进构建**——和挂念一样是打成 zip 在 APP 市场手动装的，zip 放在 `/root/vibe-coding/gua-nian-releases/`。
 仓库里这份是正本，改完要重打 zip 才到得了手机。
 
+- **宿主打底**（`00e0f7a`，先于 APP 进仓库）：四条请求路径（流式 / 非流式 / 工具流 / 工具非流）
+  原来都在写日志前就抛异常，**报错的调用在日志和用量里完全消失**；改为在 catch 里补一条 failed 记录，
+  `simpleLLMCall` 的空回复同样标记失败（token 照记，空回复也计费）。
+  `apiLogChannelFor` 不再把所有 appId 压成 `"chat"`，`source` 保留原始 appId，
+  小红书/朋友圈/群聊/查手机才分得开；`ApiUsageBucket` 加 `failedCalls` 与 `calls` 分开统计
 - `2.2.0`（`d2e3fcf`）进仓库：来源细分到各 APP、失败调用单独统计，`usage.readLogs` 补 `failed` 与 `failedOnly`。
   同时**撤回**宿主自带日志面板的分页与筛选改动（`95f8cb7`）——和这个 APP 的日志页重复
 - `2.3.0`（`10413ab`）：来源名改由宿主下发（`lib/usage-source-names.ts`），APP 不再自带 id→名字 映射表，
@@ -419,7 +425,8 @@
   天数改「今日/7天/30天」默认今日且跨 0 点自动刷新、筛选计数改按日志算并合并同名角色
 - `2.8.0`（`0cbbeb9`）：**日志保留条数可调**（50/150/300/500）。宿主 `api-log-store` 的 150 改成存 kv 的配置，
   序列化预算按条数等比放大；调小立刻裁掉超出的旧日志；新权限 `usage.settings` 配
-  `usage.getSettings` / `usage.setSettings`；`readLogs` 的 limit 上限跟着容量走（原来写死 200，容量 500 时翻不到底）
+  `usage.getSettings` / `usage.setSettings`；`readLogs` 的 limit 上限跟着容量走（原来写死 200，容量 500 时翻不到底）。
+  **加新权限记得同时补 `lib/custom-app-permission-labels.ts` 的中文名**，否则权限页显示裸 id
 - `2.8.1`（`5b11bd9`）：代码审查查出的 8 处修复 + 设置页显示日志实际占用（宿主 `getApiLogStorageChars()`
   → `usage.getSettings` 的 `logChars`）。其中两处值得记住：
   APP 里 `AiPhone.usage.xxx` 必须先判 `AiPhone.usage` 本身存在，否则老宿主上整页白屏；
@@ -430,11 +437,12 @@
 
 ## X. 宿主杂项修复（2026-09-02 ~ 09-03）
 
-- `e5eed3d` 修 Anthropic 反代与应用默认 API 绑定
-- `f5fce49` 绑定管理：全局页新增「App Defaults」应用格子，可按应用设默认绑定给所有角色共用
+- `e5eed3d` 修 Anthropic 反代与应用默认 API 绑定（`lib/api-helpers.ts` + `shopping-engine` / `xiaohongshu-engine` 各自的取值口径）
+- `f5fce49` 绑定管理（`components/settings/binding-manager.tsx`）：全局页新增「App Defaults」应用格子，可按应用设默认绑定给所有角色共用
   （数据层的 `appDefaults` 早就有、解析时也读，就是没有编辑入口）。解析顺序不变
-- `e621ec1` 记忆库：删掉长期记忆条目后，总结进度退回剩余条目的最晚时间，下次能重新总结那段
-- `04fc394` 小卷加预设条目不再打乱用户拖出来的顺序——和 B.4 是同一条纪律，**写 `prompt_order` 必须走 `buildDisplayedPrompts`**
+- `e621ec1` 记忆库（`lib/memory-storage.ts`、`components/memory/memory-bank-page.tsx`）：删掉长期记忆条目后，
+  总结进度退回剩余条目的最晚时间，下次能重新总结那段
+- `04fc394` 小卷（`lib/mascot-tools.ts`）加预设条目不再打乱用户拖出来的顺序——和 B.4 是同一条纪律，**写 `prompt_order` 必须走 `buildDisplayedPrompts`**
 - `166cbab` 桌面：拖拽与翻页期间停掉实时模糊，几何只算一次
 - `44088b2` 沙盒 APP 注入样式补齐 `styles/base.css` 的四项全局保护（橡皮筋回弹露白底、
   双击/捏合缩放、滚动条、body 默认 8px 外边距）——iframe 是独立文档，宿主的 base.css 进不去
