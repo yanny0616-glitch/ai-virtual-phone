@@ -1080,16 +1080,6 @@
     }
   }
 
-  // 只读设备的横幅：说清是哪台在管，并给一条接手的路
-  function lockBanner(cx) {
-    if (owns(cx)) return "";
-    return '<div class="card"><div class="sec-head"><span class="t">只 读</span>' +
-      '<span class="badge warn">' + esc(ownerLabel(cx)) + " 在管</span></div>" +
-      '<div class="archive-note">今天由「' + esc(ownerLabel(cx)) + "」负责编排、预约和云端，这台只看不动——" +
-      "两台一起排会在服务端挂出两套预约，谁也撤不掉谁的，到点发两遍。</div>" +
-      '<div class="dg-act"><button class="tgl" id="btn-takeover"' + (cx.busy ? " disabled" : "") + ">改用这台</button></div></div>";
-  }
-
   /* ---- 云端动态复核：把计划寄存到云上，浏览器关着时由 push-recheck 重判 ---- */
   function cloudRecheckOn() {
     return !!(cloudCfg() && S.settings && S.settings.cloudRecheck);
@@ -1602,7 +1592,7 @@
   }
   async function generateDay(cx) {
     if (cx.busy || cx._planLock) { if (cx._planLock) toast("TA正在复核，稍等几秒再试"); return; }
-    if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要在这台排就先点「改用这台」"); render(); return; }
+    if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要改用这台就去诊断页「今天谁在管」"); render(); return; }
     cx.busy = true; cx._planLock = true; render();
     try {
       const existing = await readTodayCalendar(cx); // 日程 app 里TA今天已定的安排
@@ -1824,7 +1814,7 @@
   async function orchestrate(cx) {
     if (cx._planLock && !cx.busy && cx.day) { await log(cx, "编排跳过：复核或合并云端裁决正在进行，稍后再点「重新编排」"); return; }
     if (cx.busy || cx._planLock || !cx.day) return;
-    if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要在这台排就先点「改用这台」"); render(); return; }
+    if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要改用这台就去诊断页「今天谁在管」"); render(); return; }
     cx.busy = true; cx._planLock = true; render();
     try {
       const kept = keptImpromptu(cx);
@@ -2286,7 +2276,7 @@
     if (S.tab === "diag") { renderDiag(); return; }
     if (S.tab === "usage") { renderUsage(); return; }
     if (!cx.day) {
-      v.innerHTML = lockBanner(cx) +
+      v.innerHTML =
         '<div class="card empty"><div class="art">🌅</div>' +
         '<p>TA的今天还是一张白纸。<br>生成TA今天的状态与日程，<br>再看看TA会在哪些时刻想起你。'
         + (nightBridge(cx) ? '<br><span style="color:var(--tx3)">' + esc("眼下按昨天的作息：" + nightBridge(cx).doing + (nightBridge(cx).next ? "，" + nightBridge(cx).next : "")) + "</span>" : "")
@@ -2297,7 +2287,7 @@
     }
 
     const ctx = { day: cx.day, plan: cx.plan, settings: S.settings, character: cx.character, now: Date.now() };
-    v.innerHTML = lockBanner(cx) + PANELS.filter((p) => p.when(ctx)).map((p) => p.html(ctx)).join("");
+    v.innerHTML = PANELS.filter((p) => p.when(ctx)).map((p) => p.html(ctx)).join("");
     requestAnimationFrame(() => { document.querySelectorAll(".fill").forEach((el) => { el.style.width = el.dataset.w + "%"; }); });
     v.querySelectorAll(".tl-item.sched").forEach((el) => {
       el.onclick = () => { const i = +el.dataset.si; if (i >= 0) openSchedDetail(i); };
@@ -2987,6 +2977,7 @@
       { id: "logs", title: "运行日志" },
     ] },
     { title: "云 端", cards: [
+      { id: "lock", title: "今天谁在管" },
       { id: "cloud", title: "连接与聊天镜像" },
       { id: "jobs", title: "预约与降速" },
       { id: "recheck", title: "动态复核" },
@@ -3093,6 +3084,32 @@
         renderDiag();
       };
     }
+
+    // 设备锁：今天由哪台设备负责编排和预约。只读的那台从这里接手。
+    (async () => {
+      if (!cloudCfg()) {
+        fill("lock", '<div class="archive-note">没接云连接，不上锁：预约只挂在这台本机上，不会和别的设备撞车。</div>', "不上锁", "");
+        return;
+      }
+      cx._ownAt = Date.now();
+      await readOwner(cx);
+      if (!alive()) return;
+      const act = '<div class="dg-act"><button class="tgl" id="btn-takeover"' + (cx.busy ? " disabled" : "") + ">改用这台</button></div>";
+      if (!cx.owner || !cx.owner.id) {
+        fill("lock", '<div class="archive-note">今天还没人生成，谁先在自己那台生成或编排，今天就归谁管。</div>', "还没定", "");
+      } else if (owns(cx)) {
+        fill("lock", '<div class="diag-item"><b>这台（' + esc(myDevName()) + "）在管</b> 生成、编排、复核、预约和云端都从这台走</div>" +
+          '<div class="archive-note">别的设备打开挂念只能看，不会再挂一套预约。零点之后重新认：明天谁先生成谁管。</div>',
+          "这台在管", "ok");
+      } else {
+        fill("lock", '<div class="diag-item"><b>' + esc(ownerLabel(cx)) + " 在管</b> 这台只看不动</div>" +
+          '<div class="archive-note">两台一起排会在服务端挂出两套预约，谁也撤不掉谁的，到点发两遍、扣两份额度。' +
+          "「改用这台」会先撤掉那台今天挂的预约和 48 小时哨兵，再把今天接过来。</div>" + act,
+          ownerLabel(cx) + " 在管", "warn");
+        const to = $("#btn-takeover");
+        if (to) to.onclick = () => takeOver(cur());
+      }
+    })();
 
     // 系统里真实挂着的今日唤醒（和计划对照，是排查「为什么没推」的关键）
     (async () => {
@@ -3253,7 +3270,6 @@
     const rg = $("#btn-regen"); if (rg) rg.onclick = () => generateDay(cur());
     const rp = $("#btn-replan"); if (rp) rp.onclick = () => orchestrate(cur());
     const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur());
-    const to = $("#btn-takeover"); if (to) to.onclick = () => takeOver(cur());
   }
 
   /* ================= 设置弹层：schema 驱动 =================
