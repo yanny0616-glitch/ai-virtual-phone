@@ -68,15 +68,19 @@ export type ChatPluginModule = {
  *   prompt.system     单聊/群聊系统提示词组装时。payload.hint 追加/改写扩展提示词区
  *   llm.request       每次请求体发出前（含流式/工具通道）。可改 messages/model/temperature
  *   llm.response      模型原始回复文本落地前（正则式改写在这里做）
+ *   moments.beforePost  朋友圈定时发帖到点、真正生成前。cancelled=true 则这次不发，retryAfterMs 后再问；hint 追加到发帖指令后
  * 同步 transform 点（handler 必须同步返回，返回 Promise 会被忽略并记一次警告）：
  *   message.beforePersist  任何消息写入存储前（用户/角色/系统/群聊全路径）
+ *   moments.schedule       朋友圈算「下次几点到点」时（首次建档 / 发完一条 / 被插件押后）。改 nextPostAfter 即改时机
  */
 export type ChatPluginTransformPoint =
     | "user.beforeSend"
     | "prompt.system"
     | "llm.request"
     | "llm.response"
-    | "message.beforePersist";
+    | "message.beforePersist"
+    | "moments.beforePost"
+    | "moments.schedule";
 
 export type UserBeforeSendPayload = {
     text: string;
@@ -116,12 +120,34 @@ export type MessageBeforePersistPayload = {
     message: ChatMessage;
 };
 
+export type MomentsBeforePostPayload = {
+    characterId: string;
+    /** 上一条定时/手动发帖的时间，0 表示还没发过 */
+    lastPostTime: number;
+    /** 置为 true 这次不发 */
+    cancelled: boolean;
+    /** 取消后隔多久再问一次（毫秒），默认 1 小时 */
+    retryAfterMs?: number;
+    /** 追加到「请发一条朋友圈。」后面的由头 */
+    hint: string;
+};
+
+export type MomentsSchedulePayload = {
+    characterId: string;
+    reason: "init" | "afterPost" | "postponed";
+    lastPostTime: number;
+    /** 下次到点的时间戳，可改写 */
+    nextPostAfter: number;
+};
+
 export type ChatPluginTransformPayloadMap = {
     "user.beforeSend": UserBeforeSendPayload;
     "prompt.system": PromptSystemPayload;
     "llm.request": LlmRequestPayload;
     "llm.response": LlmResponsePayload;
     "message.beforePersist": MessageBeforePersistPayload;
+    "moments.beforePost": MomentsBeforePostPayload;
+    "moments.schedule": MomentsSchedulePayload;
 };
 
 /**

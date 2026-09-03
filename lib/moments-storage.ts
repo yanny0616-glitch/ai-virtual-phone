@@ -1,6 +1,7 @@
 // lib/moments-storage.ts
 // KV-DB persistence for Moments (朋友圈) feature.
 
+import { runChatPluginTransformSync } from "./chat-plugin-hooks";
 import type { MomentPost, MomentComment, AIMomentSchedule, PendingReaction } from "./moments-types";
 import { loadCharacters } from "./character-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
@@ -288,6 +289,7 @@ export function getOrCreateSchedule(characterId: string): AIMomentSchedule {
             lastPostTime: 0,
             nextPostAfter: Date.now() + delayMs,
         };
+        entry.nextPostAfter = runChatPluginTransformSync("moments.schedule", { characterId, reason: "init", lastPostTime: 0, nextPostAfter: entry.nextPostAfter }).nextPostAfter;
         schedules.push(entry);
         saveAIMomentSchedule(schedules);
     }
@@ -303,8 +305,19 @@ export function updateScheduleAfterPost(characterId: string): void {
         const range = cfg.postIntervalMaxHours - cfg.postIntervalMinHours;
         const delayMs = (cfg.postIntervalMinHours + Math.random() * range) * 60 * 60 * 1000;
         entry.nextPostAfter = Date.now() + delayMs;
+        entry.nextPostAfter = runChatPluginTransformSync("moments.schedule", { characterId, reason: "afterPost", lastPostTime: entry.lastPostTime, nextPostAfter: entry.nextPostAfter }).nextPostAfter;
         saveAIMomentSchedule(schedules);
     }
+}
+
+/** 插件在 moments.beforePost 里说「这次不发」：不动 lastPostTime，只把到点时间往后挪 */
+export function postponeSchedule(characterId: string, retryAfterMs: number): void {
+    const schedules = loadAIMomentSchedule();
+    const entry = schedules.find(s => s.characterId === characterId);
+    if (!entry) return;
+    entry.nextPostAfter = Date.now() + Math.max(60_000, retryAfterMs);
+    entry.nextPostAfter = runChatPluginTransformSync("moments.schedule", { characterId, reason: "postponed", lastPostTime: entry.lastPostTime, nextPostAfter: entry.nextPostAfter }).nextPostAfter;
+    saveAIMomentSchedule(schedules);
 }
 
 // ── Pending Reactions ──

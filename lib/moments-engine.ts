@@ -6,6 +6,7 @@
 
 import { loadCharacters } from "./character-storage";
 import { loadChatContacts } from "./chat-storage";
+import { runChatPluginTransform } from "./chat-plugin-hooks";
 import type { Character } from "./character-types";
 import {
     addMomentPost,
@@ -17,6 +18,7 @@ import {
     loadMomentComments,
     getOrCreateSchedule,
     updateScheduleAfterPost,
+    postponeSchedule,
     loadAIMomentSchedule,
     saveAIMomentSchedule,
     loadPendingReactions,
@@ -120,12 +122,22 @@ function pollScheduledPosts() {
         const schedule = getOrCreateSchedule(contact.characterId);
         if (schedule.nextPostAfter <= now) {
             isGenerating = true;
-            triggerAIPost(contact.characterId)
+            askPluginsThenPost(contact.characterId, schedule.lastPostTime)
                 .catch(err => console.error("[Moments] AI post error:", err))
                 .finally(() => { isGenerating = false; });
             return; // one at a time
         }
     }
+}
+
+/** 定时到点：先过 moments.beforePost，插件可以拦下押后，或塞一句由头 */
+async function askPluginsThenPost(characterId: string, lastPostTime: number): Promise<void> {
+    const p = await runChatPluginTransform("moments.beforePost", { characterId, lastPostTime, cancelled: false, hint: "" });
+    if (p.cancelled) {
+        postponeSchedule(characterId, p.retryAfterMs ?? 3600_000);
+        return;
+    }
+    await triggerAIPost(characterId, p.hint);
 }
 
 /** Queue of character IDs waiting for immediate post. Processed by the engine independently of UI. */
@@ -287,7 +299,7 @@ async function resolveAssemblerInput(
 
 // ── AI Post Generation ──
 
-async function triggerAIPost(characterId: string): Promise<void> {
+async function triggerAIPost(characterId: string, hint = ""): Promise<void> {
     isGenerating = true;
     // Always update schedule first to prevent retry storms on failure
     updateScheduleAfterPost(characterId);
@@ -307,7 +319,7 @@ async function triggerAIPost(characterId: string): Promise<void> {
         // Append trigger instruction
         llmMessages.push({
             role: "user",
-            content: "请发一条朋友圈。",
+            content: hint.trim() ? `请发一条朋友圈。\n${hint.trim()}` : "请发一条朋友圈。",
             _debugMeta: { marker: "moments_trigger" },
         });
 

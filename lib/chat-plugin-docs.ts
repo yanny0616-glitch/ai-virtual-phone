@@ -96,6 +96,8 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 | llm.request | 每次 LLM 请求发出前 | { messages, purpose, sessionId?, temperature?, maxTokens? } —— messages 为 OpenAI 形状数组，可增删改；设置 temperature/maxTokens 覆盖采样参数 |
 | llm.response | 模型原始回复文本落地前 | { text, sessionId?, purpose } —— 改 text 即改写回复（在内置正则之前） |
 | message.beforePersist | 任何消息写入存储前（**同步**，处理函数不能是 async） | { message } —— 可修改 message 的字段 |
+| moments.beforePost | 朋友圈定时发帖到点、真正生成前（手动「立即发帖」不经过） | { characterId, lastPostTime, cancelled, retryAfterMs?, hint } —— cancelled=true 这次不发、retryAfterMs 后再问（默认 1 小时）；hint 追加到「请发一条朋友圈。」后面当由头 |
+| moments.schedule | 朋友圈算下次到点时间时（**同步**）；reason: init 首次建档 / afterPost 发完一条 / postponed 被插件押后 | { characterId, reason, lastPostTime, nextPostAfter } —— 改 nextPostAfter 即改时机 |
 
 ### on（只读事件广播，处理函数可 async）
 
