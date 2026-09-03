@@ -704,7 +704,7 @@
       html += '<div class="r"><span class="k">角色</span><span class="v" style="display:flex;align-items:center;gap:7px">' +
         avatarHtml(log.characterId || ("name:" + dWho), dWho) + '<span>' + esc(dWho) + '</span></span></div>';
       html += '<div class="r"><span class="k">模型</span><span class="v">' + esc(log.model || "未知") + '</span></div>';
-      html += '<div class="r"><span class="k">来源</span><span class="v">' + esc(SOURCE_LABEL[log.source] || log.source || "聊天") + '</span></div>';
+      html += '<div class="r"><span class="k">来源</span><span class="v">' + esc(log.sourceName || sourceLabel(log.source)) + '</span></div>';
       html += '<div class="r"><span class="k">消息数</span><span class="v">' + (log.messages ? log.messages.length : 0) + ' 条</span></div>';
       html += '</div>';
 
