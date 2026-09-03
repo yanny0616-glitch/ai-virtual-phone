@@ -838,27 +838,53 @@ Deno.serve(async (req: Request) => {
       const snapshotAt = typeof payload.merge?.snapshotAt === "string" ? payload.merge.snapshotAt : "";
       if (contextSessionId && snapshotAt && Number.isFinite(Date.parse(snapshotAt))) {
         try {
+          const snapshotMs = Date.parse(snapshotAt);
+          // 云端自己挂的预约（挂念云端点亮 / 云端生成的时刻）不在宿主的本地登记簿里，
+          // refreshScheduledBailouts 遍历不到，快照最长能停在 48 小时前。镜像里补一段。
+          const mirrorResponse = await rest(
+            `push_chat_mirror?user_id=eq.${encodeURIComponent(job.user_id)}`
+            + `&session_id=eq.${encodeURIComponent(contextSessionId)}`
+            + `&message_at=gt.${encodeURIComponent(new Date(snapshotMs).toISOString())}`
+            + "&select=role,content,message_at&order=message_at.asc&limit=30",
+          );
+          const mirrorRows = (mirrorResponse.ok
+            ? await mirrorResponse.json() as { role: string; content: string; message_at: string }[]
+            : []).filter(row => (row.role === "user" || row.role === "assistant") && String(row.content || "").trim());
+          // 镜像里已经有的那几条角色消息就是客户端取走过的，outbox 只补它之后的，免得同一句说两遍
+          const newestMirrorMs = mirrorRows.length > 0 ? Date.parse(mirrorRows[mirrorRows.length - 1].message_at) : NaN;
+          const outboxSince = Number.isFinite(newestMirrorMs) ? Math.max(snapshotMs, newestMirrorMs) : snapshotMs;
           const sinceResponse = await rest(
             `push_outbox?user_id=eq.${encodeURIComponent(job.user_id)}`
             + `&session_id=eq.${encodeURIComponent(contextSessionId)}`
             + "&meta->>pushGenerated=eq.true"
-            + `&created_at=gt.${encodeURIComponent(new Date(Date.parse(snapshotAt)).toISOString())}`
+            + `&created_at=gt.${encodeURIComponent(new Date(outboxSince).toISOString())}`
             + "&select=raw_text,created_at&order=created_at.asc&limit=5",
           );
           const sinceRows = sinceResponse.ok
             ? await sinceResponse.json() as { raw_text: string; created_at: string }[]
             : [];
+          const parts: string[] = [];
+          if (mirrorRows.length > 0) {
+            const who = payload.notify?.title || "你";
+            parts.push("在上面的对话之后，你们又聊了这些（从旧到新，「对方」=用户，「" + who + "」=你自己）：\n"
+              + mirrorRows.map(row => {
+                const text = String(row.content || "").replace(/\s+/g, " ").trim();
+                return (row.role === "user" ? "对方：" : who + "：") + (text.length > 200 ? text.slice(0, 200) + "…" : text);
+              }).join("\n"));
+          }
           if (sinceRows.length > 0) {
-            const lines = sinceRows.map((row, index) => {
-              const minutesAgo = Math.max(1, Math.round((Date.now() - Date.parse(row.created_at)) / 60000));
-              const text = String(row.raw_text || "").replace(/\s+/g, " ").trim().slice(0, 400);
-              return `${index + 1}.（约${minutesAgo}分钟前）${text}`;
-            });
-            const note = "[系统备忘：这不是对方发来的消息。在上面的对话之后，你已经又主动给对方发过下面这些消息，对方还没有回复：\n"
-              + lines.join("\n")
-              + "\n请自然衔接你已经说过的话——不要重复以上内容，不要把它们当成对方说的，也不要机械追问对方为什么不回。]";
+            parts.push("在这之后你已经又主动发过下面这些，对方还没有回复：\n"
+              + sinceRows.map((row, index) => {
+                const minutesAgo = Math.max(1, Math.round((Date.now() - Date.parse(row.created_at)) / 60000));
+                const text = String(row.raw_text || "").replace(/\s+/g, " ").trim().slice(0, 400);
+                return `${index + 1}.（约${minutesAgo}分钟前）${text}`;
+              }).join("\n"));
+          }
+          if (parts.length > 0) {
+            const note = "[系统备忘：这不是对方发来的消息。" + parts.join("\n\n")
+              + "\n请自然衔接已经说过的话——不要重复以上内容，不要把你自己说过的当成对方说的，也不要机械追问对方为什么不回。]";
             if (appendUserNote(payload.request.body, payload.request.providerKind, note)) {
-              await progress(`context patched: +${sinceRows.length} sent since snapshot`);
+              await progress(`context patched: +${mirrorRows.length} mirrored, +${sinceRows.length} sent since snapshot`);
             }
           }
         } catch { /* 补上下文失败不阻塞生成，按原快照重放 */ }

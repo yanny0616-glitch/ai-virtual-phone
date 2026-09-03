@@ -67,7 +67,7 @@ function cleanText(value: unknown, max: number): string {
 // 名单外的键一律不落库，App 新增一项要同时加在这里。
 const RECHECK_NUMERIC_CONTEXT_KEYS = [
   "gateDailyCap", "gateGapMin", "gateHorizonMin", "gateFreshMin", "gateMinMsgs",
-  "selfImpulseCap", "selfUsed",
+  "selfImpulseCap", "selfUsed", "judgeLines",
   "presendMax", "presendTalkingMin", "presendGapMin",
   "busyHold", "busyBufferMin", "busyMaxHoldMin",
   "sleepMode", "sleepWakeProb",

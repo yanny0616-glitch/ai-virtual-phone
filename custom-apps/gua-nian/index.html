@@ -928,8 +928,8 @@
   }
   // 把最近聊天压成给模型看的几行摘录
   function chatExcerpt(msgs, maxLines) {
-    return msgs.slice(-(maxLines || 20)).map((m) =>
-      (m.role === "user" ? "我：" : "TA：") + (m.c.length > 60 ? m.c.slice(0, 60) + "…" : m.c));
+    return msgs.slice(-(maxLines || 24)).map((m) =>
+      (m.role === "user" ? "我：" : "TA：") + (m.c.length > 200 ? m.c.slice(0, 200) + "…" : m.c));
   }
 
   /* ================= 数据 ================= */
@@ -962,6 +962,7 @@
     anchorMorning: false,// 早安锚点
     chatCandidates: true,// 复核时允许因聊天临时起念
     recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开app时也会复核一次）
+    judgeLines: 24,      // 编排/复核/云端裁决喂给模型的最近几句聊天
     moodGate: true,      // 精力低/心情差时更克制
     injectChat: true,    // 把TA此刻的状态注入聊天提示词（需 chat.context 权限）
     chatEditsDay: true,  // 复核时允许按聊天内容改今天的日程（只动还没到的）
@@ -1131,6 +1132,7 @@
             gateHorizonMin: S.settings.gateHorizonMin,
             gateFreshMin: S.settings.gateFreshMin,
             gateMinMsgs: S.settings.gateMinMsgs,
+            judgeLines: S.settings.judgeLines,
             selfImpulseCap: S.settings.selfImpulseCap,
             selfUsed: (cx.plan && cx.plan.selfUsed) || 0,
             presendMax: S.settings.presendMax,
@@ -1834,7 +1836,7 @@
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
       const streak0 = unansweredStreak(chat);
-      const lines = chatExcerpt(chat, 20);
+      const lines = chatExcerpt(chat, S.settings.judgeLines);
       if (lines.length) await log(cx, "已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
       const parsed = await generateJson(cx, {
         characterId: cx.character.id,
@@ -1946,7 +1948,7 @@
         }
         if (changed) await log(cx, "复核（" + trigger + "）：连续 " + streak + " 轮未回 ≥ 降速阈值 " + S.settings.maxUnanswered + "，取消 " + changed + " 个待发时刻");
       } else {
-        const lines = chatExcerpt(chat, 24);
+        const lines = chatExcerpt(chat, S.settings.judgeLines);
         const remaining = items.filter((w) => w.fireAt > nowMs + 2 * 60000);
         const usedQuota = items.filter((w) => w.act).length;
         const parsed = await generateJson(cx, {
@@ -3337,8 +3339,10 @@
       ] }], hint: "睡前锚点：TA上床前 10–30 分钟里的某一刻。早安锚点：免打扰结束后 25–55 分钟里的某一刻。日程上的时刻也不卡整点，各往后飘几分钟。<br>聊天临时起念：复核时允许按没聊完的话头临时加一个时刻。<br>状态低落时更安静：精力很低的那天明显少起念。" },
     ] },
     { id: "chat", name: "聊天", groups: [
-      { title: "动态复核", fields: [{ type: "stepper", key: "recheckMin", min: 0, max: 120, step: 5, label: "在页时每隔", unit: "分钟 · 0 关" }],
-        hint: "打开小手机时、以及之后每隔这么久，按你们最新的聊天重审今天还没到点的时刻。<br>聊崩了会取消，聊出没完的话头会临时加。每次重审调一次模型。" },
+      { title: "动态复核", fields: [
+        { type: "stepper", key: "recheckMin", min: 0, max: 120, step: 5, label: "在页时每隔", unit: "分钟 · 0 关" },
+        { type: "stepper", key: "judgeLines", min: 6, max: 40, step: 2, label: "判断时回看", unit: "句" },
+      ], hint: "打开小手机时、以及之后每隔这么久，按你们最新的聊天重审今天还没到点的时刻。<br>聊崩了会取消，聊出没完的话头会临时加。每次重审调一次模型。<br>「判断时回看」是编排、复核、云端裁决喂给模型的最近几句，每句最多 200 字。调大更懂来龙去脉，也更费 token。保存即生效，云端那份下次上传计划时跟着更新。" },
       { title: "聊天改日程", fields: [{ type: "toggles", items: [{ key: "chatEditsDay", label: "聊出来的安排落到今天的日程上" }] }],
         hint: "复核时顺带看聊天里有没有说定、取消或临时被叫走的安排，有就直接改今天的日程，一次最多 2 条。<br>只改还没到点的，改动写回系统日程，也记进「诊断」。<br>「动态复核」设成 0 时这条不会发生。" },
       { title: "注入聊天", fields: [{ type: "toggles", items: [{ key: "injectChat", label: "让TA聊天时知道自己此刻的状态" }] }],

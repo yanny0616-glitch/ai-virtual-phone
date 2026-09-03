@@ -496,8 +496,13 @@ function buildImpulseInstruction(day: { mood: string; energy: number; schedule: 
 }
 // App 同名 chatExcerpt / unansweredStreak
 function chatExcerpt(msgs: { role: string; c: string }[], maxLines: number): string[] {
-  return msgs.slice(-(maxLines || 20)).map((m) =>
-    (m.role === "user" ? "我：" : "TA：") + (m.c.length > 60 ? m.c.slice(0, 60) + "…" : m.c));
+  return msgs.slice(-(maxLines || 24)).map((m) =>
+    (m.role === "user" ? "我：" : "TA：") + (m.c.length > 200 ? m.c.slice(0, 200) + "…" : m.c));
+}
+// 判断时回看几句：App 设置寄在 context.judgeLines，越界的值一律按默认算
+function judgeLinesOf(context: { judgeLines?: unknown }): number {
+  const n = Math.round(Number(context.judgeLines));
+  return Number.isFinite(n) && n >= 1 && n <= 60 ? n : 24;
 }
 function unansweredStreak(msgs: { role: string; t: number }[], nowMs: number): number {
   let prevT: number | null = null, rounds = 0;
@@ -713,7 +718,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
       const mirrorResponse = await rest(
         `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
         + `&character_id=eq.${encodeURIComponent(characterId)}`
-        + "&select=role,content,message_at&order=message_at.desc&limit=60",
+        + `&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context) + 20}`,
       );
       const mirrorRows = mirrorResponse.ok ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse() : [];
       const chat = mirrorRows
@@ -722,7 +727,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
         .filter(m => m.c)
         .sort((a, b) => a.t - b.t);
       const streak0 = unansweredStreak(chat, nowMs);
-      const lines = chatExcerpt(chat, 20);
+      const lines = chatExcerpt(chat, judgeLinesOf(context));
       chatUsed = lines.length;
       if (lines.length) log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
       const candRows = cands.map(c => ({ time: c.time, justFinished: c.source, mood: c.mood || "", energy: guanianNow(day, c.fireAt, settings.quietStart, settings.quietEnd).energy }));
@@ -1070,7 +1075,7 @@ Deno.serve(async (req: Request) => {
     const mirrorResponse = await rest(
       `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
       + `&character_id=eq.${encodeURIComponent(characterId)}`
-      + "&select=role,content,message_at&order=message_at.desc&limit=24",
+      + `&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context)}`,
     );
     const mirrorRows = mirrorResponse.ok
       ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse()
