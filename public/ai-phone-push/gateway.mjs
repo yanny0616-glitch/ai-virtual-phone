@@ -997,6 +997,14 @@ Deno.serve(async (request: Request) => {
         const rawContext = body.context && typeof body.context === "object"
           ? body.context as Record<string, unknown>
           : {};
+        // 超长的整块直接丢是对的（库里塞不下），但得让 App 知道——不然云端少了 day
+        // 只会表现为忙与睡、到点状态莫名其妙不生效，查不到原因。
+        const dropped: string[] = [];
+        const dropOversize = (name: string, value: unknown, maxChars: number) => {
+          const cleaned = cleanJsonObject(value, maxChars);
+          if (!cleaned && value && typeof value === "object" && !Array.isArray(value)) dropped.push(name);
+          return cleaned;
+        };
         const context: Record<string, unknown> = {
           mood: cleanText(rawContext.mood, 200),
           energy: cleanText(rawContext.energy, 200),
@@ -1015,9 +1023,9 @@ Deno.serve(async (request: Request) => {
           // 设备锁：这一天由哪台设备负责编排和预约（ownerName 只是给用户看的名字）
           owner: cleanText(rawContext.owner, 40).replace(/[^A-Za-z0-9_-]/g, ""),
           ownerName: cleanText(rawContext.ownerName, 40),
-          day: cleanJsonObject(rawContext.day, 24_000),
+          day: dropOversize("day", rawContext.day, 24_000),
           // 云端生成TA的一天要用的原料（生成指令、模板键、到点时刻），App 每次打开为明天寄一份
-          genKit: cleanJsonObject(rawContext.genKit, 40_000),
+          genKit: dropOversize("genKit", rawContext.genKit, 40_000),
         };
         for (const key of RECHECK_NUMERIC_CONTEXT_KEYS) {
           if (rawContext[key] === undefined || rawContext[key] === null || rawContext[key] === "") continue;
@@ -1045,7 +1053,7 @@ Deno.serve(async (request: Request) => {
           const detail = await save.text().catch(() => "");
           return json({ ok: false, error: detail.slice(0, 300) || `数据库返回 HTTP ${save.status}` }, 500);
         }
-        return json({ ok: true, items: items.length });
+        return json({ ok: true, items: items.length, ...(dropped.length > 0 ? { dropped } : {}) });
       }
       if (request.method === "GET") {
         const characterId = cleanText(url.searchParams.get("characterId"), 80);

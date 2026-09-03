@@ -902,6 +902,23 @@ Deno.serve(async (req: Request) => {
     const guanianWakeId = job.kind === "timed_task" && job.trigger_key.startsWith("timedwake:") ? job.trigger_key.slice(10) : "";
     const guanianPlan = await loadRecheckPlan(rest, job.user_id, guanianCharacterId, guanianWakeId)
       .catch(() => ({ row: null, item: null }));
+    // decisions 是读-改-写，手里这份是任务开头读到的，push-recheck 可能同时在写。
+    // 落库前重取一次，把丢记录的窗口从整个任务时长缩到一次请求。
+    const appendDecision = async (entry: Record<string, unknown>): Promise<void> => {
+      const row = guanianPlan.row;
+      if (!row || !guanianCharacterId) return;
+      const filter = `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
+        + `&character_id=eq.${encodeURIComponent(guanianCharacterId)}`
+        + `&plan_date=eq.${encodeURIComponent(row.plan_date)}`;
+      const fresh = await rest(`${filter}&select=decisions&limit=1`).catch(() => null);
+      const rows = fresh?.ok ? await fresh.json().catch(() => []) as { decisions?: unknown[] }[] : [];
+      const prior = Array.isArray(rows[0]?.decisions) ? rows[0].decisions : (Array.isArray(row.decisions) ? row.decisions : []);
+      await rest(filter, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ decisions: [...prior, entry].slice(-60) }),
+      }).catch(() => undefined);
+    };
     if (job.kind === "timed_task") {
       const cooldownRounds = Number(payload.merge?.cooldownRounds);
       const coolTarget = Number.isFinite(cooldownRounds) && cooldownRounds > 0 ? cooldownRounds : 0;
@@ -985,27 +1002,15 @@ Deno.serve(async (req: Request) => {
 
             // 判据写回计划：不管发没发都写，面板要能看到"通过"的那次是几分过的
             if (planRow && planItem) {
-              const prior = Array.isArray(planRow.decisions) ? planRow.decisions : [];
-              await rest(
-                `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
-                + `&character_id=eq.${encodeURIComponent(guanianCharacterId)}`
-                + `&plan_date=eq.${encodeURIComponent(planRow.plan_date)}`,
-                {
-                  method: "PATCH",
-                  headers: { Prefer: "return=minimal" },
-                  body: JSON.stringify({
-                    decisions: [...prior, {
-                      at: nowMs,
-                      kind: "presend",
-                      time: planItem.time || "",
-                      by: "cloud",
-                      note: blocked || `到点复核通过（不合时宜度 ${press}%）`,
-                      blocked: !!blocked,
-                      scores: { pr, pt, pg, press, rounds, max: maxPress },
-                    }].slice(-60),
-                  }),
-                },
-              ).catch(() => undefined);
+              await appendDecision({
+                at: nowMs,
+                kind: "presend",
+                time: planItem.time || "",
+                by: "cloud",
+                note: blocked || `到点复核通过（不合时宜度 ${press}%）`,
+                blocked: !!blocked,
+                scores: { pr, pt, pg, press, rounds, max: maxPress },
+              });
             }
 
             if (blocked) {
@@ -1046,19 +1051,7 @@ Deno.serve(async (req: Request) => {
       const bufferMs = cnum("busyBufferMin", 10) * 60_000 * (0.6 + guanianRoll(job.id + ":buffer") / 100 * 0.8);
       // 押后 = 这条任务改回 pending、到点时刻往后挪；判据记进计划，面板能看到「押后到几点」
       const hold = async (untilMs: number, note: string): Promise<void> => {
-        const prior = Array.isArray(guanianPlan.row?.decisions) ? guanianPlan.row!.decisions : [];
-        await rest(
-          `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
-          + `&character_id=eq.${encodeURIComponent(guanianCharacterId)}`
-          + `&plan_date=eq.${encodeURIComponent(guanianPlan.row!.plan_date)}`,
-          {
-            method: "PATCH",
-            headers: { Prefer: "return=minimal" },
-            body: JSON.stringify({
-              decisions: [...prior, { at: nowMs, kind: "hold", time: guanianPlan.item?.time || "", by: "cloud", note, until: untilMs, blocked: false }].slice(-60),
-            }),
-          },
-        ).catch(() => undefined);
+        await appendDecision({ at: nowMs, kind: "hold", time: guanianPlan.item?.time || "", by: "cloud", note, until: untilMs, blocked: false });
         await rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}`, {
           method: "PATCH",
           body: JSON.stringify({ status: "pending", execute_at: new Date(untilMs).toISOString(), result_note: `hold: ${note}`.slice(0, 300), updated_at: new Date().toISOString() }),

@@ -500,8 +500,8 @@ function chatExcerpt(msgs: { role: string; c: string }[], maxLines: number): str
     (m.role === "user" ? "我：" : "TA：") + (m.c.length > 200 ? m.c.slice(0, 200) + "…" : m.c));
 }
 // 判断时回看几句：App 设置寄在 context.judgeLines，越界的值一律按默认算
-function judgeLinesOf(context: { judgeLines?: unknown }): number {
-  const n = Math.round(Number(context.judgeLines));
+function judgeLinesOf(value: unknown): number {
+  const n = Math.round(Number(value));
   return Number.isFinite(n) && n >= 1 && n <= 60 ? n : 24;
 }
 function unansweredStreak(msgs: { role: string; t: number }[], nowMs: number): number {
@@ -718,7 +718,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
       const mirrorResponse = await rest(
         `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
         + `&character_id=eq.${encodeURIComponent(characterId)}`
-        + `&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context) + 20}`,
+        + `&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context.judgeLines) + 20}`,
       );
       const mirrorRows = mirrorResponse.ok ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse() : [];
       const chat = mirrorRows
@@ -727,7 +727,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
         .filter(m => m.c)
         .sort((a, b) => a.t - b.t);
       const streak0 = unansweredStreak(chat, nowMs);
-      const lines = chatExcerpt(chat, judgeLinesOf(context));
+      const lines = chatExcerpt(chat, judgeLinesOf(context.judgeLines));
       chatUsed = lines.length;
       if (lines.length) log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
       const candRows = cands.map(c => ({ time: c.time, justFinished: c.source, mood: c.mood || "", energy: guanianNow(day, c.fireAt, settings.quietStart, settings.quietEnd).energy }));
@@ -935,9 +935,12 @@ Deno.serve(async (req: Request) => {
   const day = context.day && typeof context.day === "object" ? context.day : null;
   const selfUsed = Number(context.selfUsed) || 0;
   let selfReason = "";
+  let budgetTz = 0;
   const blocked = await (async (): Promise<string> => {
     if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < gate("gateGapMin") * 60_000) return "离上次裁决还不够久";
-    const over = usageExceeded(await usageBudget(rest, userId));
+    const budget = await usageBudget(rest, userId);
+    budgetTz = budget.tz;
+    const over = usageExceeded(budget);
     if (over) return over;
     if ((plan.recheck_count || 0) >= gate("gateDailyCap")) return "今天的裁决次数用完了";
     if (!canJudge && !canImpulse) {
@@ -1075,7 +1078,7 @@ Deno.serve(async (req: Request) => {
     const mirrorResponse = await rest(
       `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
       + `&character_id=eq.${encodeURIComponent(characterId)}`
-      + `&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context)}`,
+      + `&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context.judgeLines)}`,
     );
     const mirrorRows = mirrorResponse.ok
       ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse()
@@ -1158,7 +1161,7 @@ Deno.serve(async (req: Request) => {
       });
       if (!response.ok) return;
       const judgeData = await response.json();
-      await usageAdd(rest, userId, (await usageBudget(rest, userId)).tz, "cloud-recheck", template.request.providerKind, judgeData);
+      await usageAdd(rest, userId, budgetTz, "cloud-recheck", template.request.providerKind, judgeData);
       judgeText = extractResponseText(template.request.providerKind, judgeData);
     } catch {
       return;

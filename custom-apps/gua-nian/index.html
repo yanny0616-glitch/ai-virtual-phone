@@ -1153,7 +1153,7 @@
     if (!owns(cx)) return; // 只读的那台别把自己的计划盖到管事那台的行上
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
-      await cloudFetch("recheck-plan", {
+      const r = await cloudFetch("recheck-plan", {
         method: "POST",
         body: JSON.stringify({
           characterId: cx.character.id,
@@ -1168,6 +1168,9 @@
           })),
         }),
       });
+      if (r && Array.isArray(r.dropped) && r.dropped.length) {
+        await log(cx, "云端复核：" + r.dropped.join("、") + " 太大没存下，云端这部分会失效（忙与睡、到点状态、云端生成）");
+      }
     } catch (e) { await log(cx, "云端复核：计划上传失败（不影响本地）——" + (e && e.message || e)); }
   }
   /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
@@ -1227,11 +1230,15 @@
           anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
           kitAt: Date.now(),
         };
-        await cloudFetch("recheck-plan", {
+        const r = await cloudFetch("recheck-plan", {
           method: "POST",
           body: JSON.stringify({ characterId: cx.character.id, planDate: date, sessionId: "", resetDecisions: true, context: ctx, items: [] }),
         });
-        await log(cx, "云端生成：" + date + " 的原料已寄到云端，到 " + at + " 由云端生成");
+        if (r && Array.isArray(r.dropped) && r.dropped.length) {
+          await log(cx, "云端生成：" + date + " 的 " + r.dropped.join("、") + " 太大没存下，那天云端生成不了");
+        } else {
+          await log(cx, "云端生成：" + date + " 的原料已寄到云端，到 " + at + " 由云端生成");
+        }
       } catch (e) { await log(cx, "云端生成：" + date + " 的原料上传失败——" + (e && e.message || e)); }
     }
   }
@@ -1359,6 +1366,10 @@
         w.act = true;
         w.delivery = "push"; w.reason = "";
         if (ci) {
+          // 本地这条要是自己点亮过，旧预约得先撤：下面一行覆盖掉 wakeId 就再也找不到它了
+          if (w.wakeId && ci.wakeId && w.wakeId !== ci.wakeId) {
+            try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ }
+          }
           w.wakeId = ci.wakeId || ""; w.fireAt = ci.fireAt || w.fireAt;
           w.intent = ci.intent || w.intent; w.why = ci.why || w.why;
           w.sem = ci.sem || w.sem; w.topic = ci.topic || w.topic;
@@ -1928,7 +1939,7 @@
       const since = cx.plan.recheckAt || cx.plan.plannedAt || 0;
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
-      const fresh = chat.filter((m) => m.t > since);
+      const fresh = chat.filter((m) => m.role === "user" && m.t > since);
       const streak = unansweredStreak(chat);
       const cooling = S.settings.maxUnanswered > 0 && streak >= S.settings.maxUnanswered;
       if (!fresh.length && !cooling) { cx._planLock = false; return; } // 没有新信息，维持原判断
