@@ -132,6 +132,17 @@
   .tag.in { color: var(--in); }
   .tag.out { color: var(--out); }
   .tag.cache { color: var(--cache); }
+  .pager {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-top: 10px; padding: 0 2px;
+  }
+  .pager span { font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .pager button {
+    border: 1px solid var(--panel-line); background: var(--panel); color: var(--text);
+    font: inherit; font-size: 13px; padding: 7px 16px; border-radius: 10px;
+  }
+  .pager button:disabled { opacity: .35; }
+  .pager button:active:not(:disabled) { background: var(--panel-2); }
   .tag.fail { color: var(--fail); background: color-mix(in srgb, var(--fail) 15%, transparent); font-weight: 600; }
   .card.fail .v { color: var(--fail); }
   .row .calls .fx { color: var(--fail); font-weight: 600; }
@@ -218,6 +229,8 @@
 (function () {
   "use strict";
 
+  var LOG_PAGE_SIZE = 20;
+
   // 来源名由宿主随 readDaily / readLogs 下发（state.sourceNames），这里不再自带映射表：
   // 宿主新增内置 APP、用户装了新的自定义 APP，名字都能自动跟上。
   function sourceLabel(key) {
@@ -233,6 +246,7 @@
     logFilterSource: "",
     logFailedOnly: false,
     sourceNames: {},   // 宿主给的 appId -> 显示名
+    logPage: 0,
     daysData: [],
     logs: [],
     logTotal: 0,
@@ -518,8 +532,12 @@
         '</div></div>';
       return;
     }
+    var pageCount = Math.max(1, Math.ceil(state.logs.length / LOG_PAGE_SIZE));
+    if (state.logPage > pageCount - 1) state.logPage = pageCount - 1;
+    var pageLogs = state.logs.slice(state.logPage * LOG_PAGE_SIZE, (state.logPage + 1) * LOG_PAGE_SIZE);
+
     var html = '<div class="rows">';
-    state.logs.forEach(function (log) {
+    pageLogs.forEach(function (log) {
       var u = log.usage || {};
       var who = log.characterName || "未标注";
       html += '<button class="log" data-id="' + esc(log.id) + '">' +
@@ -538,13 +556,28 @@
         '</button>';
     });
     html += '</div>';
-    if (state.logTotal > state.logs.length) {
-      html += '<p class="sec" style="margin:8px 0 0 2px">共 ' + state.logTotal + ' 条，显示最近 ' + state.logs.length + ' 条</p>';
+    if (pageCount > 1) {
+      html += '<div class="pager">' +
+        '<button data-page="prev"' + (state.logPage === 0 ? " disabled" : "") + '>上一页</button>' +
+        '<span>第 ' + (state.logPage + 1) + ' / ' + pageCount + ' 页 · 共 ' + state.logs.length + ' 条</span>' +
+        '<button data-page="next"' + (state.logPage >= pageCount - 1 ? " disabled" : "") + '>下一页</button>' +
+        '</div>';
+    } else {
+      html += '<p class="sec" style="margin:8px 0 0 2px">共 ' + state.logs.length + ' 条</p>';
     }
     el("logs-body").innerHTML = html;
 
     Array.prototype.forEach.call(document.querySelectorAll(".log"), function (btn) {
       btn.addEventListener("click", function () { openDetail(btn.getAttribute("data-id")); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".pager button"), function (btn) {
+      btn.addEventListener("click", function () {
+        state.logPage += btn.getAttribute("data-page") === "next" ? 1 : -1;
+        renderLogs();
+        // 翻页后回到列表顶部，否则停在上一页的滚动位置，像什么都没发生
+        var body = el("logs-body");
+        if (body && body.scrollIntoView) body.scrollIntoView({ block: "start" });
+      });
     });
   }
 
@@ -635,9 +668,10 @@
   }
 
   function loadLogs() {
+    state.logPage = 0;
     renderLogsFilter();
     el("logs-body").innerHTML = '<div class="rows"><div class="empty-note">读取中…</div></div>';
-    var payload = { limit: 100 };
+    var payload = { limit: 200 };
     if (state.logFilterCharacter) {
       if (state.logFilterCharacter.indexOf("name:") === 0) payload.characterName = state.logFilterCharacter.slice(5);
       else payload.characterId = state.logFilterCharacter;
