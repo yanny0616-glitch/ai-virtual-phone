@@ -44,8 +44,13 @@ const MAX_API_LOGS_CAP = 500;
 // 工坊环容量：只有答疑引擎写入，量小，维持原值。
 const MAX_QA_API_LOGS = 50;
 // 单环序列化字符预算：超预算时从最旧开始丢弃，控制 IndexedDB 常驻体积与序列化开销。
-// 按条数等比放大，否则用户把容量调到 500 也会被 2MB 预算提前砍回一百多条。
-const API_LOG_CHARS_PER_ENTRY = Math.floor(2 * 1024 * 1024 / DEFAULT_API_LOGS);
+// 按条数等比放大，否则用户把容量调到 500 也会被预算提前砍回一百多条；
+// 每条的份额按 upstream 的 8MB/150 算——特调对局一次调用带整段历史，单条逼近 100K，
+// 份额小了就把普通聊天、记忆总结这些小记录全挤出去。
+// 但总量仍封在 8MB：每次 push 都要把整环 parse/stringify 一遍，再大写放大就压不住了，
+// 所以容量调到 500 只是让小记录能存满 500 条，不等于预算跟着翻到 26MB。
+const API_LOG_CHARS_PER_ENTRY = Math.floor(8 * 1024 * 1024 / DEFAULT_API_LOGS);
+const MAX_API_LOGS_SERIALIZED_CHARS = 8 * 1024 * 1024;
 const MAX_QA_LOGS_SERIALIZED_CHARS = 1024 * 1024;
 // 记忆总结类调用的完整 prompt 动辄几十 KB，写日志前先截断，控制每次 push 的 parse/stringify 写放大与常驻体积。
 const MAX_LOG_MESSAGE_CHARS = 4000;
@@ -165,7 +170,7 @@ export function setApiLogCapacity(value: number): number {
         kvSet(API_LOG_CAPACITY_KEY, String(next));
         const logs = _loadLogs(API_LOGS_KEY);
         if (logs.length > next) {
-            _saveLogs(API_LOGS_KEY, trimLogsForStorage(logs, next, next * API_LOG_CHARS_PER_ENTRY));
+            _saveLogs(API_LOGS_KEY, trimLogsForStorage(logs, next, Math.min(MAX_API_LOGS_SERIALIZED_CHARS, next * API_LOG_CHARS_PER_ENTRY)));
         }
     } catch { /* 存不下就维持原样，读的时候会退回默认值 */ }
     return next;
@@ -179,7 +184,7 @@ export function pushApiLog(entry: Omit<DebugInfo, "id" | "timestamp">): void {
     const isQa = entry.channel === "qa";
     const key = isQa ? QA_LOGS_KEY : API_LOGS_KEY;
     const maxCount = isQa ? MAX_QA_API_LOGS : getApiLogCapacity();
-    const maxSerializedChars = isQa ? MAX_QA_LOGS_SERIALIZED_CHARS : maxCount * API_LOG_CHARS_PER_ENTRY;
+    const maxSerializedChars = isQa ? MAX_QA_LOGS_SERIALIZED_CHARS : Math.min(MAX_API_LOGS_SERIALIZED_CHARS, maxCount * API_LOG_CHARS_PER_ENTRY);
     // 日志环是定长的，按天的用量必须在写日志时就记下来，不能靠翻日志累加。
     recordApiUsage({
         model: entry.model,

@@ -431,9 +431,9 @@
   → `usage.getSettings` 的 `logChars`）。其中两处值得记住：
   APP 里 `AiPhone.usage.xxx` 必须先判 `AiPhone.usage` 本身存在，否则老宿主上整页白屏；
   `usage.readLogs` 不能逐条 `resolveUsageSourceName`，那会把整个已装 APP 大对象解析 N 次
-- ⚠️ **待定**：容量选 500 时序列化预算约 6.7MB，每次模型调用都要整环写一次 IndexedDB。
-  要不要压个绝对天花板、或者干脆砍掉 500 这一档，等实测占用出来再定
-  （设置页那行「约 X MB / 平均 Y 字符/条」就是为这个加的）
+- 合 upstream `9b231cf`（预算 2MB→8MB）时把两边意图并起来：每条份额按 8MB/150 算
+  （特调一次调用带整段历史，单条逼近 100K，份额小了会把小记录全挤掉），
+  总量仍封在 8MB——每次 push 都要把整环 parse/stringify 一遍，容量 500 时不能真让预算翻到 26MB
 
 ## X. 宿主杂项修复（2026-09-02 ~ 09-03）
 
@@ -459,3 +459,7 @@
 - `lib/moments-storage.ts` `addMomentPost` 接受 `createdAt` 回填过去的时间并保持倒序；`updateScheduleAfterPost` 的 `lastPostTime` 取较大者
 - SDK 外壳与一致性脚本（`scripts/check-custom-app-sdk-consistency.mjs`）补 `moments` / `variables` 命名空间，制作说明加了一节
 - `chat-plugins/moments-rhythm.js` 1.0.0：变量池里有挂念写的 `moments`（3 天内）就让位，避免两颗骰子各发各的
+- 合 upstream 时清掉「状态栏补写」提示的残留（`components/mixology/mixology-game.tsx`）：
+  上游 `9cd4fd6` 移除了补写请求、`60b0122` Revert 了 `mix.draft`，但 `MIX_REPAIR_EVENT` /
+  `MixRepairEventDetail` 的 import 和那个 toast 留在了组件里，指向 engine 里已经没有的导出。
+  他们 `ignoreBuildErrors: true` 所以没炸；我们跑 tsc 会报，删掉
