@@ -33,6 +33,8 @@ type PlanItem = {
   origFireAt?: number;
   /** 这个念头的保质期：过了就不新鲜了，改约只能挪到它之前 */
   until?: number;
+  /** 由头种类：plan 早上定的 / extra 聊天里冒的 / thread done miss echo quiet 自发五种。回音率按它归类 */
+  kind?: string;
 };
 type PlanContext = {
   mood?: string;
@@ -55,6 +57,15 @@ type PlanContext = {
   impulseMode?: number;
   /** 多久没联系算「安静太久」（分钟） */
   selfSilenceMin?: number;
+  /** 断了几天算「想念」；0=关。每段断联只掷一次骰子，掷过的记 missKey（用户最后一句的时间戳），App 跨天带着 */
+  missDays?: number;
+  missKey?: number;
+  /** 昨天的余韵：1=开。每天只掷一次，掷过的记 echoKey（本地日序号） */
+  echoOn?: number;
+  echoKey?: number;
+  /** 各类由头的回音账 { kind: [发过几次, 回了几次] }，App 跨天带着；fbSeen 是已经记过账的 wakeId */
+  fb?: Record<string, [number, number]>;
+  fbSeen?: string[];
   /** 改约的总上限，和「忙就押后」共用同一个设置 */
   busyMaxHoldMin?: number;
   selfUsed?: number;
@@ -98,6 +109,74 @@ function affectionLine(aff: { tier?: string; relation?: string } | null | undefi
   if (!aff || (!aff.tier && !aff.relation)) return "";
   return `你对用户：${aff.tier || "说不上"}；两人现在的关系：${aff.relation || "没定"}。想不想找TA、找了说什么，都按这个分寸来。`;
 }
+// 自发起念的由头分五种，各有口径：想念不催回复、余韵不求回应、惦记像随口问起、安静太久才是搭话
+const SELF_KIND: Record<string, string> = { thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久" };
+// 这类由头过去的回音，给模型一句实话：回得少就少发、发也更轻
+function fbLine(fb: FbBook | undefined, kind: string): string {
+  const rec = fb && Array.isArray(fb[kind]) ? fb[kind] : [0, 0];
+  const sent = Number(rec[0]) || 0, replied = Number(rec[1]) || 0;
+  if (sent < 3) return "";
+  return `这类由头你之前发过 ${sent} 次，用户回了 ${replied} 次${replied / sent < 0.34 ? "——TA不太接这种话，要么不发，要么说得更轻" : ""}。`;
+}
+function selfBrief(kind: string, reason: string): string {
+  if (kind === "miss") return `没有新对话。${reason}，最后一句是用户说的，不是你发了没人回。按你的性子和现在的关系想一想会不会有点想TA——本来就不主动的人、关系还生疏的，就不发。要发也只轻轻带一句想念或近况，不问「怎么不理我」，不催TA回。`;
+  if (kind === "echo") return `没有新对话。由头是${reason}——从昨天的对话里挑一件轻松的小事（吃的、看的、随口说过的），像忽然想起来那样顺手提一句，不要求TA回应；昨天的事已经过去或已经说清楚了就别提，别翻旧账、别追问结果。`;
+  if (kind === "thread") return `没有新对话。由头是心里挂着的事：${reason}。像朋友随口问起，不像提醒或查岗；上面聊到的事已经了了就写 []。`;
+  return `没有新对话。由头是你自己这边的事：${reason}。想一想此刻的你会不会想找用户说点什么——分享刚发生的、忽然想起TA、单纯想搭句话都行；上面聊到的事已经了了就写 []。`;
+}
+// 由头的分量：三分值（要紧 / 温度 / 急迫）合成 0–1，再乘各自的时间曲线和回音率。
+// 曲线不是统一衰减：刚忙完几小时内掉光，约定靠近到点反而涨，想念断得越久越重，安静太久是平的
+const KIND_VAL: Record<string, [number, number, number]> = {
+  thread: [0.7, 0.6, 0.7], done: [0.6, 0.5, 0.4], miss: [0.6, 0.9, 0.3], echo: [0.4, 0.7, 0.2],
+  quiet: [0.3, 0.5, 0.2], extra: [0.7, 0.6, 0.6], plan: [0.5, 0.5, 0.4],
+};
+type FbBook = Record<string, [number, number]>;
+// 回音率修正：发过不到 3 次不算数；之后按（回了+1）/（发了+2）落在 0.6–1.4 倍
+function fbMod(fb: FbBook | undefined, kind: string): number {
+  const rec = fb && Array.isArray(fb[kind]) ? fb[kind] : [0, 0];
+  const sent = Number(rec[0]) || 0, replied = Number(rec[1]) || 0;
+  if (sent < 3) return 1;
+  return Math.max(0.6, Math.min(1.4, 0.6 + 0.8 * (replied + 1) / (sent + 2)));
+}
+function impulseValue(kind: string, curve: number, fb: FbBook | undefined): number {
+  const [sal, warm, urg] = KIND_VAL[kind] || KIND_VAL.quiet;
+  return Math.max(0, Math.min(1, (sal + urg * 0.9 + warm * 0.7) / 2.6 * Math.max(0, Math.min(1, curve)) * fbMod(fb, kind)));
+}
+// 额度快用完时只让分量够的由头过：剩 2 个要 0.45，剩 1 个要 0.65，更多不设槛
+function valueFloor(remaining: number): number {
+  return remaining <= 1 ? 0.65 : remaining === 2 ? 0.45 : 0;
+}
+// 记回音账：点亮过的时刻到点 3 小时后看镜像——那之后TA真开过口才算「发过」，用户在 3 小时内接了话才算「回了」。
+// 每个 wakeId 只记一次，不调模型
+async function feedbackRoll(
+  rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, characterId: string,
+  items: PlanItem[], context: PlanContext, nowMs: number,
+): Promise<{ fb: FbBook; fbSeen: string[] } | null> {
+  const seen = Array.isArray(context.fbSeen) ? context.fbSeen.map(String) : [];
+  const fb: FbBook = {};
+  for (const [k, v] of Object.entries(context.fb || {})) if (Array.isArray(v)) fb[k] = [Number(v[0]) || 0, Number(v[1]) || 0];
+  const due = items.filter(it => it.act && it.wakeId && Number(it.fireAt) + 3 * 3600_000 <= nowMs && !seen.includes(it.wakeId));
+  if (!due.length) return null;
+  for (const it of due.slice(0, 4)) {
+    const from = Number(it.fireAt), kind = String(it.kind || "plan");
+    const resp = await rest(
+      `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
+      + `&character_id=eq.${encodeURIComponent(characterId)}`
+      + `&message_at=gt.${encodeURIComponent(new Date(from).toISOString())}`
+      + `&message_at=lte.${encodeURIComponent(new Date(from + 6 * 3600_000).toISOString())}`
+      + "&select=role,message_at&order=message_at.asc&limit=60",
+    );
+    if (!resp.ok) continue;
+    const rows = await resp.json() as { role: string; message_at: string }[];
+    seen.push(it.wakeId);
+    const sentAt = Date.parse(rows.find(r => r.role !== "user")?.message_at || "");
+    if (!Number.isFinite(sentAt)) continue; // 到点没发出去（押后作罢、发送前拦下），不算账
+    const replied = rows.some(r => r.role === "user" && Date.parse(r.message_at) > sentAt && Date.parse(r.message_at) <= sentAt + 3 * 3600_000);
+    const rec = fb[kind] || [0, 0];
+    fb[kind] = [rec[0] + 1, rec[1] + (replied ? 1 : 0)];
+  }
+  return { fb, fbSeen: seen.slice(-60) };
+}
 // ── 惦记账本（App index.html 同名函数的 tz 算术版；改一处要同步另一处）
 const THREAD_KIND: Record<string, string> = { topic: "话头", promise: "约定", date: "日子" };
 function threadAlive(t: Thread, nowMs: number, days: number): boolean {
@@ -132,10 +211,54 @@ function liveThreads(context: PlanContext, nowMs: number): Thread[] {
   const days = Number(context.threadDays) || 3;
   return (Array.isArray(context.threads) ? context.threads : []).filter(t => t && !t.done && threadAlive(t, nowMs, days));
 }
-function threadLines(context: PlanContext, nowMs: number, tz: number): string[] {
-  return liveThreads(context, nowMs).slice(0, 12).map(t => `[${t.id}] ${THREAD_KIND[t.kind] || "话头"}·${t.text}${threadWhen(t, nowMs, tz) ? "（" + threadWhen(t, nowMs, tz) + "）" : ""}`);
+// 话头的节奏（App 同名函数同步）：刚记下 4 小时内不提，提过一次 36 小时内不再提
+function threadPace(t: Thread, nowMs: number): string {
+  if (t.kind === "topic" && nowMs - (Number(t.since) || 0) < 4 * 3600_000) return "刚记下，先别提";
+  if (/said:/.test(String(t.nudge || "")) && nowMs - (Number(t.at) || 0) < 36 * 3600_000) return "刚提过，先别再提";
+  return "";
 }
-const THREAD_TASK = "惦记账本：上面带 [id] 的是你心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id。都没有就给空数组。";
+function threadLines(context: PlanContext, nowMs: number, tz: number): string[] {
+  return liveThreads(context, nowMs).slice(0, 12).map(t => {
+    const notes = [threadWhen(t, nowMs, tz), threadPace(t, nowMs)].filter(Boolean);
+    return `[${t.id}] ${THREAD_KIND[t.kind] || "话头"}·${t.text}${notes.length ? "（" + notes.join("，") + "）" : ""}`;
+  });
+}
+const THREAD_TASK = "惦记账本：上面带 [id] 的是你心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id：用户说某件事做完了、办好了、不做了、不用管了，对应那条必须写进 settle，别让它继续挂着。都没有就给空数组。";
+// 用户一句话把约定 / 话头了结：只认稳的词，宁可漏（漏的下一轮模型 settle 兜底）也不误伤。
+// 约定认「做完」和「作废」，话头只认「作废」，日子不碰（到日子自己过期）
+const DONE_WORDS = ["好了", "搞定", "解决了", "完成了", "弄完了", "做完了", "办好了", "交了", "买到了", "看完了", "结束了"];
+const DROP_WORDS = ["不用了", "算了", "取消", "不去了", "不做了", "不需要了", "别提了", "不聊了", "不说这个了"];
+const NEG_BEFORE = /(还没|没有|没能|不算|别)[^，。！？]{0,4}$/;
+const TOKEN_STOP = /帮我|记得|提醒|一下|这个|那个|然后|今天|明天|后天|一起|我们|你们|已经|可以|就是|什么/g;
+function wordTokens(text: string): Set<string> {
+  const out = new Set<string>();
+  const cleaned = String(text || "").replace(TOKEN_STOP, " ");
+  for (const run of cleaned.match(/[\u4e00-\u9fff]{2,}/g) || []) for (let i = 0; i + 2 <= run.length; i += 1) out.add(run.slice(i, i + 2));
+  for (const w of cleaned.match(/[A-Za-z0-9_]{2,}/g) || []) out.add(w.toLowerCase());
+  return out;
+}
+function settleByWords(threads: Thread[], msgs: string[], nowMs: number): { id: string; text: string; how: string; said: string }[] {
+  const out: { id: string; text: string; how: string; said: string }[] = [];
+  const live = threads.filter(t => t && !t.done && t.text && t.kind !== "date");
+  for (const raw of msgs) {
+    const msg = String(raw || "").trim();
+    if (!msg || msg.length > 60 || /[吗呢？?]\s*$/.test(msg)) continue; // 长句和问句都不猜
+    const hit = (words: string[]) => words.find(w => { const i = msg.indexOf(w); return i >= 0 && !NEG_BEFORE.test(msg.slice(0, i)); });
+    const drop = hit(DROP_WORDS), done = drop ? "" : hit(DONE_WORDS);
+    if (!drop && !done) continue;
+    const pool = live.filter(t => !out.some(o => o.id === t.id) && (drop || t.kind === "promise"));
+    if (!pool.length) continue;
+    const toks = wordTokens(msg);
+    let match = pool.filter(t => [...wordTokens(t.text)].some(k => toks.has(k)));
+    // 撞不上词：只有一条活着、这句又短得像在直接回应时才认；撞上多条也不猜
+    if (!match.length && pool.length === 1 && msg.length <= 8) match = pool;
+    if (match.length !== 1) continue;
+    const t = match[0];
+    t.done = true; t.at = nowMs; t.by = "words";
+    out.push({ id: t.id, text: t.text, how: drop ? "作废" : "完成", said: drop || done || "" });
+  }
+  return out;
+}
 // 模型给的时间：2026-09-10 15:00 / 09-10 / 9月10日 / 15:00 / 明天 15:00，按 tz 折成 UTC ms
 function parseWhen(when: unknown, nowMs: number, tz: number): number {
   const w = String(when || "").trim();
@@ -955,7 +1078,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
         const about = String(x?.about || "想起用户").slice(0, 12);
         const item: Record<string, unknown> = {
           time: hm, fireAt: ms, until: ums && ums > ms ? Math.min(ums, ms + 6 * 3600_000) : ms + 90 * 60_000,
-          source: about, act: true,
+          source: about, act: true, kind: "plan",
           why: String(x?.why || ""), intent: String(x?.intent || ""), delivery: "", reason: "", wakeId: "",
           sem: String(x?.sem || ""), topic: String(x?.topic || ""),
           score: calcScore(ms, armedCount, streak0, prevArmed(ms), tz, settings),
@@ -1124,21 +1247,32 @@ Deno.serve(async (req: Request) => {
   const selfUsed = Number(context.selfUsed) || 0;
   let selfReason = "";
   let threadNudged: { id: string; mark: string; reason: string } | null = null;
+  let selfKind = "";
+  // 想念和余韵的骰子各只掷一次，掷过的键要落库——就算这轮被拦下也要记，否则每 5 分钟重掷
+  const selfMarks: Record<string, number> = {};
+  let echoRows: { role: string; content: string; message_at: string }[] = [];
   let budgetTz = 0;
   // 生活轮在门禁之前：不花模型、不看有没有新聊天。掷完的标记和发圈账直接落库——
   // 不走 touch，last_recheck_at 是裁决的印记，掷骰子不该让门禁以为刚判过。
   const life = lifeRoll(context, nowMs);
-  if (life) {
-    Object.assign(context, life.patch);
-    if (life.post) priorDecisions.push({ at: nowMs, kind: "post", note: `想发条朋友圈——${life.post.hint}`, by: "cloud" });
+  if (life) Object.assign(context, life.patch);
+  // 回音账同样在门禁之前记，也不调模型
+  const fbRoll = await feedbackRoll(rest, userId, characterId, items, context, nowMs).catch(() => null);
+  if (fbRoll) Object.assign(context, fbRoll);
+  if (life || fbRoll) {
+    if (life?.post) priorDecisions.push({ at: nowMs, kind: "post", note: `想发条朋友圈——${life.post.hint}`, by: "cloud" });
     await rest(planFilter, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ context, ...(life.post ? { decisions: priorDecisions.slice(-60) } : {}) }),
+      body: JSON.stringify({ context, ...(life?.post ? { decisions: priorDecisions.slice(-60) } : {}) }),
     }).catch(() => undefined);
-    if (life.post) console.log("[push-recheck] 生活轮起意发圈：" + life.post.hint);
+    if (life?.post) console.log("[push-recheck] 生活轮起意发圈：" + life.post.hint);
   }
-  const blocked = await (async (): Promise<string> => {
+  // 由头的分量曲线，门禁里各由头选定后算，额度紧时拿它卡槛
+  let selfCurve = 1;
+  // 用户一句「好了 / 算了」直接了结的账本条目，拦下来也要落库
+  let wordSettled: { id: string; text: string; how: string; said: string }[] = [];
+  let blocked = await (async (): Promise<string> => {
     if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < gate("gateGapMin") * 60_000) return "离上次裁决还不够久";
     const budget = await usageBudget(rest, userId);
     budgetTz = budget.tz;
@@ -1158,9 +1292,12 @@ Deno.serve(async (req: Request) => {
       + `&character_id=eq.${encodeURIComponent(characterId)}`
       + "&role=eq.user"
       + `&message_at=gt.${encodeURIComponent(new Date(sinceMs).toISOString())}`
-      + "&select=message_at&order=message_at.desc&limit=20",
+      + "&select=content,message_at&order=message_at.desc&limit=20",
     );
-    const freshRows = freshResponse.ok ? await freshResponse.json() as { message_at: string }[] : [];
+    const freshRows = freshResponse.ok ? await freshResponse.json() as { content?: string; message_at: string }[] : [];
+    if (Array.isArray(context.threads) && freshRows.length) {
+      wordSettled = settleByWords(context.threads, freshRows.slice().reverse().map(r => String(r.content || "")), nowMs);
+    }
     if (freshRows.length < Math.max(1, gate("gateMinMsgs"))) {
       const quiet = "上次裁决之后你没说几句";
       if (!canImpulse || !day || gate("selfImpulseCap") <= 0) return quiet;
@@ -1195,27 +1332,89 @@ Deno.serve(async (req: Request) => {
       }
       // 由头三（最具体，先看）：账本里的约定快到点 / 刚过点、到日子了
       const nudge = threadNudge(context, nowMs, Number(day.tz) || budgetTz || 0);
-      if (nudge) { selfReason = nudge.reason; threadNudged = nudge; return ""; }
+      if (nudge) {
+        selfReason = nudge.reason; threadNudged = nudge; selfKind = "thread";
+        const t = liveThreads(context, nowMs).find(x => x.id === nudge.id);
+        const due = t ? threadDueMs(t, nowMs, Number(day.tz) || budgetTz || 0) : 0;
+        // 约定：越近越重，过点 3 小时后回落；日子：当天满分，前后减半
+        selfCurve = !due ? 1 : t?.kind === "date" ? (Math.abs(due - nowMs) <= 12 * 3600_000 ? 1 : 0.5)
+          : due > nowMs ? 0.6 + 0.4 * (1 - Math.min(1, (due - nowMs) / (3 * 3600_000))) : Math.max(0.3, 1 - (nowMs - due) / (3 * 3600_000) * 0.7);
+        return "";
+      }
+      // 下面几个由头都先看「谁最后说的」：TA自己起的念头发出去没人回，一律不追——
+      // 追一句没人回的话是催回复，不是想念。正常一问一答后停下来的不算
+      const tailResponse = await rest(
+        `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
+        + `&character_id=eq.${encodeURIComponent(characterId)}`
+        + "&select=role,message_at&order=message_at.desc&limit=40",
+      );
+      const tail = tailResponse.ok ? await tailResponse.json() as { role: string; message_at: string }[] : [];
+      const lastAnyMs = Date.parse(tail[0]?.message_at || "");
+      const lastUserMs = Date.parse(tail.find(r => r.role === "user")?.message_at || "");
+      const lastMineMs = Date.parse(tail.find(r => r.role !== "user")?.message_at || "");
+      // 「没人回」的判据：TA最后开口在用户之后，且那句要么对得上今天某个点亮的时刻，
+      // 要么离用户上一句超过半小时——正常回复都是紧跟着用户那句的，隔很久才说的只能是主动找的
+      const hanging = Number.isFinite(lastMineMs) && (!Number.isFinite(lastUserMs) || lastMineMs > lastUserMs)
+        && (!Number.isFinite(lastUserMs) || lastMineMs - lastUserMs > 30 * 60_000
+          || items.some(it => it.act && Number(it.fireAt) <= nowMs && Number(it.fireAt) > lastUserMs));
+      if (hanging) return `${quiet}，上一个念头发出去还没回音`;
+      const tzM = Number(day.tz) || 0;
+      const daytime = now.hm >= "10:00" && now.hm < "21:30";
+      const absentDays = Number.isFinite(lastUserMs) ? (nowMs - lastUserMs) / 86_400_000 : 0;
+      // 由头四：断了好几天。每段断联（以用户最后一句为界）只掷一次骰子，概率随这类念头的回音率涨落
+      const missDays = Number(context.missDays ?? 3);
+      if (missDays > 0 && daytime && absentDays >= missDays && absentDays <= 21 && Number(context.missKey) !== lastUserMs) {
+        selfMarks.missKey = lastUserMs;
+        if (Math.random() < Math.min(0.9, 0.56 * fbMod(context.fb, "miss"))) {
+          selfKind = "miss"; selfReason = `已经 ${Math.floor(absentDays)} 天没联系了`;
+          selfCurve = Math.min(1, 0.5 + absentDays / 14 * 0.5);
+          return "";
+        }
+      }
       // 由头一：上次裁决之后新开始了一条日程（严格模式还要求耗神/回血明显或有情绪余味）
-      const tzMs = (Number(day.tz) || 0) * 60_000;
+      const tzMs = tzM * 60_000;
       const sameLocalDay = Number.isFinite(lastRecheckMs)
         && Math.floor((lastRecheckMs + tzMs) / 86_400_000) === Math.floor((nowMs + tzMs) / 86_400_000);
       const sinceHM = sameLocalDay ? guanianNow(day, lastRecheckMs, qs, qe).hm : "00:00";
       const weighty = now.done && String(now.done.time) > sinceHM
         && (live || Math.abs(Number(now.done.cost) || 0) >= 15 || !!now.done.mood);
-      if (weighty) { selfReason = `刚${now.done!.title || "做完一件事"}`; return ""; }
-      // 由头二：双方都安静太久。要有过对话才算，从没聊过的不算「安静」
-      const lastAnyResponse = await rest(
-        `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
-        + `&character_id=eq.${encodeURIComponent(characterId)}`
-        + "&select=message_at&order=message_at.desc&limit=1",
-      );
-      const lastAny = lastAnyResponse.ok ? await lastAnyResponse.json() as { message_at: string }[] : [];
-      const lastAnyMs = Date.parse(lastAny[0]?.message_at || "");
-      const silentMs = Number.isFinite(lastAnyMs) ? nowMs - lastAnyMs : 0;
+      if (weighty) {
+        selfReason = `刚${now.done!.title || "做完一件事"}`; selfKind = "done";
+        // 事过 3 小时就不新鲜了
+        const endHM = String(now.done!.end || now.done!.time), m = /^(\d{1,2}):(\d{2})$/.exec(endHM);
+        const sinceMin = m ? (Number(now.hm.slice(0, 2)) * 60 + Number(now.hm.slice(3)) - (+m[1] * 60 + +m[2])) : 0;
+        selfCurve = Math.max(0, 1 - Math.max(0, sinceMin) / 180);
+        return "";
+      }
+      if (!Number.isFinite(lastAnyMs)) return quiet; // 从没聊过的不算「安静」
+      // 由头五：昨天的余韵。每天只掷一次；昨天要真聊过几句，TA上一句也已过了 8 小时
+      const localDay = Math.floor((nowMs + tzM * 60_000) / 86_400_000);
+      if (Number(context.echoOn ?? 1) === 1 && daytime && absentDays <= 7 && Number(context.echoKey) !== localDay
+        && (!Number.isFinite(lastMineMs) || nowMs - lastMineMs >= 8 * 3600_000)) {
+        const dayStart = localDay * 86_400_000 - tzM * 60_000;
+        const echoResponse = await rest(
+          `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
+          + `&character_id=eq.${encodeURIComponent(characterId)}`
+          + `&message_at=gte.${encodeURIComponent(new Date(dayStart - 86_400_000).toISOString())}`
+          + `&message_at=lt.${encodeURIComponent(new Date(dayStart).toISOString())}`
+          + "&select=role,content,message_at&order=message_at.desc&limit=40",
+        );
+        const rows = echoResponse.ok ? (await echoResponse.json() as typeof echoRows).reverse() : [];
+        const userSaid = rows.filter(r => r.role === "user").map(r => String(r.content || ""));
+        // 昨天聊得沉重的不拿来当轻松的余韵——那是该关心的事，让用户开口或走临时起念
+        const heavy = /低落|焦虑|难受|压力|紧张|失眠|疲惫|不舒服|担心|烦躁|委屈|害怕|心情不好|生病|发烧|吵架|分手/;
+        if (userSaid.length >= 3 && !userSaid.some(v => heavy.test(v))) {
+          selfMarks.echoKey = localDay;
+          if (Math.random() < Math.min(0.6, 0.24 * fbMod(context.fb, "echo"))) { echoRows = rows; selfKind = "echo"; selfReason = "忽然想起昨天聊过的一件小事"; return ""; }
+        }
+      }
+      // 由头二：双方都安静太久。断到「想念」那么久之后就不再按小时算安静，交给上面的骰子
+      if (missDays > 0 && absentDays >= missDays) return `${quiet}，断了 ${Math.floor(absentDays)} 天，这段只想念一次`;
+      const silentMs = nowMs - lastAnyMs;
       // 严格模式一段安静只起一次念；随用随判每过一个安静周期都可以再想一次
       if (silentMs >= silenceMs && (live || !Number.isFinite(lastRecheckMs) || lastRecheckMs < lastAnyMs + silenceMs)) {
         const mins = Math.round(silentMs / 60_000);
+        selfKind = "quiet";
         selfReason = mins >= 120 ? `已经 ${Math.round(mins / 60)} 小时没联系` : `已经 ${mins} 分钟没联系`;
         return "";
       }
@@ -1226,6 +1425,42 @@ Deno.serve(async (req: Request) => {
     if (freshMs > 0 && Number.isFinite(lastMsgMs) && nowMs - lastMsgMs < freshMs) return "你才刚说完，等一下再判";
     return "";
   })();
+
+  // 额度紧时按分量卡槛：低分由头别把最后一两个额度用掉，留给约定到点、临时冒出来的要紧事
+  if (!blocked && selfKind) {
+    const remaining = Number(context.quota ?? 3) - litCount;
+    const value = impulseValue(selfKind, selfCurve, context.fb);
+    if (value < valueFloor(remaining)) {
+      blocked = `额度只剩 ${remaining} 个，「${SELF_KIND[selfKind] || selfKind}」这种由头分量不够（${value.toFixed(2)}）`;
+      selfReason = ""; selfKind = ""; threadNudged = null;
+    }
+  }
+  if (wordSettled.length) {
+    // 出自这几条账本的待发时刻一并撤掉：预约标 cancelled，items 带乐观锁写回（被 App 改过就交给 App 那边合并时撤）
+    const cancelIds = new Set(wordSettled.map(w => w.id));
+    let touched = 0;
+    for (const it of items) {
+      if (!it.from || !cancelIds.has(it.from) || !it.act || Number(it.fireAt) <= nowMs + LEAD_MS) continue;
+      if (it.wakeId) {
+        await rest(`push_jobs?user_id=eq.${encodeURIComponent(userId)}&trigger_key=eq.${encodeURIComponent("timedwake:" + it.wakeId)}&status=eq.pending`, {
+          method: "PATCH", headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ status: "cancelled", result_note: "thread settled by words", updated_at: new Date().toISOString() }),
+        }).catch(() => undefined);
+      }
+      it.act = false; it.wakeId = ""; it.why = "这件事你说了结了"; touched += 1;
+      priorDecisions.push({ at: nowMs, time: it.time, kind: "recheck", note: `取消——${it.why}`, by: "cloud" });
+    }
+    for (const w of wordSettled) priorDecisions.push({ at: nowMs, kind: "settle", note: `你说「${w.said}」，${w.how}了「${w.text}」`, by: "cloud" });
+    await rest(
+      touched && plan.updated_at ? `${planFilter}&updated_at=eq.${encodeURIComponent(plan.updated_at)}` : planFilter,
+      { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ context: { ...context, ...selfMarks }, decisions: priorDecisions.slice(-60), ...(touched ? { items } : {}) }) },
+    ).catch(() => undefined);
+    console.log("[push-recheck] 按用户原话了结账本：" + wordSettled.map(w => w.text).join("、"));
+  } else if (Object.keys(selfMarks).length) {
+    Object.assign(context, selfMarks);
+    await rest(planFilter, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ context }) }).catch(() => undefined);
+  }
+  if (wordSettled.length) Object.assign(context, selfMarks);
 
   if (blocked) {
     // 拦截原因写回 decisions：不带 time，App 合并裁决时会跳过它，只当诊断用。
@@ -1358,14 +1593,15 @@ Deno.serve(async (req: Request) => {
       selfReason ? "最近和用户的对话（这之后没有新消息）：" : "刚刚和用户的对话：",
       chatLines || "（这段时间没有对话记录）",
       "",
+      selfKind === "echo" && echoRows.length
+        ? "昨天的对话：\n" + echoRows.map(row => `${row.role === "user" ? "用户" : characterName}（${hhmm(Date.parse(row.message_at), offsetMin)}）：${String(row.content || "").slice(0, 160)}`).join("\n") + "\n"
+        : "",
       judge ? "今天剩下的计划时刻：" : (selfReason ? "" : "今天排好的时刻都已经过点了，没有要重判的。"),
       judge ? planLines : "",
       "",
       threadsOn && threadLinesNow.length ? "你心里还挂着的事：\n" + threadLinesNow.join("\n") : "",
       selfReason
-        ? `没有新对话。由头是你自己这边的事：${selfReason}。想一想此刻的你会不会想找用户说点什么——`
-          + "分享刚发生的、忽然想起TA、单纯想搭句话都行；但不想说、或者上面聊到的事已经了了，就老实写 []，"
-          + "不要为了发而发。真要发的话时刻定在接下来 5 到 40 分钟之间，until 给这话的保质期（半小时到两三小时）。"
+        ? selfBrief(selfKind, selfReason) + fbLine(context.fb, selfKind) + "不想说就老实写 []，不要为了发而发。真要发的话时刻定在接下来 5 到 40 分钟之间，until 给这话的保质期（半小时到两三小时）。"
         : canJudge
         ? "根据刚才聊过的内容重新判断每个时刻：聊过的话题已经了了就别再提，"
           + "用户说了忙/情绪不好就收敛，聊到一半没说完或约好了要说的事可以点亮"
@@ -1591,8 +1827,9 @@ Deno.serve(async (req: Request) => {
         time,
         fireAt,
         until: exUms > fireAt ? Math.min(exUms, fireAt + 6 * 3600_000) : fireAt + 90 * 60_000,
-        source: `${selfReason ? "自发" : "临时"}·${String(one.about || (selfReason ? "想起你" : "未完话题")).slice(0, 10)}`,
+        source: `${selfReason ? "自发" : "临时"}·${String(one.about || (selfReason ? (SELF_KIND[selfKind] || "想起你") : "未完话题")).slice(0, 10)}`,
         act: true,
+        kind: selfReason ? selfKind : "extra",
         intent,
         why: String(one.why || "").slice(0, 200),
         sem: "",
@@ -1610,7 +1847,7 @@ Deno.serve(async (req: Request) => {
 
     nextItems.sort((a, b) => a.fireAt - b.fireAt);
     // 自发起念不管有没有起成都记一笔：既扣次数，也让 App 的诊断里看得到「TA想了想，没找你」
-    if (selfReason) applied.push({ at: Date.now(), kind: "self", note: `自发起念（${selfReason}）——${lit > litCount ? "起了一个念头" : "想了想，没找你"}`, by: "cloud" });
+    if (selfReason) applied.push({ at: Date.now(), kind: "self", note: `自发起念（${SELF_KIND[selfKind] ? SELF_KIND[selfKind] + "：" : ""}${selfReason}）——${lit > litCount ? "起了一个念头" : "想了想，没找你"}`, by: "cloud" });
     if (postDecision) applied.push(postDecision);
     const saved = await touch({
       items: nextItems,

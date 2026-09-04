@@ -71,10 +71,21 @@ const RECHECK_NUMERIC_CONTEXT_KEYS = [
   "presendMax", "presendTalkingMin", "presendGapMin",
   "busyHold", "busyBufferMin", "busyMaxHoldMin",
   "sleepMode", "sleepWakeProb",
-  "impulseMode", "selfSilenceMin", "threadDays",
+  "impulseMode", "selfSilenceMin", "threadDays", "missDays", "missKey", "echoOn", "echoKey",
   "momentsOn", "momentsWeekly", "momentsGapH", "momentsLast", "momentsWeekStart", "momentsWeekN", "momentsRollHour",
 ] as const;
 
+// 各类由头的回音账 { kind: [发过, 回了] }：只认小写字母键和两个非负整数
+function cleanFb(value: unknown): Record<string, [number, number]> {
+  const out: Record<string, [number, number]> = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [k, v] of Object.entries(value as Record<string, unknown>).slice(0, 12)) {
+    if (!/^[a-z]{1,12}$/.test(k) || !Array.isArray(v)) continue;
+    const sent = Math.max(0, Math.floor(Number(v[0]) || 0)), rep = Math.max(0, Math.floor(Number(v[1]) || 0));
+    out[k] = [Math.min(sent, 9999), Math.min(rep, sent)];
+  }
+  return out;
+}
 // 发朋友圈的起意：云端写、App 消费后原样带回没消费完的，最多 5 条
 function cleanOutbox(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
@@ -1027,6 +1038,7 @@ Deno.serve(async (request: Request) => {
             until: Number(it.until) || 0,
             origFireAt: Number(it.origFireAt) || 0,
             from: cleanText(it.from, 16).replace(/[^A-Za-z0-9_-]/g, ""),
+            kind: cleanText(it.kind, 12).replace(/[^a-z]/g, ""),
           };
         }).filter((it) => it.time && it.fireAt > 0);
         const rawContext = body.context && typeof body.context === "object"
@@ -1057,6 +1069,9 @@ Deno.serve(async (request: Request) => {
           affection: cleanAffection(rawContext.affection),
           threads: cleanThreads(rawContext.threads),
           outbox: cleanOutbox(rawContext.outbox),
+          fb: cleanFb(rawContext.fb),
+          fbSeen: (Array.isArray(rawContext.fbSeen) ? rawContext.fbSeen : []).slice(-60)
+            .map((v) => cleanText(v, 80).replace(/[^A-Za-z0-9._-]/g, "")).filter(Boolean),
           // 设备锁：这一天由哪台设备负责编排和预约（ownerName 只是给用户看的名字）
           owner: cleanText(rawContext.owner, 40).replace(/[^A-Za-z0-9_-]/g, ""),
           ownerName: cleanText(rawContext.ownerName, 40),

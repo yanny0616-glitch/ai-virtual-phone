@@ -1003,6 +1003,10 @@
     selfImpulseCap: 6,   // 没新聊天时每天最多几次自发起念（云端复核；0=关）
     impulseMode: 1,      // 0=早上一把定完  1=随用随判：编排不排念头，白天云端随时起
     selfSilenceMin: 120, // 多久没联系算「安静太久」（自发起念的由头之一）
+    missDays: 3,         // 断了几天算「想念」（0 关）。每段断联云端只掷一次骰子，掷过的键记在 missState 里跨天带着
+    echoOn: true,        // 昨天的余韵：每天掷一次，想起昨天聊过的一件小事
+    missState: {},       // { cid: 用户最后一句的时间戳 }，云端掷过想念骰子的那段断联
+    fbState: {},         // { cid: { kind: [发过, 回了] } }，各类由头的回音账，云端记、本机存，跨天带着
     // 发送前复核：到点真发之前再综合判一次，不合时宜度超过 presendMax 就不发
     presendMax: 70,        // 不合时宜度阈值（%），100 = 从不拦
     presendTalkingMin: 15, // 你最后一句话在这么久以内算「正聊着」（分钟）
@@ -1172,6 +1176,12 @@
             impulseMode: S.settings.impulseMode,
             selfSilenceMin: S.settings.selfSilenceMin,
             selfUsed: (cx.plan && cx.plan.selfUsed) || 0,
+            missDays: S.settings.missDays,
+            missKey: (S.settings.missState || {})[cx.character.id] || 0,
+            echoOn: S.settings.echoOn ? 1 : 0,
+            echoKey: (cx.plan && cx.plan.echoKey) || 0,
+            fb: (S.settings.fbState || {})[cx.character.id] || {},
+            fbSeen: (cx.plan && Array.isArray(cx.plan.fbSeen)) ? cx.plan.fbSeen : [],
             presendMax: S.settings.presendMax,
             presendTalkingMin: S.settings.presendTalkingMin,
             presendGapMin: S.settings.presendGapMin,
@@ -1211,6 +1221,7 @@
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
             wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0, from: w.from || "",
+            kind: w.kind || "",
           })),
         }),
       });
@@ -1309,7 +1320,7 @@
         time: w.time, fireAt: +w.fireAt || 0, source: w.source || "", act: !!w.act,
         why: w.why || "", intent: w.intent || "", wakeId: w.wakeId || "",
         delivery: w.act && w.wakeId ? "push" : "", reason: w.act && !w.wakeId ? (w.reason || "云端没有可借的聊天模板") : "",
-        sem: w.sem || "", topic: w.topic || "", score: w.score || calcScore(+w.fireAt || 0, 0, 0, 0),
+        sem: w.sem || "", topic: w.topic || "", score: w.score || calcScore(+w.fireAt || 0, 0, 0, 0), kind: w.kind || "plan",
         hist: Array.isArray(w.hist) && w.hist.length ? w.hist : [{ at: genAt, kind: w.act ? "plan" : "skip", note: w.act ? (w.intent || "") : (w.why || "TA这会儿不想"), by: "cloud" }],
       })).sort((a, b) => a.fireAt - b.fireAt);
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
@@ -1354,11 +1365,33 @@
     // 只在本次会话里去重（云端每次拉取后会清空 decisions，靠 at 比时间戳不可靠）。
     const g = decs.find((d) => d && d.kind === "gate");
     if (g && g.at > cx._gateNoted) { cx._gateNoted = g.at; await log(cx, "云端复核：这轮没判——" + (g.note || "")); }
-    for (const d of decs) { if (d && (d.kind === "self" || d.kind === "post") && d.at > cx._selfNoted) { cx._selfNoted = d.at; await log(cx, "云端复核：" + (d.note || "自发起念")); } }
+    for (const d of decs) { if (d && (d.kind === "self" || d.kind === "post" || d.kind === "settle") && d.at > cx._selfNoted) { cx._selfNoted = d.at; await log(cx, "云端复核：" + (d.note || "自发起念")); } }
     // 自发起念用掉的次数由云端记在 context 里，下次上传计划要原样带回去，否则每次打开都清零
     const selfUsed = +((p.context || {}).selfUsed) || 0;
     if (selfUsed > (cx.plan.selfUsed || 0)) {
       cx.plan = await upsert("plans", (x) => x.date === date && x.characterId === cx.character.id, { selfUsed: selfUsed });
+    }
+    // 想念 / 余韵的骰子云端掷过一次就不再掷，键带回来存住：余韵按天跟着计划走，想念跨天跟着角色走
+    const echoKey = +((p.context || {}).echoKey) || 0;
+    if (echoKey > (cx.plan.echoKey || 0)) cx.plan = await upsert("plans", (x) => x.date === date && x.characterId === cx.character.id, { echoKey: echoKey });
+    const missKey = +((p.context || {}).missKey) || 0;
+    if (missKey > ((S.settings.missState || {})[cx.character.id] || 0)) {
+      await patchSettings((x) => ({ missState: Object.assign({}, x.missState || {}, { [cx.character.id]: missKey }) }));
+    }
+    // 回音账：云端按 wakeId 记过一次就不再记，本机按种类取大并存住；记过账的 wakeId 跟计划走
+    const fbSeen = Array.isArray((p.context || {}).fbSeen) ? p.context.fbSeen : [];
+    if (fbSeen.length > (cx.plan.fbSeen || []).length) cx.plan = await upsert("plans", (x) => x.date === date && x.characterId === cx.character.id, { fbSeen: fbSeen.slice(-60) });
+    const fbCloud = (p.context || {}).fb;
+    if (fbCloud && typeof fbCloud === "object") {
+      const mine = (S.settings.fbState || {})[cx.character.id] || {};
+      let grew = false;
+      const next = Object.assign({}, mine);
+      for (const k of Object.keys(fbCloud)) {
+        const c = fbCloud[k], m = mine[k] || [0, 0];
+        if (!Array.isArray(c) || !((+c[0] || 0) > (+m[0] || 0))) continue;
+        next[k] = [+c[0] || 0, +c[1] || 0]; grew = true;
+      }
+      if (grew) await patchSettings((x) => ({ fbState: Object.assign({}, x.fbState || {}, { [cx.character.id]: next }) }));
     }
     await consumeOutbox(cx, p.context || {});
     // 云端在账本上了结、新记、标过「已提醒」的，按 id 并回来，at 大的赢
@@ -1369,7 +1402,10 @@
         if (!c || !c.id || !c.text) continue;
         const mine = list.find((x) => x.id === c.id);
         if (!mine) { list.push({ id: String(c.id), kind: THREAD_KIND[c.kind] ? c.kind : "topic", text: String(c.text).slice(0, 60), due: +c.due || 0, yearly: !!c.yearly, since: +c.since || +c.at || Date.now(), at: +c.at || Date.now(), by: "cloud", done: !!c.done, nudge: String(c.nudge || ""), why: String(c.why || "").slice(0, 40) }); ch++; }
-        else if ((+c.at || 0) > (+mine.at || 0)) { mine.done = !!c.done; mine.at = +c.at; mine.nudge = String(c.nudge || mine.nudge || ""); ch++; }
+        else if ((+c.at || 0) > (+mine.at || 0)) {
+          if (!mine.done && c.done) await dropThreadSlots(cx, mine.id, "这件事你说了结了");
+          mine.done = !!c.done; mine.at = +c.at; mine.nudge = String(c.nudge || mine.nudge || ""); ch++;
+        }
       }
       if (ch) { await saveThreads(cx, list); await log(cx, "惦记账本：并入云端改动 " + ch + " 处"); }
     }
@@ -1398,7 +1434,7 @@
       if (!w) {
         if (d.kind !== "extra" || !ci) continue;
         w = {
-          time: ci.time, fireAt: ci.fireAt, source: ci.source || "临时起念", act: false,
+          time: ci.time, fireAt: ci.fireAt, source: ci.source || "临时起念", act: false, kind: ci.kind || "extra",
           why: "", intent: "", delivery: "", reason: "", wakeId: "",
           sem: ci.sem || "", topic: ci.topic || "", from: ci.from || "", hist: [],
           score: calcScore(ci.fireAt, items.filter((x) => x.act).length, 0, 0),
@@ -1634,11 +1670,19 @@
     const now = nowMs || Date.now();
     return (cx.threads || []).filter((t) => !t.done && threadAlive(t, now, S.settings.threadDays));
   }
+  function threadPace(t, nowMs) {
+    if (t.kind === "topic" && nowMs - (+t.since || 0) < 4 * 3600000) return "刚记下，先别提";
+    if (/said:/.test(String(t.nudge || "")) && nowMs - (+t.at || 0) < 36 * 3600000) return "刚提过，先别再提";
+    return "";
+  }
   function threadLines(cx, nowMs) {
     const now = nowMs || Date.now();
-    return liveThreads(cx, now).slice(0, 12).map((t) => "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + "·" + t.text + (threadWhen(t, now) ? "（" + threadWhen(t, now) + "）" : ""));
+    return liveThreads(cx, now).slice(0, 12).map((t) => {
+      const notes = [threadWhen(t, now), threadPace(t, now)].filter(Boolean);
+      return "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + "·" + t.text + (notes.length ? "（" + notes.join("，") + "）" : "");
+    });
   }
-  const THREAD_TASK = "惦记账本：上面带 [id] 的是TA心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id。都没有就给空数组。";
+  const THREAD_TASK = "惦记账本：上面带 [id] 的是TA心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id：用户说某件事做完了、办好了、不做了、不用管了，对应那条必须写进 settle，别让它继续挂着。都没有就给空数组。";
   // 时刻上的 from 指向账本某条：模型给的 id 可能带方括号或是编的，这里核一遍
   function threadIdOf(cx, raw) {
     const id = String(raw || "").replace(/[\[\]\s]/g, "");
@@ -3470,6 +3514,7 @@
     { id: "jobs", title: "预约与降速", cloud: true },
     { id: "recheck", title: "动态复核", cloud: true },
     { id: "wakes", title: "系统唤醒对照" },
+    { id: "echo", title: "念头的回音", info: true },
     { id: "logs", title: "运行日志", info: true },
     { id: "preview", title: "此刻预览", info: true },
   ];
@@ -3618,6 +3663,23 @@
       ? '<div class="archive-note">按TA此刻的状态生成一句话，不发送、不进聊天、不占额度，花一次模型调用。</div>' + previewZone()
       : '<div class="archive-note">TA的今天还没生成，没有状态可看。</div>', cx.day ? "" : "没状态", "");
     { const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur()); }
+    // 各类由头发出去之后你接没接话：云端复核记的账，分量和骰子概率都按它涨落（发过不到 3 次不算数）
+    {
+      const KIND_LABEL = { plan: "早上定的", extra: "临时起念", thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久" };
+      const fb = (S.settings.fbState || {})[cx.character ? cx.character.id : ""] || {};
+      const rows = Object.keys(fb).filter((k) => Array.isArray(fb[k]) && +fb[k][0] > 0)
+        .sort((a, b) => (+fb[b][0] || 0) - (+fb[a][0] || 0));
+      const mod = (sent, rep) => sent < 3 ? 1 : Math.max(0.6, Math.min(1.4, 0.6 + 0.8 * (rep + 1) / (sent + 2)));
+      const total = rows.reduce((n, k) => n + (+fb[k][0] || 0), 0);
+      fill("echo", rows.length
+        ? rows.map((k) => {
+            const sent = +fb[k][0] || 0, rep = +fb[k][1] || 0, m = mod(sent, rep);
+            return '<div class="diag-item"><b>' + esc(KIND_LABEL[k] || k) + "</b> 发过 " + sent + " 次 · 回了 " + rep + " 次" +
+              (sent >= 3 ? ' <span class="badge ' + (m < 0.9 ? "cool" : "") + '">分量 ×' + m.toFixed(2) + "</span>" : ' <span class="badge cool">还没满 3 次</span>') + "</div>";
+          }).join("") + '<div class="archive-note">TA主动发的每一条，到点 3 小时后云端看一眼你有没有接话。某类念头你回得少，它的分量和骰子概率就一起降，模型也会被告知「这种话TA不太接」。</div>'
+        : '<div class="archive-note">还没有账。云端复核会在TA每条主动消息发出 3 小时后记一笔：你接了话算「回了」。</div>',
+        total ? total + " 条 · " + rows.length + " 类" : "还没有", "");
+    }
     // 日志是本地现成的，先画上，别让整页都在等云端
     if (!logItems.length) {
       fill("logs", '<div class="archive-note">还没有日志。生成、编排、复核、预约的每一步都会记在这里。</div>', "还没有", "");
@@ -3896,7 +3958,9 @@
         { type: "stepper", key: "gateMinMsgs", min: 1, max: 10, step: 1, label: "上次判完你至少说", unit: "句" },
         { type: "stepper", key: "selfImpulseCap", min: 0, max: 12, step: 1, label: "自发念头每天最多", unit: "次 · 0 关" },
         { type: "stepper", key: "selfSilenceMin", min: 30, max: 480, step: 30, label: "多久没联系算安静", unit: "分钟" },
-      ], hint: "云端每 5 分钟醒一次（cron 频率，见 README），先过这几道门，全过了才真的调一次模型。拦下来的不花钱，原因记在「诊断」。<br>自发起念：你没新消息时，TA刚做完一件要紧的事、或你们安静了「多久没联系算安静」那么久，也会想一想要不要找你。每次都调模型，所以单独限次，重新编排后清零。<br>保存即生效，不用重新部署云函数。" },
+        { type: "stepper", key: "missDays", min: 0, max: 14, step: 1, label: "断了几天会想念", unit: "天 · 0 关" },
+        { type: "toggles", items: [{ key: "echoOn", label: "想起昨天聊过的小事" }] },
+      ], hint: "云端每 5 分钟醒一次（cron 频率，见 README），先过这几道门，全过了才真的调一次模型。拦下来的不花钱，原因记在「诊断」。<br>自发起念分五种由头：刚做完一件要紧的事、惦记到点、安静太久、想念、余韵。安静太久按小时算；断到「想念」那么多天后就不再按小时追，整段断联只在白天掷一次骰子（56%）想不想TA；余韵是每天白天掷一次（24%），想起昨天聊过的一件轻松小事顺手提一句。TA自己起的念头发出去没回音时，这三种都不追。每次都调模型，所以单独限次，重新编排后清零。<br>保存即生效，不用重新部署云函数。" },
       { title: "发送前复核", adv: true, sub: "到点真发之前再判一次", fields: [
         { type: "stepper", key: "presendMax", min: 30, max: 100, step: 5, label: "不合时宜度超过就不发", unit: "% · 100 从不拦" },
         { type: "stepper", key: "presendTalkingMin", min: 0, max: 120, step: 5, label: "你最后一句在多久内算正聊着", unit: "分钟" },
