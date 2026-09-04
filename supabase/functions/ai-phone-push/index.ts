@@ -98,6 +98,7 @@ function cleanThreads(value: unknown): Record<string, unknown>[] {
       since: Number(t.since) || 0,
       at: Number(t.at) || 0,
       done: t.done === true,
+      why: cleanText(t.why, 60),
       nudge: cleanText(t.nudge, 200),
     };
   }).filter((t) => t.id && t.text);

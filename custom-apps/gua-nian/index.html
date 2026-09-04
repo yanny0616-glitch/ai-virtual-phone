@@ -341,8 +341,14 @@
   .hero .kvs.link { cursor: pointer; }
   .hero .kvs.link .go { text-align: right; font-size: 12px; color: var(--acc); margin-top: 4px; }
   .th-row { display: flex; align-items: center; gap: 6px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; cursor: pointer; }
-  .th-row .drop { display: none; }
-  .th-row.sel .drop { display: inline-block; }
+  .th-row { flex-direction: column; align-items: stretch; gap: 0; }
+  .th-head { display: flex; align-items: center; gap: 6px; }
+  .th-row .th-arrow { color: var(--tx3); font-size: 12px; flex: none; }
+  .th-row.is-done .th-text { color: var(--tx3); text-decoration: line-through; }
+  .th-detail { padding: 8px 0 2px; display: flex; flex-direction: column; gap: 6px; }
+  .th-why { font-size: 12px; line-height: 1.5; color: var(--tx2); }
+  .th-acts { display: flex; gap: 6px; }
+  .th-acts .drop-btn { color: var(--tx3); }
   .th-row:first-of-type { border-top: 0; }
   .th-row .badge { margin-left: 0; flex: none; }
   .th-row .th-text { flex: 1; min-width: 0; line-height: 1.4; }
@@ -1183,7 +1189,7 @@
             momentsWeekStart: moState(cx).weekStart,
             momentsWeekN: moState(cx).weekN,
             outbox: (cx.plan && Array.isArray(cx.plan.outbox)) ? cx.plan.outbox : [],
-            threads: S.settings.threadsOn ? liveThreads(cx).slice(0, 20).map((t) => ({ id: t.id, kind: t.kind, text: t.text, due: +t.due || 0, yearly: !!t.yearly, since: +t.since || 0, at: +t.at || 0, done: false, nudge: t.nudge || "" })) : [],
+            threads: S.settings.threadsOn ? liveThreads(cx).slice(0, 20).map((t) => ({ id: t.id, kind: t.kind, text: t.text, due: +t.due || 0, yearly: !!t.yearly, since: +t.since || 0, at: +t.at || 0, done: false, nudge: t.nudge || "", why: t.why || "" })) : [],
             owner: myDev(), ownerName: myDevName(),
             day: dayForCloud(cx),
     };
@@ -1362,7 +1368,7 @@
       for (const c of ct) {
         if (!c || !c.id || !c.text) continue;
         const mine = list.find((x) => x.id === c.id);
-        if (!mine) { list.push({ id: String(c.id), kind: THREAD_KIND[c.kind] ? c.kind : "topic", text: String(c.text).slice(0, 60), due: +c.due || 0, yearly: !!c.yearly, since: +c.since || +c.at || Date.now(), at: +c.at || Date.now(), by: "cloud", done: !!c.done, nudge: String(c.nudge || "") }); ch++; }
+        if (!mine) { list.push({ id: String(c.id), kind: THREAD_KIND[c.kind] ? c.kind : "topic", text: String(c.text).slice(0, 60), due: +c.due || 0, yearly: !!c.yearly, since: +c.since || +c.at || Date.now(), at: +c.at || Date.now(), by: "cloud", done: !!c.done, nudge: String(c.nudge || ""), why: String(c.why || "").slice(0, 40) }); ch++; }
         else if ((+c.at || 0) > (+mine.at || 0)) { mine.done = !!c.done; mine.at = +c.at; mine.nudge = String(c.nudge || mine.nudge || ""); ch++; }
       }
       if (ch) { await saveThreads(cx, list); await log(cx, "惦记账本：并入云端改动 " + ch + " 处"); }
@@ -1588,7 +1594,7 @@
   const THREAD_KIND = { topic: "话头", promise: "约定", date: "日子" };
   function threadAlive(t, nowMs, days) {
     if (!t || !t.text) return false;
-    if (t.done) return nowMs - (+t.at || 0) < 86400000; // 了结的留一天给面板看
+    if (t.done) return nowMs - (+t.at || 0) < 7 * 86400000; // 了结的留一周，「已了结」里还能翻回来恢复
     const due = +t.due || 0;
     if (t.kind === "date") return t.yearly ? true : (due ? nowMs < due + 86400000 : false);
     if (t.kind === "promise") return due ? nowMs < due + 86400000 : nowMs - (+t.since || 0) < 7 * 86400000;
@@ -1615,6 +1621,15 @@
     if (sameDay(d, new Date(nowMs + 86400000))) return "明天" + hm;
     return (d.getMonth() + 1) + "/" + d.getDate() + hm + " · " + Math.round(diff / 86400000) + " 天后";
   }
+  // 「几天前」：详情里说清这条是什么时候记下的
+  function dateBrief(ms) {
+    const d = Math.floor((Date.now() - (+ms || 0)) / 86400000);
+    if (d <= 0) return "今天";
+    if (d === 1) return "昨天";
+    if (d < 30) return d + " 天前";
+    const t = new Date(+ms);
+    return (t.getMonth() + 1) + "/" + t.getDate();
+  }
   function liveThreads(cx, nowMs) {
     const now = nowMs || Date.now();
     return (cx.threads || []).filter((t) => !t.done && threadAlive(t, now, S.settings.threadDays));
@@ -1623,7 +1638,7 @@
     const now = nowMs || Date.now();
     return liveThreads(cx, now).slice(0, 12).map((t) => "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + "·" + t.text + (threadWhen(t, now) ? "（" + threadWhen(t, now) + "）" : ""));
   }
-  const THREAD_TASK = "惦记账本：上面带 [id] 的是TA心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。settle 写已经了结、过时或说开了的 id。都没有就给空数组。";
+  const THREAD_TASK = "惦记账本：上面带 [id] 的是TA心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id。都没有就给空数组。";
   async function saveThreads(cx, list) {
     cx.threads = list;
     await upsert("threads", (x) => x.characterId === cx.character.id, { characterId: cx.character.id, items: list });
@@ -1643,8 +1658,8 @@
     }
     return 0;
   }
-  function newThread(kind, text, due, nowMs, by) {
-    return { id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by, done: false };
+  function newThread(kind, text, due, nowMs, by, why) {
+    return { id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by, done: false, why: String(why || "").slice(0, 40) };
   }
   // 把复核回来的 keep / settle 并进账本
   // ─── 发朋友圈 ───
@@ -1722,7 +1737,7 @@
       if (dup) { dup.at = nowMs; continue; } // 又提起了：续命，不重复记
       const due = parseWhen(k.when, nowMs);
       if (kind !== "topic" && !due) continue; // 约定和日子没时间就不算
-      list.push(newThread(kind, text, due, nowMs, by));
+      list.push(newThread(kind, text, due, nowMs, by, (k && k.why) || ""));
       notes.push("记下" + THREAD_KIND[kind] + "「" + text + "」");
     }
     const alive = list.filter((t) => threadAlive(t, nowMs, S.settings.threadDays)).slice(-30);
@@ -2218,7 +2233,7 @@
             biasText() || null,
             canJudge ? "还没到点的时刻（act 是之前的判断）：" : null,
             canJudge ? JSON.stringify(remaining.map((w) => ({ time: w.time, source: w.source, act: !!w.act, intent: w.intent || "", energy: energyAt(cx.day, w.fireAt) }))) : null,
-            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-40到40的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
+            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-40到40的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
             "feel 描述的是聊天带来的情绪变化，不是今天的底色：被安慰/被逗笑/聊得投入给正 energy，被冷落/吵架/说累了给负；聊得平淡就把 intensity 给低分。",
             (S.settings.chatEditsDay
               ? "sched 只在聊天里确实出现了会改变TA今天安排的事才给：约好了几点做什么、临时被叫走、说了某件事不去了。最多 2 条，时间必须晚于现在（" + fmtHM(nowMs) + "）；只是随口聊到、没有落实的事不要写进来，没有就给空数组。"
@@ -2643,17 +2658,26 @@
     const go = $("#go-heart");
     if (go) go.onclick = () => switchTab("heart");
     v.querySelectorAll(".th-row").forEach((row) => {
-      row.onclick = (e) => { if (!e.target.closest("button")) row.classList.toggle("sel"); };
+      row.onclick = (e) => {
+        if (e.target.closest("button")) return;
+        S._thOpen = S._thOpen === row.dataset.tid ? "" : row.dataset.tid;
+        render();
+      };
     });
     v.querySelectorAll(".th-row button").forEach((el) => {
       el.onclick = async () => {
-        const id = el.closest(".th-row").dataset.tid, list = (cx.threads || []).slice();
+        const id = el.closest(".th-row").dataset.tid, act = el.dataset.act, list = (cx.threads || []).slice();
         const t = list.find((x) => x.id === id); if (!t) return;
-        if (el.dataset.act === "done") { t.done = true; t.at = Date.now(); t.by = "user"; }
+        if (act === "drop" && !confirm("删掉「" + t.text + "」？删了就找不回来了。")) return;
+        if (act === "done") { t.done = true; t.at = Date.now(); t.by = "user"; toast("已了结，可以在「已了结」里恢复"); }
+        else if (act === "undone") { t.done = false; t.at = Date.now(); t.by = "user"; }
         else list.splice(list.indexOf(t), 1);
+        S._thOpen = "";
         await saveThreads(cx, list); await uploadPlanCloud(cx, false); cx._ctx = null; syncChatContext(cx, true).catch(() => {}); render();
       };
     });
+    const thDone = $("#th-done");
+    if (thDone) thDone.onclick = () => { S._thDone = !S._thDone; S._thOpen = ""; render(); };
     const thPlus = $("#th-plus");
     if (thPlus) thPlus.onclick = () => { S._thAdd = !S._thAdd; render(); if (S._thAdd) { const i = $("#th-add input"); if (i) i.focus(); } };
     const thAdd = $("#th-add");
@@ -2663,7 +2687,7 @@
       const when = thAdd.when.value.trim(), now = Date.now(), due = parseWhen(when, now);
       if (when && !due) { toast("时间没看懂：写 9/10、2026-09-10 或 15:00"); return; }
       const kind = !due ? "topic" : (/\d{1,2}:\d{2}/.test(when) ? "promise" : "date");
-      await saveThreads(cx, (cx.threads || []).concat([newThread(kind, text, due, now, "user")]));
+      await saveThreads(cx, (cx.threads || []).concat([newThread(kind, text, due, now, "user", "你手动记的")]));
       S._thAdd = false;
       await uploadPlanCloud(cx, false); cx._ctx = null; syncChatContext(cx, true).catch(() => {}); render();
     };
@@ -2788,13 +2812,36 @@
   function panelThreads(c) {
     const cx = cur(), now = c.now;
     const list = liveThreads(cx, now).slice().sort((a, b) => (threadDueMs(a, now) || 9e15) - (threadDueMs(b, now) || 9e15));
-    const row = (t) => '<div class="th-row" data-tid="' + esc(t.id) + '"><span class="badge ' + (t.kind === "promise" ? "cool" : t.kind === "date" ? "warn" : "") + '">' + THREAD_KIND[t.kind] + "</span>"
+    const done = (cx.threads || []).filter((t) => t.done && threadAlive(t, now)).sort((a, b) => (+b.at || 0) - (+a.at || 0));
+    const WHO = { user: "你手动记的", app: "本机复核时记的", cloud: "云端复核时记的" };
+    // 展开的详情：为什么记它、几时记的、提醒过没有；了结和删掉都收在这里，免得列表上一戳就没
+    const detail = (t) => {
+      const when = threadWhen(t, now);
+      const marks = String(t.nudge || "").trim().split(/\s+/).filter(Boolean).length;
+      return '<div class="th-detail">'
+        + '<div class="th-why">' + esc(t.why || (t.by === "user" ? "你手动记的" : "（当时没记下由头）")) + "</div>"
+        + '<div class="dim">' + THREAD_KIND[t.kind] + (when ? " · " + esc(when) : "")
+        + " · " + esc(WHO[t.by] || "记于") + " " + esc(dateBrief(+t.since || +t.at || now))
+        + (marks ? " · 提起过 " + marks + " 次" : "") + "</div>"
+        + '<div class="th-acts">' + (t.done
+          ? '<button class="mini" data-act="undone">恢复</button>'
+          : '<button class="mini" data-act="done">了结</button>')
+        + '<button class="mini drop-btn" data-act="drop">删掉</button></div></div>';
+    };
+    const row = (t) => '<div class="th-row' + (S._thOpen === t.id ? " open" : "") + (t.done ? " is-done" : "") + '" data-tid="' + esc(t.id) + '">'
+      + '<div class="th-head"><span class="badge ' + (t.kind === "promise" ? "cool" : t.kind === "date" ? "warn" : "") + '">' + THREAD_KIND[t.kind] + "</span>"
       + '<span class="th-text">' + esc(t.text) + (threadWhen(t, now) ? ' <span class="dim">' + esc(threadWhen(t, now)) + "</span>" : "") + "</span>"
-      + '<button class="mini" data-act="done" title="了结">✓</button><button class="mini drop" data-act="drop" title="删掉">✕</button></div>';
-    return '<div class="card"><div class="sec-head"><span class="t">惦 记</span>' + (list.length ? '<span class="badge">' + list.length + " 件</span>" : "")
+      + '<span class="th-arrow">' + (S._thOpen === t.id ? "▾" : "›") + "</span></div>"
+      + (S._thOpen === t.id ? detail(t) : "") + "</div>";
+    const shown = S._thDone ? done : list;
+    return '<div class="card"><div class="sec-head"><span class="t">惦 记</span>' + (shown.length ? '<span class="badge">' + shown.length + " 件</span>" : "")
+      + (done.length ? '<button class="act" id="th-done">' + (S._thDone ? "看还挂着的" : "已了结 " + done.length) + "</button>" : "")
       + '<button class="act" id="th-plus" title="手动记一件">' + (S._thAdd ? "收起" : "＋ 记一件") + "</button></div>"
       + (S._thAdd ? '<form class="th-add" id="th-add"><input name="text" placeholder="如「我生日」「周五面试」" maxlength="40"><input name="when" placeholder="9/10 或 15:00"><button type="submit" class="mini">记</button></form>' : "")
-      + (list.length ? list.map(row).join("") : '<div class="archive-note">聊天里说定的事、没聊完的话头、重要的日子，TA会记在这里跨天惦记着；快到点、到日子了会自己想起来找你。</div>')
+      + (shown.length ? shown.map(row).join("")
+        : S._thDone ? '<div class="archive-note">这一周还没有了结的。</div>'
+        : '<div class="archive-note">聊天里说定的事、没聊完的话头、重要的日子，TA会记在这里跨天惦记着；快到点、到日子了会自己想起来找你。</div>')
+      + (S._thDone ? '<div class="archive-note">了结的留一周，之后自动清掉。恢复回去TA会重新惦记。</div>' : "")
       + "</div>";
   }
   function panelWakes(c) {

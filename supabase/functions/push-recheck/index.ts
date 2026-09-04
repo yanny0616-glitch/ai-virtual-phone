@@ -133,7 +133,7 @@ function liveThreads(context: PlanContext, nowMs: number): Thread[] {
 function threadLines(context: PlanContext, nowMs: number, tz: number): string[] {
   return liveThreads(context, nowMs).slice(0, 12).map(t => `[${t.id}] ${THREAD_KIND[t.kind] || "话头"}·${t.text}${threadWhen(t, nowMs, tz) ? "（" + threadWhen(t, nowMs, tz) + "）" : ""}`);
 }
-const THREAD_TASK = "惦记账本：上面带 [id] 的是你心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。settle 写已经了结、过时或说开了的 id。都没有就给空数组。";
+const THREAD_TASK = "惦记账本：上面带 [id] 的是你心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id。都没有就给空数组。";
 // 模型给的时间：2026-09-10 15:00 / 09-10 / 9月10日 / 15:00 / 明天 15:00，按 tz 折成 UTC ms
 function parseWhen(when: unknown, nowMs: number, tz: number): number {
   const w = String(when || "").trim();
@@ -168,7 +168,7 @@ function applyThreads(context: PlanContext, keep: Keep[], settle: string[], nowM
     if (dup) { dup.at = nowMs; continue; }
     const due = parseWhen(k?.when, nowMs, tz);
     if (kind !== "topic" && !due) continue;
-    list.push({ id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by: "cloud", done: false });
+    list.push({ id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by: "cloud", done: false, why: String(k?.why || "").slice(0, 40) });
     notes.push(`记下${THREAD_KIND[kind]}「${text}」`);
   }
   if (!notes.length) return null;
@@ -321,8 +321,8 @@ function lifeRoll(context: PlanContext, nowMs: number): { patch: Record<string, 
 
 type Decision = { time?: string; act?: boolean; sem?: string; topic?: string; why?: string; intent?: string; defer?: string };
 type Extra = { time?: string; until?: string; about?: string; intent?: string; why?: string };
-type Thread = { id: string; kind: string; text: string; due?: number; yearly?: boolean; since?: number; at?: number; by?: string; done?: boolean; nudge?: string };
-type Keep = { kind?: string; text?: string; when?: string };
+type Thread = { id: string; kind: string; text: string; due?: number; yearly?: boolean; since?: number; at?: number; by?: string; done?: boolean; nudge?: string; why?: string };
+type Keep = { kind?: string; text?: string; when?: string; why?: string };
 type Outbox = { id: string; at: number; hint: string; by?: string };
 
 // 门禁默认值，可被 App 上传的 context 里的同名字段覆盖（改设置不用重新部署云函数）。
@@ -1380,7 +1380,7 @@ Deno.serve(async (req: Request) => {
         ? '"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"这个念头的由头（8字内）","intent":"想说的事","why":"为什么现在加"}]'
         : '"extra":[]')
       + (threadsOn && !selfReason
-        ? ',"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空"}],"settle":["已了结的账本 id"]'
+        ? ',"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"]'
         : "")
       + (canPost ? ',"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null' : "")
       + "}",
