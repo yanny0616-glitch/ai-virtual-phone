@@ -1073,9 +1073,9 @@
     } catch (e) { /* 读不到就按没锁算，别把离线的这台也锁死 */ }
     return cx.owner;
   }
-  function lockCloud(cx) {
+  function lockCloud(cx, force) {
     return cloudFetch("recheck-plan", { method: "POST", body: JSON.stringify({
-      characterId: cx.character.id, planDate: todayStr(), ownerOnly: true,
+      characterId: cx.character.id, planDate: todayStr(), ownerOnly: true, force: !!force,
       owner: myDev(), ownerName: myDevName(),
     }) });
   }
@@ -1087,7 +1087,13 @@
     await readOwner(cx);
     if (!owns(cx)) return false;
     if (!cx.owner || cx.owner.id !== myDev()) {
-      try { await lockCloud(cx); } catch (e) { /* 行还没建：等第一次上传计划时带上 */ }
+      // 网关按「没人占 / 还是我」条件写锁，两台同时来只有一台写得进；写不进的以网关回的持有者为准
+      let r = null;
+      try { r = await lockCloud(cx); } catch (e) { /* 网络不通就按没锁算，别把离线的这台也锁死 */ }
+      if (r && r.stored === false && r.taken && r.owner) {
+        cx.owner = { id: String(r.owner), name: String(r.ownerName || "") };
+        return false;
+      }
       cx.owner = { id: myDev(), name: myDevName() };
     }
     return true;
@@ -1106,7 +1112,7 @@
       } catch (e) { /* 读不到哨兵就算了：那条 48 小时后只会问候一句 */ }
       await cancelTodayWakes(cx);
       if (sw) { try { await AiPhone.push.cancelWake(sw); } catch (e) { /* 已触发的取消失败可忽略 */ } }
-      await lockCloud(cx);
+      await lockCloud(cx, true);
       cx.owner = { id: myDev(), name: myDevName() };
       S._diagCache = {};
       await log(cx, "接管：今天改由「" + myDevName() + "」负责，已撤掉「" + from + "」挂的预约");
@@ -1486,15 +1492,18 @@
       n++;
       await log(cx, "云端复核：" + d.time + " " + (d.note || d.kind));
     }
-    // 回执：裁决已并进本地轨迹，清掉云端那份，免得下次打开重复合并
-    try { await cloudFetch("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id, planDate: date, decisionsOnly: true }) }); }
+    // 先存本地，再回执：反过来的话本地写失败或中途关页，云端那份已经没了。
+    // 回执只清到这批最晚的 at 为止，GET 之后新到的裁决留给下次
+    const lastAt = decs.reduce((m, d) => Math.max(m, +(d && d.at) || 0), 0);
+    if (n) {
+      items.sort((a, b) => a.fireAt - b.fireAt);
+      cx.plan = await upsert("plans", (x) => x.date === date && x.characterId === cx.character.id,
+        { date: date, characterId: cx.character.id, items: items, chatUsed: cx.plan.chatUsed || 0,
+          plannedAt: cx.plan.plannedAt || Date.now(), recheckAt: cx.plan.recheckAt || 0, cloudAckAt: maxAt });
+      cx.archive = null;
+    }
+    try { await cloudFetch("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id, planDate: date, decisionsOnly: true, before: lastAt }) }); }
     catch (e) { /* 清不掉也没关系：上面按 at > since 去重 */ }
-    if (!n) return 0;
-    items.sort((a, b) => a.fireAt - b.fireAt);
-    cx.plan = await upsert("plans", (x) => x.date === date && x.characterId === cx.character.id,
-      { date: date, characterId: cx.character.id, items: items, chatUsed: cx.plan.chatUsed || 0,
-        plannedAt: cx.plan.plannedAt || Date.now(), recheckAt: cx.plan.recheckAt || 0, cloudAckAt: maxAt });
-    cx.archive = null;
     return n;
   }
 
@@ -1693,21 +1702,28 @@
    * 到点还得问结果，不该就此从心里划掉。没有这一步的话，账本要等模型下一轮自己想起来
    * settle，不 settle 就一直挂着，用户看到的是「明明聊过了还在惦记里」。
    */
+  // 只认真说出去的：到点之后聊天记录里有TA的一句才推进账本；发送前拦下、押后作罢的不算。
+  // 到点 6 小时还没见到就放弃这条（不再查）。云端回音账那步同一套规则
   async function settleFired(cx) {
     if (!S.settings.threadsOn || !cx.plan || !Array.isArray(cx.plan.items) || !(cx.threads || []).length) return;
     const now = Date.now(), list = (cx.threads || []).slice(), notes = [];
-    for (const w of cx.plan.items) {
-      if (!w.act || !w.from || w.fireAt >= now || w.thDone) continue;
+    const due = cx.plan.items.filter((w) => w.act && w.from && w.fireAt < now && !w.thDone);
+    if (!due.length) return;
+    const said = (await readRecentChat(cx, 80)).filter((m) => m.role === "assistant").map((m) => m.t);
+    let marked = 0;
+    for (const w of due) {
+      const spoke = said.some((t) => t >= w.fireAt - 60000 && t <= w.fireAt + 6 * 3600000);
+      if (!spoke) { if (now - w.fireAt > 6 * 3600000) { w.thDone = true; marked++; } continue; }
       const t = list.find((x) => x.id === w.from);
-      w.thDone = true; // 只回写一次
+      w.thDone = true; marked++; // 只回写一次
       if (!t || t.done) continue;
       if (t.kind === "topic") { t.done = true; t.at = now; t.by = "app"; notes.push("说完了，了结「" + t.text + "」"); }
       else if (String(t.nudge || "").indexOf("said:") < 0) { t.nudge = (String(t.nudge || "") + " said:" + w.time).trim().slice(-200); t.at = now; notes.push("提过了「" + t.text + "」"); }
     }
-    if (!notes.length) return;
-    await saveThreads(cx, list);
+    if (!marked) return;
+    if (notes.length) await saveThreads(cx, list);
     cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items: cx.plan.items });
-    await log(cx, "惦记账本：" + notes.join("，"));
+    if (notes.length) await log(cx, "惦记账本：" + notes.join("，"));
   }
   // 了结或删掉一条惦记时，由它起的、还没到点的时刻一起撤掉——不然人在面板上把事划掉了，
   // 到点TA还照着这条由头发消息。

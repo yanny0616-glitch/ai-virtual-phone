@@ -132,6 +132,11 @@ function jitterMin(base: number): number {
     return base * (0.6 + Math.random() * 0.8);
 }
 
+/** 明确要求马上回的话（救命、医院、快回…）：越过押后，也越过已有的等待 */
+export function isUrgentReplyText(text: string): boolean {
+    return URGENT_RE.test(String(text || "").replace(/\s+/g, ""));
+}
+
 export function evaluateReplyGate(gate: ReplyGate | null, text: string, nowMs = Date.now()): ReplyGateDecision {
     if (!gate) return { kind: "now" };
     if (URGENT_RE.test(text.replace(/\s+/g, ""))) return { kind: "now" };

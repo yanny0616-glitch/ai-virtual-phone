@@ -1000,23 +1000,33 @@ Deno.serve(async (request: Request) => {
           return json({ ok: false, error: "缺少 characterId 或 planDate。" }, 400);
         }
         // 设备锁：电脑和手机同时开着挂念时，一天里只有一台负责编排和预约。
-        // 只 PATCH context 里的 owner，不动 items/decisions——抢锁的那台手里往往还没有
-        // 当天的计划，整行 upsert 会把正在跑的那份清空。行还不存在就不建：空行会被
-        // cron 派出去白跑一轮，锁跟着那台设备第一次上传计划时的 context.owner 落地。
+        // 只动 context 里的 owner，不碰 items/decisions——抢锁的那台手里往往还没有当天的计划。
         if (body.ownerOnly === true) {
           const owner = cleanText(body.owner, 40).replace(/[^A-Za-z0-9_-]/g, "");
           const ownerName = cleanText(body.ownerName, 40);
           const planFilter = `push_recheck_plans?user_id=eq.${OWNER_ID}`
             + `&character_id=eq.${encodeURIComponent(characterId)}&plan_date=eq.${planDate}`;
+          // 行不存在就先建一行空行（重复插入忽略）；随后的 PATCH 带条件「没人占 / 还是我」，
+          // 两台同时来只有一台匹配得上。接管（force）跳过条件。空行会被 cron 派一轮，门禁挡住不花钱
+          await rest("push_recheck_plans?on_conflict=user_id,character_id,plan_date", {
+            method: "POST",
+            headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+            body: JSON.stringify({ user_id: OWNER_ID, character_id: characterId, plan_date: planDate, context: {}, items: [], decisions: [], updated_at: new Date().toISOString() }),
+          }).catch(() => undefined);
+          // PATCH 是整列替换：先读出 context 合并再写，条件 PATCH 保证读写之间没被别台抢走
           const rows = await readJson<{ context?: Record<string, unknown> }[]>(await rest(`${planFilter}&select=context&limit=1`));
-          if (rows.length === 0) return json({ ok: true, owner, stored: false });
-          const save = await rest(planFilter, {
+          const cond = body.force === true ? "" : `&or=(context->>owner.is.null,context->>owner.in.${encodeURIComponent(`("",${owner})`)})`;
+          const save = await rest(`${planFilter}${cond}&select=plan_date`, {
             method: "PATCH",
-            headers: { Prefer: "return=minimal" },
-            body: JSON.stringify({ context: { ...(rows[0].context ?? {}), owner, ownerName }, updated_at: new Date().toISOString() }),
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify({ context: { ...(rows[0]?.context ?? {}), owner, ownerName }, updated_at: new Date().toISOString() }),
           });
           if (!save.ok) return json({ ok: false, error: `写入设备锁失败 HTTP ${save.status}` }, 500);
-          return json({ ok: true, owner, stored: true });
+          const saved = await readJson<unknown[]>(save);
+          if (saved.length > 0) return json({ ok: true, owner, stored: true });
+          const cur = await readJson<{ context?: Record<string, unknown> }[]>(await rest(`${planFilter}&select=context&limit=1`));
+          const held = cleanText(cur[0]?.context?.owner, 40);
+          return json({ ok: true, owner: held || owner, ownerName: cleanText(cur[0]?.context?.ownerName, 40), stored: false, taken: !!held && held !== owner });
         }
         // 只收 push-recheck 判断时真正会读的字段，别把 App 的整份 plan 原样堆进库里。
         const rawItems = Array.isArray(body.items) ? body.items.slice(0, 40) : [];
@@ -1128,12 +1138,19 @@ Deno.serve(async (request: Request) => {
         const filter = `push_recheck_plans?user_id=eq.${OWNER_ID}`
           + `&character_id=eq.${encodeURIComponent(characterId)}`
           + (planDate ? `&plan_date=eq.${encodeURIComponent(planDate)}` : "");
+        // 回执带 before：只清 App 已经并进去的那批（at <= before），GET 之后新到的裁决留着下次取
+        const before = Number(body.before);
+        const keepNewer = async (): Promise<Response> => {
+          const rows = await readJson<{ decisions?: { at?: number }[] }[]>(await rest(`${filter}&select=decisions&limit=1`));
+          const rest_ = (Array.isArray(rows[0]?.decisions) ? rows[0]!.decisions! : []).filter(d => Number(d?.at) > before);
+          return rest(filter, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ decisions: rest_ }) });
+        };
         const done = body.decisionsOnly === true
-          ? await rest(filter, {
+          ? (Number.isFinite(before) && before > 0 ? await keepNewer() : await rest(filter, {
             method: "PATCH",
             headers: { Prefer: "return=minimal" },
             body: JSON.stringify({ decisions: [] }),
-          })
+          }))
           : await rest(filter, { method: "DELETE", headers: { Prefer: "return=minimal" } });
         if (!done.ok) return json({ ok: false, error: `数据库返回 HTTP ${done.status}` }, 500);
         return json({ ok: true });

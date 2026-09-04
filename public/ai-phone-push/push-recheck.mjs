@@ -151,7 +151,8 @@ function valueFloor(remaining: number): number {
 async function feedbackRoll(
   rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, characterId: string,
   items: PlanItem[], context: PlanContext, nowMs: number,
-): Promise<{ fb: FbBook; fbSeen: string[] } | null> {
+): Promise<{ fb: FbBook; fbSeen: string[]; settled: string[] } | null> {
+  const settled: string[] = [];
   const seen = Array.isArray(context.fbSeen) ? context.fbSeen.map(String) : [];
   const fb: FbBook = {};
   for (const [k, v] of Object.entries(context.fb || {})) if (Array.isArray(v)) fb[k] = [Number(v[0]) || 0, Number(v[1]) || 0];
@@ -170,12 +171,18 @@ async function feedbackRoll(
     const rows = await resp.json() as { role: string; message_at: string }[];
     seen.push(it.wakeId);
     const sentAt = Date.parse(rows.find(r => r.role !== "user")?.message_at || "");
-    if (!Number.isFinite(sentAt)) continue; // 到点没发出去（押后作罢、发送前拦下），不算账
+    if (!Number.isFinite(sentAt)) continue; // 到点没发出去（押后作罢、发送前拦下），不算账，账本也不动
     const replied = rows.some(r => r.role === "user" && Date.parse(r.message_at) > sentAt && Date.parse(r.message_at) <= sentAt + 3 * 3600_000);
     const rec = fb[kind] || [0, 0];
     fb[kind] = [rec[0] + 1, rec[1] + (replied ? 1 : 0)];
+    // 出自账本的那条真说出去了，才推进账本：话头了结、约定标「提过了」。App 的 settleFired 同一套规则
+    const t = it.from && Array.isArray(context.threads) ? context.threads.find(x => x.id === it.from) : undefined;
+    if (t && !t.done) {
+      if (t.kind === "topic") { t.done = true; t.at = nowMs; t.by = "cloud"; settled.push(`说完了，了结「${t.text}」`); }
+      else if (!/said:/.test(String(t.nudge || ""))) { t.nudge = (String(t.nudge || "") + " said:" + it.time).trim().slice(-200); t.at = nowMs; settled.push(`提过了「${t.text}」`); }
+    }
   }
-  return { fb, fbSeen: seen.slice(-60) };
+  return { fb, fbSeen: seen.slice(-60), settled };
 }
 // ── 惦记账本（App index.html 同名函数的 tz 算术版；改一处要同步另一处）
 const THREAD_KIND: Record<string, string> = { topic: "话头", promise: "约定", date: "日子" };
@@ -1008,6 +1015,9 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
     let chatUsed = 0;
     if (!outlook.length) {
       log("编排：今天剩下的时间全在免打扰或睡眠里");
+    } else if (Number(context.impulseMode) === 1) {
+      // 与 App orchestrate 同步：随用随判早上不预排念头，白天由复核随时起
+      log("随用随判：早上不排念头（没调模型）");
     } else {
       const mirrorResponse = await rest(
         `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
@@ -1258,13 +1268,15 @@ Deno.serve(async (req: Request) => {
   if (life) Object.assign(context, life.patch);
   // 回音账同样在门禁之前记，也不调模型
   const fbRoll = await feedbackRoll(rest, userId, characterId, items, context, nowMs).catch(() => null);
-  if (fbRoll) Object.assign(context, fbRoll);
+  if (fbRoll) { context.fb = fbRoll.fb; context.fbSeen = fbRoll.fbSeen; }
   if (life || fbRoll) {
     if (life?.post) priorDecisions.push({ at: nowMs, kind: "post", note: `想发条朋友圈——${life.post.hint}`, by: "cloud" });
+    for (const note of fbRoll?.settled || []) priorDecisions.push({ at: nowMs, kind: "settle", note, by: "cloud" });
+    const noteful = !!life?.post || !!fbRoll?.settled.length;
     await rest(planFilter, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ context, ...(life?.post ? { decisions: priorDecisions.slice(-60) } : {}) }),
+      body: JSON.stringify({ context, ...(noteful ? { decisions: priorDecisions.slice(-60) } : {}) }),
     }).catch(() => undefined);
     if (life?.post) console.log("[push-recheck] 生活轮起意发圈：" + life.post.hint);
   }
@@ -1503,7 +1515,10 @@ Deno.serve(async (req: Request) => {
     // 临时起念的绝对时刻全靠这个基准换算，基准不可信只会把消息发到错的钟点。
     // 用 items 而不是 pending：日程走完的晚上 pending 是空的，但今天已经过点的时刻
     // 一样能还原出时区偏移，起念照样算得出绝对时刻。
-    const anchor = items.find(item => /^\d{1,2}:\d{2}$/.test(item.time)) || items[0];
+    // 随用随判的早上 App 只寄空计划：一条 items 都没有，就拿 App 寄来的时区自己造一个「此刻」当基准，
+    // 否则云端整天起不了念。
+    const tzAnchor = Number.isFinite(rowTz) ? { time: hhmm(nowMs, rowTz), fireAt: nowMs } as PlanItem : null;
+    const anchor = items.find(item => /^\d{1,2}:\d{2}$/.test(item.time)) || items[0] || tzAnchor;
     if (!anchor) return;
     const anchorTrusted = /^\d{1,2}:\d{2}$/.test(anchor.time);
     const anchorLocal = anchorTrusted

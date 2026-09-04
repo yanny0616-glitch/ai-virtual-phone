@@ -63,7 +63,7 @@ import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
-import { evaluateReplyGate, readDeferredReply, readReplyGate, writeDeferredReply } from "@/lib/chat-reply-gate";
+import { evaluateReplyGate, isUrgentReplyText, readDeferredReply, readReplyGate, writeDeferredReply } from "@/lib/chat-reply-gate";
 import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
 import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/shopping-gift-utils";
 import { settleShoppingPaymentRequest } from "@/lib/shopping-payment-request";
@@ -3886,9 +3886,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // 这里只落一条押后记录；到点由桌面壳发回复请求，聊天室开着就本组件接，关了就后台生成。
     const scheduleGatedReply = (text: string) => {
         if (session.isGroup) { void triggerAIResponse(); return; }
-        // 已经押后了（睡着 / 忙着），再点「触发回复」也不该把TA叫起来：到点由桌面壳派回来
+        // 已经押后了（睡着 / 忙着），再点「触发回复」也不该把TA叫起来：到点由桌面壳派回来。
+        // 紧急词例外：闸门会判成立刻回，顺手把旧等待清掉，免得到点再生成一次
         const held = readDeferredReply(session.id);
-        if (held && !held.firedAt && held.until > Date.now()) {
+        if (held && !held.firedAt && held.until > Date.now() && !isUrgentReplyText(text)) {
             const at = new Date(held.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
             showChatToast(`TA这会儿顾不上，${at} 左右再回`, 3000);
             return;
