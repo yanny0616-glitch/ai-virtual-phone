@@ -2717,7 +2717,14 @@
         const t = list.find((x) => x.id === id); if (!t) return;
         if (act === "drop" && !confirm("删掉「" + t.text + "」？删了就找不回来了。")) return;
         if (act === "done") { t.done = true; t.at = Date.now(); t.by = "user"; toast("已了结，可以在「已了结」里恢复"); }
-        else if (act === "undone") { t.done = false; t.at = Date.now(); t.by = "user"; }
+        else if (act === "undone") {
+          const n = Date.now();
+          t.done = false; t.at = n; t.since = n; t.by = "user";
+          // 约定/日子的存活按 due 判：过了点的放回去会立刻被判死、当场又消失。降成话头再放回。
+          if (!threadAlive(t, n, S.settings.threadDays)) { t.kind = "topic"; t.due = 0; t.yearly = false; toast("这件事的时间已经过了，放回去当话头挂着"); }
+          else toast("放回去了，TA会重新惦记着");
+          S._thDone = false;
+        }
         else list.splice(list.indexOf(t), 1);
         if (act !== "undone") await dropThreadSlots(cx, id, act === "done" ? "你把这件事了结了" : "你删掉了这条惦记");
         S._thOpen = "";
@@ -2883,7 +2890,7 @@
       + (S._thOpen === t.id ? detail(t) : "") + "</div>";
     const shown = S._thDone ? done : list;
     return '<div class="card"><div class="sec-head"><span class="t">惦 记</span>' + (shown.length ? '<span class="badge">' + shown.length + " 件</span>" : "")
-      + (done.length ? '<button class="act" id="th-done">' + (S._thDone ? "看还挂着的" : "已了结 " + done.length) + "</button>" : "")
+      + (done.length || S._thDone ? '<button class="act" id="th-done">' + (S._thDone ? "看还挂着的" : "已了结 " + done.length) + "</button>" : "")
       + '<button class="act" id="th-plus" title="手动记一件">' + (S._thAdd ? "收起" : "＋ 记一件") + "</button></div>"
       + (S._thAdd ? '<form class="th-add" id="th-add"><input name="text" placeholder="如「我生日」「周五面试」" maxlength="40"><input name="when" placeholder="9/10 或 15:00"><button type="submit" class="mini">记</button></form>' : "")
       + (shown.length ? shown.map(row).join("")
