@@ -100,19 +100,22 @@ export function findRecentDuplicateMomentPost(
 }
 
 /** 新增一条朋友圈；角色帖命中内容去重时丢弃并返回 null。 */
-export function addMomentPost(post: Omit<MomentPost, "id" | "likes" | "createdAt">): MomentPost | null {
+export function addMomentPost(post: Omit<MomentPost, "id" | "likes" | "createdAt"> & { createdAt?: string }): MomentPost | null {
     const duplicate = findRecentDuplicateMomentPost(post);
     if (duplicate) {
         console.warn(`[MomentsStorage] SKIP duplicate moment post from ${post.authorId} (existing ${duplicate.id})`);
         return null;
     }
+    const backdated = post.createdAt && Number.isFinite(Date.parse(post.createdAt)) && Date.parse(post.createdAt) < Date.now();
     const newPost: MomentPost = {
         ...post,
         id: generateId("moment"),
         likes: [],
-        createdAt: new Date().toISOString(),
+        createdAt: backdated ? new Date(Date.parse(post.createdAt as string)).toISOString() : new Date().toISOString(),
     };
     _postsCache = [newPost, ...loadMomentPosts()]; // newest first
+    // 补发的帖子带过去的时间戳，去重和列表都按 createdAt 倒序假设，插进去后要归位
+    if (backdated) _postsCache.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     dbPutPost(newPost);
     return newPost;
 }
@@ -296,12 +299,12 @@ export function getOrCreateSchedule(characterId: string): AIMomentSchedule {
     return entry;
 }
 
-export function updateScheduleAfterPost(characterId: string): void {
+export function updateScheduleAfterPost(characterId: string, postedAt = Date.now()): void {
     const schedules = loadAIMomentSchedule();
     const entry = schedules.find(s => s.characterId === characterId);
     if (entry) {
         const cfg = loadMomentsConfig();
-        entry.lastPostTime = Date.now();
+        entry.lastPostTime = Math.max(entry.lastPostTime || 0, postedAt);
         const range = cfg.postIntervalMaxHours - cfg.postIntervalMinHours;
         const delayMs = (cfg.postIntervalMinHours + Math.random() * range) * 60 * 60 * 1000;
         entry.nextPostAfter = Date.now() + delayMs;

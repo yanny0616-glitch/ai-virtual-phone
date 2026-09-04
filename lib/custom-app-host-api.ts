@@ -18,6 +18,7 @@ import type { ChatPluginVarScope } from "./chat-plugin-types";
 import { buildCustomAppChatTags } from "./custom-app-tags";
 import { hydrateKvDb } from "./kv-db";
 import { loadCharacters } from "./character-storage";
+import { postMomentForCharacter } from "./moments-engine";
 import {
   addChatContact,
   createOrGetSession,
@@ -197,6 +198,7 @@ const HOST_ACTION_PERMISSIONS: Record<string, CustomAppPermission[]> = {
   "push.wake": ["push.wake"],
   "push.freeze": ["push.wake"],
   "push.unfreeze": ["push.wake"],
+  "moments.post": ["moments.write"],
 };
 
 function emitHostStateUpdated(): void {
@@ -2632,6 +2634,17 @@ export function cancelCustomAppTimedWake(appId: string, rawId: string): { ok: bo
   return { ok: exists };
 }
 
+export async function postCustomAppMoment(record: Record<string, unknown>): Promise<{ postId: string | null }> {
+  const characterId = cleanText(record.characterId, 160);
+  if (!characterId) throw new Error("moments.post 缺少 characterId。");
+  if (!loadCharacters().some((c) => c.id === characterId)) throw new Error("moments.post：角色不存在。");
+  const hint = cleanText(record.hint, 600);
+  const at = record.createdAt === undefined ? NaN : typeof record.createdAt === "number" ? record.createdAt : Date.parse(String(record.createdAt));
+  const createdAt = Number.isFinite(at) && at > 0 ? new Date(at).toISOString() : undefined;
+  const postId = await postMomentForCharacter(characterId, hint, createdAt);
+  return { postId };
+}
+
 export async function executeCustomAppHostAction(
   app: InstalledCustomApp,
   rawAction: CustomAppHostAction,
@@ -2672,6 +2685,8 @@ export async function executeCustomAppHostAction(
     case "variables.update":
     case "variables.unset":
       return accessSharedVariable(actionType, payload);
+    case "moments.post":
+      return postCustomAppMoment(payload);
     case "chat.updateCard":
       return updateCustomAppCard(app, payload);
     case "chat.history":

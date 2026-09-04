@@ -20,6 +20,7 @@
     --warn: #c08a1a;
     --r-lg: 22px;
     --r-md: 16px;
+    --r-sm: 10px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
@@ -47,7 +48,7 @@
   header .date { font-size: 12px; color: var(--tx3); padding-bottom: 5px; letter-spacing: 1px; }
   header .gear {
     margin-left: auto; margin-bottom: 2px;
-    width: 34px; height: 34px; border-radius: 12px; border: 1px solid var(--line);
+    width: 34px; height: 34px; border-radius: var(--r-sm); border: 1px solid var(--line);
     background: var(--card); color: var(--tx2); font-size: 16px;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
   }
@@ -151,13 +152,13 @@
   .tl-item .tm { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--tx2); font-weight: 700; }
   .tl-item .tt { font-size: 14px; font-weight: 600; }
   .tl-item .nt { font-size: 12px; color: var(--tx3); margin-top: 3px; line-height: 1.5; }
-  .tl-item.sched { cursor: pointer; border-radius: 8px; }
+  .tl-item.sched { cursor: pointer; border-radius: var(--r-sm); }
   .tl-item.sched:active { background: rgba(160, 110, 100, .07); }
   .tl-item .more { color: var(--tx3); opacity: .55; font-size: 11px; }
   .sd-ask { margin-top: 14px; }
   .sd-ask input {
     width: 100%; box-sizing: border-box; padding: 10px 12px; font: inherit; font-size: 13px;
-    border: 1px solid rgba(160, 110, 100, .22); border-radius: 10px; background: transparent; color: var(--tx1);
+    border: 1px solid rgba(160, 110, 100, .22); border-radius: var(--r-sm); background: transparent; color: var(--tx1);
   }
   .sd-ask .row { display: flex; gap: 8px; margin-top: 10px; }
   .sd-ask .row button { flex: 1; }
@@ -178,15 +179,13 @@
     display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px;
     margin-left: 6px; vertical-align: 1px; letter-spacing: .5px;
   }
-  .badge.ok { background: rgba(42, 168, 118, .10); color: var(--good); border: 1px solid rgba(42, 168, 118, .3); }
-  .badge.warn { background: rgba(192, 138, 26, .10); color: var(--warn); border: 1px solid rgba(192, 138, 26, .3); }
+  /* 标签只有三种色：强调（TA做了 / 状态好）、灰（没有 / 关着）、警告 */
+  .badge.ok, .badge.cool, .badge.push, .badge.done, .badge.sent, .badge.replied, .badge.wait { background: rgba(245, 107, 156, .10); color: var(--acc2); border: 1px solid rgba(245, 107, 156, .3); }
+  .badge.warn, .badge.local { background: rgba(192, 138, 26, .10); color: var(--warn); border: 1px solid rgba(192, 138, 26, .3); }
+  .badge.off { background: rgba(160, 110, 100, .06); color: var(--tx3); border: 1px solid var(--line); }
   .usage-bar { height: 6px; border-radius: 999px; background: rgba(160, 110, 100, .12); overflow: hidden; margin: 6px 0 2px; }
   .usage-bar .fill { height: 100%; border-radius: 999px; background: var(--ac); transition: width .6s ease; }
   .stat .num small { font-size: 11px; color: var(--tx3); font-weight: 500; }
-  .badge.push { background: rgba(42, 168, 118, .10); color: var(--good); border: 1px solid rgba(42, 168, 118, .3); }
-  .badge.local { background: rgba(192, 138, 26, .10); color: var(--warn); border: 1px solid rgba(192, 138, 26, .3); }
-  .badge.off { background: rgba(160, 110, 100, .06); color: var(--tx3); border: 1px solid var(--line); }
-  .badge.done { background: rgba(245, 107, 156, .10); color: var(--acc2); border: 1px solid rgba(245, 107, 156, .3); }
 
   /* 预览气泡 */
   .preview-zone:empty { display: none; }
@@ -259,15 +258,17 @@
   .sheet-hd { display: flex; align-items: center; margin-bottom: 16px; }
   .sheet h3 { font-size: 15px; letter-spacing: 3px; }
   .sheet-x {
-    margin-left: auto; width: 30px; height: 30px; border-radius: 10px;
+    margin-left: auto; width: 30px; height: 30px; border-radius: var(--r-sm);
     border: 1px solid var(--line); background: var(--card); color: var(--tx2);
     font-size: 13px; cursor: pointer;
   }
   .sheet .big-btn { position: sticky; bottom: 0; margin-top: 4px; box-shadow: 0 -10px 18px rgba(253, 244, 239, .92), 0 8px 24px rgba(255, 107, 157, .3); }
-  .stabs { display: flex; gap: 4px; padding: 3px; margin: -4px 0 16px; border-radius: 12px; background: var(--bg1); position: sticky; top: -20px; z-index: 2; }
-  .stab { flex: 1; padding: 8px 0; border: none; border-radius: 9px; background: none; color: var(--tx3); font-size: 12.5px; letter-spacing: 2px; cursor: pointer; font-family: inherit; }
+  .stabs { display: flex; gap: 4px; padding: 3px; margin: -4px 0 16px; border-radius: var(--r-sm); background: var(--bg1); position: sticky; top: -20px; z-index: 2; }
+  .stab { flex: 1; padding: 8px 0; border: none; border-radius: var(--r-sm); background: none; color: var(--tx3); font-size: 12.5px; letter-spacing: 2px; cursor: pointer; font-family: inherit; }
   .stab.on { background: var(--card); color: var(--tx); font-weight: 700; box-shadow: 0 2px 8px rgba(150, 90, 90, .12); }
   .ssec[hidden] { display: none; }
+  .grp[hidden] { display: none; }
+  .adv-more { display: block; width: 100%; margin: 4px 0 8px; padding: 9px 0; border: 1px dashed var(--line); border-radius: var(--r-sm); background: none; color: var(--tx3); font-size: 12px; font-family: inherit; cursor: pointer; }
   .sheet .grp { margin-bottom: 14px; padding: 12px 14px; border-radius: var(--r-md); background: var(--card); border: 1px solid var(--line); }
   .sheet .grp.note { background: none; border-style: dashed; }
   .sheet .grp-t { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--tx2); letter-spacing: 1px; margin-bottom: 8px; }
@@ -277,7 +278,7 @@
   .frow .fl { font-size: 13px; color: var(--tx); min-width: 0; }
   .frow .fu { font-size: 11px; color: var(--tx3); margin-top: 2px; }
   .frow .stepper { gap: 8px; flex: none; }
-  .frow .stepper button { width: 30px; height: 30px; border-radius: 10px; font-size: 16px; }
+  .frow .stepper button { width: 30px; height: 30px; border-radius: var(--r-sm); font-size: 16px; }
   .frow .stepper .val { font-size: 16px; min-width: 26px; }
   .grp .tgl-row + .frow, .grp .field-row + .frow { margin-top: 6px; }
   .grp-i { margin-left: auto; flex: none; width: 15px; height: 15px; padding: 0; border-radius: 50%; border: 1px solid var(--tx3); background: none; color: var(--tx3); font-size: 10px; line-height: 13px; letter-spacing: 0; cursor: pointer; }
@@ -298,14 +299,14 @@
   .char-cell .nm { font-size: 11px; color: var(--tx2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .field-row { display: flex; align-items: center; gap: 10px; }
   .field-row input[type="time"], .frow input[type="time"] {
-    flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-sm);
     color: var(--tx); padding: 9px 10px; font-size: 14px; font-family: inherit;
     color-scheme: light;
   }
   .frow input[type="time"] { flex: none; padding: 6px 10px; }
   .txt-in {
     width: 100%; box-sizing: border-box; background: var(--card); border: 1px solid var(--line);
-    border-radius: 10px; color: var(--tx); padding: 9px 10px; font-size: 13px; font-family: inherit;
+    border-radius: var(--r-sm); color: var(--tx); padding: 9px 10px; font-size: 13px; font-family: inherit;
     margin-bottom: 8px; color-scheme: light;
   }
   .cloud-row { display: flex; align-items: center; gap: 10px; }
@@ -313,14 +314,14 @@
   #cloud-test-r { font-size: 11.5px; color: var(--tx2); line-height: 1.5; min-width: 0; }
   .stepper { display: flex; align-items: center; gap: 14px; }
   .stepper button {
-    width: 36px; height: 36px; border-radius: 12px; border: 1px solid var(--line);
+    width: 36px; height: 36px; border-radius: var(--r-sm); border: 1px solid var(--line);
     background: var(--card); color: var(--tx); font-size: 18px; cursor: pointer;
   }
   .stepper .val { font-size: 18px; font-weight: 700; min-width: 30px; text-align: center; }
   .stepper .unit { font-size: 12px; color: var(--tx3); }
   .seg { display: flex; gap: 5px; }
   .seg button {
-    flex: 1; min-width: 0; padding: 9px 2px; border-radius: 10px; border: 1px solid var(--line);
+    flex: 1; min-width: 0; padding: 9px 2px; border-radius: var(--r-sm); border: 1px solid var(--line);
     background: var(--card); color: var(--tx2); font-size: 11.5px; cursor: pointer; font-family: inherit;
     white-space: nowrap;
   }
@@ -337,7 +338,19 @@
   .tgl.on::before { content: "✓ "; }
   .grp-hint { font-size: 11.5px; color: var(--tx2); line-height: 1.6; margin-top: 7px; padding: 8px 10px; border-radius: var(--r-md); background: var(--bg1); }
   .grp-hint[hidden] { display: none; }
-  .badge.cool { background: rgba(100, 140, 200, .10); color: #6b8cba; border: 1px solid rgba(100, 140, 200, .3); }
+  .hero .kvs.link { cursor: pointer; }
+  .hero .kvs.link .go { text-align: right; font-size: 12px; color: var(--acc); margin-top: 4px; }
+  .th-row { display: flex; align-items: center; gap: 6px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+  .th-row .drop { display: none; }
+  .th-row.sel .drop { display: inline-block; }
+  .th-row:first-of-type { border-top: 0; }
+  .th-row .badge { margin-left: 0; flex: none; }
+  .th-row .th-text { flex: 1; min-width: 0; line-height: 1.4; }
+  .th-row .dim { color: var(--tx3); font-size: 11px; }
+  .mini { flex: none; font-size: 12px; padding: 3px 8px; border-radius: var(--r-sm); border: 1px solid var(--line); background: transparent; color: var(--tx2); }
+  .th-add { display: flex; gap: 6px; margin-top: 8px; }
+  .th-add input { flex: 1; min-width: 0; font-size: 12px; padding: 6px 8px; border-radius: var(--r-sm); border: 1px solid var(--line); background: transparent; color: var(--tx); }
+  .th-add input[name=when] { flex: 0 0 96px; }
   /* 详情弹层 */
   .tl-item.wake, .dec { cursor: pointer; }
   .d-hd { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
@@ -357,7 +370,7 @@
   .hist-it { font-size: 12px; color: var(--tx2); line-height: 1.7; padding: 5px 0 5px 12px; border-left: 2px solid var(--line); margin: 4px 0; overflow-wrap: anywhere; }
   .hist-it b { color: var(--tx); font-variant-numeric: tabular-nums; font-weight: 600; }
   .d-msg {
-    background: var(--card-strong); border: 1px solid var(--line); border-radius: 12px;
+    background: var(--card-strong); border: 1px solid var(--line); border-radius: var(--r-sm);
     padding: 11px 13px; font-size: 13px; line-height: 1.7; margin-top: 8px; overflow-wrap: anywhere;
   }
   .d-meta { font-size: 11px; color: var(--tx3); margin-top: 14px; line-height: 1.8; }
@@ -431,9 +444,6 @@
   .skip-fold[open] > summary { color: var(--tx2); }
   .skip-fold .dec { opacity: .75; }
   .dec.no .why, .dec.no .tt { color: var(--tx3); }
-  .badge.sent { background: rgba(245, 107, 156, .10); color: var(--acc2); border: 1px solid rgba(245, 107, 156, .3); }
-  .badge.replied { background: rgba(42, 168, 118, .10); color: var(--good); border: 1px solid rgba(42, 168, 118, .3); }
-  .badge.wait { background: rgba(255, 143, 112, .10); color: var(--acc); border: 1px solid rgba(255, 143, 112, .35); }
   .archive-note { font-size: 11px; color: var(--tx3); text-align: center; padding: 4px 0 2px; line-height: 1.7; }
 
   /* toast（本地兜底） */
@@ -464,7 +474,16 @@
   .stats.four .stat .cap { letter-spacing: 1px; }
   /* 诊断页：分组折叠。收起时每行只留「名称 + 一句结论」，展开才铺细节，
      否则五块内容一起摊在页上，真出问题那一块反而看不见。 */
-  .dg-g { font-size: 11px; color: var(--tx3); letter-spacing: 3px; margin: 4px 2px 9px; }
+  .dg-sum { padding: 14px 16px; }
+  .dg-sum .row { display: flex; align-items: center; gap: 10px; }
+  .dg-sum .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--tx3); flex: none; }
+  .dg-sum .dot.ok { background: var(--good); box-shadow: 0 0 0 4px rgba(42, 168, 118, .14); }
+  .dg-sum .dot.warn { background: var(--warn); box-shadow: 0 0 0 4px rgba(192, 138, 26, .14); }
+  .dg-sum .dot.bad { background: var(--acc2); box-shadow: 0 0 0 4px rgba(245, 107, 156, .16); }
+  .dg-sum .head { flex: 1; font-size: 15px; font-weight: 700; }
+  .dg-sum .sub { margin-top: 6px; font-size: 12px; color: var(--tx2); line-height: 1.5; }
+  .dg-item.bad .dg-hd { box-shadow: inset 3px 0 0 var(--acc2); }
+  .dg-item.warn .dg-hd { box-shadow: inset 3px 0 0 var(--warn); }
   .card.dg { padding: 0; overflow: hidden; }
   .dg-item + .dg-item { border-top: 1px solid var(--line); }
   .dg-hd { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 16px;
@@ -500,9 +519,8 @@
   .who[hidden] { display: none; }
   /* 状态标签排 + 引言块 */
   .strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .chip.ok { color: var(--good); border-color: rgba(42, 168, 118, .3); background: rgba(42, 168, 118, .08); }
+  .chip.ok, .chip.cool { color: var(--acc2); border-color: rgba(245, 107, 156, .3); background: rgba(245, 107, 156, .08); }
   .chip.warn { color: var(--warn); border-color: rgba(192, 138, 26, .3); background: rgba(192, 138, 26, .08); }
-  .chip.cool { color: #6b8cba; border-color: rgba(100, 140, 200, .3); background: rgba(100, 140, 200, .08); }
   .quote {
     margin-top: 12px; padding: 11px 13px; border-radius: 4px 14px 14px 14px;
     background: var(--card-strong); border: 1px solid var(--line);
@@ -540,9 +558,9 @@
 
   <div class="tabs" id="tabs" hidden>
     <button class="tab on" data-tab="today">今 天</button>
+    <button class="tab" data-tab="heart">心 动</button>
     <button class="tab" data-tab="archive">记 录</button>
-    <button class="tab" data-tab="usage">用 量</button>
-    <button class="tab" data-tab="diag">诊 断</button>
+    <button class="tab" data-tab="back">后 台</button>
   </div>
 
   <div id="view"></div>
@@ -574,7 +592,8 @@
     characters: [],
     settings: null,        // db 记录 {id, characterIds, quietStart, quietEnd, quota, …}
     logs: null,            // db 记录 {id, items:[{at,text}]}
-    tab: "today",          // today | archive | diag
+    tab: "today",          // today | heart | archive | back
+    sub: "diag",           // 后台页里的段：diag | usage
     byId: {},              // 每个挂念的人各一份运行时状态，见 ctxOf
     order: [],             // 挂念的人的顺序（characterId）
     cur: "",               // 面板正在看的那位
@@ -975,7 +994,9 @@
     gateHorizonMin: 240, // 最近的待发时刻比这更远就先不判（分钟，0=不限）
     gateFreshMin: 10,    // 你刚说完话先等这么久再判（分钟，0=不等）
     gateMinMsgs: 1,      // 上次判完你至少说这么多句才判
-    selfImpulseCap: 2,   // 没新聊天时每天最多几次自发起念（云端复核；0=关）
+    selfImpulseCap: 6,   // 没新聊天时每天最多几次自发起念（云端复核；0=关）
+    impulseMode: 1,      // 0=早上一把定完  1=随用随判：编排不排念头，白天云端随时起
+    selfSilenceMin: 120, // 多久没联系算「安静太久」（自发起念的由头之一）
     // 发送前复核：到点真发之前再综合判一次，不合时宜度超过 presendMax 就不发
     presendMax: 70,        // 不合时宜度阈值（%），100 = 从不拦
     presendTalkingMin: 15, // 你最后一句话在这么久以内算「正聊着」（分钟）
@@ -989,6 +1010,14 @@
     // 你发消息时也照这套来（宿主判，挂念关着也管用）：睡着押到醒来、忙着偷空再回
     replyGate: true,
     busyPeekMin: 3,        // 忙着时偷空看一眼手机大约要等几分钟（0 = 不等）
+    // 惦记账本：聊天里冒出来的没聊完的话头、约好的事、重要的日子，跨天记着；起念、生成明天、注入聊天、到点发消息都看它
+    threadsOn: true,
+    threadDays: 3,         // 话头几天没再提就淡掉（约定按时间、日子按日期各自作废）
+    showAdv: false,        // 设置面板是否展开高级组
+    momentsOn: true,       // 替TA发朋友圈：生活轮掷骰子 + 分享型念头改走朋友圈（宿主要有 moments.post 接口）
+    momentsWeekly: 3,      // 一周最多几条（发圈的唯一一套数：装了挂念，「朋友圈节奏」插件让位读这份）
+    momentsGapH: 6,        // 两条至少隔几小时
+    momentsState: {},      // 每个角色的发圈账 { cid: { lastAt, weekStart, weekN } }，本机和云端各自记、合并取大
   };
 
   /* ================= 云连接（个人云后端） ================= */
@@ -1134,6 +1163,8 @@
             gateMinMsgs: S.settings.gateMinMsgs,
             judgeLines: S.settings.judgeLines,
             selfImpulseCap: S.settings.selfImpulseCap,
+            impulseMode: S.settings.impulseMode,
+            selfSilenceMin: S.settings.selfSilenceMin,
             selfUsed: (cx.plan && cx.plan.selfUsed) || 0,
             presendMax: S.settings.presendMax,
             presendTalkingMin: S.settings.presendTalkingMin,
@@ -1144,6 +1175,15 @@
             sleepMode: S.settings.sleepMode,
             sleepWakeProb: S.settings.sleepWakeProb,
             affection: cx.aff || null,
+            threadDays: S.settings.threadDays,
+            momentsOn: momentsReady() ? 1 : 0,
+            momentsWeekly: S.settings.momentsWeekly,
+            momentsGapH: S.settings.momentsGapH,
+            momentsLast: moState(cx).lastAt,
+            momentsWeekStart: moState(cx).weekStart,
+            momentsWeekN: moState(cx).weekN,
+            outbox: (cx.plan && Array.isArray(cx.plan.outbox)) ? cx.plan.outbox : [],
+            threads: S.settings.threadsOn ? liveThreads(cx).slice(0, 20).map((t) => ({ id: t.id, kind: t.kind, text: t.text, due: +t.due || 0, yearly: !!t.yearly, since: +t.since || 0, at: +t.at || 0, done: false, nudge: t.nudge || "" })) : [],
             owner: myDev(), ownerName: myDevName(),
             day: dayForCloud(cx),
     };
@@ -1164,7 +1204,7 @@
           items: cx.plan.items.map((w) => ({
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
-            wakeId: w.wakeId || "",
+            wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0,
           })),
         }),
       });
@@ -1223,7 +1263,7 @@
         const ctx = cloudContext(cx);
         ctx.day = null; // 还没生成的那天不该拿今天的生活面去自发起念
         ctx.genKit = {
-          date: date, instruction: buildDayInstruction(cal, at, past, existing),
+          date: date, instruction: buildDayInstruction(cal, at, past, existing, S.settings.threadsOn ? threadLines(cx, dateOf(date).getTime() + 8 * 3600000) : []),
           existing: existing.map((it) => ({ id: it.id, startTime: it.startTime, endTime: it.endTime || "", title: it.title, location: it.location || "", lock: it.lock || "" })),
           autoGenAt: at, tz: -new Date().getTimezoneOffset(),
           tplDaily: tpl.daily, tplImpulse: tpl.impulse,
@@ -1308,11 +1348,24 @@
     // 只在本次会话里去重（云端每次拉取后会清空 decisions，靠 at 比时间戳不可靠）。
     const g = decs.find((d) => d && d.kind === "gate");
     if (g && g.at > cx._gateNoted) { cx._gateNoted = g.at; await log(cx, "云端复核：这轮没判——" + (g.note || "")); }
-    for (const d of decs) { if (d && d.kind === "self" && d.at > cx._selfNoted) { cx._selfNoted = d.at; await log(cx, "云端复核：" + (d.note || "自发起念")); } }
+    for (const d of decs) { if (d && (d.kind === "self" || d.kind === "post") && d.at > cx._selfNoted) { cx._selfNoted = d.at; await log(cx, "云端复核：" + (d.note || "自发起念")); } }
     // 自发起念用掉的次数由云端记在 context 里，下次上传计划要原样带回去，否则每次打开都清零
     const selfUsed = +((p.context || {}).selfUsed) || 0;
     if (selfUsed > (cx.plan.selfUsed || 0)) {
       cx.plan = await upsert("plans", (x) => x.date === date && x.characterId === cx.character.id, { selfUsed: selfUsed });
+    }
+    await consumeOutbox(cx, p.context || {});
+    // 云端在账本上了结、新记、标过「已提醒」的，按 id 并回来，at 大的赢
+    const ct = Array.isArray((p.context || {}).threads) ? p.context.threads : [];
+    if (ct.length && S.settings.threadsOn) {
+      const list = (cx.threads || []).slice(); let ch = 0;
+      for (const c of ct) {
+        if (!c || !c.id || !c.text) continue;
+        const mine = list.find((x) => x.id === c.id);
+        if (!mine) { list.push({ id: String(c.id), kind: THREAD_KIND[c.kind] ? c.kind : "topic", text: String(c.text).slice(0, 60), due: +c.due || 0, yearly: !!c.yearly, since: +c.since || +c.at || Date.now(), at: +c.at || Date.now(), by: "cloud", done: !!c.done, nudge: String(c.nudge || "") }); ch++; }
+        else if ((+c.at || 0) > (+mine.at || 0)) { mine.done = !!c.done; mine.at = +c.at; mine.nudge = String(c.nudge || mine.nudge || ""); ch++; }
+      }
+      if (ch) { await saveThreads(cx, list); await log(cx, "惦记账本：并入云端改动 " + ch + " 处"); }
     }
     if (!decs.length) return 0;
     const byTime = {};
@@ -1324,11 +1377,11 @@
     let n = 0, maxAt = 0;
     for (const d of decs) {
       if (!d || d.by !== "cloud" || !d.time) continue;
-      const ci = byTime[d.time];
+      const ci = byTime[d.kind === "defer" ? d.to : d.time];
       if (!(d.at > since)) {
         // 以本地为准丢弃这条裁决——但云端点亮时预约是真挂上了的。只丢记录不撤预约，
         // 那条 job 就成了本地和云端计划里都查不到的孤儿，到点照发。
-        if ((d.kind === "lit" || d.kind === "extra") && ci && ci.wakeId
+        if ((d.kind === "lit" || d.kind === "extra" || d.kind === "defer") && ci && ci.wakeId
             && !items.some((x) => x.wakeId === ci.wakeId)) {
           try { await AiPhone.push.cancelWake(ci.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ }
           await log(cx, "云端复核：丢弃过期裁决并撤回预约 " + d.time);
@@ -1352,6 +1405,16 @@
         markAdj = false;
         if (+d.until > 0) w.fireAt = +d.until;
         w.held = true;
+      } else if (d.kind === "defer") {
+        // 云端改约：旧预约已撤、新预约挂在 d.to 那条上；本地不跟着挪，旧 wakeId 就指着一条撤了的，新那条成孤儿
+        const ni = ci;
+        if (!ni) continue;
+        if (w.wakeId && ni.wakeId && w.wakeId !== ni.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已撤的取消失败可忽略 */ } }
+        w.origFireAt = +ni.origFireAt || +w.origFireAt || w.fireAt;
+        w.time = ni.time; w.fireAt = ni.fireAt; w.held = true;
+        w.wakeId = ni.wakeId || ""; w.delivery = ni.wakeId ? "push" : ""; w.reason = ni.reason || "";
+        if (ni.until) w.until = ni.until;
+        w.why = ni.why || w.why; w.intent = ni.intent || w.intent;
       } else if (d.kind === "presend") {
         // 到点复核只是这一条的执行判据，不算「云端改过计划」，不打调整角标
         markAdj = false;
@@ -1398,6 +1461,8 @@
     S.settings = (rows && rows[0]) || await AiPhone.db.create("settings", { characterId: "", ...SET_DEF });
     const missing = {};
     for (const k in SET_DEF) if (S.settings[k] == null) missing[k] = SET_DEF[k];
+    // 0.9.9 起默认随用随判，它唯一的出念路径是自发起念；老设置里 selfImpulseCap 还是旧默认 2 或干脆关着，不抬上去会一整天没动静
+    if (S.settings.impulseMode == null && !(S.settings.selfImpulseCap >= SET_DEF.selfImpulseCap)) missing.selfImpulseCap = SET_DEF.selfImpulseCap;
     // 0.9.1 之前只挂念一个人：单个 characterId / sentinel / genTpl 折进按角色的表
     const legacyId = S.settings.characterId;
     if (!(Array.isArray(S.settings.characterIds) && S.settings.characterIds.length) && legacyId) missing.characterIds = [legacyId];
@@ -1442,6 +1507,9 @@
     cx.prev = (days || []).find((r) => r.date === dateStrOf(yd) && r.characterId === cid) || null;
     const plans = await AiPhone.db.list("plans", { limit: 60 });
     cx.plan = (plans || []).find((r) => r.date === date && r.characterId === cid) || null;
+    const th = await AiPhone.db.list("threads", { limit: 60 });
+    const row = (th || []).find((r) => r.characterId === cid);
+    cx.threads = row && Array.isArray(row.items) ? row.items : [];
   }
 
   /* ================= 系统日程互通 ================= */
@@ -1514,6 +1582,155 @@
     return { label: d.getFullYear() + "-" + pad(m) + "-" + pad(day) + " 周" + "日一二三四五六"[wd] + (tags.length ? "（" + tags.join("、") + "）" : ""), season: season };
   }
   // 前几天的生活面：给模型看骨架防止天天一样，也让昨天开了头的事今天有下文
+  /* ================= 惦记账本：跨天记住话头、约定、日子 =================
+     一行一件事 { id, kind: topic|promise|date, text, due, yearly, since, at, by, done, nudge }。
+     云端 push-recheck 有 threadAlive / threadDueMs / threadLines 的 tz 算术版副本，改这里要同步那边。 */
+  const THREAD_KIND = { topic: "话头", promise: "约定", date: "日子" };
+  function threadAlive(t, nowMs, days) {
+    if (!t || !t.text) return false;
+    if (t.done) return nowMs - (+t.at || 0) < 86400000; // 了结的留一天给面板看
+    const due = +t.due || 0;
+    if (t.kind === "date") return t.yearly ? true : (due ? nowMs < due + 86400000 : false);
+    if (t.kind === "promise") return due ? nowMs < due + 86400000 : nowMs - (+t.since || 0) < 7 * 86400000;
+    return nowMs - (+t.at || +t.since || 0) < (days || 3) * 86400000;
+  }
+  // 每年的日子折算到最近的一次
+  function threadDueMs(t, nowMs) {
+    const due = +t.due || 0;
+    if (!due || !t.yearly) return due;
+    const d = new Date(due), n = new Date(nowMs);
+    d.setFullYear(n.getFullYear());
+    if (d.getTime() < nowMs - 86400000) d.setFullYear(n.getFullYear() + 1);
+    return d.getTime();
+  }
+  function threadWhen(t, nowMs) {
+    const due = threadDueMs(t, nowMs);
+    if (!due) return "";
+    const diff = due - nowMs, d = new Date(due), n = new Date(nowMs);
+    const hm = t.kind === "date" ? "" : " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+    const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    if (t.kind !== "date" && Math.abs(diff) < 3600000) return "就在这会儿";
+    if (sameDay(d, n)) return "今天" + hm;
+    if (diff < 0) return diff > -86400000 * 1.5 ? "昨天" + hm : Math.round(-diff / 86400000) + " 天前";
+    if (sameDay(d, new Date(nowMs + 86400000))) return "明天" + hm;
+    return (d.getMonth() + 1) + "/" + d.getDate() + hm + " · " + Math.round(diff / 86400000) + " 天后";
+  }
+  function liveThreads(cx, nowMs) {
+    const now = nowMs || Date.now();
+    return (cx.threads || []).filter((t) => !t.done && threadAlive(t, now, S.settings.threadDays));
+  }
+  function threadLines(cx, nowMs) {
+    const now = nowMs || Date.now();
+    return liveThreads(cx, now).slice(0, 12).map((t) => "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + "·" + t.text + (threadWhen(t, now) ? "（" + threadWhen(t, now) + "）" : ""));
+  }
+  const THREAD_TASK = "惦记账本：上面带 [id] 的是TA心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。settle 写已经了结、过时或说开了的 id。都没有就给空数组。";
+  async function saveThreads(cx, list) {
+    cx.threads = list;
+    await upsert("threads", (x) => x.characterId === cx.character.id, { characterId: cx.character.id, items: list });
+  }
+  // 模型给的时间几种写法都收：2026-09-10 15:00 / 09-10 / 9月10日 / 15:00 / 明天 15:00
+  function parseWhen(when, nowMs) {
+    const w = String(when || "").trim();
+    let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?$/.exec(w);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 12, m[5] ? +m[5] : 0).getTime();
+    m = /^(\d{1,2})[-/月](\d{1,2})日?$/.exec(w);
+    if (m) { const d = new Date(new Date(nowMs).getFullYear(), +m[1] - 1, +m[2], 12, 0); if (d.getTime() < nowMs - 86400000) d.setFullYear(d.getFullYear() + 1); return d.getTime(); }
+    m = /^(?:(今天|明天|后天)\s*)?(\d{1,2}):(\d{2})$/.exec(w);
+    if (m) {
+      const d = new Date(nowMs); d.setDate(d.getDate() + (m[1] === "明天" ? 1 : m[1] === "后天" ? 2 : 0)); d.setHours(+m[2], +m[3], 0, 0);
+      if (!m[1] && d.getTime() < nowMs - 3600000) d.setDate(d.getDate() + 1);
+      return d.getTime();
+    }
+    return 0;
+  }
+  function newThread(kind, text, due, nowMs, by) {
+    return { id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by, done: false };
+  }
+  // 把复核回来的 keep / settle 并进账本
+  // ─── 发朋友圈 ───
+  // 帖子只能由宿主在前台入库；云端起的意先记在计划 context.outbox 里，下次打开补成 at 那个时间点的帖子。
+  // 配速只有这一套（一周几条、至少隔几小时），本机和云端共用；发圈账写进变量池 moments，「朋友圈节奏」插件看到就让位。
+  function momentsReady() { return !!(S.settings.momentsOn && AiPhone.moments && AiPhone.moments.post); }
+  function weekStartMs(ms) { const d = new Date(ms); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d.getTime(); }
+  function moState(cx) {
+    const s = (S.settings.momentsState || {})[cx.character ? cx.character.id : ""] || {};
+    const ws = weekStartMs(Date.now());
+    return { lastAt: +s.lastAt || 0, weekStart: ws, weekN: +s.weekStart === ws ? (+s.weekN || 0) : 0 };
+  }
+  function moCanPost(cx) {
+    const st = moState(cx);
+    return momentsReady() && st.weekN < (+S.settings.momentsWeekly || 0) && Date.now() - st.lastAt >= (+S.settings.momentsGapH || 0) * 3600000;
+  }
+  async function moNote(cx, atMs, weekN) {
+    const st = moState(cx);
+    const next = { lastAt: Math.max(st.lastAt, atMs || 0), weekStart: st.weekStart, weekN: Math.max(st.weekN, weekN == null ? st.weekN + 1 : weekN) };
+    if (next.lastAt === st.lastAt && next.weekN === st.weekN) return;
+    await patchSettings((x) => ({ momentsState: Object.assign({}, x.momentsState || {}, { [cx.character.id]: next }) }));
+    await publishMoments(cx);
+  }
+  async function publishMoments(cx) {
+    if (!cx.character || !AiPhone.variables || !AiPhone.variables.set) return;
+    const opts = { scope: "character", characterId: cx.character.id };
+    try {
+      if (!momentsReady()) { await AiPhone.variables.unset("moments", opts); return; }
+      const st = moState(cx);
+      await AiPhone.variables.set("moments", { by: "gua-nian", at: Date.now(), weeklyTarget: S.settings.momentsWeekly, minGapHours: S.settings.momentsGapH, lastPostAt: st.lastAt, weekN: st.weekN }, opts);
+    } catch (e) { /* 变量池不可用就算了 */ }
+  }
+  async function postMoment(cx, hint, atMs, by) {
+    hint = String(hint || "").trim().slice(0, 120);
+    if (!hint || !cx.character || !momentsReady()) return false;
+    const who = by === "cloud" ? "云端起意" : "复核起意";
+    try {
+      const r = await AiPhone.moments.post({ characterId: cx.character.id, hint: hint, createdAt: atMs });
+      await log(cx, who + "发朋友圈 " + (r && r.postId ? "✓ " : "") + fmtHM(atMs) + "「" + hint + "」" + (r && r.postId ? "" : "——撞上近期重复内容，没发"));
+      return true;
+    } catch (e) { await log(cx, "发朋友圈失败：" + (e && e.message || e)); return false; }
+  }
+  // 云端 outbox：按 id 去重（回执前 App 可能多次拉到同一条），发过的记在 plan.postedIds；发不了（宿主太旧）留在 plan.outbox 原样带回云端。
+  // 云端记的发圈账（momentsLast / momentsWeekN）也在这里并回来。
+  async function consumeOutbox(cx, ctx) {
+    const list = Array.isArray(ctx.outbox) ? ctx.outbox.filter((o) => o && o.id && o.hint) : [];
+    const posted = Array.isArray(cx.plan.postedIds) ? cx.plan.postedIds.slice() : [];
+    const fresh = list.filter((o) => posted.indexOf(o.id) < 0);
+    const st = moState(cx);
+    if (+ctx.momentsLast > st.lastAt || (+ctx.momentsWeekStart === st.weekStart && +ctx.momentsWeekN > st.weekN)) {
+      await moNote(cx, +ctx.momentsLast || 0, +ctx.momentsWeekStart === st.weekStart ? +ctx.momentsWeekN : st.weekN);
+    }
+    if (!fresh.length) return;
+    const left = [];
+    for (const o of fresh) {
+      if (!momentsReady()) { left.push(o); continue; }
+      if (await postMoment(cx, o.hint, +o.at || Date.now(), "cloud")) posted.push(o.id); else left.push(o);
+    }
+    if (left.length && !momentsReady()) await log(cx, "云端起意发朋友圈 " + left.length + " 条没发出去：" + (S.settings.momentsOn ? "宿主版本太旧，没有发朋友圈接口" : "已关闭发朋友圈"));
+    cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { postedIds: posted.slice(-20), outbox: left.slice(-5) });
+  }
+
+  async function applyThreads(cx, parsed, nowMs, by) {
+    if (!S.settings.threadsOn || !parsed) return 0;
+    const list = (cx.threads || []).slice(), notes = [];
+    for (const id of (Array.isArray(parsed.settle) ? parsed.settle : []).slice(0, 6)) {
+      const t = list.find((x) => x.id === String(id).replace(/[\[\]]/g, "").trim());
+      if (t && !t.done) { t.done = true; t.at = nowMs; t.by = by; notes.push("了结「" + t.text + "」"); }
+    }
+    for (const k of (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2)) {
+      const text = String((k && k.text) || "").trim().slice(0, 60);
+      if (!text) continue;
+      const kind = THREAD_KIND[k.kind] ? k.kind : "topic";
+      const dup = list.find((x) => !x.done && (x.text === text || x.text.includes(text) || text.includes(x.text)));
+      if (dup) { dup.at = nowMs; continue; } // 又提起了：续命，不重复记
+      const due = parseWhen(k.when, nowMs);
+      if (kind !== "topic" && !due) continue; // 约定和日子没时间就不算
+      list.push(newThread(kind, text, due, nowMs, by));
+      notes.push("记下" + THREAD_KIND[kind] + "「" + text + "」");
+    }
+    const alive = list.filter((t) => threadAlive(t, nowMs, S.settings.threadDays)).slice(-30);
+    if (notes.length || alive.length !== list.length) await saveThreads(cx, alive);
+    if (notes.length) await log(cx, "惦记账本：" + notes.join("，"));
+    return notes.length;
+  }
+
   async function recentDaysBrief(cx, n, forDate) {
     const upto = forDate || todayStr();
     try {
@@ -1535,18 +1752,21 @@
     } catch (e) { return { lines: [], residue: [] }; }
   }
   // 生成指令：本地生成和云端生成（push-recheck 里有一份逐字对照的副本）共用这段文字，改这里要同步那边。
-  function buildDayInstruction(cal, nowHM, past, existing) {
+  function buildDayInstruction(cal, nowHM, past, existing, threads) {
     let inst = [
       "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
       "以当前角色的人设、职业、近期记忆和最近的聊天为依据，想象TA今天真实会过的一天：先定今天的身体底子和情绪底色，再排日程。",
       "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + nowHM + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
       past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵；跨好几天的事——项目、备考、排练、等结果——按筹备、进行、收尾、余波的顺序往下走，让这几天连成线）：\n" + past.lines.join("\n") : null,
       past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
+      threads && threads.length ? "TA心里还挂着这些事（约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + threads.join("\n") : null,
       "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
       "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
       '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-20到20的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-40到40的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
       "body 是今天真实带在身上的状况，多数日子是空数组，最多两条；睡得不好、昨天太累、生病、天气才会有。",
       "情绪写法：用可感的状态词（迷糊、清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空、粘人）再带一点原因或身体感受，例如「开完会后脑子发紧」；一天里要有起伏，别每条都差不多；情绪要和 cost 对得上，耗神的事之后不该是「轻松」，回血的事之后不该是「疲惫」；底色 mood 要能从 sleep 和昨天的余波推出来。",
+      "energy 是身体的电量，和情绪底色是两回事：心情差但睡饱了 energy 照样高，心情好但熬了夜 energy 照样低。不要把「今天不开心」「性格沉闷」翻译成「精力低」。",
+      "energy 基线通常落在 55 到 85；只有生病、通宵、连着几天连轴转、或昨晚睡得很差，才低于 50。低于 40 是少见的坏日子，不该天天出现。",
       "cost 负数=消耗（开会、通勤、应酬、体力活），正数=回血（午睡、吃饭、散步、发呆），平淡的事给 0；一天累计下来别把人耗到负数太多。",
       "schedule 给 5 到 9 条，从起床后第一件事到睡前最后一件事；有主线也有琐碎，时间不均匀；不用把每个小时填满，事与事之间可以留空档（空档里TA就是自己待着）；有的日子轻（3、4 条），有的日子满；最后一件事结束到 bed 之间是TA自己的睡前时间；「睡觉」本身不要写成一条日程。",
     ].filter(Boolean).join("\n");
@@ -1613,7 +1833,7 @@
       const existing = await readTodayCalendar(cx); // 日程 app 里TA今天已定的安排
       const cal = calendarReality(new Date());
       const past = await recentDaysBrief(cx, 7);
-      const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing);
+      const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing, S.settings.threadsOn ? threadLines(cx) : []);
       const d = await generateJson(cx, {
         characterId: cx.character.id,
         appTags: ["companion", "daily"],
@@ -1638,60 +1858,57 @@
   }
 
   // 起念判断的指令：本地编排和云端生成后的编排共用这段文字（push-recheck 有逐字副本），改这里要同步那边。
-  function buildImpulseInstruction(day, candRows, lines, settings, biasLine) {
+  function buildImpulseInstruction(day, outlook, nowHM, lines, settings, biasLine, threads) {
+    const anchors = [
+      settings.anchorMorning ? "早上刚过免打扰那会儿，TA可能会想问一句早" : null,
+      settings.anchorSleep ? "睡前那段，TA可能会想说句晚安或白天没说完的话" : null,
+    ].filter(Boolean);
     return [
       "【后台系统任务，不是聊天：不要以角色口吻说话、不要直接写消息内容，只输出判断 JSON】",
-      "你是当前角色的内心。逐个判断：在下面每个候选时刻、做完那件事之后，TA会不会真的想给用户发消息？不是每个都要发——按TA的性格克制判断。",
-      '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"这次接触的类型，从 问候/关心/追话题/分享/惦记 里选一个","topic":"这次想聊的话题（8字内）","why":"判断理由（20字内）","intent":"act为true时TA当时的第一人称心理动机（40字内，不写台词），否则空字符串"}]}。decisions 与候选时刻一一对应、顺序一致。',
-      "TA今天的生活面：", JSON.stringify({ mood: day.mood, energy: day.energy, schedule: day.schedule }),
-      "（energy 是TA刚醒时的基线；下面每个候选时刻另给了那一刻的剩余精力和做完那件事之后的情绪，精力越低越懒得开口，情绪决定TA想说什么样的话）",
+      "你是当前角色的内心。现在是 " + nowHM + "。想一想：今天剩下的时间里，TA会在哪些时刻想给用户发消息？",
+      "念头是TA自己冒出来的，不必挂在日程上——刚做完一件事想说、路上看见什么、忽然惦记、白天没聊完的话头、单纯想搭句话，都算；一件事也可以不产生任何念头。按TA的性格克制判断，宁可少也别硬凑。",
+      '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"impulses":[{"time":"这个念头最想说出口的时刻HH:MM","until":"过了这个时刻这话就不新鲜了、不必再发HH:MM","about":"这个念头的由头（8字内，例：路过花店/刚开完会/昨晚那事没聊完）","sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"想聊的话题（8字内）","intent":"TA当时的第一人称心理动机（40字内，不写台词）","why":"为什么这会儿会想起（20字内）"}]}',
+      "impulses 按时刻从早到晚排；一个也没有就给空数组，不要为了填满而编。",
+      "until 是这个念头的保质期：接话头、约好的事可以短（半小时到一小时），单纯想分享的可以长（两三小时）。不写就按一个半小时算。",
+      "TA今天的生活面（背景，不是候选时刻）：", JSON.stringify({ mood: day.mood, energy: day.energy, schedule: day.schedule }),
+      "（energy 是TA刚醒时的基线，不是此刻的）",
+      "", "今天剩下的时间长这样（按TA的日程逐段列出，end 是这段结束的时刻，空档也单列一行；精力越低越懒得开口，busy=true 那几段顾不上看手机，别把念头排在里面——排在它结束之后反而正好）：",
+      JSON.stringify(outlook),
       lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
       lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
-      "", "候选时刻（判断每个时刻做完这件事后，TA会不会想给用户发消息）：",
-      JSON.stringify(candRows),
-      "", "约束：今天最多真的发 " + settings.quota + " 条；免打扰时段 " + settings.quietStart + "–" + settings.quietEnd
-        + (settings.minGapMin > 0 ? "；相邻两次起念至少隔 " + settings.minGapMin + " 分钟" : "") + "。",
+      threads && threads.length ? "\nTA心里还挂着这些事（约定快到点想打个气、过了点想问结果、到日子的想说一句、话头没接完想续上，都是很自然的由头）：\n" + threads.join("\n") : null,
+      anchors.length ? "\n用户希望留意这几段：" + anchors.join("；") + "。想不起来就不用勉强。" : null,
+      "", "约束：最多给 " + (settings.quota + 3) + " 个念头，今天最多真的发 " + settings.quota + " 条（多出来的会被记成「想过但没发」）；"
+        + "时刻必须晚于 " + nowHM + "；免打扰时段 " + settings.quietStart + "–" + settings.quietEnd + " 内不要排"
+        + (settings.minGapMin > 0 ? "；相邻两个念头至少隔 " + settings.minGapMin + " 分钟" : "") + "。",
       (settings.moodGate && day.energy < 30) ? "TA今天精力只有 " + day.energy + "%，很低。这种时候TA更想缩着，明显减少主动。" : null,
       biasLine || null,
     ].filter((s) => s !== null).join("\n");
   }
   /* ================= 核心：编排心动时刻 ================= */
-  function buildCandidates(cx) {
-    const now = Date.now() + 3 * 60000;
-    const seen = new Set();
-    const cands = [];
-    // 时刻不卡在整点：人是做着做着才想起对方的，每条往后飘 1–12 分钟；锚点也各自在一个区间里落
-    const drift = (lo, hi) => Math.round(lo + Math.random() * (hi - lo)) * 60000;
-    for (const it of cx.day.schedule) {
-      const base = timeToMs(it.time);
-      const ms = base ? base + drift(1, 12) : null;
-      if (!ms || ms < now || seen.has(it.time)) continue;
+  // 念头不再挂在日程节点上：日程只作为背景喂给模型，让TA自己说今天想在哪些时刻找用户。
+  // 这里给的是「今天剩下的时间长什么样」——不按固定网格采样（那会漏掉夹在两点之间的短日程），
+  // 而是按日程自己的边界走：每条还没过完的日程一行，中间的空档各补一行，都带那一刻的精力和
+  // busy 标记。模型自己挑时刻时才有依据，不至于把念头排到TA正开会那会儿。
+  function dayOutlook(cx) {
+    const rows = [], now = Date.now(), sw = sleepWindow(cx.day);
+    const endMs = (sw && timeToMs(sw.overnight ? "23:50" : sw.bed)) || timeToMs("23:00") || now;
+    const push = (ms, doing, busy, end) => {
       const hm = fmtHM(ms);
-      if (inQuiet(hm) || asleepAt(cx.day, hm)) continue;
-      seen.add(it.time);
-      cands.push({ time: hm, source: it.title, fireAt: ms, mood: it.mood || "" });
+      if (ms < now || ms > endMs || inQuiet(hm) || asleepAt(cx.day, hm)) return;
+      rows.push({ time: hm, end: end || "", energy: energyAt(cx.day, ms), doing: doing, busy: !!busy });
+    };
+    let cursor = now;
+    for (const it of (cx.day.schedule || [])) {
+      const a = timeToMs(it.time); if (!a) continue;
+      const b = it.end ? timeToMs(it.end) : null;
+      if ((b || a) < now) continue;
+      if (a - cursor > 20 * 60000) push(Math.round((Math.max(cursor, now) + a) / 2), "空着", false);
+      push(Math.max(a, now), String(it.title || ""), it.busy, it.end || "");
+      cursor = Math.max(cursor, b || a);
     }
-    // 早安锚点：免打扰结束后 25–55 分钟
-    if (S.settings.anchorMorning) {
-      const ms = timeToMs(S.settings.quietEnd) || timeToMs("08:00");
-      const gm = ms ? ms + drift(25, 55) : null;
-      if (gm && gm > now) {
-        const hm = fmtHM(gm);
-        if (!seen.has(hm) && !inQuiet(hm)) { seen.add(hm); cands.push({ time: hm, source: "早安", fireAt: gm }); }
-      }
-    }
-    // 睡前锚点：TA自己上床前 10–30 分钟；过零点才睡的就压到 23:50 之前，时间轴只认当天
-    const sw = sleepWindow(cx.day);
-    if (S.settings.anchorSleep && sw) {
-      const ms = sw.overnight ? timeToMs("23:50") : timeToMs(sw.bed);
-      const gm = ms ? ms - drift(10, 30) : null;
-      if (gm && gm > now) {
-        const hm = fmtHM(gm);
-        if (!seen.has(hm) && !inQuiet(hm) && !asleepAt(cx.day, hm)) cands.push({ time: hm, source: "睡前", fireAt: gm });
-      }
-    }
-    cands.sort((a, b) => a.fireAt - b.fireAt);
-    return cands.slice(0, 8);
+    if (endMs - cursor > 20 * 60000) push(Math.round((Math.max(cursor, now) + endMs) / 2), "睡前自己待着", false);
+    return rows.slice(0, 16);
   }
 
   // 主动倾向 → 给模型的一句话（0=自然，不加话）
@@ -1835,28 +2052,42 @@
       const kept = keptImpromptu(cx);
       const keptTimes = {}, keptIds = {};
       kept.forEach((k) => { keptTimes[k.time] = 1; if (k.wakeId) keptIds[k.wakeId] = 1; });
-      const cands = buildCandidates(cx).filter((c) => !keptTimes[c.time]);
-      if (!cands.length) {
+      // 随用随判：早上不排念头，也就不调模型。只把哨兵和空计划寄上去，白天云端随时起。
+      if (+S.settings.impulseMode === 1 && !cloudRecheckOn()) await log(cx, "随用随判要开着云端复核才有人起念，这次按「早上定完」排");
+      if (liveMode()) {
+        await cancelTodayWakes(cx, keptIds);
+        await armSentinel(cx);
+        const liveItems = kept.slice().sort((a, b) => a.fireAt - b.fireAt);
         cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-          { date: todayStr(), characterId: cx.character.id, items: (cx.plan && cx.plan.items) || [] });
-        toast("今天剩下的时间没有合适的时刻了");
-        await log(cx, "编排：无未来候选时刻（已过时段或全部落在免打扰内）");
+          { date: todayStr(), characterId: cx.character.id, items: liveItems, chatUsed: 0, plannedAt: Date.now(), recheckAt: 0, selfUsed: 0, postedIds: [], outbox: [] });
+        cx.archive = null;
+        await uploadPlanCloud(cx, true);
+        uploadGenKitCloud(cx, true).catch(() => { /* 已在函数内记日志 */ });
+        await log(cx, "随用随判：早上不排念头（没调模型）"
+          + (liveItems.length ? "，保留了 " + liveItems.length + " 个临时起念" : "") + "；白天由云端每次醒来现想");
+        toast("今天交给TA随时起念");
         cx.busy = false; cx._planLock = false; render(); return;
       }
-      await log(cx, "候选时刻：" + cands.map((c) => c.time + "·" + c.source).join("，"));
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
       const streak0 = unansweredStreak(chat);
       const lines = chatExcerpt(chat, S.settings.judgeLines);
       if (lines.length) await log(cx, "已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
+      const outlook = dayOutlook(cx);
+      if (!outlook.length) {
+        cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
+          { date: todayStr(), characterId: cx.character.id, items: (cx.plan && cx.plan.items) || [] });
+        toast("今天剩下的时间没有合适的时刻了");
+        await log(cx, "编排：今天剩下的时间全在免打扰或睡眠里");
+        cx.busy = false; cx._planLock = false; render(); return;
+      }
       const parsed = await generateJson(cx, {
         characterId: cx.character.id,
         appTags: ["companion", "impulse"],
-        instruction: buildImpulseInstruction(cx.day,
-          cands.map((c) => ({ time: c.time, justFinished: c.source, mood: c.mood || "", energy: energyAt(cx.day, c.fireAt) })),
-          lines, S.settings, biasText()),
+        instruction: buildImpulseInstruction(cx.day, outlook, fmtHM(Date.now()), lines, S.settings, biasText(), S.settings.threadsOn ? threadLines(cx) : []),
       });
-      const decisions = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+      const raw = Array.isArray(parsed.impulses) ? parsed.impulses : [];
+      await log(cx, "TA提了 " + raw.length + " 个念头：" + (raw.map((x) => normHM(x && x.time) + "·" + String((x && x.about) || "")).join("，") || "（一个都没有）"));
       await cancelTodayWakes(cx, keptIds);
       await armSentinel(cx);
 
@@ -1865,41 +2096,50 @@
       const armedAt = kept.filter((k) => k.act).map((k) => k.fireAt);
       let armedCount = armedAt.length;
       const prevArmed = (t) => armedAt.filter((x) => x < t).sort((a, b) => b - a)[0] || 0;
-      for (let i = 0; i < cands.length; i++) {
-        const c = cands[i];
-        const d = decisions[i] || {};
+      // 模型自己挑的时刻说了不算：免打扰、睡眠窗、时刻去重、最小间隔、额度，这五道照样硬拦
+      const nowMs0 = Date.now(), gapMs = (S.settings.minGapMin || 0) * 60000;
+      const taken = Object.assign({}, keptTimes);
+      for (const x of raw.slice(0, S.settings.quota + 3)) {
+        const hm = normHM(x && x.time), ms = hm ? timeToMs(hm) : null;
+        if (!ms || ms < nowMs0 + 3 * 60000) { await log(cx, "念头丢弃：时刻不合法或已过点（" + String((x && x.time) || "") + "）"); continue; }
+        if (inQuiet(hm) || asleepAt(cx.day, hm)) { await log(cx, "念头丢弃：" + hm + " 落在免打扰或睡着的时段"); continue; }
+        if (taken[hm]) { await log(cx, "念头丢弃：" + hm + " 已经有一个了"); continue; }
+        taken[hm] = 1;
+        // until 是这个念头的保质期，改约只能在它之前挪；模型没给或给反了就按 90 分钟，最长不超过 6 小时
+        const uhm = normHM(x.until), ums = uhm ? timeToMs(uhm) : null;
+        const about = String((x && x.about) || "想起用户").slice(0, 12);
         const item = {
-          time: c.time, fireAt: c.fireAt, source: c.source, act: !!d.act,
-          why: String(d.why || ""), intent: String(d.intent || ""), delivery: "", reason: "", wakeId: "",
-          sem: String(d.sem || ""), topic: String(d.topic || ""),
-          score: calcScore(c.fireAt, armedCount, streak0, prevArmed(c.fireAt)),
+          time: hm, fireAt: ms, until: ums && ums > ms ? Math.min(ums, ms + 6 * 3600000) : ms + 90 * 60000,
+          source: about, act: true,
+          why: String(x.why || ""), intent: String(x.intent || ""), delivery: "", reason: "", wakeId: "",
+          sem: String(x.sem || ""), topic: String(x.topic || ""),
+          score: calcScore(ms, armedCount, streak0, prevArmed(ms)),
         };
-        if (item.act && armedCount >= S.settings.quota) { item.act = false; item.why = "超出今日额度"; }
-        if (item.act && S.settings.minGapMin > 0
-            && armedAt.some((t) => Math.abs(c.fireAt - t) < S.settings.minGapMin * 60000)) { item.act = false; item.why = "离上一个起念太近"; }
+        if (armedCount >= S.settings.quota) { item.act = false; item.why = "超出今日额度"; }
+        else if (gapMs && armedAt.some((t) => Math.abs(ms - t) < gapMs)) { item.act = false; item.why = "离上一个起念太近"; }
         if (item.act) {
           try {
             const res = await AiPhone.push.wake({
-              characterId: cx.character.id, fireAt: c.fireAt,
-              intent: item.intent || ("刚" + c.source + "，忽然想到用户"), source: "tool",
+              characterId: cx.character.id, fireAt: ms,
+              intent: item.intent || about, source: "tool",
               cooldownRounds: S.settings.maxUnanswered,
             });
             item.wakeId = res.id; item.delivery = res.armed ? "push" : "local"; item.reason = res.reason || "";
-            armedCount++; armedAt.push(c.fireAt);
-            await log(cx, c.time + " 起念 ✓ " + (res.armed ? "已预约离线推送" : "仅本地（" + (res.reason || "未知") + "）") + "：" + item.intent);
+            armedCount++; armedAt.push(ms);
+            await log(cx, hm + " 起念 ✓ " + (res.armed ? "已预约离线推送" : "仅本地（" + (res.reason || "未知") + "）") + "：" + item.intent);
           } catch (e) {
             item.act = false; item.why = "预约失败：" + (e && e.message || e);
-            await log(cx, c.time + " 预约失败：" + (e && e.message || e));
+            await log(cx, hm + " 预约失败：" + (e && e.message || e));
           }
         } else {
-          await log(cx, c.time + " 未起念：" + (item.why || "TA这会儿不想"));
+          await log(cx, hm + " 未起念：" + item.why);
         }
         item.hist = [{ at: Date.now(), kind: item.act ? "plan" : "skip", note: item.act ? item.intent : (item.why || "TA这会儿不想") }];
         items.push(item);
       }
       items.sort((a, b) => a.fireAt - b.fireAt);
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        { date: todayStr(), characterId: cx.character.id, items, chatUsed: lines.length, plannedAt: Date.now(), recheckAt: 0, selfUsed: 0 });
+        { date: todayStr(), characterId: cx.character.id, items, chatUsed: lines.length, plannedAt: Date.now(), recheckAt: 0, selfUsed: 0, postedIds: [], outbox: [] });
       cx.archive = null; // 记录页缓存失效
       await uploadPlanCloud(cx, true);
       // 哨兵刚换了一条，明天的原料里记的还是旧 id，不重寄云端明天就没模板可借
@@ -1962,6 +2202,7 @@
         const lines = chatExcerpt(chat, S.settings.judgeLines);
         const remaining = items.filter((w) => w.fireAt > nowMs + 2 * 60000);
         const usedQuota = items.filter((w) => w.act).length;
+        const canPost = moCanPost(cx);
         const parsed = await generateJson(cx, {
           characterId: cx.character.id,
           appTags: ["companion", "impulse"],
@@ -1977,13 +2218,19 @@
             biasText() || null,
             canJudge ? "还没到点的时刻（act 是之前的判断）：" : null,
             canJudge ? JSON.stringify(remaining.map((w) => ({ time: w.time, source: w.source, act: !!w.act, intent: w.intent || "", energy: energyAt(cx.day, w.fireAt) }))) : null,
-            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）"}],"extra":[{"time":"HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-40到40的整数,"why":"聊天里的依据（15字内）"}]}',
+            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-40到40的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
             "feel 描述的是聊天带来的情绪变化，不是今天的底色：被安慰/被逗笑/聊得投入给正 energy，被冷落/吵架/说累了给负；聊得平淡就把 intensity 给低分。",
             (S.settings.chatEditsDay
               ? "sched 只在聊天里确实出现了会改变TA今天安排的事才给：约好了几点做什么、临时被叫走、说了某件事不去了。最多 2 条，时间必须晚于现在（" + fmtHM(nowMs) + "）；只是随口聊到、没有落实的事不要写进来，没有就给空数组。"
               : "sched 必须是空数组（用户关掉了聊天改日程）。"),
             "TA今天还没到点的日程：" + JSON.stringify(((cx.day && cx.day.schedule) || []).filter((x) => x.time > fmtHM(nowMs)).map((x) => ({ time: x.time, title: x.title }))),
-            "decisions 与上面时刻一一对应、顺序一致；没有变化就原样回传。extra 最多 1 条：只有聊天里确实有没聊完的话头、约好的事、或明显被勾起的牵挂才加，没有就给空数组。"
+            S.settings.threadsOn && threadLines(cx, nowMs).length ? "TA心里还挂着的事：\n" + threadLines(cx, nowMs).join("\n") : null,
+            S.settings.threadsOn ? THREAD_TASK : "keep 和 settle 一律空数组。",
+            canPost
+              ? "post：如果此刻更想发一条朋友圈而不是私聊（晒一下刚做的事、随手记一句、发个感慨——给所有人看的，不是说给用户听的），就在 post.hint 里写想发的由头或大意（30字内），由系统按人设成文。这周已发 " + moState(cx).weekN + " 条。私聊和发圈可以只要一个，也可以都不要；不想发就写 null。"
+              : "post 一律写 null。",
+            "改约：act 给 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断你、TA心思还没到这上面），而话本身还想说，就在 defer 里写一个今天更晚的 HH:MM，整个念头会挪过去，不占新额度；真的不想说了才把 defer 留空。TA到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。只能挪到这个念头的保质期（until）之前——过了那个点这话就不新鲜了，宁可作罢。",
+            "decisions 与上面时刻一一对应、顺序一致；没有变化就原样回传。extra 最多 1 条：只有聊天里确实有没聊完的话头、约好的事、或明显被勾起的牵挂才加（账本里快到点的约定、到了的日子也算），没有就给空数组。"
               + (S.settings.chatCandidates ? "" : "（临时起念已被用户关闭，extra 必须是空数组）"),
             "约束：今天最多 " + S.settings.quota + " 条（已占 " + usedQuota + "）；免打扰 " + S.settings.quietStart + "–" + S.settings.quietEnd
               + (S.settings.minGapMin > 0 ? "；相邻起念至少隔 " + S.settings.minGapMin + " 分钟" : "")
@@ -2012,6 +2259,34 @@
           const wantAct = !!d.act;
           if (wantAct === !!w.act) { if (wantAct && d.intent) w.intent = String(d.intent); continue; }
           if (!wantAct) {
+            // 改约：想说但这个点不合适的，整条挪走而不是丢掉。挪不动（时刻不合法/撞免打扰/
+            // 挨太近/离原时刻太远）就退回原来的取消。念头本来就点亮着，挪完不额外占额度。
+            // 和「忙与睡」的 held 是同一件事——都是把时刻往后挪——所以复用 held 那套展示，
+            // 只在历史里分开记：那边是到点机械顺延，这边是复核时TA自己改的主意。
+            const dh = normHM(d.defer), dms = dh ? timeToMs(dh) : null;
+            const dgap = (S.settings.minGapMin || 0) * 60000;
+            // 挪的上限是念头自己的保质期 until（生成时模型给的，老计划没有就按原时刻 +
+            // busyMaxHoldMin 兜底）。不数次数——过了保质期这话就不新鲜了，由头本身不成立。
+            const dorig = +w.origFireAt || w.fireAt;
+            const dcap = +w.until || dorig + (S.settings.busyMaxHoldMin || 180) * 60000;
+            if (dms && dms > nowMs + 2 * 60000 && !inQuiet(dh) && !asleepAt(cx.day, dh) && dms <= dcap
+              && !items.some((x) => x !== w && x.time === dh)
+              && !(dgap && items.some((x) => x.act && x !== w && Math.abs(x.fireAt - dms) < dgap))) {
+              if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 忽略 */ } }
+              w.wakeId = "";
+              try {
+                const res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt: dms, intent: w.intent || String(d.intent || ""), source: "tool", cooldownRounds: S.settings.maxUnanswered });
+                const from = w.time;
+                w.time = dh; w.fireAt = dms; w.held = true; w.origFireAt = dorig;
+                w.wakeId = res.id; w.delivery = res.armed ? "push" : "local"; w.reason = res.reason || "";
+                w.why = String(d.why || "这个点不合适");
+                (w.hist = w.hist || []).push({ at: nowMs, kind: "defer", note: from + " 改约到 " + dh + "——" + w.why });
+                items.sort((a, b) => a.fireAt - b.fireAt);
+                changed++;
+                await log(cx, "复核：" + from + " 改约到 " + dh + "——" + w.why);
+                continue;
+              } catch (e) { await log(cx, "复核改约失败 → " + dh + "（改为取消）：" + (e && e.message || e)); }
+            }
             if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 忽略 */ } }
             w.act = false; w.adj = "recheck"; w.wakeId = ""; w.delivery = "";
             w.why = String(d.why || "聊过之后TA改了主意");
@@ -2021,7 +2296,7 @@
           } else {
             if (items.filter((x) => x.act).length >= S.settings.quota) { await log(cx, "复核：" + w.time + " 想点亮但额度已满"); continue; }
             try {
-              const res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt: w.fireAt, intent: String(d.intent || ("刚" + w.source + "，想到用户")), source: "tool", cooldownRounds: S.settings.maxUnanswered });
+              const res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt: w.fireAt, intent: String(d.intent || w.source || "想到用户"), source: "tool", cooldownRounds: S.settings.maxUnanswered });
               w.act = true; w.adj = "recheck"; w.intent = String(d.intent || ""); w.why = String(d.why || "");
               w.wakeId = res.id; w.delivery = res.armed ? "push" : "local"; w.reason = res.reason || "";
               w.score = calcScore(w.fireAt, items.filter((x) => x.act && x !== w).length, streak, 0);
@@ -2043,8 +2318,10 @@
           if (gap && items.some((w) => w.act && Math.abs(w.fireAt - ms) < gap)) { await log(cx, "复核：临时起念 " + hm + " 离已有起念太近，放弃"); continue; }
           try {
             const res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt: ms, intent: String(x.intent || "有句话没说完，想找用户"), source: "tool", cooldownRounds: S.settings.maxUnanswered });
+            const xUms = timeToMs(normHM(x.until) || "");
             items.push({
-              time: hm, fireAt: ms, source: "临时·" + String(x.about || "未完话题").slice(0, 10),
+              time: hm, fireAt: ms, until: xUms && xUms > ms ? Math.min(xUms, ms + 6 * 3600000) : ms + 90 * 60000,
+              source: "临时·" + String(x.about || "未完话题").slice(0, 10),
               act: true, adj: "extra", why: String(x.why || ""), intent: String(x.intent || ""),
               delivery: res.armed ? "push" : "local", reason: res.reason || "", wakeId: res.id,
               sem: "追话题", topic: String(x.about || "").slice(0, 10),
@@ -2057,6 +2334,9 @@
           } catch (e) { await log(cx, "复核临时起念预约失败：" + (e && e.message || e)); }
         }
         await applyChatSchedEdits(cx, parsed.sched, nowMs);
+        await applyThreads(cx, parsed, nowMs, "app");
+        const postHint = canPost && parsed.post && typeof parsed.post === "object" ? String(parsed.post.hint || "") : "";
+        if (postHint && await postMoment(cx, postHint, nowMs, "app")) await moNote(cx, nowMs);
       }
 
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
@@ -2157,6 +2437,10 @@
     if (nx) lines.push("接下来：" + nx.time + " " + nx.title);
     else if (ph.kind === "pre" && sw) lines.push("接下来：" + sw.bed + " 睡觉");
     else if (ph.kind === "sleep" && sw) lines.push("接下来：" + sw.wake + " 起床");
+    if (S.settings.threadsOn) {
+      const tl = liveThreads(cx, now).slice(0, 4).map((t) => THREAD_KIND[t.kind] + "·" + t.text + (threadWhen(t, now) ? "（" + threadWhen(t, now) + "）" : ""));
+      if (tl.length) lines.push("心里还挂着：" + tl.join("；") + "。到了时候自然会想问一句，不用每次都提。");
+    }
     lines.push("这些是你自己的状态，说话时自然带出来就行，别报数字、别列清单、别提这段文字。");
     return lines.join("\n");
   }
@@ -2237,6 +2521,7 @@
     await syncReplyGate(cx);
     await refreshAffection(cx);
     await publishPresence(cx);
+    await publishMoments(cx);
     if (!cx.character || !AiPhone.chat || !AiPhone.chat.setContext) return;
     const on = !!(S.settings && S.settings.injectChat) && !!(cx.day || nightBridge(cx));
     const text = on ? chatContextText(cx) : "";
@@ -2292,8 +2577,8 @@
       return;
     }
     if (S.tab === "archive") { renderArchive(); return; }
-    if (S.tab === "diag") { renderDiag(); return; }
-    if (S.tab === "usage") { renderUsage(); return; }
+    if (S.tab === "back") { renderBack(); return; }
+    if (S.tab === "heart") { renderHeart(); return; }
     if (!cx.day) {
       v.innerHTML =
         '<div class="card empty"><div class="art">🌅</div>' +
@@ -2301,13 +2586,51 @@
         + (nightBridge(cx) ? '<br><span style="color:var(--tx3)">' + esc("眼下按昨天的作息：" + nightBridge(cx).doing + (nightBridge(cx).next ? "，" + nightBridge(cx).next : "")) + "</span>" : "")
         + (S.settings && S.settings.autoGen ? '<br><span style="color:var(--tx3)">每天 ' + esc(S.settings.autoGenAt || SET_DEF.autoGenAt) + ' 会自动生成（挂念得开着；错过了下次打开时补）</span>' : "") + "</p>" +
         '<button class="big-btn" id="btn-gen"' + (cx.busy ? " disabled" : "") + ">" +
-        (cx.busy ? '<span class="spin"></span>正在展开TA的一天…' : "开始TA的今天") + "</button></div>" + previewCard();
+        (cx.busy ? '<span class="spin"></span>正在展开TA的一天…' : "开始TA的今天") + "</button></div>";
       bindCommon(); return;
     }
 
     const ctx = { day: cx.day, plan: cx.plan, settings: S.settings, character: cx.character, now: Date.now() };
     v.innerHTML = PANELS.filter((p) => p.when(ctx)).map((p) => p.html(ctx)).join("");
     requestAnimationFrame(() => { document.querySelectorAll(".fill").forEach((el) => { el.style.width = el.dataset.w + "%"; }); });
+    bindPanels(cx, v);
+  }
+
+  /* ================= 总览面板：卡片注册表 =================
+     加一块展示 = 往 PANELS 里加一条 {id, when, html}，render 本身不用改。
+     html(ctx) 只许返回字符串，绑事件统一在 render 末尾做（innerHTML 会冲掉旧节点）。 */
+  const PANELS = [
+    { id: "state", when: (c) => !!c.day, html: panelState },
+    { id: "timeline", when: (c) => !!c.day, html: panelTimeline },
+  ];
+  // 心动页：主动消息的全部——TA想说什么、几点、惦记着什么、按什么分寸
+  const HEART_PANELS = [
+    { id: "pulse", when: (c) => !!c.day, html: panelPulse },
+    { id: "wakes", when: (c) => !!c.day, html: panelWakes },
+    { id: "threads", when: (c) => !!c.day && !!S.settings.threadsOn, html: panelThreads },
+    { id: "rules", when: () => true, html: panelRules },
+  ];
+  function renderHeart() {
+    const cx = cur(), v = $("#view");
+    if (!cx.day) {
+      v.innerHTML = '<div class="card empty"><div class="art">♡</div><p>TA的今天还没开始。<br>先去「今天」页生成TA的一天，<br>这里才会有TA想起你的时刻。</p></div>';
+      bindCommon(); return;
+    }
+    const ctx = { day: cx.day, plan: cx.plan, settings: S.settings, character: cx.character, now: Date.now() };
+    v.innerHTML = HEART_PANELS.filter((p) => p.when(ctx)).map((p) => p.html(ctx)).join("");
+    bindPanels(cx, v);
+  }
+  // 后台页：诊断和用量两段，段切换只换子容器
+  function renderBack() {
+    const v = $("#view");
+    v.innerHTML = '<div class="stabs" style="margin-top:2px">'
+      + '<button class="stab' + (S.sub === "diag" ? " on" : "") + '" data-sub="diag">诊断</button>'
+      + '<button class="stab' + (S.sub === "usage" ? " on" : "") + '" data-sub="usage">用量</button>'
+      + '</div><div id="subview"></div>';
+    v.querySelectorAll(".stab").forEach((b) => { b.onclick = () => { if (S.sub !== b.dataset.sub) { S.sub = b.dataset.sub; renderBack(); } }; });
+    if (S.sub === "usage") renderUsage(); else renderDiag();
+  }
+  function bindPanels(cx, v) {
     v.querySelectorAll(".tl-item.sched").forEach((el) => {
       el.onclick = () => { const i = +el.dataset.si; if (i >= 0) openSchedDetail(i); };
     });
@@ -2317,6 +2640,33 @@
         if (w) openDetail(w, cx.plan, null);
       };
     });
+    const go = $("#go-heart");
+    if (go) go.onclick = () => switchTab("heart");
+    v.querySelectorAll(".th-row").forEach((row) => {
+      row.onclick = (e) => { if (!e.target.closest("button")) row.classList.toggle("sel"); };
+    });
+    v.querySelectorAll(".th-row button").forEach((el) => {
+      el.onclick = async () => {
+        const id = el.closest(".th-row").dataset.tid, list = (cx.threads || []).slice();
+        const t = list.find((x) => x.id === id); if (!t) return;
+        if (el.dataset.act === "done") { t.done = true; t.at = Date.now(); t.by = "user"; }
+        else list.splice(list.indexOf(t), 1);
+        await saveThreads(cx, list); await uploadPlanCloud(cx, false); cx._ctx = null; syncChatContext(cx, true).catch(() => {}); render();
+      };
+    });
+    const thPlus = $("#th-plus");
+    if (thPlus) thPlus.onclick = () => { S._thAdd = !S._thAdd; render(); if (S._thAdd) { const i = $("#th-add input"); if (i) i.focus(); } };
+    const thAdd = $("#th-add");
+    if (thAdd) thAdd.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = thAdd.text.value.trim().slice(0, 60); if (!text) return;
+      const when = thAdd.when.value.trim(), now = Date.now(), due = parseWhen(when, now);
+      if (when && !due) { toast("时间没看懂：写 9/10、2026-09-10 或 15:00"); return; }
+      const kind = !due ? "topic" : (/\d{1,2}:\d{2}/.test(when) ? "promise" : "date");
+      await saveThreads(cx, (cx.threads || []).concat([newThread(kind, text, due, now, "user")]));
+      S._thAdd = false;
+      await uploadPlanCloud(cx, false); cx._ctx = null; syncChatContext(cx, true).catch(() => {}); render();
+    };
     const gear = $("#btn-panel-set");
     if (gear) gear.onclick = openSheet;
     const fold = v.querySelector("details.fold");
@@ -2325,16 +2675,12 @@
     if (hw) hw.onclick = (e) => { if (!e.target.closest("button")) openSheet(); };
     bindCommon();
   }
-
-  /* ================= 总览面板：卡片注册表 =================
-     加一块展示 = 往 PANELS 里加一条 {id, when, html}，render 本身不用改。
-     html(ctx) 只许返回字符串，绑事件统一在 render 末尾做（innerHTML 会冲掉旧节点）。 */
-  const PANELS = [
-    { id: "state", when: (c) => !!c.day, html: panelState },
-    { id: "pulse", when: (c) => !!c.day, html: panelPulse },
-    { id: "timeline", when: (c) => !!c.day, html: panelTimeline },
-    { id: "rules", when: () => true, html: panelRules },
-  ];
+  function switchTab(tab) {
+    if (S.tab === tab) return;
+    S.tab = tab;
+    document.querySelectorAll("#tabs .tab").forEach((x) => x.classList.toggle("on", x.dataset.tab === tab));
+    render();
+  }
 
   function fromNow(ms) {
     const d = Math.round((ms - Date.now()) / 60000);
@@ -2385,12 +2731,19 @@
           + (e !== b ? ' <span style="opacity:.45">起床 ' + b + "%</span>" : "") + "</span></div>"
           + '<div class="bar"><div class="fill" data-w="' + e + '"></div></div></div>';
       })() +
-      '<div class="kvs">' +
+      '<div class="kvs link" id="go-heart">' +
       (next
         ? kv("下一次想起你", esc(next.time) + " · " + esc(fromNow(next.fireAt)), "hi") +
           kv("那会儿TA想说", "「" + esc(next.intent) + "」", "col")
         : kv("下一次想起你", "今天没有还没到点的时刻了", "dim")) +
-      "</div>" + previewZone() + "</div>";
+      (function () {
+        if (!S.settings.threadsOn) return "";
+        const th = liveThreads(cx, c.now).slice().sort((x, y) => (threadDueMs(x, c.now) || 9e15) - (threadDueMs(y, c.now) || 9e15));
+        if (!th.length) return "";
+        const shown = th.slice(0, 2).map((t) => esc(t.text) + (threadWhen(t, c.now) ? "（" + esc(threadWhen(t, c.now)) + "）" : ""));
+        return kv("心里挂着", shown.join(" · ") + (th.length > 2 ? " · 还有 " + (th.length - 2) + " 件" : ""));
+      })() +
+      '<div class="go">去心动页 ›</div></div></div>';
   }
 
   function panelPulse(c) {
@@ -2408,40 +2761,64 @@
     const stat = (n, cap, delay) => '<div class="stat"' + (delay ? ' style="animation-delay:' + delay + 'ms"' : "") +
       '><div class="num">' + n + '</div><div class="cap">' + cap + "</div></div>";
     return '<div class="card"><div class="sec-head"><span class="t">今 日 心 动</span>' +
-      '<button class="act" id="btn-replan"' + (cx.busy ? " disabled" : "") + ">" + (cx.busy ? "编排中…" : "♥ 重新编排") + "</button></div>" +
-      (c.plan ? "" : '<div class="archive-note" style="padding-bottom:10px">今天还没编排过。点右上角「♥ 重新编排」，看看TA会在哪些时刻想起你。</div>') +
-      '<div class="stats four" style="margin-bottom:2px">' +
+      '<button class="act" id="btn-replan"' + (cx.busy ? " disabled" : "") + ">" + (cx.busy ? "处理中…" : replanLabel()) + "</button></div>" +
+      (c.plan ? "" : '<div class="archive-note" style="padding-bottom:10px">'
+        + (liveMode()
+          ? "今天的念头由TA随时起，早上不预先排。点右上角「♥ 重置今天」把计划寄到云上，云端才接得上手。"
+          : "今天还没编排过。点右上角「♥ 重新编排」，看看TA会在哪些时刻想起你。") + "</div>") +
+      (wait[0]
+        ? '<div class="quote"><div class="from">' + esc(wait[0].time) + ' · 接下来想找你</div>「' + esc(wait[0].intent) + "」</div>"
+        : last
+        ? '<div class="quote"><div class="from">' + esc(last.time) + ' · 最近一次想起你</div>「' + esc(last.intent) + "」</div>"
+        : '<div class="quote dim">今天还没想起过你</div>') +
+      '<div class="stats four" style="margin:12px 0 2px">' +
       stat(fired.length, "已想起") + stat(wait.length, "待 发", 60) +
-      stat(skipped.length, "未起念", 120) + stat(armed.length + "/" + quota, "配 额", 180) + "</div>" +
+      stat(skipped.length, "作 罢", 120) + stat(armed.length + "/" + quota, "配 额", 180) + "</div>" +
       '<div class="strip">' +
       tag(wait.length ? (reach.length === wait.length ? "待发的都离线可达" : "离线可达 " + reach.length + " / " + wait.length) : "没有待发", wait.length && reach.length === wait.length ? "ok" : (wait.length ? "warn" : "")) +
-      tag(cloudRecheckOn() ? "云端复核 · 每半小时" : (cloudCfg() ? "云端复核关着" : "没配云"), cloudRecheckOn() ? "ok" : "") +
+      tag(cloudRecheckOn() ? "云端复核 · 每 5 分钟" : (cloudCfg() ? "云端复核关着" : "没配云"), cloudRecheckOn() ? "ok" : "") +
+      (+S.settings.impulseMode === 1 && !cloudRecheckOn() ? tag("随用随判要配云，先按早上定完跑", "warn") : "") +
       (() => { const t = usageTotals(); return tag("模型调用 " + t.calls + (t.capCalls ? "/" + t.capCalls : "") + " · " + fmtTok(t.tokens) + (t.capTokens ? "/" + fmtTok(t.capTokens) : "") + " token", usageOver() ? "warn" : ""); })() +
       (c.day && c.day.by === "cloud" ? tag("今天由云端生成", "cool") : (cloudGenOn() ? tag("明天云端生成 " + esc(S.settings.autoGenAt || SET_DEF.autoGenAt), "") : "")) +
       tag(c.plan && c.plan.recheckAt ? "本机复核 " + esc(fmtHM(c.plan.recheckAt)) : "本机还没复核过", "") +
-      (adj.length || imp.length ? tag([adj.length ? "复核改了 " + adj.length + " 处" : "", imp.length ? "临时起念 " + imp.length : ""].filter(Boolean).join(" · "), "cool") : "") +
-      "</div>" +
-      (last
-        ? '<div class="quote"><div class="from">' + esc(last.time) + ' · 最近一次想起你</div>「' + esc(last.intent) + "」</div>"
-        : '<div class="quote dim">今天还没想起过你</div>') +
-      "</div>";
+      (adj.length || imp.length ? tag([adj.length ? "复核改了 " + adj.length + " 处" : "", imp.length ? "临时念头 " + imp.length : ""].filter(Boolean).join(" · "), "cool") : "") +
+      "</div></div>";
   }
 
+  function panelThreads(c) {
+    const cx = cur(), now = c.now;
+    const list = liveThreads(cx, now).slice().sort((a, b) => (threadDueMs(a, now) || 9e15) - (threadDueMs(b, now) || 9e15));
+    const row = (t) => '<div class="th-row" data-tid="' + esc(t.id) + '"><span class="badge ' + (t.kind === "promise" ? "cool" : t.kind === "date" ? "warn" : "") + '">' + THREAD_KIND[t.kind] + "</span>"
+      + '<span class="th-text">' + esc(t.text) + (threadWhen(t, now) ? ' <span class="dim">' + esc(threadWhen(t, now)) + "</span>" : "") + "</span>"
+      + '<button class="mini" data-act="done" title="了结">✓</button><button class="mini drop" data-act="drop" title="删掉">✕</button></div>';
+    return '<div class="card"><div class="sec-head"><span class="t">惦 记</span>' + (list.length ? '<span class="badge">' + list.length + " 件</span>" : "")
+      + '<button class="act" id="th-plus" title="手动记一件">' + (S._thAdd ? "收起" : "＋ 记一件") + "</button></div>"
+      + (S._thAdd ? '<form class="th-add" id="th-add"><input name="text" placeholder="如「我生日」「周五面试」" maxlength="40"><input name="when" placeholder="9/10 或 15:00"><button type="submit" class="mini">记</button></form>' : "")
+      + (list.length ? list.map(row).join("") : '<div class="archive-note">聊天里说定的事、没聊完的话头、重要的日子，TA会记在这里跨天惦记着；快到点、到日子了会自己想起来找你。</div>')
+      + "</div>";
+  }
+  function panelWakes(c) {
+    const items = sortedItems(c);
+    const now = fmtHM(c.now);
+    let tl = "", idx = 0, nowInserted = false;
+    const nowLine = '<div class="tl-now"><span class="lbl">现在 ' + now + "</span></div>";
+    for (const w of items) {
+      if (w.time >= now && !nowInserted) { tl += nowLine; nowInserted = true; }
+      tl += wakeRow(w, w.time < now, w.source, 'style="animation-delay:' + (idx++ * 40) + 'ms"');
+    }
+    if (items.length && !nowInserted) tl += nowLine;
+    return '<div class="card"><div class="sec-head"><span class="t">时 刻</span></div>' +
+      '<div class="tl">' + (tl || '<div class="nt" style="padding:8px 0;color:var(--tx3)">' + (liveMode() ? "还没有念头。TA白天想起来了会自己排。" : "还没编排。点上面「♥ 重新编排」。") + "</div>") + "</div></div>";
+  }
+  // 随用随判模式下「编排」不再排念头，只把计划重新寄到云上，按钮跟着改名
+  function replanLabel() { return liveMode() ? "♥ 重置今天" : "♥ 重新编排"; }
+  // 随用随判的念头全在云端起，没配云就只能退回早上定完
+  function liveMode() { return +S.settings.impulseMode === 1 && cloudRecheckOn(); }
   function panelTimeline(c) {
     const cx = cur();
     const now = fmtHM(c.now);
-    const wakeByTime = {};
-    for (const w of (c.plan && c.plan.items) || []) wakeByTime[w.time] = w;
-    const times = new Set();
-    const merged = [];
-    const bySource = {};
-    for (const it of c.day.schedule) { const m = { kind: "sched", time: it.time, it, subs: [] }; merged.push(m); times.add(it.time); if (!bySource[it.title]) bySource[it.title] = m; }
-    for (const w of (c.plan && c.plan.items) || []) {
-      if (times.has(w.time)) continue;
-      const host = bySource[w.source];
-      if (host && w.time >= host.time) host.subs.push(w);
-      else merged.push({ kind: "wakeOnly", time: w.time, w });
-    }
+    // 只放日程和作息标记；心动时刻在心动页
+    const merged = c.day.schedule.map((it) => ({ kind: "sched", time: it.time, it }));
     // 起床和上床两行只是标记，不可点；过零点才睡的排在最末，标「次日」
     const sw = sleepWindow(c.day);
     if (sw && c.day.wake) merged.push({ kind: "mark", time: "00:00", label: c.prev && c.prev.bed ? "昨晚 " + c.prev.bed : "昨晚", icon: "🌙", text: "睡觉", night: true });
@@ -2464,10 +2841,8 @@
       if (m.kind === "mark") {
         tl += '<div class="tl-item mark' + (past ? " past" : "") + (cur ? " cur" : "") + '" ' + delay + '><span class="dot"></span>'
           + '<div class="row1"><span class="tm">' + esc(m.label || m.time) + '</span><span class="tt">' + m.icon + " " + m.text + "</span></div></div>";
-      } else if (m.kind === "sched") {
-        const w = wakeByTime[m.time];
-        if (w) tl += wakeRow(w, past, m.it.title, delay);
-        else {
+      } else {
+        {
           const steps = Array.isArray(m.it.steps) ? m.it.steps.length : 0;
           tl += '<div class="tl-item sched' + (past ? " past" : "") + (cur ? " cur" : "") + '" data-si="'
             + ((cx.day && cx.day.schedule) || []).indexOf(m.it) + '" ' + delay + '><span class="dot"></span>'
@@ -2476,9 +2851,6 @@
             + (steps ? '<div class="nt more">…点开看这段时间里的 ' + steps + " 件事</div>"
                : m.it.detail ? '<div class="nt more">…点开看细化的部分</div>' : "") + "</div>";
         }
-        for (const w of m.subs) tl += wakeRow(w, w.time < now, "之后", 'style="animation-delay:' + (idx++ * 40) + 'ms"', true);
-      } else {
-        tl += wakeRow(m.w, past, m.w.source, delay);
       }
     }
     if (merged.length && !nowInserted) tl += nowLine; // 一天已全部过完
@@ -2498,7 +2870,7 @@
       '<span class="cv">›</span></summary><div class="kvs">' +
       kv("免打扰时段", esc(st.quietStart || "—") + " — " + esc(st.quietEnd || "—")) +
       kv("每天最多主动", (st.quota || 0) + " 次") +
-      kv("两次起念至少隔", st.minGapMin > 0 ? st.minGapMin + " 分钟" : "不限制", st.minGapMin > 0 ? "" : "dim") +
+      kv("两个时刻至少隔", st.minGapMin > 0 ? st.minGapMin + " 分钟" : "不限制", st.minGapMin > 0 ? "" : "dim") +
       kv("主动倾向", esc(segLabel("bias", st.bias || 0))) +
       kv("未回应降速", st.maxUnanswered > 0 ? "连续 " + st.maxUnanswered + " 轮没回就收手" : "关闭", st.maxUnanswered > 0 ? "" : "dim") +
       kv("在页时动态复核", st.recheckMin > 0 ? "每 " + st.recheckMin + " 分钟" : "关闭", st.recheckMin > 0 ? "" : "dim") +
@@ -2526,7 +2898,7 @@
       intent = '<div class="intent">「' + esc(w.intent) + '」</div>';
       if (!fired && w.delivery === "local" && w.reason) intent += '<div class="nt">未挂上离线推送：' + esc(w.reason) + "</div>";
     } else {
-      badge = '<span class="badge off">未起念</span>';
+      badge = '<span class="badge off">作罢</span>';
       intent = '<div class="intent">' + esc(w.why || "TA这会儿不想") + "</div>";
     }
     return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + (sub ? " sub" : "") + '" data-t="' + esc(w.time) + '" ' + delay + '><span class="dot"></span>' +
@@ -2556,7 +2928,7 @@
 
   // 一条心动时刻此刻的真实状态：结合聊天记录推断发没发出、用户回没回
   function decStatus(w, msgs) {
-    if (!w.act) return { cls: "no", heart: "♡", badge: '<span class="badge off">未起念</span>' };
+    if (!w.act) return { cls: "no", heart: "♡", badge: '<span class="badge off">作罢</span>' };
     if (w.fireAt > Date.now()) {
       return w.delivery === "push"
         ? { cls: "on", heart: "♥", badge: '<span class="badge wait">待发 · 离线可达</span>' }
@@ -2572,7 +2944,7 @@
   }
 
   /* ================= 时刻详情弹层 ================= */
-  const HIST_KIND = { plan: "首次编排 · 起念", skip: "首次编排 · 未起念", recheck: "复核取消", lit: "复核点亮", cooled: "未回应降速", extra: "临时起念", presend: "发送前复核" };
+  const HIST_KIND = { plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核" };
 
   function detailHtml(w, plan, msgs) {
     const cx = cur();
@@ -2773,7 +3145,7 @@
     await pullCloudDecisions(cx); // 同 recheck：不先并会把云端回填的 wakeId 盖掉
     await uploadPlanCloud(cx, false);
     render();
-    toast(planStale === false ? note : note + "；心动时刻还是按旧日程排的，要跟上就点「♥ 重新编排」");
+    toast(planStale === false || liveMode() ? note : note + "；心动时刻还是按旧日程排的，要跟上就点「♥ 重新编排」");
   }
   async function refineSchedItem(cx, i, ask) {
     const sched = ((cx.day && cx.day.schedule) || []).slice();
@@ -2983,37 +3355,32 @@
     return '<button class="ghost-btn preview-btn" id="btn-preview">听听TA此刻会说什么</button>' +
       '<div class="preview-zone" id="preview-zone">' + ((S._preview || {})[cur().character ? cur().character.id : ""] || "") + "</div>";
   }
-  function previewCard() {
-    return '<div class="card"><div class="sec-head"><span class="t">此 刻</span></div>' + previewZone() + "</div>";
-  }
-  /* ================= 诊断页：分组 + 折叠 =================
-     加一块诊断 = 往 DIAG_GROUPS 里加一条，再在下面 fill 一次。
+  /* ================= 诊断页：结论 + 要处理 + 其余 =================
+     加一块诊断 = 往 DIAG_ITEMS 里加一条，再在下面 fill 一次。
      fill 同时写「展开后的细节」和「收起时那一行结论」，tone 决定颜色；
-     warn / bad 自动展开——出问题的那块不该还要用户点开找。
+     warn / bad 的挪进「要处理」那张卡并自动展开，其余按表里的顺序收在下面一张；
+     顶上的结论卡按各块的 tone 算。info 类（日志、预览）不参与结论。
      手动点过的记在 S._diagOpen，云端结果陆续回来时不会把它又合上。 */
-  const DIAG_GROUPS = [
-    { title: "本 机", cards: [
-      { id: "wakes", title: "系统唤醒对照" },
-      { id: "logs", title: "运行日志" },
-    ] },
-    { title: "云 端", cloud: true, cards: [
-      // 自己在管是常态，只在「连接与聊天镜像」里占一行；别的设备在管才单独出一张（要动手的状态）
-      { id: "lock", title: "今天谁在管", when: (cx) => !!(cx.owner && cx.owner.id) && !owns(cx) },
-      { id: "cloud", title: "连接与聊天镜像" },
-      { id: "jobs", title: "预约与降速" },
-      { id: "recheck", title: "动态复核" },
-    ] },
+  const DIAG_ITEMS = [
+    // 自己在管是常态，只在「连接与聊天镜像」里占一行；别的设备在管才单独出一张（要动手的状态）
+    { id: "lock", title: "今天谁在管", cloud: true, when: (cx) => !!(cx.owner && cx.owner.id) && !owns(cx) },
+    { id: "cloud", title: "连接与聊天镜像", cloud: true },
+    { id: "jobs", title: "预约与降速", cloud: true },
+    { id: "recheck", title: "动态复核", cloud: true },
+    { id: "wakes", title: "系统唤醒对照" },
+    { id: "logs", title: "运行日志", info: true },
+    { id: "preview", title: "此刻预览", info: true },
   ];
   const CLOUD_DIAG_IDS = { lock: 1, cloud: 1, jobs: 1, recheck: 1 };
   const DIAG_TTL = 60000;
 
   async function renderUsage() {
-    const v = $("#view");
+    const v = $("#subview") || $("#view");
     const req = (S._usageReq = (S._usageReq || 0) + 1);
     v.innerHTML = '<div class="card empty"><div class="art">⏳</div><p>正在统计…</p></div>';
     await readLocalUsage(true);
     await syncUsageCloud(false);
-    if (S.tab !== "usage" || req !== S._usageReq) return;
+    if (!(S.tab === "back" && S.sub === "usage") || req !== S._usageReq) return;
     const t = usageTotals();
     const stat = (n, cap) => '<div class="stat"><div class="num">' + n + '</div><div class="cap">' + cap + "</div></div>";
     const bar = (n, cap) => cap > 0 ? '<div class="usage-bar"><div class="fill" style="width:' + Math.min(100, Math.round(n / cap * 100)) + '%"></div></div>' : "";
@@ -3046,9 +3413,9 @@
 
   async function renderDiag() {
     const cx = cur();
-    const v = $("#view");
+    const v = $("#subview") || $("#view");
     const req = (S._diagReq = (S._diagReq || 0) + 1);
-    const alive = () => S.tab === "diag" && req === S._diagReq;
+    const alive = () => S.tab === "back" && S.sub === "diag" && req === S._diagReq;
     S._diagOpen = S._diagOpen || {};
 
     const setOpen = (id, on) => {
@@ -3057,13 +3424,51 @@
       it.classList.toggle("open", !!on);
       bd.hidden = !on;
     };
+    const tones = {};
+    const shown = DIAG_ITEMS.filter((c) => !c.when || c.when(cx)).filter((c) => !c.cloud || cloudCfg());
+    // 要处理的挪到上面那张卡（bad 在 warn 前），其余按表里的顺序留在下面
+    const layout = () => {
+      const attn = $("#dg-attn"), rest = $("#dg-ok");
+      if (!attn || !rest) return;
+      const rank = (c) => tones[c.id] === "bad" ? 0 : tones[c.id] === "warn" ? 1 : 2;
+      for (const c of shown.slice().sort((a, b) => rank(a) - rank(b))) {
+        const el = $("#dgi-" + c.id); if (!el) continue;
+        el.classList.toggle("bad", tones[c.id] === "bad");
+        el.classList.toggle("warn", tones[c.id] === "warn");
+        (rank(c) < 2 ? attn : rest).appendChild(el);
+      }
+      attn.hidden = !attn.querySelector(".dg-item");
+    };
+    const summarize = () => {
+      const box = $("#dg-sum"); if (!box) return;
+      const status = shown.filter((c) => !c.info);
+      const pending = status.filter((c) => !(c.id in tones));
+      const bad = status.filter((c) => tones[c.id] === "bad"), warn = status.filter((c) => tones[c.id] === "warn");
+      let dot = "", head = "", sub = "";
+      if (bad.length || warn.length) {
+        dot = bad.length ? "bad" : "warn";
+        head = (bad.length + warn.length) + " 处要处理";
+        sub = bad.concat(warn).map((c) => c.title).join(" · ") + (pending.length ? "（还在查 " + pending.length + " 项）" : "");
+      } else if (pending.length) {
+        dot = ""; head = "检查中…"; sub = "已看完 " + (status.length - pending.length) + " / " + status.length + " 项";
+      } else {
+        dot = "ok"; head = "一切正常"; sub = "本机" + (cloudCfg() ? "和云端" : "") + "都在正常跑";
+      }
+      if (!cloudCfg()) sub += (sub ? "；" : "") + "没接云连接，云端复核、浏览器关着也生成、设备锁都停着";
+      box.innerHTML = '<div class="row"><span class="dot ' + dot + '"></span><span class="head">' + head + "</span>"
+        + (!cloudCfg() ? '<button class="tgl" id="btn-diag-cloudset">去设置</button>' : "") + "</div>"
+        + (sub ? '<div class="sub">' + esc(sub) + "</div>" : "");
+      const cs = $("#btn-diag-cloudset"); if (cs) cs.onclick = () => { S._setTab = "cloud"; openSheet(); };
+    };
     const fillRaw = (id, html, sum, tone) => {
       if (!alive()) return;
       const bd = $("#diag-" + id), sm = $("#dgs-" + id);
       if (!bd) return;
       bd.innerHTML = html;
       if (sm) { sm.className = "sm" + (tone ? " " + tone : ""); sm.textContent = sum || ""; }
+      tones[id] = tone || "";
       setOpen(id, id in S._diagOpen ? S._diagOpen[id] : (tone === "warn" || tone === "bad"));
+      layout(); summarize();
     };
     // 云端那几张卡每进一次诊断页就各发一次请求，页签来回切就重复发。
     // 结果连同摘要缓存 60 秒；计划一变（uploadPlanCloud）或接管过就整份作废。
@@ -3083,21 +3488,19 @@
     const logItems = (S.logs && S.logs.items || []).slice().reverse();
     const planItems = (cx.plan && cx.plan.items) || [];
 
-    // 没接云连接时云端那几张全是「未配置」，四行说同一件事：折成一行，留个去设置的入口
-    v.innerHTML = DIAG_GROUPS.map((g) =>
-      '<div class="dg-g">' + g.title + "</div>" +
-      (g.cloud && !cloudCfg()
-        ? '<div class="card"><div class="archive-note">没接云连接：云端复核、浏览器关着也生成、设备锁都停着，只有本机这些还在跑。</div>' +
-          '<div class="dg-act"><button class="tgl" id="btn-diag-cloudset">去设置</button></div></div>'
-        : '<div class="card dg">' +
-          g.cards.filter((c) => !c.when || c.when(cx)).map((c) =>
-            '<div class="dg-item" id="dgi-' + c.id + '">' +
-              '<button class="dg-hd" data-dg="' + c.id + '"><span class="nm">' + esc(c.title) + "</span>" +
-              '<span class="sm" id="dgs-' + c.id + '">读取中…</span><span class="cv">›</span></button>' +
-              '<div class="dg-bd" id="diag-' + c.id + '" hidden><div class="archive-note">读取中…</div></div>' +
-            "</div>").join("") + "</div>")).join("") +
-      '<div class="archive-note">日志最多保留 120 条，只存在本地，不上传。</div>';
-    const cs = $("#btn-diag-cloudset"); if (cs) cs.onclick = () => { S._setTab = "cloud"; openSheet(); };
+    // 没接云连接时云端那几块不画，结论卡里说一句、留个去设置的入口
+    v.innerHTML = '<div class="card dg-sum" id="dg-sum"></div>'
+      + '<div class="card dg" id="dg-attn" hidden></div>'
+      + '<div class="card dg" id="dg-ok">'
+      + shown.map((c) =>
+          '<div class="dg-item" id="dgi-' + c.id + '">' +
+            '<button class="dg-hd" data-dg="' + c.id + '"><span class="nm">' + esc(c.title) + "</span>" +
+            '<span class="sm" id="dgs-' + c.id + '">读取中…</span><span class="cv">›</span></button>' +
+            '<div class="dg-bd" id="diag-' + c.id + '" hidden><div class="archive-note">读取中…</div></div>' +
+          "</div>").join("")
+      + "</div>"
+      + '<div class="archive-note">日志最多保留 120 条，只存在本地，不上传。</div>';
+    summarize();
 
     v.querySelectorAll(".dg-hd").forEach((b) => {
       b.onclick = () => {
@@ -3108,6 +3511,11 @@
       };
     });
 
+    // 拿此刻的状态让TA说一句，只显示不发送：用来核对注入的状态对不对
+    fill("preview", cx.day
+      ? '<div class="archive-note">按TA此刻的状态生成一句话，不发送、不进聊天、不占额度，花一次模型调用。</div>' + previewZone()
+      : '<div class="archive-note">TA的今天还没生成，没有状态可看。</div>', cx.day ? "" : "没状态", "");
+    { const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur()); }
     // 日志是本地现成的，先画上，别让整页都在等云端
     if (!logItems.length) {
       fill("logs", '<div class="archive-note">还没有日志。生成、编排、复核、预约的每一步都会记在这里。</div>', "还没有", "");
@@ -3247,7 +3655,7 @@
           const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", limit: "8" });
           const jobs = jr.jobs || [];
           if (!jobs.length) {
-            fill("jobs", '<div class="archive-note">云端目前没有定时预约的记录。到「今天」页点「♥ 重新编排」挂一个再来看。</div>', "0 条记录", "");
+            fill("jobs", '<div class="archive-note">云端目前没有定时预约的记录。到「今天」页点「' + replanLabel() + '」挂一个再来看。</div>', "0 条记录", "");
           } else {
             const stName = { pending: "待触发", running: "生成中", done: "已完成", cancelled: "已取消", failed: "失败" };
             let jHtml = jobs.map((j) => {
@@ -3266,7 +3674,7 @@
             }).join("");
             const sentinelKeys = Object.values(S.settings.sentinels || {}).map((x) => x && x.wakeId ? "timedwake:" + x.wakeId : "");
             const stale = jobs.some((j) => j.status === "pending" && !(j.cooldownRounds > 0) && sentinelKeys.indexOf(j.triggerKey) < 0) && S.settings.maxUnanswered > 0;
-            if (stale) jHtml += '<div class="archive-note">有预约没带降速阈值（旧版挂的）。到「今天」页点「♥ 重新编排」重挂一次就带上了。</div>';
+            if (stale) jHtml += '<div class="archive-note">有预约没带降速阈值（旧版挂的）。到「今天」页点「' + replanLabel() + '」重挂一次就带上了。</div>';
             const pendingN = jobs.filter((j) => j.status === "pending").length;
             fill("jobs", jHtml,
               "待触发 " + pendingN + " · 共 " + jobs.length + (stale ? " · 有旧预约" : ""),
@@ -3279,7 +3687,7 @@
 
       if (!cloudRecheckOn()) {
         fill("recheck", '<div class="archive-note">「浏览器关着也复核」没打开。开了之后，今天的计划会寄存到你的个人云，' +
-          "浏览器关着时云端每半小时按最近的聊天重判一次。</div>", "没打开", "");
+          "浏览器关着时云端每 5 分钟醒一次，按最近的聊天重判。</div>", "没打开", "");
         return;
       }
       try {
@@ -3290,7 +3698,7 @@
         const rr = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() });
         const pl = rr.plan;
         if (!pl) {
-          fill("recheck", '<div class="archive-note">今天的计划还没寄存到云上。到「今天」页点「♥ 重新编排」上传一次。</div>', "计划还没寄存", "warn");
+          fill("recheck", '<div class="archive-note">今天的计划还没寄存到云上。到「今天」页点「' + replanLabel() + '」上传一次。</div>', "计划还没寄存", "warn");
           return;
         }
         const pend = (pl.items || []).filter((it) => it.fireAt > Date.now()).length;
@@ -3323,7 +3731,7 @@
   const SET_SECTIONS = [
     { id: "base", name: "基本", groups: [
       { title: "挂念的人", sub: "可以多选，每位各有自己的一天", fields: [{ type: "chars" }] },
-      { title: "模型调用", fields: [
+      { title: "模型调用", adv: true, fields: [
         { type: "stepper", key: "apiDailyCap", min: 0, max: 500, step: 5, label: "一天最多", unit: "次" },
         { type: "stepper", key: "tokenDailyCap", min: 0, max: 5000000, step: 50000, label: "一天最多", unit: "token" },
       ], hint: "本机和云端、所有挂念的人合计。生成一天、编排、复核、改日程，以及云端的生成、复核、到点发送，每次调用都记一笔；到了上限当天就不再调，明天自动归零。0 = 不限。「用量」页能看明细。" },
@@ -3332,30 +3740,42 @@
         { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }, { key: "cloudGen", label: "浏览器关着也生成（云端）" }] },
         { type: "timeRange", keys: ["autoGenAt"], label: "每天几点" },
       ], hint: "到点自动生成TA今天的状态、日程和心动时刻。挂念在后台也算开着。<br>开了「云端」：每次打开挂念会把明天的生成原料和一份和本地同源的提示词模板寄到你的个人云，到点由云函数生成并编排，你打开时直接接管；云端 45 分钟没生成会本地补。需要云连接和离线推送。<br>错过了这个点，下次打开时补。浏览器一整天没开就生成不了，那天只有云端的兜底问候。" },
-      { title: "什么时候生效", fields: [], hint: "额度、间隔、倾向、锚点：改完回「今天」页点「♥ 重新编排」才生效。<br>其余各项保存即生效。<br>重新编排只动日程上的时刻，聊天里临时起的念头留着不动。", open: true },
+      { title: "什么时候生效", adv: true, fields: [], hint: "随用随判模式：额度、间隔、倾向这些改完，回「今天」页点「♥ 重置今天」把新设置寄到云上才生效（云端读的是那份计划里的快照）；复核门禁那几项保存即生效。<br>早上定完模式：额度、间隔、倾向、锚点改完要点「♥ 重新编排」重排一次。<br>两种模式下，聊天里临时起的念头都留着不动。", open: true },
     ] },
     { id: "pace", name: "分寸", groups: [
       { title: "主动倾向", sub: "TA有多想黏着你", fields: [{ type: "seg", key: "bias",
         options: [[-2, "很克制"], [-1, "克制"], [0, "自然"], [1, "热络"], [2, "黏人"]] }] },
       { title: "频率", fields: [
         { type: "stepper", key: "quota", min: 1, max: 6, step: 1, label: "每天最多主动", unit: "次" },
-        { type: "stepper", key: "minGapMin", min: 0, max: 240, step: 30, label: "两次起念至少隔", unit: "分钟 · 0 不限" },
+        { type: "stepper", key: "minGapMin", min: 0, max: 240, step: 30, label: "两个时刻至少隔", unit: "分钟 · 0 不限" },
         { type: "stepper", key: "maxUnanswered", min: 0, max: 6, step: 1, label: "未回应降速", unit: "轮 · 0 关" },
       ], hint: "未回应降速：TA连着主动这么多轮你都没回，今天剩下的时刻全部取消，不追着发。<br>一次连发的几条算一轮，最新一轮要晾满 30 分钟才计。" },
-      { title: "起念来源与克制", fields: [{ type: "toggles", items: [
+      { title: "念头什么时候定", fields: [
+        { type: "seg", key: "impulseMode", options: [[1, "随用随判"], [0, "早上定完"]] },
+      ], hint: "随用随判：早上只生成生活面，不排念头；白天云端每次醒来看一眼此刻的状态，想起来了才当场排一个近期时刻。更像真人，但要开着云端复核，并把 cron 调密（见 README）。<br>早上定完：编排时一次把今天所有心动时刻定死（老行为）。浏览器不常开、没配云的话选这个。<br>两种模式下额度、免打扰、最小间隔都照旧；随用随判另有配速，防止上午就把额度用光。" },
+      { title: "起念来源与克制", adv: true, fields: [{ type: "toggles", items: [
         { key: "anchorSleep", label: "睡前锚点" },
         { key: "anchorMorning", label: "早安锚点" },
-        { key: "chatCandidates", label: "聊天临时起念" },
+        { key: "chatCandidates", label: "聊天里临时冒念头" },
         { key: "moodGate", label: "状态低落时更安静" },
-      ] }], hint: "睡前锚点：TA上床前 10–30 分钟里的某一刻。早安锚点：免打扰结束后 25–55 分钟里的某一刻。日程上的时刻也不卡整点，各往后飘几分钟。<br>聊天临时起念：复核时允许按没聊完的话头临时加一个时刻。<br>状态低落时更安静：精力很低的那天明显少起念。" },
+        { key: "momentsOn", label: "想分享时发朋友圈" },
+      ] },
+        { type: "stepper", key: "momentsWeekly", min: 0, max: 14, step: 1, label: "朋友圈一周最多", unit: "条 · 不占私聊额度" },
+        { type: "stepper", key: "momentsGapH", min: 1, max: 48, step: 1, label: "两条至少隔", unit: "小时" },
+      ],
+      hint: "睡前锚点 / 早安锚点：提醒TA留意睡前那段、早上刚过免打扰那会儿，想不起来也不勉强——不再硬排时刻。<br>聊天临时起念：复核时允许按没聊完的话头临时加一个时刻。<br>状态低落时更安静：精力很低的那天明显少起念。<br>想分享时发朋友圈：TA自己过日子也会想发圈——云端每小时按时段、精力、刚做完的事掷一次骰子（不调模型）；复核判定某件事更像发给所有人看时也会改走朋友圈。都走宿主朋友圈的整条管线；浏览器关着时云端只记下起意和时间点，下次打开补成当时的帖子。<br>一周几条、隔几小时是发圈唯一的一套数：装了挂念，「朋友圈节奏」插件会让位。" },
     ] },
     { id: "chat", name: "聊天", groups: [
-      { title: "动态复核", fields: [
+      { title: "动态复核", adv: true, fields: [
         { type: "stepper", key: "recheckMin", min: 0, max: 120, step: 5, label: "在页时每隔", unit: "分钟 · 0 关" },
         { type: "stepper", key: "judgeLines", min: 6, max: 40, step: 2, label: "判断时回看", unit: "句" },
       ], hint: "打开小手机时、以及之后每隔这么久，按你们最新的聊天重审今天还没到点的时刻。<br>聊崩了会取消，聊出没完的话头会临时加。每次重审调一次模型。<br>「判断时回看」是编排、复核、云端裁决喂给模型的最近几句，每句最多 200 字。调大更懂来龙去脉，也更费 token。保存即生效，云端那份下次上传计划时跟着更新。" },
-      { title: "聊天改日程", fields: [{ type: "toggles", items: [{ key: "chatEditsDay", label: "聊出来的安排落到今天的日程上" }] }],
+      { title: "聊天改日程", adv: true, fields: [{ type: "toggles", items: [{ key: "chatEditsDay", label: "聊出来的安排落到今天的日程上" }] }],
         hint: "复核时顺带看聊天里有没有说定、取消或临时被叫走的安排，有就直接改今天的日程，一次最多 2 条。<br>只改还没到点的，改动写回系统日程，也记进「诊断」。<br>「动态复核」设成 0 时这条不会发生。" },
+      { title: "惦记账本", fields: [
+        { type: "toggles", items: [{ key: "threadsOn", label: "跨天记住话头、约定和日子" }] },
+        { type: "stepper", key: "threadDays", min: 1, max: 14, step: 1, label: "话头几天没再提就淡掉", unit: "天" },
+      ], hint: "复核时顺带从聊天里记下没聊完的话头、约好的事、重要的日子；起念、生成明天、注入聊天、到点发消息都会看它。约定快到点、刚过点、到日子了，TA会自己想起来找你（走云端自发起念）。「今天」页能手动记和了结。" },
       { title: "注入聊天", fields: [{ type: "toggles", items: [{ key: "injectChat", label: "让TA聊天时知道自己此刻的状态" }] }],
         hint: "让TA聊天时知道自己此刻在做什么、什么心情、剩多少精力、接下来做什么。<br>每次刷新覆盖上一次，不会堆进聊天记录，也不影响前面人设和世界书的缓存。<br>关掉立刻撤销。" },
     ] },
@@ -3365,16 +3785,17 @@
         { type: "text", key: "cloudKey", password: true, placeholder: "sb_secret_… 或 service_role key" },
         { type: "cloudTest" },
         { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }] },
-      ], hint: "填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每半小时按你们最新的聊天重审一次（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
-      { title: "复核门禁", sub: "拦下来的不花钱、不占额度", fields: [
+      ], hint: "填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
+      { title: "复核门禁", adv: true, sub: "拦下来的不花钱、不占额度", fields: [
         { type: "stepper", key: "gateDailyCap", min: 1, max: 24, step: 1, label: "每天最多判", unit: "次" },
         { type: "stepper", key: "gateGapMin", min: 5, max: 240, step: 5, label: "两次判至少隔", unit: "分钟" },
         { type: "stepper", key: "gateHorizonMin", min: 0, max: 720, step: 30, label: "最近的时刻比这更远就先不判", unit: "分钟 · 0 不限" },
         { type: "stepper", key: "gateFreshMin", min: 0, max: 60, step: 5, label: "你刚说完先等", unit: "分钟 · 0 不等" },
         { type: "stepper", key: "gateMinMsgs", min: 1, max: 10, step: 1, label: "上次判完你至少说", unit: "句" },
-        { type: "stepper", key: "selfImpulseCap", min: 0, max: 6, step: 1, label: "自发起念每天最多", unit: "次 · 0 关" },
-      ], hint: "云端每半小时醒一次，先过这几道门，全过了才真的调一次模型。拦下来的不花钱，原因记在「诊断」。<br>自发起念：你没新消息时，TA刚做完一件要紧的事、或你们 3 小时没联系，也会想一想要不要找你。每次都调模型，所以单独限次，重新编排后清零。<br>保存即生效，不用重新部署云函数。" },
-      { title: "发送前复核", sub: "到点真发之前再判一次", fields: [
+        { type: "stepper", key: "selfImpulseCap", min: 0, max: 12, step: 1, label: "自发念头每天最多", unit: "次 · 0 关" },
+        { type: "stepper", key: "selfSilenceMin", min: 30, max: 480, step: 30, label: "多久没联系算安静", unit: "分钟" },
+      ], hint: "云端每 5 分钟醒一次（cron 频率，见 README），先过这几道门，全过了才真的调一次模型。拦下来的不花钱，原因记在「诊断」。<br>自发起念：你没新消息时，TA刚做完一件要紧的事、或你们安静了「多久没联系算安静」那么久，也会想一想要不要找你。每次都调模型，所以单独限次，重新编排后清零。<br>保存即生效，不用重新部署云函数。" },
+      { title: "发送前复核", adv: true, sub: "到点真发之前再判一次", fields: [
         { type: "stepper", key: "presendMax", min: 30, max: 100, step: 5, label: "不合时宜度超过就不发", unit: "% · 100 从不拦" },
         { type: "stepper", key: "presendTalkingMin", min: 0, max: 120, step: 5, label: "你最后一句在多久内算正聊着", unit: "分钟" },
         { type: "stepper", key: "presendGapMin", min: 0, max: 240, step: 15, label: "离TA上一条主动多近算太密", unit: "分钟" },
@@ -3444,12 +3865,27 @@
       SET_SECTIONS.map((sec) => '<div class="ssec" data-sec="' + sec.id + '"' + (sec.id === tab ? "" : " hidden") + ">" +
         sec.groups.map((g) => {
           const i = gi++;
-          return '<div class="grp' + ((g.fields || []).length ? "" : " note") + '">' + (g.title ? '<div class="grp-t"><span>' + esc(g.title) + "</span>" +
+          return '<div class="grp' + ((g.fields || []).length ? "" : " note") + (g.adv ? " adv" : "") + '"' + (g.adv && !S.settings.showAdv ? " hidden" : "") + ">" + (g.title ? '<div class="grp-t"><span>' + esc(g.title) + "</span>" +
             (g.sub ? '<span class="grp-sub">' + esc(g.sub) + "</span>" : "") +
             (g.hint && !g.open ? '<button type="button" class="grp-i" data-hint="' + i + '" aria-label="说明">?</button>' : "") + "</div>" : "") +
             (g.fields || []).map(fieldHtml).join("") +
             (g.hint ? '<div class="grp-hint" id="grp-hint-' + i + '"' + (g.open ? "" : " hidden") + ">" + g.hint + "</div>" : "") + "</div>";
-        }).join("") + "</div>").join("");
+        }).join("") +
+        // 高级组默认收着：多数人一辈子不碰门禁那几个数字。开关全局记在设置里，四节一起开
+        (function () {
+          const n = sec.groups.filter((g) => g.adv).length;
+          if (!n) return "";
+          return '<button type="button" class="adv-more">' + (S.settings.showAdv ? "收起高级设置" : "还有 " + n + " 项高级设置") + "</button>";
+        })() + "</div>").join("");
+    $("#sheet-body").querySelectorAll(".adv-more").forEach((btn) => {
+      btn.onclick = () => {
+        const on = !S.settings.showAdv;
+        S.settings.showAdv = on; // 先改内存让本次渲染生效，落盘走后台
+        patchSettings(() => ({ showAdv: on })).catch(() => {});
+        $("#sheet-body").querySelectorAll(".grp.adv").forEach((g) => { g.hidden = !on; });
+        $("#sheet-body").querySelectorAll(".adv-more").forEach((b) => { b.textContent = on ? "收起高级设置" : "还有 " + b.closest(".ssec").querySelectorAll(".grp.adv").length + " 项高级设置"; });
+      };
+    });
     $("#sheet-body").querySelectorAll(".stab").forEach((btn) => {
       btn.onclick = () => {
         S._setTab = btn.dataset.sec;
@@ -3592,12 +4028,7 @@
     });
     $("#btn-save-settings").onclick = () => { saveSettings().catch((e) => toast("保存失败：" + (e && e.message || e))); };
     document.querySelectorAll("#tabs .tab").forEach((b) => {
-      b.onclick = () => {
-        if (S.tab === b.dataset.tab) return;
-        S.tab = b.dataset.tab;
-        document.querySelectorAll("#tabs .tab").forEach((x) => x.classList.toggle("on", x === b));
-        render();
-      };
+      b.onclick = () => switchTab(b.dataset.tab);
     });
 
     try {

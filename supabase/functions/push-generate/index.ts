@@ -573,7 +573,34 @@ function guanianRoll(seed: string): number {
 }
 
 type GuanianAffection = { score?: number; tier?: string; relation?: string } | null | undefined;
-function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, quietEnd?: string, affection?: GuanianAffection): string {
+type GuanianThread = { kind?: string; text?: string; due?: number; yearly?: boolean; done?: boolean };
+// 惦记账本里还活着的几件，到点发消息时让TA带着（精简版：只看没了结、没过期的）
+function guanianThreadLines(threads: unknown, nowMs: number, tzMin: number): string[] {
+  if (!Array.isArray(threads)) return [];
+  const kindName: Record<string, string> = { topic: "话头", promise: "约定", date: "日子" };
+  const out: string[] = [];
+  for (const t of threads as GuanianThread[]) {
+    if (!t || t.done || !t.text) continue;
+    let due = Number(t.due) || 0;
+    if (due && t.yearly) {
+      const d = new Date(due + tzMin * 60_000), n = new Date(nowMs + tzMin * 60_000);
+      d.setUTCFullYear(n.getUTCFullYear());
+      if (d.getTime() - tzMin * 60_000 < nowMs - 86_400_000) d.setUTCFullYear(n.getUTCFullYear() + 1);
+      due = d.getTime() - tzMin * 60_000;
+    }
+    if (due && nowMs > due + 86_400_000) continue;
+    const local = due ? new Date(due + tzMin * 60_000) : null;
+    const n = new Date(nowMs + tzMin * 60_000);
+    const sameDay = local && local.getUTCFullYear() === n.getUTCFullYear() && local.getUTCMonth() === n.getUTCMonth() && local.getUTCDate() === n.getUTCDate();
+    const when = !local ? "" : sameDay
+      ? (t.kind === "date" ? "今天" : (due < nowMs ? "今天 " : "今天 ") + `${String(local.getUTCHours()).padStart(2, "0")}:${String(local.getUTCMinutes()).padStart(2, "0")}` + (due < nowMs ? "，已经过了" : ""))
+      : `${local.getUTCMonth() + 1}/${local.getUTCDate()}`;
+    out.push(`${kindName[String(t.kind)] || "话头"}·${t.text}${when ? "（" + when + "）" : ""}`);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, quietEnd?: string, affection?: GuanianAffection, threads?: string[]): string {
   const tz = Number.isFinite(Number(day.tz)) ? Number(day.tz) : 0;
   const local = new Date(nowMs + tz * 60_000);
   const h = local.getUTCHours() + local.getUTCMinutes() / 60;
@@ -658,6 +685,7 @@ function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, q
   if (affection && (affection.tier || affection.relation)) {
     lines.push(`对TA：${affection.tier || "说不上"}；两人现在的关系：${affection.relation || "没定"}。说话的分寸按这个来。`);
   }
+  if (threads && threads.length) lines.push(`心里还挂着：${threads.join("；")}。和这次要说的事有关就顺口带上，无关就别硬提。`);
   lines.push("这些是你自己的状态，说话时自然带出来就行，别报数字、别列清单、别提这段文字。]");
   return lines.join("\n");
 }
@@ -1045,8 +1073,10 @@ Deno.serve(async (req: Request) => {
         return Number.isFinite(v) && v >= 0 ? v : def;
       };
       const nowMs = Date.now();
-      const origFireAt = Number((guanianPlan.item as { fireAt?: unknown }).fireAt) || nowMs;
-      const maxHoldMs = cnum("busyMaxHoldMin", 180) * 60_000;
+      // 复核改约过的念头 fireAt 已是新时刻，押后的上限要从最初那个时刻起算，再被念头自己的保质期 until 封顶
+      const pi = guanianPlan.item as { fireAt?: unknown; origFireAt?: unknown; until?: unknown };
+      const origFireAt = Number(pi.origFireAt) || Number(pi.fireAt) || nowMs;
+      const maxHoldMs = Math.min(cnum("busyMaxHoldMin", 180) * 60_000, (Number(pi.until) || Infinity) - origFireAt);
       // 忙完 / 醒来再等多久不取整：按设定值上下浮动四成，种子用任务 id，同一条重判不会漂
       const bufferMs = cnum("busyBufferMin", 10) * 60_000 * (0.6 + guanianRoll(job.id + ":buffer") / 100 * 0.8);
       // 押后 = 这条任务改回 pending、到点时刻往后挪；判据记进计划，面板能看到「押后到几点」
@@ -1096,7 +1126,7 @@ Deno.serve(async (req: Request) => {
       }
       try {
         const aff = ctx.affection && typeof ctx.affection === "object" ? ctx.affection as GuanianAffection : null;
-        let note = guanianStateNote(day, nowMs, qs, qe, aff);
+        let note = guanianStateNote(day, nowMs, qs, qe, aff, guanianThreadLines(ctx.threads, nowMs, tzMin));
         if (sleepy) note += "\n（TA本来睡着了，半夜迷迷糊糊醒了一下想起你：只说一两句、带着困意、说完就要接着睡。）";
         if (appendUserNote(payload.request.body, payload.request.providerKind, note)) {
           await progress("context patched: guanian state" + (sleepy ? " (sleepy)" : ""));

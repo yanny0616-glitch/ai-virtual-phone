@@ -91,6 +91,7 @@ import {
   writeCustomAppChatContext,
   writeCustomAppReplyGate,
   accessSharedVariable,
+  postCustomAppMoment,
   writeCustomAppCalendar,
   writeCustomAppHistoryMessage,
   writeCustomAppCharacterState,
@@ -484,6 +485,9 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       set: function(name, value, opts){ return request('variables.set', Object.assign({ name: name, value: value }, opts || {})).then(function(r){ return r && r.value; }); },
       update: function(name, patch, opts){ return request('variables.update', Object.assign({ name: name, patch: patch || {} }, opts || {})).then(function(r){ return r && r.value; }); },
       unset: function(name, opts){ return request('variables.unset', Object.assign({ name: name }, opts || {})).then(function(){ return true; }); }
+    },
+    moments: {
+      post: function(payload){ return request('moments.post', payload || {}); }
     },
     characters: {
       list: function(){ return request('characters.list'); },
@@ -1130,6 +1134,7 @@ export function CustomAppRunner({
           media: ["pick", "save", "put", "get", "revoke", "delete"],
           characters: ["list", "get", "readState", "writeState", "readRelations"],
           variables: ["get", "set", "update", "unset"],
+          moments: ["post"],
           usage: ["readDaily", "readLogs", "readLogDetail", "getSettings", "setSettings"],
           chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState", "setContext", "clearContext", "setReplyGate"],
           memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
@@ -1810,6 +1815,11 @@ export function CustomAppRunner({
     if (action === "variables.get" || action === "variables.set" || action === "variables.update" || action === "variables.unset") {
       requirePermission("chat.context");
       return accessSharedVariable(action, record);
+    }
+
+    if (action === "moments.post") {
+      requirePermission("moments.write");
+      return postCustomAppMoment(record);
     }
 
     if (action === "chat.updateCard") {

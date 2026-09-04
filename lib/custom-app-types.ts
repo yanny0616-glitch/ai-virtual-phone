@@ -52,6 +52,7 @@ export type CustomAppPermission =
   | "notifications.write"
   | "tasks.schedule"
   | "push.wake"
+  | "moments.write"
   | "ui.toast"
   | "ui.notification"
   | "ui.sms"

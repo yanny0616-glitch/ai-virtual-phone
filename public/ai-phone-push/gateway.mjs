@@ -71,7 +71,37 @@ const RECHECK_NUMERIC_CONTEXT_KEYS = [
   "presendMax", "presendTalkingMin", "presendGapMin",
   "busyHold", "busyBufferMin", "busyMaxHoldMin",
   "sleepMode", "sleepWakeProb",
+  "impulseMode", "selfSilenceMin", "threadDays",
+  "momentsOn", "momentsWeekly", "momentsGapH", "momentsLast", "momentsWeekStart", "momentsWeekN", "momentsRollHour",
 ] as const;
+
+// 发朋友圈的起意：云端写、App 消费后原样带回没消费完的，最多 5 条
+function cleanOutbox(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 5).map((raw) => {
+    const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    return { id: cleanText(o.id, 16).replace(/[^A-Za-z0-9_-]/g, ""), at: Number(o.at) || 0, hint: cleanText(o.hint, 120), by: cleanText(o.by, 10) };
+  }).filter((o) => o.id && o.hint);
+}
+
+// 惦记账本：每条只留固定几个字段，文本截短，最多 30 条
+function cleanThreads(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 30).map((raw) => {
+    const t = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    return {
+      id: cleanText(t.id, 16).replace(/[^A-Za-z0-9_-]/g, ""),
+      kind: ["topic", "promise", "date"].includes(String(t.kind)) ? String(t.kind) : "topic",
+      text: cleanText(t.text, 80),
+      due: Number(t.due) || 0,
+      yearly: t.yearly === true,
+      since: Number(t.since) || 0,
+      at: Number(t.at) || 0,
+      done: t.done === true,
+      nudge: cleanText(t.nudge, 200),
+    };
+  }).filter((t) => t.id && t.text);
+}
 
 function cleanAffection(value: unknown): { score: number; tier: string; relation: string } | null {
   if (!value || typeof value !== "object") return null;
@@ -992,6 +1022,9 @@ Deno.serve(async (request: Request) => {
             // 预约在服务端的键是 timedwake:<wakeId>，push-recheck 靠它撤销/改期。
             // 这串会被拼进 PostgREST 的 in.("…") 过滤器，引号之类的字符挡在入口。
             wakeId: cleanText(it.wakeId, 80).replace(/[^A-Za-z0-9._-]/g, ""),
+            // 念头的保质期和改约前的原时刻：云端改约、到点押后都拿它们封顶
+            until: Number(it.until) || 0,
+            origFireAt: Number(it.origFireAt) || 0,
           };
         }).filter((it) => it.time && it.fireAt > 0);
         const rawContext = body.context && typeof body.context === "object"
@@ -1020,6 +1053,8 @@ Deno.serve(async (request: Request) => {
           // 哨兵预约 id 会拼进 PostgREST 的 in.("…") 过滤器，和 wakeId 一样只留安全字符
           sentinelWakeId: cleanText(rawContext.sentinelWakeId, 80).replace(/[^A-Za-z0-9._-]/g, ""),
           affection: cleanAffection(rawContext.affection),
+          threads: cleanThreads(rawContext.threads),
+          outbox: cleanOutbox(rawContext.outbox),
           // 设备锁：这一天由哪台设备负责编排和预约（ownerName 只是给用户看的名字）
           owner: cleanText(rawContext.owner, 40).replace(/[^A-Za-z0-9_-]/g, ""),
           ownerName: cleanText(rawContext.ownerName, 40),

@@ -9,7 +9,7 @@ export default {
     apiVersion: 1,
     version: "1.0.0",
     author: "自制",
-    description: "角色发朋友圈不再到点必发：每小时按时段、作息、精力、当天的事掷一次骰子。有时一天两条，有时几天没动静。刚做完一件事、今天聊得多、好感刚涨，都更想发，而且会把由头带进提示词。",
+    description: "角色发朋友圈不再到点必发：每小时按时段、作息、精力、当天的事掷一次骰子。有时一天两条，有时几天没动静。刚做完一件事、今天聊得多、好感刚涨，都更想发，而且会把由头带进提示词。装了挂念的角色由挂念掷这颗骰子（浏览器关着也掷），这里自动让位。",
     permissions: ["chat.read", "storage"],
     settings: [
       { key: "weeklyTarget", label: "平均每周大约发几条", type: "number", default: 3 },
@@ -60,6 +60,9 @@ export default {
     function decide(cid, lastPostTime) {
       const now = new Date();
       const nowMs = now.getTime();
+      // 装了挂念（变量池 moments 由它写、三天内更新过）就让位：发圈的骰子由挂念掷，前台后台一套配速，两边不会各发各的
+      const gn = obj(ctx.data.variables.get("moments", "character", cid));
+      if (gn && gn.by === "gua-nian" && nowMs - Number(gn.at || 0) < 3 * 86400000) return { post: false, retry: HOUR, why: "由挂念掌管" };
       const minGap = num("minGapHours", 6) * HOUR;
       if (lastPostTime && nowMs - lastPostTime < minGap) return { post: false, retry: lastPostTime + minGap - nowMs, why: "离上一条太近" };
 

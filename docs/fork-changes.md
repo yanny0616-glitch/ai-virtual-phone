@@ -447,3 +447,15 @@
 - `44088b2` 沙盒 APP 注入样式补齐 `styles/base.css` 的四项全局保护（橡皮筋回弹露白底、
   双击/捏合缩放、滚动条、body 默认 8px 外边距）——iframe 是独立文档，宿主的 base.css 进不去
 - `630f57e` 把版本号升到 1.0.0，当天 `4fc35cd` 回滚了
+
+## Y. 自定义 APP 替角色发朋友圈 `AiPhone.moments.post`（2026-09-04）
+
+挂念 0.9.9 要「浏览器关着也发朋友圈」。朋友圈整条链路（5 秒轮询、IndexedDB 帖子）都在前台，
+云端发不了帖，所以分成两半：云端只记「起意 + 时间点」，前台打开时由宿主补成当时的帖子。
+
+- 新权限 `moments.write`（`lib/custom-app-types.ts` / `custom-app-storage.ts` 白名单 / `custom-app-permission-labels.ts` 中文名）
+- 新动作 `moments.post({ characterId, hint, createdAt })`：`lib/custom-app-host-api.ts` `postCustomAppMoment` → `lib/moments-engine.ts` `postMomentForCharacter`，
+  走和定时发帖一样的 `triggerAIPost`（人设、记忆、去重、配图、NPC 互动），**不过** `moments.beforePost` 钩子——念头已经在 APP 那边定了
+- `lib/moments-storage.ts` `addMomentPost` 接受 `createdAt` 回填过去的时间并保持倒序；`updateScheduleAfterPost` 的 `lastPostTime` 取较大者
+- SDK 外壳与一致性脚本（`scripts/check-custom-app-sdk-consistency.mjs`）补 `moments` / `variables` 命名空间，制作说明加了一节
+- `chat-plugins/moments-rhythm.js` 1.0.0：变量池里有挂念写的 `moments`（3 天内）就让位，避免两颗骰子各发各的

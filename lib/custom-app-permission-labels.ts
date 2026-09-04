@@ -55,6 +55,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "notifications.write": "写入通知和桌面红点",
   "tasks.schedule": "创建后台定时任务",
   "push.wake": "预约角色离线主动消息（浏览器关闭时经系统推送送达）",
+  "moments.write": "以角色身份发朋友圈",
   "ui.toast": "显示提示",
   "ui.notification": "显示通知",
   "ui.sms": "触发短信界面",

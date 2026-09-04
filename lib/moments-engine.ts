@@ -299,18 +299,18 @@ async function resolveAssemblerInput(
 
 // ── AI Post Generation ──
 
-async function triggerAIPost(characterId: string, hint = ""): Promise<void> {
+async function triggerAIPost(characterId: string, hint = "", createdAt?: string): Promise<string | null> {
     isGenerating = true;
     // Always update schedule first to prevent retry storms on failure
-    updateScheduleAfterPost(characterId);
+    updateScheduleAfterPost(characterId, createdAt ? Date.parse(createdAt) : Date.now());
     try {
         const resolved = await resolveAssemblerInput(characterId, "post");
-        if (!resolved) return;
+        if (!resolved) return null;
 
         const { input, apiConfig, preset, character } = resolved;
         if (!apiConfig) {
             console.warn("[Moments] No API config for", character.name);
-            return;
+            return null;
         }
 
         // Assemble prompt via shared pipeline
@@ -333,7 +333,7 @@ async function triggerAIPost(characterId: string, hint = ""): Promise<void> {
             input.appTags,
             input.userIdentity?.name,
         );
-        if (!responseText) return;
+        if (!responseText) return null;
 
         // Extract cross-engine actions before moments-specific parsing
         const { cleanText: postText, actions } = parseActionTags(responseText);
@@ -343,7 +343,7 @@ async function triggerAIPost(characterId: string, hint = ""): Promise<void> {
         }
 
         const parsed = parseMomentPostResponse(postText);
-        if (!parsed) return;
+        if (!parsed) return null;
 
         // 内容去重：生图前先判重，命中直接丢弃（防止同一内容经多路径重复入库）
         if (findRecentDuplicateMomentPost({
@@ -353,7 +353,7 @@ async function triggerAIPost(characterId: string, hint = ""): Promise<void> {
             photoDescription: parsed.photoDescription,
         })) {
             console.warn(`[Moments] SKIP duplicate AI post from ${character.name}`);
-            return;
+            return null;
         }
 
         const contacts = loadChatContacts();
@@ -368,10 +368,11 @@ async function triggerAIPost(characterId: string, hint = ""): Promise<void> {
             photoUseReferenceImage: parsed.photoUseReferenceImage === true,
             photoGenerationStatus: parsed.photoDescription ? "pending" : undefined,
             visibility,
+            createdAt,
         });
         if (!post) {
             console.warn(`[Moments] SKIP duplicate AI post from ${character.name}`);
-            return;
+            return null;
         }
 
         if (parsed.photoDescription) {
@@ -386,10 +387,20 @@ async function triggerAIPost(characterId: string, hint = ""): Promise<void> {
         dispatchMomentsUpdated();
         // Character's post → NPC reactions (not other main characters)
         generateNPCReactions(post, character);
+        return post.id;
 
     } finally {
         isGenerating = false;
     }
+}
+
+/**
+ * 自定义 APP（挂念）替角色起意发一条：走和定时发帖一样的整条管线（人设、记忆、去重、配图、NPC 互动），
+ * 不过 moments.beforePost——念头已经在 APP 那边定了。createdAt 传过去的时间就补成那个时间点的帖子。
+ */
+export async function postMomentForCharacter(characterId: string, hint = "", createdAt?: string): Promise<string | null> {
+    if (isGenerating) throw new Error("朋友圈正在生成另一条，稍后再试。");
+    return triggerAIPost(characterId, hint, createdAt);
 }
 
 /** Called when user publishes a post — trigger AI reactions. */

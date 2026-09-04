@@ -271,6 +271,7 @@ function normalizePermission(value: unknown): CustomAppPermission | null {
     "notifications.write",
     "tasks.schedule",
     "push.wake",
+    "moments.write",
     "bridge.send",
     "bridge.read",
     "ui.toast",

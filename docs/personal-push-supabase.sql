@@ -470,10 +470,13 @@ select cron.unschedule(jobid)
   from cron.job
  where jobname = 'ai-phone-personal-push-recheck-scan';
 
--- 云端动态复核：每 30 分钟挑几份计划交给 push-recheck。这里只负责派发，
+-- 云端动态复核：每 5 分钟挑几份计划交给 push-recheck。这里只负责派发，
 -- 「有没有新聊天、要不要真发 LLM 判断」全在函数里决定，省得 cron 里塞逻辑。
+-- 醒来本身几乎不花钱（每天 288 次，Supabase 免费额度 50 万/月）；真正计费的模型调用
+-- 由函数里的 gateDailyCap / gateGapMin / 配速 卡着，跟这里的频率无关。
+-- 挂念选「早上定完」模式的话，改回 '*/30 * * * *' 就行。
 -- 不按 plan_date 过滤：plan_date 是用户本地日期，和数据库的 UTC now() 对不上。
-select cron.schedule('ai-phone-personal-push-recheck-scan', '*/30 * * * *', $CRON$
+select cron.schedule('ai-phone-personal-push-recheck-scan', '*/5 * * * *', $CRON$
   select net.http_post(
     url     := 'https://__PROJECT_REF__.supabase.co/functions/v1/push-recheck',
     headers := jsonb_build_object('Content-Type', 'application/json'),
