@@ -485,3 +485,12 @@
 4. 云端裁决先清后存 → App 先存本地再回执，回执带 `before`，网关只清 `at <= before` 的那批
 5. 云端生成无视随用随判 → `generateCloudDay` 在该模式下不调起念模板
 6. 已押后时紧急词失效 → `isUrgentReplyText` 先判，命中越过已有等待
+
+复查修补（第二轮报告三项）：
+1. 「已发」凭据改成 `push_jobs` 的执行结果（`timedwake:<wakeId>` 的 `result_note` 以 generated / sent 开头），
+   云端回音账与 App `settleFired` 都不再拿邻近聊天冒充；没配云的本地预约才退回看聊天记录
+2. 设备锁任期号 `context.ownerSeq`：换人 / 接管 +1；普通上传带着走，库里是别台的锁或任期号更旧就拒 409 `taken`，
+   App 收到就记下新持有者停手。老版 App 不寄任期号时只按名字校验
+3. 回执改走 SQL 函数 `push_recheck_ack_decisions` 原子过滤 `at <= before`；函数不存在（404）退回读-过滤-写。
+   **要在 Supabase 重跑一遍 schema**
+

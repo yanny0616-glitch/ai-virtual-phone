@@ -416,6 +416,23 @@ grant execute on function public.ai_phone_screen_chat_begin(text, text, text, te
 grant execute on function public.ai_phone_screen_chat_finish(text, text, text, jsonb, integer, text, text, text, text, jsonb) to service_role;
 grant execute on function public.ai_phone_screen_chat_abort(text, text, text) to service_role;
 
+-- App 回执云端裁决：只清 at <= p_before 的那批，在数据库里原子过滤，GET 之后新到的裁决留着下次取
+create or replace function public.push_recheck_ack_decisions(
+  p_user_id text, p_character_id text, p_plan_date text, p_before numeric
+) returns void
+language sql
+security invoker
+as $$
+  update public.push_recheck_plans
+    set decisions = coalesce((
+      select jsonb_agg(d) from jsonb_array_elements(decisions) d
+      where coalesce((d->>'at')::numeric, 0) > p_before
+    ), '[]'::jsonb)
+  where user_id = p_user_id and character_id = p_character_id
+    and (p_plan_date = '' or plan_date = p_plan_date);
+$$;
+grant execute on function public.push_recheck_ack_decisions(text, text, text, numeric) to service_role;
+
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 

@@ -146,8 +146,9 @@ function impulseValue(kind: string, curve: number, fb: FbBook | undefined): numb
 function valueFloor(remaining: number): number {
   return remaining <= 1 ? 0.65 : remaining === 2 ? 0.45 : 0;
 }
-// 记回音账：点亮过的时刻到点 3 小时后看镜像——那之后TA真开过口才算「发过」，用户在 3 小时内接了话才算「回了」。
-// 每个 wakeId 只记一次，不调模型
+// 记回音账：点亮过的时刻到点 3 小时后看 push_jobs 的执行结果——result_note 以 generated / sent 开头才算「发过」
+// （押后作罢、发送前拦下、睡着没发的都不算），用户在那之后 3 小时内接了话才算「回了」。
+// 凭据是这条预约自己的结果，不拿聊天记录里恰好有的一句冒充。每个 wakeId 只记一次，不调模型
 async function feedbackRoll(
   rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, characterId: string,
   items: PlanItem[], context: PlanContext, nowMs: number,
@@ -156,23 +157,31 @@ async function feedbackRoll(
   const seen = Array.isArray(context.fbSeen) ? context.fbSeen.map(String) : [];
   const fb: FbBook = {};
   for (const [k, v] of Object.entries(context.fb || {})) if (Array.isArray(v)) fb[k] = [Number(v[0]) || 0, Number(v[1]) || 0];
-  const due = items.filter(it => it.act && it.wakeId && Number(it.fireAt) + 3 * 3600_000 <= nowMs && !seen.includes(it.wakeId));
+  const due = items.filter(it => it.act && it.wakeId && Number(it.fireAt) + 3 * 3600_000 <= nowMs && !seen.includes(it.wakeId)).slice(0, 6);
   if (!due.length) return null;
-  for (const it of due.slice(0, 4)) {
-    const from = Number(it.fireAt), kind = String(it.kind || "plan");
+  const jobsResp = await rest(
+    `push_jobs?user_id=eq.${encodeURIComponent(userId)}`
+    + `&trigger_key=in.(${encodeURIComponent(due.map(it => `"timedwake:${it.wakeId}"`).join(","))})`
+    + "&select=trigger_key,status,result_note,updated_at",
+  );
+  if (!jobsResp.ok) return null;
+  const jobs = await jobsResp.json() as { trigger_key: string; status: string; result_note: string | null; updated_at: string }[];
+  for (const it of due) {
+    const kind = String(it.kind || "plan");
+    const job = jobs.find(j => j.trigger_key === `timedwake:${it.wakeId}`);
+    if (job && (job.status === "pending" || job.status === "running")) continue; // 押后中，下轮再看
+    seen.push(it.wakeId);
+    const sentAt = job && job.status === "done" && /^(generated|sent)/.test(String(job.result_note || "")) ? Date.parse(job.updated_at) : NaN;
+    if (!Number.isFinite(sentAt)) continue; // 没发出去：不算账，账本也不动
     const resp = await rest(
       `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
       + `&character_id=eq.${encodeURIComponent(characterId)}`
-      + `&message_at=gt.${encodeURIComponent(new Date(from).toISOString())}`
-      + `&message_at=lte.${encodeURIComponent(new Date(from + 6 * 3600_000).toISOString())}`
-      + "&select=role,message_at&order=message_at.asc&limit=60",
+      + "&role=eq.user"
+      + `&message_at=gt.${encodeURIComponent(new Date(sentAt).toISOString())}`
+      + `&message_at=lte.${encodeURIComponent(new Date(sentAt + 3 * 3600_000).toISOString())}`
+      + "&select=message_at&limit=1",
     );
-    if (!resp.ok) continue;
-    const rows = await resp.json() as { role: string; message_at: string }[];
-    seen.push(it.wakeId);
-    const sentAt = Date.parse(rows.find(r => r.role !== "user")?.message_at || "");
-    if (!Number.isFinite(sentAt)) continue; // 到点没发出去（押后作罢、发送前拦下），不算账，账本也不动
-    const replied = rows.some(r => r.role === "user" && Date.parse(r.message_at) > sentAt && Date.parse(r.message_at) <= sentAt + 3 * 3600_000);
+    const replied = resp.ok && ((await resp.json()) as unknown[]).length > 0;
     const rec = fb[kind] || [0, 0];
     fb[kind] = [rec[0] + 1, rec[1] + (replied ? 1 : 0)];
     // 出自账本的那条真说出去了，才推进账本：话头了结、约定标「提过了」。App 的 settleFired 同一套规则

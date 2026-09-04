@@ -1046,7 +1046,9 @@
       Object.assign({ cache: "no-store" }, init || {}, { headers: headers }));
     const data = await r.json().catch(() => null);
     if (!r.ok || !data || data.ok !== true) {
-      throw new Error((data && data.error) || ("云函数返回 HTTP " + r.status));
+      const err = new Error((data && data.error) || ("云函数返回 HTTP " + r.status));
+      err.data = data; // 409 taken 之类带结构的拒绝，调用方要看
+      throw err;
     }
     return data;
   }
@@ -1069,7 +1071,7 @@
     try {
       const r = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() });
       const c = (r && r.plan && r.plan.context) || {};
-      cx.owner = c.owner ? { id: String(c.owner), name: String(c.ownerName || "") } : null;
+      cx.owner = c.owner ? { id: String(c.owner), name: String(c.ownerName || ""), seq: +c.ownerSeq || 0 } : null;
     } catch (e) { /* 读不到就按没锁算，别把离线的这台也锁死 */ }
     return cx.owner;
   }
@@ -1091,11 +1093,21 @@
       let r = null;
       try { r = await lockCloud(cx); } catch (e) { /* 网络不通就按没锁算，别把离线的这台也锁死 */ }
       if (r && r.stored === false && r.taken && r.owner) {
-        cx.owner = { id: String(r.owner), name: String(r.ownerName || "") };
+        cx.owner = { id: String(r.owner), name: String(r.ownerName || ""), seq: +r.ownerSeq || 0 };
         return false;
       }
-      cx.owner = { id: myDev(), name: myDevName() };
+      cx.owner = { id: myDev(), name: myDevName(), seq: (r && +r.ownerSeq) || 0 };
     }
+    return true;
+  }
+  // 上传被网关按设备锁拒了（409 taken）：记下新持有者，本机停手
+  async function onTaken(cx, e, what) {
+    const d = e && e.data;
+    if (!d || !d.taken) return false;
+    cx.owner = { id: String(d.owner || ""), name: String(d.ownerName || ""), seq: +d.ownerSeq || 0 };
+    S._diagCache = {};
+    await log(cx, what + "：今天已由「" + ownerLabel(cx) + "」接管，本机这份没上传");
+    render();
     return true;
   }
   // 只读的那台要接手：先撤掉原来那台挂在服务端的预约（含 48 小时哨兵），再把锁抢过来。
@@ -1112,8 +1124,8 @@
       } catch (e) { /* 读不到哨兵就算了：那条 48 小时后只会问候一句 */ }
       await cancelTodayWakes(cx);
       if (sw) { try { await AiPhone.push.cancelWake(sw); } catch (e) { /* 已触发的取消失败可忽略 */ } }
-      await lockCloud(cx, true);
-      cx.owner = { id: myDev(), name: myDevName() };
+      const lk = await lockCloud(cx, true);
+      cx.owner = { id: myDev(), name: myDevName(), seq: (lk && +lk.ownerSeq) || 0 };
       S._diagCache = {};
       await log(cx, "接管：今天改由「" + myDevName() + "」负责，已撤掉「" + from + "」挂的预约");
       cx.busy = false;
@@ -1207,6 +1219,7 @@
             outbox: (cx.plan && Array.isArray(cx.plan.outbox)) ? cx.plan.outbox : [],
             threads: S.settings.threadsOn ? liveThreads(cx).slice(0, 20).map((t) => ({ id: t.id, kind: t.kind, text: t.text, due: +t.due || 0, yearly: !!t.yearly, since: +t.since || 0, at: +t.at || 0, done: false, nudge: t.nudge || "", why: t.why || "" })) : [],
             owner: myDev(), ownerName: myDevName(),
+            ownerSeq: (cx.owner && cx.owner.id === myDev() && +cx.owner.seq) || 0,
             day: dayForCloud(cx),
     };
   }
@@ -1234,7 +1247,10 @@
       if (r && Array.isArray(r.dropped) && r.dropped.length) {
         await log(cx, "云端复核：" + r.dropped.join("、") + " 太大没存下，云端这部分会失效（忙与睡、到点状态、云端生成）");
       }
-    } catch (e) { await log(cx, "云端复核：计划上传失败（不影响本地）——" + (e && e.message || e)); }
+    } catch (e) {
+      if (await onTaken(cx, e, "云端复核")) return;
+      await log(cx, "云端复核：计划上传失败（不影响本地）——" + (e && e.message || e));
+    }
   }
   /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
   function cloudGenOn() {
@@ -1302,7 +1318,10 @@
         } else {
           await log(cx, "云端生成：" + date + " 的原料已寄到云端，到 " + at + " 由云端生成");
         }
-      } catch (e) { await log(cx, "云端生成：" + date + " 的原料上传失败——" + (e && e.message || e)); }
+      } catch (e) {
+        if (await onTaken(cx, e, "云端生成")) return;
+        await log(cx, "云端生成：" + date + " 的原料上传失败——" + (e && e.message || e));
+      }
     }
   }
   // 云端生成好了今天：把它当成自己生成的接过来——落库、写回系统日程、接管预约，再走正常的复核流程。
@@ -1702,20 +1721,36 @@
    * 到点还得问结果，不该就此从心里划掉。没有这一步的话，账本要等模型下一轮自己想起来
    * settle，不 settle 就一直挂着，用户看到的是「明明聊过了还在惦记里」。
    */
-  // 只认真说出去的：到点之后聊天记录里有TA的一句才推进账本；发送前拦下、押后作罢的不算。
-  // 到点 6 小时还没见到就放弃这条（不再查）。云端回音账那步同一套规则
+  // 只认真说出去的才推进账本。凭据是云端预约自己的执行结果（result_note 以 generated / sent 开头），
+  // 押后作罢、发送前拦下、睡着没发的都不算；没配云的本地预约拿不到结果，只能退回看聊天记录（粗）。
+  // 到点 6 小时还查不到就放弃这条。云端回音账那步同一套规则
   async function settleFired(cx) {
     if (!S.settings.threadsOn || !cx.plan || !Array.isArray(cx.plan.items) || !(cx.threads || []).length) return;
     const now = Date.now(), list = (cx.threads || []).slice(), notes = [];
     const due = cx.plan.items.filter((w) => w.act && w.from && w.fireAt < now && !w.thDone);
     if (!due.length) return;
-    const said = (await readRecentChat(cx, 80)).filter((m) => m.role === "assistant").map((m) => m.t);
+    let jobs = null, said = null;
+    if (cloudCfg()) {
+      try { const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", limit: "20" }); jobs = (jr && jr.jobs) || []; }
+      catch (e) { return; } // 读不到就下一分钟再看
+    } else {
+      said = (await readRecentChat(cx, 80)).filter((m) => m.role === "assistant").map((m) => m.t);
+    }
     let marked = 0;
     for (const w of due) {
-      const spoke = said.some((t) => t >= w.fireAt - 60000 && t <= w.fireAt + 6 * 3600000);
-      if (!spoke) { if (now - w.fireAt > 6 * 3600000) { w.thDone = true; marked++; } continue; }
-      const t = list.find((x) => x.id === w.from);
+      let spoke = false;
+      if (jobs) {
+        const j = w.wakeId ? jobs.find((x) => x.triggerKey === "timedwake:" + w.wakeId) : null;
+        if (j && (j.status === "pending" || j.status === "running")) continue; // 押后中
+        if (!j && now - w.fireAt <= 6 * 3600000) continue; // 列表只回最近 20 条，晚点再找
+        spoke = !!j && j.status === "done" && /^(generated|sent)/.test(String(j.resultNote || ""));
+      } else {
+        spoke = said.some((t) => t >= w.fireAt - 60000 && t <= w.fireAt + 6 * 3600000);
+        if (!spoke && now - w.fireAt <= 6 * 3600000) continue;
+      }
       w.thDone = true; marked++; // 只回写一次
+      if (!spoke) continue;
+      const t = list.find((x) => x.id === w.from);
       if (!t || t.done) continue;
       if (t.kind === "topic") { t.done = true; t.at = now; t.by = "app"; notes.push("说完了，了结「" + t.text + "」"); }
       else if (String(t.nudge || "").indexOf("said:") < 0) { t.nudge = (String(t.nudge || "") + " said:" + w.time).trim().slice(-200); t.at = now; notes.push("提过了「" + t.text + "」"); }

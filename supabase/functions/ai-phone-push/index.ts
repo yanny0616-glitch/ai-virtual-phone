@@ -1015,18 +1015,22 @@ Deno.serve(async (request: Request) => {
           }).catch(() => undefined);
           // PATCH 是整列替换：先读出 context 合并再写，条件 PATCH 保证读写之间没被别台抢走
           const rows = await readJson<{ context?: Record<string, unknown> }[]>(await rest(`${planFilter}&select=context&limit=1`));
+          const curCtx = rows[0]?.context ?? {};
+          // 任期号：换人（含接管）就 +1。之后每次上传都带着，旧任期在途的上传会被拒
+          const curSeq = Number(curCtx.ownerSeq) || 0;
+          const ownerSeq = body.force === true || cleanText(curCtx.owner, 40) !== owner ? curSeq + 1 : curSeq;
           const cond = body.force === true ? "" : `&or=(context->>owner.is.null,context->>owner.in.${encodeURIComponent(`("",${owner})`)})`;
           const save = await rest(`${planFilter}${cond}&select=plan_date`, {
             method: "PATCH",
             headers: { Prefer: "return=representation" },
-            body: JSON.stringify({ context: { ...(rows[0]?.context ?? {}), owner, ownerName }, updated_at: new Date().toISOString() }),
+            body: JSON.stringify({ context: { ...curCtx, owner, ownerName, ownerSeq }, updated_at: new Date().toISOString() }),
           });
           if (!save.ok) return json({ ok: false, error: `写入设备锁失败 HTTP ${save.status}` }, 500);
           const saved = await readJson<unknown[]>(save);
-          if (saved.length > 0) return json({ ok: true, owner, stored: true });
+          if (saved.length > 0) return json({ ok: true, owner, stored: true, ownerSeq });
           const cur = await readJson<{ context?: Record<string, unknown> }[]>(await rest(`${planFilter}&select=context&limit=1`));
           const held = cleanText(cur[0]?.context?.owner, 40);
-          return json({ ok: true, owner: held || owner, ownerName: cleanText(cur[0]?.context?.ownerName, 40), stored: false, taken: !!held && held !== owner });
+          return json({ ok: true, owner: held || owner, ownerName: cleanText(cur[0]?.context?.ownerName, 40), ownerSeq: Number(cur[0]?.context?.ownerSeq) || 0, stored: false, taken: !!held && held !== owner });
         }
         // 只收 push-recheck 判断时真正会读的字段，别把 App 的整份 plan 原样堆进库里。
         const rawItems = Array.isArray(body.items) ? body.items.slice(0, 40) : [];
@@ -1094,6 +1098,21 @@ Deno.serve(async (request: Request) => {
           const n = Number(rawContext[key]);
           if (Number.isFinite(n)) context[key] = n;
         }
+        // 设备锁校验：库里已是别台的锁、或本机任期号比库里旧（接管过又被接回去），一律拒——
+        // 旧任期在途的上传不能盖掉新持有者的计划。任期号只在 ownerOnly 那条路上涨，上传只能带着走
+        const curRows = await readJson<{ context?: Record<string, unknown> }[]>(await rest(
+          `push_recheck_plans?user_id=eq.${OWNER_ID}&character_id=eq.${encodeURIComponent(characterId)}&plan_date=eq.${planDate}&select=context&limit=1`,
+        ));
+        const curCtx = curRows[0]?.context ?? {};
+        const curOwner = cleanText(curCtx.owner, 40), curSeq = Number(curCtx.ownerSeq) || 0;
+        const mySeq = Number(rawContext.ownerSeq) || 0;
+        // 老版 App 不寄任期号：只按 owner 名字校验，别把装着旧 zip 的持有者也拒了
+        const hasSeq = rawContext.ownerSeq !== undefined && rawContext.ownerSeq !== null;
+        if (curOwner && context.owner && (curOwner !== context.owner || (hasSeq && mySeq < curSeq))) {
+          return json({ ok: false, error: "taken", taken: true, owner: curOwner, ownerName: cleanText(curCtx.ownerName, 40), ownerSeq: curSeq }, 409);
+        }
+        context.ownerSeq = Math.max(curSeq, mySeq);
+        if (curOwner && !context.owner) { context.owner = curOwner; context.ownerName = cleanText(curCtx.ownerName, 40); }
         const row: Record<string, unknown> = {
           user_id: OWNER_ID,
           character_id: characterId,
@@ -1138,9 +1157,16 @@ Deno.serve(async (request: Request) => {
         const filter = `push_recheck_plans?user_id=eq.${OWNER_ID}`
           + `&character_id=eq.${encodeURIComponent(characterId)}`
           + (planDate ? `&plan_date=eq.${encodeURIComponent(planDate)}` : "");
-        // 回执带 before：只清 App 已经并进去的那批（at <= before），GET 之后新到的裁决留着下次取
+        // 回执带 before：只清 App 已经并进去的那批（at <= before），GET 之后新到的裁决留着下次取。
+        // 先走数据库里的原子函数；schema 还没跑到那版（404）就退回读-过滤-写
         const before = Number(body.before);
         const keepNewer = async (): Promise<Response> => {
+          const atomic = await rest("rpc/push_recheck_ack_decisions", {
+            method: "POST",
+            headers: { Prefer: "return=minimal" },
+            body: JSON.stringify({ p_user_id: OWNER_ID, p_character_id: characterId, p_plan_date: planDate || "", p_before: before }),
+          });
+          if (atomic.status !== 404) return atomic;
           const rows = await readJson<{ decisions?: { at?: number }[] }[]>(await rest(`${filter}&select=decisions&limit=1`));
           const rest_ = (Array.isArray(rows[0]?.decisions) ? rows[0]!.decisions! : []).filter(d => Number(d?.at) > before);
           return rest(filter, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ decisions: rest_ }) });
