@@ -63,7 +63,7 @@ import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
-import { evaluateReplyGate, readReplyGate, writeDeferredReply } from "@/lib/chat-reply-gate";
+import { evaluateReplyGate, readDeferredReply, readReplyGate, writeDeferredReply } from "@/lib/chat-reply-gate";
 import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
 import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/shopping-gift-utils";
 import { settleShoppingPaymentRequest } from "@/lib/shopping-payment-request";
@@ -3886,6 +3886,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // 这里只落一条押后记录；到点由桌面壳发回复请求，聊天室开着就本组件接，关了就后台生成。
     const scheduleGatedReply = (text: string) => {
         if (session.isGroup) { void triggerAIResponse(); return; }
+        // 已经押后了（睡着 / 忙着），再点「触发回复」也不该把TA叫起来：到点由桌面壳派回来
+        const held = readDeferredReply(session.id);
+        if (held && !held.firedAt && held.until > Date.now()) {
+            const at = new Date(held.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+            showChatToast(`TA这会儿顾不上，${at} 左右再回`, 3000);
+            return;
+        }
         const decision = evaluateReplyGate(readReplyGate(session.contactId), text);
         if (decision.kind === "now") {
             writeDeferredReply(session.id, decision.note ? { until: Date.now(), note: decision.note, firedAt: Date.now() } : null);
@@ -3897,6 +3904,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const at = new Date(decision.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
         showChatToast(decision.reason === "sleep" ? `TA睡着了，${at} 醒来再回` : `TA正忙，${at} 左右再回`, 3000);
     };
+    // 「触发回复」按钮和收起键盘自动触发都走这里：和按回复键发一样过闸门，
+    // 否则夜里点一下TA就得醒着回，提示词里却写着「在睡觉」。判据用你最后一句（紧急词能破门）
+    const triggerGatedReply = () => {
+        if (session.isGroup) { void triggerAIResponse(); return; }
+        const lastUser = [...loadChatMessages(session.id)].reverse().find(m => m.role === "user");
+        scheduleGatedReply(lastUser?.content || "");
+    };
 
     // 收起键盘（或关掉表情/加号面板）并安静 N 秒后自动触发回复，
     // 等价于替用户点一次「触发回复」。判定全在 hook 内部，配置关掉后与手动模式一致。
@@ -3906,7 +3920,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         generating: isGenerating,
         panelOpen: showEmojiPanel || showStickerPanel || showPlusMenu,
         sessionId: session.id,
-        onTrigger: () => { void triggerAIResponse(); },
+        onTrigger: () => { triggerGatedReply(); },
     });
 
     useEffect(() => {
@@ -6295,7 +6309,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 onStartVoiceCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
                 onSendText={handleSendText}
                 onStopGeneration={clearStuckGeneration}
-                onTriggerAIResponse={triggerAIResponse}
+                onTriggerAIResponse={triggerGatedReply}
                 onSendSticker={(name, url) => { setShowStickerPanel(false); sendRichMessage("sticker", { label: name, stickerUrl: url }); }}
             />
             ))}
