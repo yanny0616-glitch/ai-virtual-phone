@@ -23,6 +23,8 @@ type PlanItem = {
   fireAt: number;
   source: string;
   act: boolean;
+  /** 这条时刻出自账本里哪件事（账本 id）：发出去之后回写账本，用户了结时连带撤掉 */
+  from?: string;
   intent: string;
   why: string;
   sem: string;
@@ -320,7 +322,7 @@ function lifeRoll(context: PlanContext, nowMs: number): { patch: Record<string, 
 }
 
 type Decision = { time?: string; act?: boolean; sem?: string; topic?: string; why?: string; intent?: string; defer?: string };
-type Extra = { time?: string; until?: string; about?: string; intent?: string; why?: string };
+type Extra = { time?: string; until?: string; about?: string; intent?: string; why?: string; from?: string };
 type Thread = { id: string; kind: string; text: string; due?: number; yearly?: boolean; since?: number; at?: number; by?: string; done?: boolean; nudge?: string; why?: string };
 type Keep = { kind?: string; text?: string; when?: string; why?: string };
 type Outbox = { id: string; at: number; hint: string; by?: string };
@@ -1377,7 +1379,7 @@ Deno.serve(async (req: Request) => {
         : '"decisions":[]')
       + ","
       + (canImpulse
-        ? '"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"这个念头的由头（8字内）","intent":"想说的事","why":"为什么现在加"}]'
+        ? '"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"这个念头的由头（8字内）","intent":"想说的事","why":"为什么现在加","from":"出自账本里某件事就填它的 id，否则空字符串"}]'
         : '"extra":[]')
       + (threadsOn && !selfReason
         ? ',"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"]'
@@ -1388,6 +1390,9 @@ Deno.serve(async (req: Request) => {
       judge ? "decisions 只写你要改的时刻（其余的保持原样就不用写）。" : "decisions 一律写 []。",
       judge ? `改约：act 写 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断对方），而话本身还想说，就在 defer 里填今天更晚的 HH:MM，整个念头挪过去、不占新额度；真的不想说了才把 defer 留空。到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。只能挪到这个念头的保质期（until）之前——过了那个点这话就不新鲜了，宁可作罢。` : "",
       canImpulse ? "extra 最多 1 条，没有就写 []。" : "今日额度已满，extra 一律写 []。",
+      canImpulse && threadsOn
+        ? "extra 和 keep 是两条路，同一件事只能进一边：今天之内说得掉的走 extra 排个时刻；今天说不掉的（要等结果、要到某个日子、隔几天再问才自然）走 keep 记进账本，以后自己会想起来。extra 出自账本里已有的某件事时 from 填那条的 id，发出去之后系统会自动把账本那条了结或标成提过了，不用再写进 settle。"
+        : "",
       canPost
         ? `post：如果此刻更想发一条朋友圈而不是私聊（晒一下刚做的事、随手记一句、发个感慨——给所有人看的，不是说给用户听的），就在 post.hint 里写想发的由头或大意（30字内），由系统按你的人设成文。这周已发 ${moBudget.weekN} 条。私聊和发圈可以只要一个，也可以都不要；不想发就写 null。`
         : "",
@@ -1593,6 +1598,11 @@ Deno.serve(async (req: Request) => {
         sem: "",
         topic: "",
         wakeId,
+        // 出自账本某条：App 那边发出去之后按它回写账本（话头了结、约定标提过了）
+        from: threadNudged ? threadNudged.id : (() => {
+          const id = String(one.from || "").replace(/[\[\]\s]/g, "");
+          return id && (Array.isArray(context.threads) ? context.threads : []).some(t => t.id === id) ? id : "";
+        })(),
       });
       lit += 1;
       applied.push({ at: Date.now(), time, kind: "extra", note: `云端临时起念——${intent}`, by: "cloud" });

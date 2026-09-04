@@ -1210,7 +1210,7 @@
           items: cx.plan.items.map((w) => ({
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
-            wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0,
+            wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0, from: w.from || "",
           })),
         }),
       });
@@ -1400,7 +1400,7 @@
         w = {
           time: ci.time, fireAt: ci.fireAt, source: ci.source || "临时起念", act: false,
           why: "", intent: "", delivery: "", reason: "", wakeId: "",
-          sem: ci.sem || "", topic: ci.topic || "", hist: [],
+          sem: ci.sem || "", topic: ci.topic || "", from: ci.from || "", hist: [],
           score: calcScore(ci.fireAt, items.filter((x) => x.act).length, 0, 0),
         };
         items.push(w);
@@ -1639,6 +1639,51 @@
     return liveThreads(cx, now).slice(0, 12).map((t) => "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + "·" + t.text + (threadWhen(t, now) ? "（" + threadWhen(t, now) + "）" : ""));
   }
   const THREAD_TASK = "惦记账本：上面带 [id] 的是TA心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id。都没有就给空数组。";
+  // 时刻上的 from 指向账本某条：模型给的 id 可能带方括号或是编的，这里核一遍
+  function threadIdOf(cx, raw) {
+    const id = String(raw || "").replace(/[\[\]\s]/g, "");
+    return id && (cx.threads || []).some((t) => t.id === id) ? id : "";
+  }
+  /**
+   * 发出去的时刻回写账本：话头说完就了结；约定和日子只标「提过了」——话还没说完，
+   * 到点还得问结果，不该就此从心里划掉。没有这一步的话，账本要等模型下一轮自己想起来
+   * settle，不 settle 就一直挂着，用户看到的是「明明聊过了还在惦记里」。
+   */
+  async function settleFired(cx) {
+    if (!S.settings.threadsOn || !cx.plan || !Array.isArray(cx.plan.items) || !(cx.threads || []).length) return;
+    const now = Date.now(), list = (cx.threads || []).slice(), notes = [];
+    for (const w of cx.plan.items) {
+      if (!w.act || !w.from || w.fireAt >= now || w.thDone) continue;
+      const t = list.find((x) => x.id === w.from);
+      w.thDone = true; // 只回写一次
+      if (!t || t.done) continue;
+      if (t.kind === "topic") { t.done = true; t.at = now; t.by = "app"; notes.push("说完了，了结「" + t.text + "」"); }
+      else if (String(t.nudge || "").indexOf("said:") < 0) { t.nudge = (String(t.nudge || "") + " said:" + w.time).trim().slice(-200); t.at = now; notes.push("提过了「" + t.text + "」"); }
+    }
+    if (!notes.length) return;
+    await saveThreads(cx, list);
+    cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items: cx.plan.items });
+    await log(cx, "惦记账本：" + notes.join("，"));
+  }
+  // 了结或删掉一条惦记时，由它起的、还没到点的时刻一起撤掉——不然人在面板上把事划掉了，
+  // 到点TA还照着这条由头发消息。
+  async function dropThreadSlots(cx, id, why) {
+    if (!cx.plan || !Array.isArray(cx.plan.items)) return 0;
+    const now = Date.now(); let n = 0;
+    for (const w of cx.plan.items) {
+      if (w.from !== id || !w.act || w.fireAt <= now) continue;
+      if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
+      w.act = false; w.wakeId = ""; w.why = why;
+      (w.hist = w.hist || []).push({ at: now, kind: "recheck", note: why });
+      n++;
+    }
+    if (n) {
+      cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items: cx.plan.items });
+      await log(cx, "惦记账本：" + why + "，撤掉 " + n + " 个时刻");
+    }
+    return n;
+  }
+
   async function saveThreads(cx, list) {
     cx.threads = list;
     await upsert("threads", (x) => x.characterId === cx.character.id, { characterId: cx.character.id, items: list });
@@ -2233,7 +2278,7 @@
             biasText() || null,
             canJudge ? "还没到点的时刻（act 是之前的判断）：" : null,
             canJudge ? JSON.stringify(remaining.map((w) => ({ time: w.time, source: w.source, act: !!w.act, intent: w.intent || "", energy: energyAt(cx.day, w.fireAt) }))) : null,
-            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-40到40的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
+            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念","from":"如果这条出自账本里某件事，填它的 id，否则空字符串"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-40到40的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
             "feel 描述的是聊天带来的情绪变化，不是今天的底色：被安慰/被逗笑/聊得投入给正 energy，被冷落/吵架/说累了给负；聊得平淡就把 intensity 给低分。",
             (S.settings.chatEditsDay
               ? "sched 只在聊天里确实出现了会改变TA今天安排的事才给：约好了几点做什么、临时被叫走、说了某件事不去了。最多 2 条，时间必须晚于现在（" + fmtHM(nowMs) + "）；只是随口聊到、没有落实的事不要写进来，没有就给空数组。"
@@ -2245,7 +2290,8 @@
               ? "post：如果此刻更想发一条朋友圈而不是私聊（晒一下刚做的事、随手记一句、发个感慨——给所有人看的，不是说给用户听的），就在 post.hint 里写想发的由头或大意（30字内），由系统按人设成文。这周已发 " + moState(cx).weekN + " 条。私聊和发圈可以只要一个，也可以都不要；不想发就写 null。"
               : "post 一律写 null。",
             "改约：act 给 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断你、TA心思还没到这上面），而话本身还想说，就在 defer 里写一个今天更晚的 HH:MM，整个念头会挪过去，不占新额度；真的不想说了才把 defer 留空。TA到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。只能挪到这个念头的保质期（until）之前——过了那个点这话就不新鲜了，宁可作罢。",
-            "decisions 与上面时刻一一对应、顺序一致；没有变化就原样回传。extra 最多 1 条：只有聊天里确实有没聊完的话头、约好的事、或明显被勾起的牵挂才加（账本里快到点的约定、到了的日子也算），没有就给空数组。"
+            "decisions 与上面时刻一一对应、顺序一致；没有变化就原样回传。extra 最多 1 条：只有聊天里确实有没聊完的话头、约好的事、或明显被勾起的牵挂才加（账本里快到点的约定、到了的日子也算），没有就给空数组。",
+            "extra 和 keep 是两条路，同一件事只能进一边：今天之内说得掉的（下午问一句、晚上接着聊）走 extra 排个时刻；今天说不掉的（要等结果、要到某个日子、隔几天再问才自然）走 keep 记进账本，以后自己会想起来。今天的额度和间隔在上面，说不说得下就按它判。extra 出自账本里已有的某件事时，from 填那条的 id——发出去之后系统会自动把账本那条了结或标成提过了，你不用再写进 settle。"
               + (S.settings.chatCandidates ? "" : "（临时起念已被用户关闭，extra 必须是空数组）"),
             "约束：今天最多 " + S.settings.quota + " 条（已占 " + usedQuota + "）；免打扰 " + S.settings.quietStart + "–" + S.settings.quietEnd
               + (S.settings.minGapMin > 0 ? "；相邻起念至少隔 " + S.settings.minGapMin + " 分钟" : "")
@@ -2340,6 +2386,7 @@
               act: true, adj: "extra", why: String(x.why || ""), intent: String(x.intent || ""),
               delivery: res.armed ? "push" : "local", reason: res.reason || "", wakeId: res.id,
               sem: "追话题", topic: String(x.about || "").slice(0, 10),
+              from: threadIdOf(cx, x.from),
               score: calcScore(ms, items.filter((w) => w.act).length, streak, 0),
               hist: [{ at: nowMs, kind: "extra", note: "聊天里冒出来的：" + String(x.why || x.intent || "") }],
             });
@@ -2672,6 +2719,7 @@
         if (act === "done") { t.done = true; t.at = Date.now(); t.by = "user"; toast("已了结，可以在「已了结」里恢复"); }
         else if (act === "undone") { t.done = false; t.at = Date.now(); t.by = "user"; }
         else list.splice(list.indexOf(t), 1);
+        if (act !== "undone") await dropThreadSlots(cx, id, act === "done" ? "你把这件事了结了" : "你删掉了这条惦记");
         S._thOpen = "";
         await saveThreads(cx, list); await uploadPlanCloud(cx, false); cx._ctx = null; syncChatContext(cx, true).catch(() => {}); render();
       };
@@ -4100,7 +4148,7 @@
         const rows = await AiPhone.db.list("logs", { limit: 5 });
         S.logs = (rows && rows[0]) || null;
       } catch (e) { /* 无日志可读 */ }
-      for (const cx of allCx()) await loadDayAndPlan(cx);
+      for (const cx of allCx()) { await loadDayAndPlan(cx); await settleFired(cx).catch(() => { /* 已在函数内记日志 */ }); }
       render();
       for (const cx of allCx()) {
         // 先认锁：另一台在管的话，下面的接管、寄原料、复核、取裁决全都不该做
@@ -4143,6 +4191,7 @@
             if (was !== owns(cx)) render();
           }
           await maybeAutoGen(cx).catch(() => { /* 已在函数内记日志 */ });
+          await settleFired(cx).catch(() => { /* 已在函数内记日志 */ });
           await syncChatContext(cx).catch(() => { /* 已在函数内记日志 */ });
           if (S.settings && S.settings.recheckMin > 0 && Date.now() - (cx._rcTry || 0) >= S.settings.recheckMin * 60000) {
             cx._rcTry = Date.now();

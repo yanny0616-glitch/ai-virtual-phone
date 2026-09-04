@@ -1026,6 +1026,7 @@ Deno.serve(async (request: Request) => {
             // 念头的保质期和改约前的原时刻：云端改约、到点押后都拿它们封顶
             until: Number(it.until) || 0,
             origFireAt: Number(it.origFireAt) || 0,
+            from: cleanText(it.from, 16).replace(/[^A-Za-z0-9_-]/g, ""),
           };
         }).filter((it) => it.time && it.fireAt > 0);
         const rawContext = body.context && typeof body.context === "object"
