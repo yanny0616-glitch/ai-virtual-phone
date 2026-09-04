@@ -17,11 +17,15 @@ import { isPersonalPushCloudActive, personalPushFetch } from "./personal-push-cl
 
 const MIRROR_ENABLED_KEY = "chat_mirror_enabled_v1";
 const MIRROR_QUEUE_KEY = "chat_mirror_queue_v1";
-const QUEUE_CAP = 800;
+const QUEUE_CAP = 5_000;
 const FLUSH_BATCH = 50;
 const FLUSH_DEBOUNCE_MS = 2_500;
 const RETRY_INTERVAL_MS = 60_000;
 const CONTENT_MAX = 4_000;
+// 回填范围：开开关那次、以及队列为空时手动点「立即上传」抓的量。
+// 上限 = SESSIONS × PER_SESSION，要留在 QUEUE_CAP 以内，否则前面的会被挤掉。
+const BACKFILL_SESSIONS = 20;
+const BACKFILL_PER_SESSION = 200;
 
 registerKvMigration(MIRROR_ENABLED_KEY);
 registerKvMigration(MIRROR_QUEUE_KEY);
@@ -78,13 +82,32 @@ function characterIdForSession(sessionId: string): string {
     return contact?.characterId || cid;
 }
 
+/**
+ * 镜像正文：云端只拿得到这一段文字，看不到 mediaData。
+ * 预览函数把语音条、红包留言、位置名、表情名都截成了 [语音] 这样的固定标记，
+ * 引用则只剩回复本身、丢了被引的原话——判断时这些恰恰是有信息量的部分，这里补回去。
+ * 媒体文件本身（图片 base64、音频）仍然不上云。
+ */
+function mirrorText(msg: ChatMessage): string {
+    const label = msg.mediaData?.label?.trim() || "";
+    if (msg.mediaType === "quote") {
+        const quoted = msg.mediaData?.quotePreview?.trim() || "";
+        const body = (msg.content || "").trim();
+        return quoted ? `引用「${quoted}」：${body}` : body;
+    }
+    const base = (msg.content || getChatMessagePreview(msg) || "").trim();
+    // 图片的预览已经是「[图片] 描述」，别再拼一遍
+    if (label && !base.includes(label)) return base ? `${base} ${label}` : label;
+    return base;
+}
+
 function toMirrorEntry(msg: ChatMessage, deleted?: true): ChatMirrorEntry | null {
     if (msg.role !== "user" && msg.role !== "assistant") return null;
     const characterId = characterIdForSession(msg.sessionId);
     // 群聊会话（characterId 解析不到单一角色）暂不镜像，控制数据量与隐私面。
     // 删除例外：会话可能已经没了，按 id 删不需要角色。
     if (!characterId && !deleted) return null;
-    const content = deleted ? "" : (msg.content || getChatMessagePreview(msg) || "").slice(0, CONTENT_MAX);
+    const content = deleted ? "" : mirrorText(msg).slice(0, CONTENT_MAX);
     return {
         id: msg.id,
         sessionId: msg.sessionId,
@@ -165,11 +188,11 @@ function backfillRecentChat(): void {
         const sessions = loadChatSessions()
             .filter(session => !session.isGroup)
             .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
-            .slice(0, 10);
+            .slice(0, BACKFILL_SESSIONS);
         const queue = loadQueue();
         const queued = new Set(queue.map(item => item.id));
         for (const session of sessions) {
-            for (const msg of loadChatMessages(session.id, 60)) {
+            for (const msg of loadChatMessages(session.id, BACKFILL_PER_SESSION)) {
                 if (queued.has(msg.id)) continue;
                 const entry = toMirrorEntry(msg);
                 if (entry) {
@@ -232,6 +255,14 @@ export function installChatMirror(): void {
     installed = true;
     // 镜像跟着本地变：新增、编辑、整批重生成都按 id 覆盖，删除按 id 删。
     // 云端裁决读的就是这份镜像，本地删掉的话不该再被当成还在。
+    // 只有 id 在手（整批重建顶掉的旧消息）：云端删除只认 id，其余字段填个能过表约束的空壳
+    const mirrorDeletedIds = (ids: string[], sessionId: string) => {
+        if (!isChatMirrorEnabled() || !isPersonalPushCloudActive()) return;
+        for (const id of ids) {
+            if (!id) continue;
+            enqueue({ id, sessionId, characterId: "", role: "assistant", content: "", createdAt: new Date().toISOString(), deleted: true });
+        }
+    };
     const mirrorMessages = (messages: ChatMessage[], deleted?: true) => {
         if (!isChatMirrorEnabled() || !isPersonalPushCloudActive()) return;
         for (const message of messages) {
@@ -248,8 +279,12 @@ export function installChatMirror(): void {
         if (message) mirrorMessages([message]);
     });
     window.addEventListener(CHAT_RESPONSE_BATCH_REPLACED_EVENT, event => {
-        const messages = (event as CustomEvent<{ messages?: ChatMessage[] }>).detail?.messages;
-        if (Array.isArray(messages)) mirrorMessages(messages);
+        const detail = (event as CustomEvent<{ messages?: ChatMessage[]; replacedIds?: string[]; sessionId?: string }>).detail;
+        // 重建出来的是新 id，旧的那几条本地已经没了：不删的话云端会一直留着看不见的旧版本
+        if (Array.isArray(detail?.replacedIds) && detail.replacedIds.length > 0) {
+            mirrorDeletedIds(detail.replacedIds, detail.sessionId || "");
+        }
+        if (Array.isArray(detail?.messages)) mirrorMessages(detail.messages);
     });
     window.addEventListener(CHAT_MESSAGES_DELETED_EVENT, event => {
         const messages = (event as CustomEvent<{ messages?: ChatMessage[] }>).detail?.messages;

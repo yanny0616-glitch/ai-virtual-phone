@@ -2040,7 +2040,7 @@ export function replaceResponseBatchWithParts(
         saveChatSessions(sessions);
     }
 
-    dispatchResponseBatchReplaced(sessionId, newMessages, rawResponseText);
+    dispatchResponseBatchReplaced(sessionId, newMessages, rawResponseText, deletedIds);
     return newMessages;
 }
 
@@ -2049,10 +2049,12 @@ export function replaceResponseBatchWithParts(
  * （前者会被当成新消息新建云端对象，后者会把云端原件删掉），所以单独发一个事件，
  * 由云同步侧「就地覆盖同一条云消息」。
  */
-function dispatchResponseBatchReplaced(sessionId: string, messages: ChatMessage[], rawResponseText: string): void {
+function dispatchResponseBatchReplaced(sessionId: string, messages: ChatMessage[], rawResponseText: string, replacedIds: string[] = []): void {
     if (typeof window === "undefined" || messages.length === 0) return;
     window.dispatchEvent(new CustomEvent(CHAT_RESPONSE_BATCH_REPLACED_EVENT, {
-        detail: { sessionId, messages, rawResponseText },
+        // replacedIds 是被这批新消息顶掉的旧消息 id。云同步侧按 cloudSync 身份就地覆盖，用不上它；
+        // 聊天镜像是按消息 id 存的，不把旧 id 删掉，重生成一次云端就多留一份看不见的旧版本。
+        detail: { sessionId, messages, rawResponseText, replacedIds },
     }));
 }
 
