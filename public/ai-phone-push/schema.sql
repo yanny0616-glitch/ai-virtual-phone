@@ -35,7 +35,7 @@ create table if not exists public.ai_phone_cloud_meta (
   updated_at timestamptz not null default now()
 );
 insert into public.ai_phone_cloud_meta (id, schema_version, updated_at)
-values ('personal-cloud', 7, now())
+values ('personal-cloud', 8, now())
 on conflict (id) do update set schema_version = excluded.schema_version, updated_at = excluded.updated_at;
 
 create table if not exists public.push_server_config (
@@ -526,3 +526,34 @@ select cron.schedule('ai-phone-personal-push-cron-cleanup', '0 3 * * *', $CRON$
   delete from public.push_recheck_plans where updated_at < now() - interval '7 days';
   delete from public.push_api_usage where updated_at < now() - interval '90 days';
 $CRON$);
+
+
+-- 挂念复核开关：只修改 context 中这一项，保留生成原料、回音与并发写入的其他字段。
+create or replace function public.push_recheck_set_enabled(
+  p_user_id text, p_character_id text, p_from_date text, p_enabled boolean, p_owner text
+) returns integer
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  affected integer;
+begin
+  perform 1 from public.push_recheck_plans
+    where user_id = p_user_id and character_id = p_character_id and plan_date >= p_from_date
+    for update;
+  if exists (
+    select 1 from public.push_recheck_plans
+      where user_id = p_user_id and character_id = p_character_id and plan_date >= p_from_date
+        and coalesce(context->>'owner', '') <> '' and context->>'owner' <> coalesce(p_owner, '')
+  ) then return -1; end if;
+  update public.push_recheck_plans
+    set context = jsonb_set(coalesce(context, '{}'::jsonb), '{recheckEnabled}', to_jsonb(case when p_enabled then 1 else 0 end), true),
+        updated_at = now()
+    where user_id = p_user_id and character_id = p_character_id and plan_date >= p_from_date;
+  get diagnostics affected = row_count;
+  return affected;
+end;
+$$;
+revoke all on function public.push_recheck_set_enabled(text, text, text, boolean, text) from public, anon, authenticated;
+grant execute on function public.push_recheck_set_enabled(text, text, text, boolean, text) to service_role;

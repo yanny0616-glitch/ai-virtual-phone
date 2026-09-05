@@ -1,7 +1,12 @@
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
 
-import { Agent, type Dispatcher } from "undici";
+import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
+
+// DOM 与 npm Undici 各自声明 Web API 类型；运行时 fetch 和 dispatcher 必须来自同一版本。
+const fetchWithDispatcher = undiciFetch as unknown as (
+  input: URL, init: RequestInit & { dispatcher: Dispatcher },
+) => Promise<Response>;
 
 const MAX_REDIRECTS = 5;
 
@@ -116,21 +121,17 @@ export async function assertSafeOutboundUrl(rawUrl: string | URL): Promise<URL> 
   return url;
 }
 
-type LookupCallback = (error: NodeJS.ErrnoException | null, address?: string, family?: number) => void;
-
-function secureLookup(
-  hostname: string,
-  options: { family?: number | "IPv4" | "IPv6" },
-  callback: LookupCallback,
-): void {
+const secureLookup: LookupFunction = (hostname, options, callback) => {
   resolvePublicAddresses(hostname)
     .then(addresses => {
       const requestedFamily = options?.family === "IPv4" ? 4 : options?.family === "IPv6" ? 6 : options?.family;
-      const selected = addresses.find(item => !requestedFamily || item.family === requestedFamily) ?? addresses[0];
-      callback(null, selected.address, selected.family);
+      const selected = addresses.filter(item => !requestedFamily || item.family === requestedFamily);
+      if (selected.length === 0) throw new UnsafeOutboundUrlError("目标域名没有指定地址族的可用地址");
+      if (options.all) callback(null, selected);
+      else callback(null, selected[0].address, selected[0].family);
     })
-    .catch(error => callback(error instanceof Error ? error : new Error(String(error))));
-}
+    .catch(error => callback(error instanceof Error ? error : new Error(String(error)), []));
+};
 
 const directDispatcher = new Agent({ connect: { lookup: secureLookup } });
 
@@ -149,14 +150,14 @@ export async function safeOutboundFetch(
   const headers = new Headers(init.headers);
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    const response = await fetch(current, {
+    const response = await fetchWithDispatcher(current, {
       ...init,
       method,
       headers,
       body,
       redirect: "manual",
       dispatcher: dispatcher ?? directDispatcher,
-    } as RequestInit & { dispatcher: Dispatcher });
+    });
 
     if (!isRedirect(response.status)) return response;
     const location = response.headers.get("location");

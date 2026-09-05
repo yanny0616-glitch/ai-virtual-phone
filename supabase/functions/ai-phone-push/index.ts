@@ -722,14 +722,29 @@ Deno.serve(async (request: Request) => {
       // （sessionId / cooldownRounds / armAt），绝不回传冻结请求本体——里面有上游凭据。
       const limit = Math.max(1, Math.min(20, Number(url.searchParams.get("limit")) || 10));
       const kindFilter = cleanText(url.searchParams.get("kind"), 40);
+      // 结算用精确查询，不能拿诊断页最近 20 条来推断某个预约是否执行。
+      let triggerKeys: string[] | null = null;
+      if (url.searchParams.has("triggerKeys")) {
+        try {
+          const value: unknown = JSON.parse(url.searchParams.get("triggerKeys") || "");
+          if (!Array.isArray(value) || value.length === 0 || value.length > 20
+            || value.some(key => typeof key !== "string" || !/^[A-Za-z0-9:._-]{1,200}$/.test(key))) {
+            return json({ ok: false, error: "triggerKeys 须为 1–20 个有效预约键。" }, 400);
+          }
+          triggerKeys = [...new Set(value as string[])];
+        } catch { return json({ ok: false, error: "triggerKeys 须为 JSON 数组。" }, 400); }
+      }
+      const response = await rest(
+        `push_jobs?user_id=eq.${OWNER_ID}`
+        + (kindFilter ? `&kind=eq.${encodeURIComponent(kindFilter)}` : "")
+        + (triggerKeys ? `&trigger_key=in.(${encodeURIComponent(triggerKeys.map(key => `"${key}"`).join(","))})` : "")
+        + `&select=trigger_key,kind,execute_at,status,result_note,updated_at,payload&order=execute_at.desc&limit=${triggerKeys?.length ?? limit}`,
+      );
+      if (!response.ok) return json({ ok: false, error: `查询预约失败 HTTP ${response.status}` }, 500);
       const rows = await readJson<{
         trigger_key: string; kind: string; execute_at: string; status: string;
         result_note: string | null; updated_at: string; payload: EncryptedPayload;
-      }[]>(await rest(
-        `push_jobs?user_id=eq.${OWNER_ID}`
-        + (kindFilter ? `&kind=eq.${encodeURIComponent(kindFilter)}` : "")
-        + `&select=trigger_key,kind,execute_at,status,result_note,updated_at,payload&order=execute_at.desc&limit=${limit}`,
-      ));
+      }[]>(response);
       const config = await loadConfig();
       const jobs = [];
       for (const row of Array.isArray(rows) ? rows : []) {
@@ -760,7 +775,7 @@ Deno.serve(async (request: Request) => {
           armAt,
         });
       }
-      return json({ ok: true, jobs });
+      return json({ ok: true, jobs, ...(triggerKeys ? { queriedTriggerKeys: triggerKeys } : {}) });
     }
     if (action === "jobs") {
       const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -994,6 +1009,42 @@ Deno.serve(async (request: Request) => {
       }
     }
 
+    if (action === "recheck-capabilities" || action === "recheck-control") {
+      // 直接询问实际执行的 worker；不把网关自身的新版本当作 worker 已更新。
+      const configs = await readJson<{ cron_secret?: string }[]>(await rest("push_server_config?id=eq.main&select=cron_secret&limit=1"));
+      if (!configs[0]?.cron_secret) return json({ ok: false, error: "请先完成个人云部署。" }, 409);
+      let worker: { ok?: boolean; capabilities?: string[] } | null = null;
+      try {
+        const probe = await fetch(`${supabaseUrl}/functions/v1/push-recheck`, {
+          method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ action: "capabilities", token: configs[0].cron_secret }), signal: AbortSignal.timeout(10_000),
+        });
+        if (probe.ok) worker = await probe.json().catch(() => null);
+      } catch { /* 旧 worker 或网络失败，不执行写入，也不报告支持 */ }
+      const capabilities = worker?.ok && Array.isArray(worker.capabilities) ? worker.capabilities : [];
+      if (action === "recheck-capabilities" && request.method === "GET") return json({ ok: true, capabilities });
+      if (action !== "recheck-control" || request.method !== "POST") return json({ ok: false, error: "不支持的操作。" }, 405);
+      if (!capabilities.includes("recheck-control-v1")) return json({ ok: false, error: "无法确认云端支持停用控制，请重新部署网关和 push-recheck 后重试。" }, 409);
+      const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+      const characterId = cleanText(body.characterId, 80), owner = cleanText(body.owner, 40), fromDate = cleanText(body.planDate, 10);
+      if (!characterId || !/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || typeof body.enabled !== "boolean") return json({ ok: false, error: "缺少角色、日期或复核开关。" }, 400);
+      const filter = `push_recheck_plans?user_id=eq.${OWNER_ID}&character_id=eq.${encodeURIComponent(characterId)}&plan_date=gte.${fromDate}`;
+      const rows = await readJson<{ plan_date: string; context: Record<string, unknown>; updated_at: string }[]>(await rest(`${filter}&select=plan_date,context,updated_at`));
+      for (const row of rows) {
+        if (row.context?.owner && row.context.owner !== owner) return json({ ok: false, error: "部分计划由其他设备负责，请在负责设备上修改。" }, 409);
+      }
+      // 数据库内只改开关，避免读出整个 context 后覆盖同期写入的回音/裁决状态。
+      const changed = await rest("rpc/push_recheck_set_enabled", {
+        method: "POST", body: JSON.stringify({ p_user_id: OWNER_ID, p_character_id: characterId, p_from_date: fromDate, p_enabled: body.enabled, p_owner: owner }),
+      });
+      if (changed.status === 404) return json({ ok: false, error: "请先更新个人云数据库 schema，再重试复核开关。" }, 409);
+      const count = await readJson<number>(changed);
+      if (count < 0) return json({ ok: false, error: "计划已被其他设备接管，复核开关未修改。" }, 409);
+      const verified = await readJson<{ context?: { recheckEnabled?: number } }[]>(await rest(`${filter}&select=context`));
+      if (verified.some(row => row.context?.recheckEnabled !== (body.enabled ? 1 : 0))) return json({ ok: false, error: "云端控制未全部确认，请重试。" }, 409);
+      return json({ ok: true, recheckEnabled: body.enabled, capabilities, plans: verified.length });
+    }
+
     if (action === "recheck-plan") {
       // 云端动态复核的计划底本：App 编排完把当天时刻表和判断上下文传上来，
       // push-recheck 浏览器关着时照它重判。decisions 是云端已经做出、App 还没
@@ -1074,11 +1125,17 @@ Deno.serve(async (request: Request) => {
           return cleaned;
         };
         const context: Record<string, unknown> = {
+          recheckEnabled: rawContext.recheckEnabled === 0 ? 0 : 1,
           mood: cleanText(rawContext.mood, 200),
           energy: cleanText(rawContext.energy, 200),
           quota: Number(rawContext.quota) || 0,
           quietStart: cleanText(rawContext.quietStart, 10),
           quietEnd: cleanText(rawContext.quietEnd, 10),
+          userSleepOn: rawContext.userSleepOn === 1 || rawContext.userSleepOn === true ? 1 : 0,
+          userSleepStart: cleanText(rawContext.userSleepStart, 5),
+          userSleepEnd: cleanText(rawContext.userSleepEnd, 5),
+          userSleepTimeZone: cleanText(rawContext.userSleepTimeZone, 100),
+          userSleepTz: Number.isFinite(Number(rawContext.userSleepTz)) ? Math.max(-840, Math.min(840, Math.trunc(Number(rawContext.userSleepTz)))) : 0,
           minGapMin: Number(rawContext.minGapMin) || 0,
           maxUnanswered: Number(rawContext.maxUnanswered) || 0,
           chatCandidates: cleanText(rawContext.chatCandidates, 2000),
@@ -1118,6 +1175,18 @@ Deno.serve(async (request: Request) => {
         if (curOwner && context.owner && (curOwner !== context.owner || (hasSeq && mySeq < curSeq))) {
           return json({ ok: false, error: "taken", taken: true, owner: curOwner, ownerName: cleanText(curCtx.ownerName, 40), ownerSeq: curSeq }, 409);
         }
+        // 合并去重键的内容，不能因客户端列表与服务端等长就把新键覆盖回去。
+        context.fbSeen = [...new Set([
+          ...(Array.isArray(context.fbSeen) ? context.fbSeen : []),
+          ...(Array.isArray(curCtx.fbSeen) ? curCtx.fbSeen : []),
+        ].map(v => cleanText(v, 80).replace(/[^A-Za-z0-9._-]/g, "")).filter(Boolean))].slice(-60);
+        // 去重键与累计统计一起保留，避免键保住了、对应的已结算计数却被旧客户端覆盖。
+        const mergedFb = cleanFb(context.fb);
+        for (const [kind, counts] of Object.entries(cleanFb(curCtx.fb))) {
+          const mine = mergedFb[kind] || [0, 0];
+          if (counts[0] > mine[0] || counts[0] === mine[0] && counts[1] > mine[1]) mergedFb[kind] = counts;
+        }
+        context.fb = mergedFb;
         context.ownerSeq = Math.max(curSeq, mySeq);
         if (curOwner && !context.owner) { context.owner = curOwner; context.ownerName = cleanText(curCtx.ownerName, 40); }
         const row: Record<string, unknown> = {
@@ -1141,7 +1210,10 @@ Deno.serve(async (request: Request) => {
           const detail = await save.text().catch(() => "");
           return json({ ok: false, error: detail.slice(0, 300) || `数据库返回 HTTP ${save.status}` }, 500);
         }
-        return json({ ok: true, items: items.length, ...(dropped.length > 0 ? { dropped } : {}) });
+        return json({ ok: true, items: items.length, acceptedUserSleep: {
+          enabled: context.userSleepOn, start: context.userSleepStart, end: context.userSleepEnd,
+          timeZone: context.userSleepTimeZone, tz: context.userSleepTz,
+        }, ...(dropped.length > 0 ? { dropped } : {}) });
       }
       if (request.method === "GET") {
         const characterId = cleanText(url.searchParams.get("characterId"), 80);

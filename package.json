@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "node --max-old-space-size=4096 scripts/local-next-server.mjs --dev",
-    "build": "node scripts/build-weixin-assistant-dist.mjs && node scripts/build-personal-push-dist.mjs && node scripts/build-chat-plugins-dist.mjs && next build --webpack && node scripts/restore-backdrop-filter.mjs",
+    "build": "node scripts/build-gua-nian.mjs && node scripts/build-weixin-assistant-dist.mjs && node scripts/build-personal-push-dist.mjs && node scripts/build-chat-plugins-dist.mjs && next build --webpack && node scripts/restore-backdrop-filter.mjs",
     "start": "node scripts/local-next-server.mjs --prod",
     "lint": "eslint . --cache --cache-location .eslintcache",
     "lint:all": "eslint .",
@@ -18,7 +18,11 @@
     "weixin:build-dist": "node scripts/build-weixin-assistant-dist.mjs",
     "push:build-dist": "node scripts/build-personal-push-dist.mjs",
     "plugins:build-dist": "node scripts/build-chat-plugins-dist.mjs",
-    "build:glass-icons": "node scripts/build-glass-icons.mjs"
+    "build:glass-icons": "node scripts/build-glass-icons.mjs",
+    "gua-nian:build": "node scripts/build-gua-nian.mjs",
+    "gua-nian:check": "node scripts/build-gua-nian.mjs --check",
+    "gua-nian:package": "node scripts/build-gua-nian.mjs --package",
+    "gua-nian:test": "node scripts/check-gua-nian-domain.mjs && node scripts/check-gua-nian-delivery.mjs"
   },
   "dependencies": {
     "@gltf-transform/functions": "^4.4.1",

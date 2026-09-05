@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>挂念</title>
+<style>{{STYLES}}</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">挂<span class="dot">·</span>念</div>
+    <div class="date" id="hdr-date"></div>
+    <button class="gear" id="btn-settings" title="设置">⚙</button>
+  </header>
+
+  <div class="who-switch" id="who-switch" hidden></div>
+  <div class="who" id="who" hidden>
+    <div class="ava" id="who-ava"></div>
+    <div class="meta">
+      <div class="name" id="who-name"></div>
+      <div class="now" id="who-now"></div>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs" hidden>
+    <button class="tab on" data-tab="today">今 天</button>
+    <button class="tab" data-tab="heart">心 动</button>
+    <button class="tab" data-tab="archive">记 录</button>
+    <button class="tab" data-tab="back">后 台</button>
+  </div>
+
+  <div id="cloud-sync" role="status" aria-live="polite" hidden></div>
+  <div id="settings-effects" role="status" aria-live="polite" hidden></div>
+  <div id="view"></div>
+
+  <div class="sheet-mask" id="sheet-mask"></div>
+  <div class="sheet" id="sheet">
+    <div class="sheet-hd">
+      <h3>设 置</h3>
+      <button class="sheet-x" id="sheet-close" title="关闭">✕</button>
+    </div>
+    <div id="sheet-body"></div>
+    <button class="big-btn" id="btn-save-settings">保 存</button>
+  </div>
+  <div class="sheet" id="dsheet">
+    <div class="sheet-hd">
+      <h3 id="dsheet-title">时 刻 详 情</h3>
+      <button class="sheet-x" id="dsheet-close" title="关闭">✕</button>
+    </div>
+    <div id="dsheet-body"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+{{SCRIPTS}}})();
+</script>
+</body>
+</html>

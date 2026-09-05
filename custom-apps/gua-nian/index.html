@@ -569,6 +569,8 @@
     <button class="tab" data-tab="back">后 台</button>
   </div>
 
+  <div id="cloud-sync" role="status" aria-live="polite" hidden></div>
+  <div id="settings-effects" role="status" aria-live="polite" hidden></div>
   <div id="view"></div>
 
   <div class="sheet-mask" id="sheet-mask"></div>
@@ -593,6 +595,113 @@
 <script>
 (function () {
   "use strict";
+  const GuaNianTime = (() => {
+const exports = Object.create(null);
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.localDateKey = localDateKey;
+exports.formatLocalTime = formatLocalTime;
+exports.parseLocalDate = parseLocalDate;
+exports.normalizeTime = normalizeTime;
+exports.timeOnLocalDay = timeOnLocalDay;
+exports.addMinutes = addMinutes;
+exports.isInTimeWindow = isInTimeWindow;
+exports.getSleepWindow = getSleepWindow;
+exports.isAsleep = isAsleep;
+// 本地时区日历运算。当前时刻由调用方传入，不读取应用状态或系统时钟。
+const pad = value => String(value).padStart(2, "0");
+function localDateKey(date) {
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+}
+function formatLocalTime(timestamp) {
+    const date = new Date(timestamp);
+    return pad(date.getHours()) + ":" + pad(date.getMinutes());
+}
+function parseLocalDate(value, fallbackMs) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+    return match ? new Date(+match[1], +match[2] - 1, +match[3], 12, 0, 0, 0) : new Date(fallbackMs);
+}
+function normalizeTime(value) {
+    const match = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(String(value || ""));
+    if (!match)
+        return "";
+    return pad(Math.min(23, +match[1])) + ":" + pad(Math.min(59, +(match[2] || 0)));
+}
+function timeOnLocalDay(value, baseMs) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || "").trim());
+    if (!match)
+        return null;
+    const date = new Date(baseMs);
+    date.setHours(+match[1], +match[2], 0, 0);
+    return date.getTime();
+}
+// 保留原来的“最晚 23:59”规则，不把溢出时间绕到第二天。
+function addMinutes(value, minutes) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || "").trim());
+    if (!match)
+        return value;
+    const total = Math.min(+match[1] * 60 + +match[2] + minutes, 23 * 60 + 59);
+    return pad(Math.floor(total / 60)) + ":" + pad(total % 60);
+}
+function isInTimeWindow(time, start, end) {
+    if (!start || !end || start === end)
+        return false;
+    return start < end ? time >= start && time < end : time >= start || time < end;
+}
+function getSleepWindow(day, settings) {
+    const bed = normalizeTime(day && day.bed) || (settings && settings.quietStart) || "";
+    const wake = normalizeTime(day && day.wake) || (settings && settings.quietEnd) || "";
+    // overnight 是旧数据接口名，历史含义为 bed < wake；保留以兼容现有调用方。
+    return bed && wake && bed !== wake ? { bed, wake, overnight: bed < wake } : null;
+}
+function isAsleep(day, time, settings) {
+    const window = getSleepWindow(day, settings);
+    return window ? isInTimeWindow(time, window.bed, window.wake) : false;
+}
+
+return Object.freeze(exports);
+})();
+  const GuaNianScoring = (() => {
+const exports = Object.create(null);
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.fitScore = fitScore;
+exports.calculateScore = calculateScore;
+exports.countUnansweredRounds = countUnansweredRounds;
+// 输入都是调用时的值；不读取 S、时钟、存储或宿主 SDK。
+function fitScore(localHour) {
+    const gaussian = (peak, sigma) => Math.exp(-Math.pow(localHour - peak, 2) / (2 * sigma * sigma));
+    return Math.round(100 * Math.min(1, gaussian(13, 3) * 0.75 + gaussian(21, 2.5)));
+}
+function calculateScore({ localHour, fireAt, armedBefore, streak, lastArmedAt, quota, maxUnanswered, minGapMin }) {
+    const pq = Math.round(Math.min(100, armedBefore / Math.max(1, quota) * 100));
+    const pr = Math.round(Math.min(100, maxUnanswered > 0 ? streak / maxUnanswered * 100 : streak * 25));
+    let pg = 0;
+    if (minGapMin > 0 && lastArmedAt) {
+        const distance = (fireAt - lastArmedAt) / 60000;
+        if (distance < minGapMin * 2)
+            pg = Math.round(Math.max(0, Math.min(100, (1 - distance / (minGapMin * 2)) * 100)));
+    }
+    return { fit: fitScore(localHour), pq, pr, pg, press: Math.round(pq * 0.4 + pr * 0.4 + pg * 0.2) };
+}
+// 消息按时间升序；3 分钟内的气泡归一轮，满 30 分钟才算未回应。
+function countUnansweredRounds(messages, nowMs) {
+    let previousTime = null, rounds = 0;
+    for (let index = messages.length - 1; index >= 0; index--) {
+        const message = messages[index];
+        if (message.role !== "assistant")
+            break;
+        if (previousTime === null || previousTime - message.t > 3 * 60000) {
+            if (nowMs - message.t >= 30 * 60000)
+                rounds++;
+        }
+        previousTime = message.t;
+    }
+    return rounds;
+}
+
+return Object.freeze(exports);
+})();
   /* ================= 状态 ================= */
   const S = {
     characters: [],
@@ -621,10 +730,10 @@
   function allCx() { return S.order.map((id) => S.byId[id]).filter(Boolean); }
   const $ = (s) => document.querySelector(s);
   const pad = (n) => String(n).padStart(2, "0");
-  const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
-  const fmtHM = (ms) => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
-  const dateStrOf = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
-  const dateOf = (ymd) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0, 0) : new Date(); };
+  const todayStr = () => GuaNianTime.localDateKey(new Date());
+  const fmtHM = GuaNianTime.formatLocalTime;
+  const dateStrOf = GuaNianTime.localDateKey;
+  const dateOf = (ymd) => GuaNianTime.parseLocalDate(ymd, Date.now());
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   function toast(msg) {
@@ -656,7 +765,6 @@
     try { await AiPhone.db.update("logs", S.logs.id, { items: S.logs.items || [] }); }
     catch (e) { /* 日志失败不打断主流程 */ }
   }
-
   /* ================= 工具 ================= */
   function parseModelJson(text) {
     let t = String(text || "")
@@ -800,17 +908,9 @@
   }
   // 「8:30」「08：30」「8点30」「14时」等都归一成 HH:MM；认不出返回空串
   function isTrue(v) { return v === true || /^(true|是|1)$/i.test(String(v || "").trim()); }
-  function normHM(v) {
-    const m = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(String(v || ""));
-    if (!m) return "";
-    return String(Math.min(23, +m[1])).padStart(2, "0") + ":" + String(Math.min(59, +(m[2] || 0))).padStart(2, "0");
-  }
+  const normHM = GuaNianTime.normalizeTime;
   function timeToMs(hm, base) {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim());
-    if (!m) return null;
-    const d = base ? new Date(base) : new Date();
-    d.setHours(+m[1], +m[2], 0, 0);
-    return d.getTime();
+    return GuaNianTime.timeOnLocalDay(hm, base || Date.now());
   }
   /* ---- 此刻的状态：日程记账 + 会自己淡掉的「情况」 ---- */
   // day.conds 是一摞此刻还在起作用的事（目前只有聊天判出来的），每条带
@@ -842,14 +942,10 @@
   }
   // 睡眠窗：day.bed 起到 day.wake 止，允许过零点。没生成过 wake/bed 的旧数据退回免打扰时段。
   function sleepWindow(day) {
-    const bed = normHM(day && day.bed) || (S.settings && S.settings.quietStart) || "";
-    const wake = normHM(day && day.wake) || (S.settings && S.settings.quietEnd) || "";
-    return bed && wake && bed !== wake ? { bed: bed, wake: wake, overnight: bed < wake } : null;
+    return GuaNianTime.getSleepWindow(day, S.settings);
   }
   function asleepAt(day, hm) {
-    const w = sleepWindow(day);
-    if (!w) return false;
-    return w.overnight ? (hm >= w.bed && hm < w.wake) : (hm >= w.bed || hm < w.wake);
+    return GuaNianTime.isAsleep(day, hm, S.settings);
   }
   // 零点一过今天就换了记录，可TA的一夜还没过完。今天没生成之前，睡没睡、几点醒
   // 都按昨天那条记录里的作息来，别一到零点就当TA凭空消失了。
@@ -931,9 +1027,7 @@
       { date: todayStr(), characterId: cx.character.id, conds: conds });
   }
   function inQuiet(hm) {
-    const qs = S.settings.quietStart, qe = S.settings.quietEnd;
-    if (!qs || !qe || qs === qe) return false;
-    return qs < qe ? (hm >= qs && hm < qe) : (hm >= qs || hm < qe); // 跨零点
+    return GuaNianTime.isInTimeWindow(hm, S.settings.quietStart, S.settings.quietEnd);
   }
 
   /* ================= 聊天上下文 ================= */
@@ -956,7 +1050,6 @@
     return msgs.slice(-(maxLines || 24)).map((m) =>
       (m.role === "user" ? "我：" : "TA：") + (m.c.length > 200 ? m.c.slice(0, 200) + "…" : m.c));
   }
-
   /* ================= 数据 ================= */
   async function upsert(coll, match, data) {
     const rows = await AiPhone.db.list(coll, { limit: 100 });
@@ -968,6 +1061,8 @@
   // 所有可调参数的默认值；旧版本存的 settings 缺哪个补哪个
   const SET_DEF = {
     quietStart: "23:30", quietEnd: "08:00",
+    userSleepOn: false,  // 用户可选睡眠窗：仅暂停回音统计的等待计时，默认不启用
+    userSleepStart: "23:30", userSleepEnd: "08:00",
     autoGen: false,      // 每天到点自动生成TA的一天（要挂念开着；错过了下次打开时补）
     autoGenAt: "07:30",
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
@@ -1029,7 +1124,6 @@
     momentsGapH: 6,        // 两条至少隔几小时
     momentsState: {},      // 每个角色的发圈账 { cid: { lastAt, weekStart, weekN } }，本机和云端各自记、合并取大
   };
-
   /* ================= 云连接（个人云后端） ================= */
   function cloudCfg() {
     const u = (S.settings && S.settings.cloudUrl || "").trim().replace(/\/+$/, "");
@@ -1051,6 +1145,17 @@
       throw err;
     }
     return data;
+  }
+  // 回执查询和计划同步是短请求，避免断网时按钮一直停在处理中。
+  async function cloudFetchBounded(action, init, params) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      return await cloudFetch(action, Object.assign({}, init, { signal: controller.signal }), params);
+    } catch (e) {
+      if (controller.signal.aborted) throw new Error("云端请求超时（15 秒），请检查网络后重试");
+      throw e;
+    } finally { clearTimeout(timer); }
   }
   /* ---- 设备锁：电脑和手机同时开着挂念时，一天里只有一台负责编排、预约和云端 ----
      两台各自编排，服务端就挂出两套 push_jobs（预约 id 带本机随机后缀，登记簿也各存各的），
@@ -1138,7 +1243,45 @@
       toast("接管失败：" + (e && e.message || e));
     }
   }
-
+  // 发送凭据只按预约键关联，不通过聊天时间猜测。缓存仅用于展示，不回写计划或账本。
+  function receiptFor(w, cx) {
+    cx = cx || cur();
+    if (cx._receiptSource !== (cloudCfg() || {}).url) return null;
+    const cache = cx._receipts;
+    return w.wakeId && cache && cache[w.wakeId] || null;
+  }
+  function refreshReceipts(cx, items, force) {
+    const run = async () => {
+      if (!cloudCfg()) return;
+      const source = cloudCfg().url;
+      if (cx._receiptSource !== source) { cx._receipts = {}; cx._receiptSource = source; }
+      const cache = cx._receipts = cx._receipts || {};
+      const keys = [...new Set(items.filter((w) => w.act && w.wakeId).map((w) => w.wakeId))]
+        .filter((key) => force || !cache[key] || Date.now() - cache[key].checkedAt >= 60000);
+      for (let i = 0; i < keys.length; i += 20) {
+        const batch = keys.slice(i, i + 20), triggers = batch.map((key) => "timedwake:" + key);
+        try {
+          const r = await cloudFetchBounded("jobs", { method: "GET" }, { kind: "timed_task", triggerKeys: JSON.stringify(triggers) });
+          if (!Array.isArray(r.queriedTriggerKeys) || triggers.some((key) => !r.queriedTriggerKeys.includes(key))) {
+            throw new Error("个人云版本偏旧，请在设置 → 云服务部署中重新部署离线推送，再刷新回执。");
+          }
+          for (const key of batch) {
+            const job = (r.jobs || []).find((j) => j.triggerKey === "timedwake:" + key);
+            cache[key] = { checkedAt: Date.now(), job: job || null, error: job ? "" : "未查到对应预约回执，无法确认是否发送。" };
+          }
+        } catch (e) {
+          for (const key of keys.slice(i)) {
+            // 查询失败不会把上次已确认的结果抹掉，但必须提示本次未刷新成功。
+            cache[key] = { checkedAt: Date.now(), job: cache[key] && cache[key].job || null, error: String(e && e.message || e).slice(0, 300) };
+          }
+          break; // 网络或版本异常时停止后续批次，保留手动重试。
+        }
+      }
+    };
+    const p = (cx._receiptQ || Promise.resolve()).then(run, run);
+    cx._receiptQ = p.catch(() => {});
+    return p;
+  }
   /* ---- 云端动态复核：把计划寄存到云上，浏览器关着时由 push-recheck 重判 ---- */
   function cloudRecheckOn() {
     return !!(cloudCfg() && S.settings && S.settings.cloudRecheck);
@@ -1165,6 +1308,17 @@
       })),
     };
   }
+  function userSleepContext() {
+    let timeZone = "";
+    try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* 旧环境用保存时的 UTC 偏移兜底 */ }
+    return {
+      userSleepOn: S.settings.userSleepOn ? 1 : 0,
+      userSleepStart: S.settings.userSleepStart || SET_DEF.userSleepStart,
+      userSleepEnd: S.settings.userSleepEnd || SET_DEF.userSleepEnd,
+      userSleepTimeZone: timeZone,
+      userSleepTz: -new Date().getTimezoneOffset(),
+    };
+  }
   // 寄给云端的判断上下文：今天的计划和明天的生成原料共用一份
   function cloudContext(cx) {
     // wakePrefix：云端点亮时要自己造预约 id，宿主只认 timed_wake_capp_<appId>_ 开头的，
@@ -1173,6 +1327,8 @@
     const anyId = any ? any.wakeId : (sentinelOf(cx) && sentinelOf(cx).wakeId) || "";
     const wakePrefix = anyId ? String(anyId).replace(/\d+_[a-z0-9]+$/i, "") : "";
     return {
+            ...userSleepContext(),
+            recheckEnabled: S.settings.cloudRecheck ? 1 : 0,
             mood: String((cx.day && cx.day.mood) || ""),
             energy: String(cx.day ? energyAt(cx.day, Date.now()) : ""),
             quota: S.settings.quota,
@@ -1223,18 +1379,49 @@
             day: dayForCloud(cx),
     };
   }
-  async function uploadPlanCloud(cx, resetDecisions) {
-    if (!cloudRecheckOn() || !cx.character || !cx.plan || !Array.isArray(cx.plan.items)) return;
-    if (!owns(cx)) return; // 只读的那台别把自己的计划盖到管事那台的行上
+  function planSyncState(cx) {
+    const state = cx._planSync || ((S.settings || {}).planSync || {})[cx.character && cx.character.id];
+    return state && (state.operation === "control" || cx.plan && state.date === cx.plan.date) && state.date === todayStr()
+      && state.cloudUrl === (cloudCfg() || {}).url ? state : null;
+  }
+  async function setPlanSync(cx, state) {
+    cx._planSync = state;
+    renderCloudSync();
+    try {
+      await patchSettings((s) => ({ planSync: Object.assign({}, s.planSync, { [cx.character.id]: state }) }));
+    } catch (e) { /* 状态落盘失败不覆盖真实上传结果，本次会话仍显示状态 */ }
+  }
+  // 串行上传，防止较早请求的失败/成功覆盖较新的同步结果。
+  function uploadPlanCloud(cx, resetDecisions) {
+    const run = () => uploadPlanCloudBody(cx, resetDecisions);
+    const p = (cx._uploadQ || Promise.resolve()).then(run, run);
+    cx._uploadQ = p.catch(() => {});
+    return p;
+  }
+  async function uploadPlanCloudBody(cx, resetDecisions) {
+    if (!cloudRecheckOn()) return { status: "disabled" };
+    if (!cx.character || !cx.plan || cx.plan.date !== todayStr() || !Array.isArray(cx.plan.items)) return { status: "no-plan" };
+    const previous = planSyncState(cx);
+    const reset = resetDecisions === true || !!(previous && previous.resetDecisions);
+    const base = { date: cx.plan.date, cloudUrl: cloudCfg().url, resetDecisions: reset };
+    const finish = async (status, message, needsReset) => {
+      const state = Object.assign({}, base, { status, message, at: Date.now(), resetDecisions: !!needsReset });
+      await setPlanSync(cx, state);
+      return state;
+    };
+    if (!owns(cx)) return finish("readonly", "今天由「" + ownerLabel(cx) + "」负责，本机改动未上传。", reset);
+    await finish("syncing", "正在同步今天的计划…", reset);
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
-      const r = await cloudFetch("recheck-plan", {
+      if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
+      const expectedSleep = userSleepContext();
+      const r = await cloudFetchBounded("recheck-plan", {
         method: "POST",
         body: JSON.stringify({
           characterId: cx.character.id,
           planDate: todayStr(),
           sessionId: "",
-          resetDecisions: resetDecisions === true,
+          resetDecisions: reset,
           context: cloudContext(cx),
           items: cx.plan.items.map((w) => ({
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
@@ -1244,12 +1431,99 @@
           })),
         }),
       });
-      if (r && Array.isArray(r.dropped) && r.dropped.length) {
-        await log(cx, "云端复核：" + r.dropped.join("、") + " 太大没存下，云端这部分会失效（忙与睡、到点状态、云端生成）");
+      if (S.settings.userSleepOn && !acceptsUserSleep(r, expectedSleep)) {
+        return finish("partial", "云端未确认保存睡眠设置，请更新网关和 push-recheck 后重试。", false);
       }
+      if (r && Array.isArray(r.dropped) && r.dropped.length) {
+        const message = "计划已上传，但部分内容过大未同步，云端功能可能不完整。";
+        await log(cx, message + "（" + r.dropped.join("、") + "）");
+        return finish("partial", message, false);
+      }
+      return finish("synced", "今天的计划已同步云端", false);
     } catch (e) {
-      if (await onTaken(cx, e, "云端复核")) return;
-      await log(cx, "云端复核：计划上传失败（不影响本地）——" + (e && e.message || e));
+      if (await onTaken(cx, e, "云端复核")) return finish("readonly", "今天由「" + ownerLabel(cx) + "」负责，本机改动未上传。", reset);
+      const message = "计划同步失败：" + String(e && e.message || e).slice(0, 200);
+      await log(cx, "云端复核：" + message + "（本地数据已保留）");
+      return finish("failed", message, reset);
+    }
+  }
+
+  async function requireRecheckFeatures(features) {
+    let result;
+    try { result = await cloudFetchBounded("recheck-capabilities", { method: "GET" }); }
+    catch (e) { throw new Error("无法核对云端能力，请检查连接并重新部署网关和 push-recheck 后重试"); }
+    if (!Array.isArray(result?.capabilities) || features.some(feature => !result.capabilities.includes(feature))) {
+      throw new Error("云端版本尚不支持此设置，请重新部署网关和 push-recheck 后重试");
+    }
+  }
+  function acceptsUserSleep(result, expected) {
+    const got = result && result.acceptedUserSleep;
+    return got && got.enabled === expected.userSleepOn && got.start === expected.userSleepStart && got.end === expected.userSleepEnd
+      && got.timeZone === expected.userSleepTimeZone && got.tz === expected.userSleepTz;
+  }
+  async function controlCloudRecheck(cx, enabled) {
+    const state = { operation: "control", enabled, date: todayStr(), cloudUrl: (cloudCfg() || {}).url || "", at: Date.now() };
+    const finish = async (status, message) => { const next = { ...state, status, message }; await setPlanSync(cx, next); return next; };
+    cx._controlActive = true;
+    await finish("syncing", enabled ? "正在开启云端复核…" : "正在关闭云端复核…");
+    try {
+      const result = await cloudFetchBounded("recheck-control", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr(), enabled, owner: myDev() }) });
+      if (result.recheckEnabled !== enabled || !(result.capabilities || []).includes("recheck-control-v1")) throw new Error("云端未确认控制结果，请更新网关和 push-recheck");
+      return finish("synced", enabled ? "云端已确认开启复核" : "云端已确认关闭复核；已有预约仍按原计划执行");
+    } catch (e) { return finish("failed", (enabled ? "云端尚未确认开启：" : "云端尚未确认关闭，可能仍在运行：") + String(e && e.message || e).slice(0, 200)); }
+    finally { cx._controlActive = false; renderCloudSync(); }
+  }
+  async function syncSavedPlan(cx, changeControl) {
+    if (cx.busy || cx._planLock || cx._syncRetrying || cx._controlActive) {
+      const state = { date: todayStr(), cloudUrl: (cloudCfg() || {}).url || "", operation: changeControl || !S.settings.cloudRecheck ? "control" : "plan", enabled: !!S.settings.cloudRecheck,
+        status: "failed", at: Date.now(), message: "本地已保存；计划正在处理中，云端尚未同步，请稍后重试" };
+      await setPlanSync(cx, state); return state;
+    }
+    if (!S.settings.cloudRecheck) return controlCloudRecheck(cx, false);
+    if (!owns(cx)) return { status: "readonly" };
+    cx._planLock = true;
+    try {
+      await pullCloudDecisionsBody(cx, true);
+      const result = await uploadPlanCloud(cx, false);
+      if (changeControl && ["synced", "no-plan"].includes(result.status)) return controlCloudRecheck(cx, true);
+      if (changeControl) {
+        const pending = { ...result, operation: "control", enabled: true };
+        await setPlanSync(cx, pending); return pending;
+      }
+      return result;
+    } catch (e) {
+      const state = { date: todayStr(), cloudUrl: (cloudCfg() || {}).url || "", operation: changeControl ? "control" : "plan", enabled: true,
+        resetDecisions: !!planSyncState(cx)?.resetDecisions,
+        at: Date.now(), status: "failed", message: "同步前读取云端失败，未上传本地计划：" + String(e && e.message || e).slice(0, 200) };
+      await setPlanSync(cx, state); return state;
+    } finally { cx._planLock = false; }
+  }
+  async function retryPlanSync(cx) {
+    if (cx.busy || cx._planLock || cx._syncRetrying || cx._controlActive) { toast("正在处理计划，请处理完成后重试"); return; }
+    if (!S.settings.cloudRecheck || planSyncState(cx)?.operation === "control") {
+      const result = await syncSavedPlan(cx, true); render(); toast(result.status === "synced" ? result.message : "云端尚未确认，请查看页面提示"); return;
+    }
+    if (!cloudRecheckOn() || !cx.plan || cx.plan.date !== todayStr()) { toast("请先开启云端复核并生成今天的计划"); return; }
+    if (!owns(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，请在负责的设备上同步"); return; }
+    cx._syncRetrying = true;
+    cx._planLock = true;
+    renderCloudSync();
+    try {
+      // 必须先成功读取并合并云端的新裁决，避免重试把云端新增预约覆盖掉。
+      await pullCloudDecisionsBody(cx, true);
+      const result = await uploadPlanCloud(cx, false);
+      toast(result.status === "synced" ? "今天的计划已同步云端" : "云端同步未完成，请查看页面提示");
+    } catch (e) {
+      const previous = planSyncState(cx);
+      await setPlanSync(cx, {
+        date: cx.plan.date, cloudUrl: (cloudCfg() || {}).url || "", at: Date.now(), status: "failed",
+        resetDecisions: !!(previous && previous.resetDecisions),
+        message: "同步前读取云端失败，本地数据已保留：" + String(e && e.message || e).slice(0, 200),
+      });
+      toast("云端同步未完成，本地数据已保留");
+    } finally {
+      cx._planLock = false; cx._syncRetrying = false;
+      render();
     }
   }
   /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
@@ -1287,6 +1561,7 @@
   async function uploadGenKitCloud(cx, force) {
     if (!cloudGenOn() || !cx.character || !S.settings || !owns(cx)) return;
     if (!force && Date.now() - (cx._kitAt || 0) < 20 * 60000) return;
+    if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
     cx._kitAt = Date.now();
     const tpl = await freezeGenTemplates(cx, false);
     if (!tpl.daily || !tpl.impulse) return;
@@ -1309,11 +1584,14 @@
           anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
           kitAt: Date.now(),
         };
-        const r = await cloudFetch("recheck-plan", {
+        const r = await cloudFetchBounded("recheck-plan", {
           method: "POST",
           body: JSON.stringify({ characterId: cx.character.id, planDate: date, sessionId: "", resetDecisions: true, context: ctx, items: [] }),
         });
-        if (r && Array.isArray(r.dropped) && r.dropped.length) {
+        if (ctx.userSleepOn && !acceptsUserSleep(r, ctx)) {
+          cx._kitAt = 0;
+          await log(cx, "云端生成：" + date + " 未确认保存睡眠设置，请更新网关和 push-recheck 后重试");
+        } else if (r && Array.isArray(r.dropped) && r.dropped.length) {
           await log(cx, "云端生成：" + date + " 的 " + r.dropped.join("、") + " 太大没存下，那天云端生成不了");
         } else {
           await log(cx, "云端生成：" + date + " 的原料已寄到云端，到 " + at + " 由云端生成");
@@ -1376,13 +1654,13 @@
     try { return await pullCloudDecisionsBody(cx); } finally { cx._planLock = false; }
   }
 
-  async function pullCloudDecisionsBody(cx) {
+  async function pullCloudDecisionsBody(cx, requireRead) {
     if (!cloudRecheckOn() || !cx.character || !cx.plan || !Array.isArray(cx.plan.items)) return 0;
     const date = todayStr();
     let data;
     try {
-      data = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: date });
-    } catch (e) { return 0; }
+      data = await (requireRead ? cloudFetchBounded : cloudFetch)("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: date });
+    } catch (e) { if (requireRead) throw e; return 0; }
     const p = data && data.plan;
     if (!p || p.plan_date !== date) return 0;
     const decs = Array.isArray(p.decisions) ? p.decisions : [];
@@ -1405,7 +1683,8 @@
     }
     // 回音账：云端按 wakeId 记过一次就不再记，本机按种类取大并存住；记过账的 wakeId 跟计划走
     const fbSeen = Array.isArray((p.context || {}).fbSeen) ? p.context.fbSeen : [];
-    if (fbSeen.length > (cx.plan.fbSeen || []).length) cx.plan = await upsert("plans", (x) => x.date === date && x.characterId === cx.character.id, { fbSeen: fbSeen.slice(-60) });
+    const mergedSeen = [...new Set([...(cx.plan.fbSeen || []), ...fbSeen])].slice(-60);
+    if (JSON.stringify(mergedSeen) !== JSON.stringify(cx.plan.fbSeen || [])) cx.plan = await upsert("plans", (x) => x.date === date && x.characterId === cx.character.id, { fbSeen: mergedSeen });
     const fbCloud = (p.context || {}).fb;
     if (fbCloud && typeof fbCloud === "object") {
       const mine = (S.settings.fbState || {})[cx.character.id] || {};
@@ -1521,11 +1800,10 @@
           plannedAt: cx.plan.plannedAt || Date.now(), recheckAt: cx.plan.recheckAt || 0, cloudAckAt: maxAt });
       cx.archive = null;
     }
-    try { await cloudFetch("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id, planDate: date, decisionsOnly: true, before: lastAt }) }); }
+    try { await (requireRead ? cloudFetchBounded : cloudFetch)("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id, planDate: date, decisionsOnly: true, before: lastAt }) }); }
     catch (e) { /* 清不掉也没关系：上面按 at > since 去重 */ }
     return n;
   }
-
   async function loadSettings() {
     const rows = await AiPhone.db.list("settings", { limit: 5 });
     S.settings = (rows && rows[0]) || await AiPhone.db.create("settings", { characterId: "", ...SET_DEF });
@@ -1581,7 +1859,6 @@
     const row = (th || []).find((r) => r.characterId === cid);
     cx.threads = row && Array.isArray(row.items) ? row.items : [];
   }
-
   /* ================= 系统日程互通 ================= */
   async function readTodayCalendar(cx) { return readCalendarOn(cx, todayStr()); }
   // 日程表条目标题末尾写「·忙」或「·闲」，就是你替TA定死了做这件事时顾不顾得上看手机
@@ -1589,11 +1866,7 @@
     const m = /^(.*?)\s*[·・]\s*(忙|闲)\s*$/.exec(String(title || ""));
     return m ? { title: m[1], lock: m[2] === "忙" ? "busy" : "free" } : { title: String(title || ""), lock: "" };
   }
-  function addMin(hm, n) {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim()); if (!m) return hm;
-    const t = Math.min(+m[1] * 60 + +m[2] + n, 23 * 60 + 59);
-    return pad(Math.floor(t / 60)) + ":" + pad(t % 60);
-  }
+  const addMin = GuaNianTime.addMinutes;
   async function syncCalendar(cx, existing) {
     // 先清掉本 app 之前写入的今日条目，再把新生成的一天写回系统日程
     for (const it of existing) {
@@ -1723,7 +1996,7 @@
    */
   // 只认真说出去的才推进账本。凭据是云端预约自己的执行结果（result_note 以 generated / sent 开头），
   // 押后作罢、发送前拦下、睡着没发的都不算；没配云的本地预约拿不到结果，只能退回看聊天记录（粗）。
-  // 到点 6 小时还查不到就放弃这条。云端回音账那步同一套规则
+  // 云端按预约 id 精确查结果；暂未查到保留重试。本地的粗略聊天匹配最多等 6 小时。
   async function settleFired(cx) {
     if (!S.settings.threadsOn || !cx.plan || !Array.isArray(cx.plan.items) || !(cx.threads || []).length) return;
     const now = Date.now(), list = (cx.threads || []).slice(), notes = [];
@@ -1731,7 +2004,20 @@
     if (!due.length) return;
     let jobs = null, said = null;
     if (cloudCfg()) {
-      try { const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", limit: "20" }); jobs = (jr && jr.jobs) || []; }
+      try {
+        jobs = [];
+        const keys = [...new Set(due.filter((w) => w.wakeId).map((w) => "timedwake:" + w.wakeId))];
+        for (let i = 0; i < keys.length; i += 20) {
+          const batch = keys.slice(i, i + 20);
+          const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", triggerKeys: JSON.stringify(batch) });
+          // 旧网关会忽略新参数仍回最近 20 条；未经确认的结果不能用来结算。
+          if (!jr || !Array.isArray(jr.queriedTriggerKeys) || batch.some((key) => !jr.queriedTriggerKeys.includes(key))) {
+            if (!cx._jobLookupWarned) { cx._jobLookupWarned = true; await log(cx, "预约结算等待更新个人云：请重新部署离线推送，以支持按预约查询结果"); }
+            return;
+          }
+          jobs.push(...(jr.jobs || []));
+        }
+      }
       catch (e) { return; } // 读不到就下一分钟再看
     } else {
       said = (await readRecentChat(cx, 80)).filter((m) => m.role === "assistant").map((m) => m.t);
@@ -1742,7 +2028,7 @@
       if (jobs) {
         const j = w.wakeId ? jobs.find((x) => x.triggerKey === "timedwake:" + w.wakeId) : null;
         if (j && (j.status === "pending" || j.status === "running")) continue; // 押后中
-        if (!j && now - w.fireAt <= 6 * 3600000) continue; // 列表只回最近 20 条，晚点再找
+        if (!j) continue; // 查不到不等于没发送，不永久放弃这条。
         spoke = !!j && j.status === "done" && /^(generated|sent)/.test(String(j.resultNote || ""));
       } else {
         spoke = said.some((t) => t >= w.fireAt - 60000 && t <= w.fireAt + 6 * 3600000);
@@ -1861,7 +2147,6 @@
     if (left.length && !momentsReady()) await log(cx, "云端起意发朋友圈 " + left.length + " 条没发出去：" + (S.settings.momentsOn ? "宿主版本太旧，没有发朋友圈接口" : "已关闭发朋友圈"));
     cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { postedIds: posted.slice(-20), outbox: left.slice(-5) });
   }
-
   async function applyThreads(cx, parsed, nowMs, by) {
     if (!S.settings.threadsOn || !parsed) return 0;
     const list = (cx.threads || []).slice(), notes = [];
@@ -2079,39 +2364,23 @@
   // 时段贴合：以 13 点和 21 点两个聊天高峰做高斯衰减
   function fitScore(fireAt) {
     const d = new Date(fireAt);
-    const h = d.getHours() + d.getMinutes() / 60;
-    const g = (peak, sigma) => Math.exp(-Math.pow(h - peak, 2) / (2 * sigma * sigma));
-    return Math.round(100 * Math.min(1, g(13, 3) * 0.75 + g(21, 2.5)));
+    return GuaNianScoring.fitScore(d.getHours() + d.getMinutes() / 60);
   }
   // 判断那一刻的约束压力快照（armedBefore=此前已起念数，streak=连续未回轮数，lastArmedAt=上一个起念时间）
   function calcScore(fireAt, armedBefore, streak, lastArmedAt) {
-    const pq = Math.round(Math.min(100, armedBefore / Math.max(1, S.settings.quota) * 100));
-    const mu = S.settings.maxUnanswered;
-    const pr = Math.round(Math.min(100, mu > 0 ? streak / mu * 100 : streak * 25));
-    let pg = 0;
-    const gapMin = S.settings.minGapMin;
-    if (gapMin > 0 && lastArmedAt) {
-      const dist = (fireAt - lastArmedAt) / 60000;
-      if (dist < gapMin * 2) pg = Math.round(Math.max(0, Math.min(100, (1 - dist / (gapMin * 2)) * 100)));
-    }
-    return { fit: fitScore(fireAt), pq, pr, pg, press: Math.round(pq * 0.4 + pr * 0.4 + pg * 0.2) };
+    const d = new Date(fireAt);
+    return GuaNianScoring.calculateScore({
+      localHour: d.getHours() + d.getMinutes() / 60,
+      fireAt, armedBefore, streak, lastArmedAt,
+      quota: S.settings.quota, maxUnanswered: S.settings.maxUnanswered, minGapMin: S.settings.minGapMin,
+    });
   }
 
   // 你最后一条之后TA发了几「轮」没被回（消息需按时间升序）。
   // TA一次回复常拆成多条气泡：相邻 3 分钟内归为一轮，不逐条计数；
   // 且一轮要晾满 30 分钟才算「没回」——TA刚回复完、你还没来得及回的不算。
   function unansweredStreak(msgs) {
-    const nowMs = Date.now();
-    let prevT = null, rounds = 0;
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (m.role !== "assistant") break;
-      if (prevT === null || prevT - m.t > 3 * 60000) {
-        if (nowMs - m.t >= 30 * 60000) rounds++;
-      }
-      prevT = m.t;
-    }
-    return rounds;
+    return GuaNianScoring.countUnansweredRounds(msgs, Date.now());
   }
 
   // 临时起念不是日程排出来的，是复核时顺着聊天临时起的，重排不该把它推倒。
@@ -2307,7 +2576,6 @@
     }
     cx.busy = false; cx._planLock = false; render();
   }
-
   /* ================= 核心：动态复核 ================= */
   // 官方陪伴插件式的「判断随状态刷新」：打开小手机时（以及在页时每隔 recheckMin 分钟），
   // 按最新聊天重审今天还没到点的时刻——未回应降速是硬规则，聊崩了会取消，
@@ -2511,7 +2779,6 @@
     await syncChatContext(cx);
     cx._planLock = false;
   }
-
   /* ================= 预览 ================= */
   async function preview(cx) {
     if (S._previewing) return; S._previewing = true;
@@ -2696,9 +2963,33 @@
       await log(cx, "注入聊天失败（不影响其余功能）：" + (e && e.message || e));
     }
   }
-
+  function renderCloudSync() {
+    const box = $("#cloud-sync");
+    if (!box) return;
+    const rows = cloudCfg() ? allCx().map((cx) => ({ cx, state: planSyncState(cx) })).filter((x) => x.state) : [];
+    box.hidden = !rows.length;
+    box.innerHTML = rows.map(({ cx, state }) => {
+      const busy = cx._syncRetrying || state.status === "syncing" && (!!cx._uploadQ || cx._controlActive);
+      const ok = state.status === "synced";
+      const title = ok ? (state.operation === "control" ? "云端控制已确认" : "计划已同步云端") : busy ? "正在同步计划…" : "云端同步未完成";
+      const message = state.status === "syncing" && !busy ? "上次同步未确认完成，请重试。" : state.message;
+      return '<div class="card"><div class="sec-head"><span class="t">' + esc(cx.character.name) +
+        '</span><span class="badge ' + (ok ? "ok" : "warn") + '">' + title + '</span></div>' +
+        '<div class="d-why">' + esc(message) + (ok ? ' · ' + esc(fmtHM(state.at)) : ' 本地数据已保留。') + '</div>' +
+        (!ok && state.status !== "readonly" ? '<button class="tgl" data-sync-retry="' + esc(cx.character.id) + '"' +
+          (busy || cx.busy || cx._planLock ? ' disabled' : '') + '>重试同步</button>' : '') + '</div>';
+    }).join("");
+    box.querySelectorAll("[data-sync-retry]").forEach((button) => {
+      button.onclick = () => {
+        const cx = S.byId[button.dataset.syncRetry];
+        if (cx) retryPlanSync(cx).catch(() => toast("同步未完成，请重试"));
+      };
+    });
+  }
   /* ================= 渲染 ================= */
   function render() {
+    renderCloudSync();
+    renderSettingsEffects();
     const cx = cur();
     $("#hdr-date").textContent = todayStr().slice(5).replace("-", " / ") + " · 周" + "日一二三四五六"[new Date().getDay()];
     // 挂念几位时，顶上一排头像切换看谁
@@ -3101,16 +3392,14 @@
     return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + (sub ? " sub" : "") + '" data-t="' + esc(w.time) + '" ' + delay + '><span class="dot"></span>' +
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
   }
-
   /* ================= 记录页 ================= */
   async function loadArchive() {
     const cx = cur();
     if (cx.archive && Date.now() - cx.archive.at < 60000) return cx.archive;
     const cid = cx.character.id;
-    const [days, plans, msgs] = await Promise.all([
+    const [days, plans] = await Promise.all([
       AiPhone.db.list("days", { limit: 100 }),
       AiPhone.db.list("plans", { limit: 100 }),
-      readRecentChat(cx, 200),
     ]);
     const byDate = {};
     for (const d of days || []) if (d.characterId === cid) byDate[d.date] = { day: d, plan: null };
@@ -3118,35 +3407,43 @@
       if (!byDate[p.date]) byDate[p.date] = { day: null, plan: null };
       byDate[p.date].plan = p;
     }
-    msgs.sort((a, b) => a.t - b.t);
-    cx.archive = { at: Date.now(), dates: Object.keys(byDate).sort().reverse(), byDate, msgs };
+    await refreshReceipts(cx, Object.values(byDate).flatMap((r) => r.plan && r.plan.items || []));
+    cx.archive = { at: Date.now(), dates: Object.keys(byDate).sort().reverse(), byDate };
     return cx.archive;
   }
 
-  // 一条心动时刻此刻的真实状态：结合聊天记录推断发没发出、用户回没回
-  function decStatus(w, msgs) {
-    if (!w.act) return { cls: "no", heart: "♡", badge: '<span class="badge off">作罢</span>' };
-    if (w.fireAt > Date.now()) {
-      return w.delivery === "push"
-        ? { cls: "on", heart: "♥", badge: '<span class="badge wait">待发 · 离线可达</span>' }
-        : { cls: "on", heart: "♥", badge: '<span class="badge local" title="' + esc(w.reason || "") + '">待发 · 仅在线</span>' };
+  function decStatus(w, _msgs, cx) {
+    const receipt = receiptFor(w, cx), j = receipt && receipt.job;
+    const state = (status, label, tone, explanation, sentAt) => ({
+      status, cls: w.act ? "on" : "no", heart: w.act ? "♥" : "♡", explanation, sentAt: sentAt || 0,
+      badge: '<span class="badge ' + tone + '">' + label + '</span>',
+    });
+    if (j) {
+      if (j.status === "done" && /^(generated|sent)(?:\b|,)/.test(String(j.resultNote || ""))) {
+        return state("sent", "已发出", "sent", "对应预约的云端回执已确认消息生成完成；这不代表手机通知已展示或你已读。", Date.parse(j.updatedAt) || 0);
+      }
+      if (j.status === "failed") return state("failed", "发送失败", "warn", "对应预约执行失败。" + (j.resultNote || ""));
+      if (j.status === "cancelled") return state("cancelled", "已取消", "off", "对应预约已取消。" + (j.resultNote || ""));
+      if (j.status === "done" && /^(presend skip:|guanian |template expired|no_subscription|daily cap)/.test(String(j.resultNote || ""))) {
+        return state("skipped", "未发送", "off", "对应预约已结束，本次未发送。" + j.resultNote);
+      }
+      // 缓存的进行中状态在刷新失败时不再当作当前状态。
+      if (!receipt.error && j.status === "running") return state("running", "生成中", "wait", "对应预约正在执行，尚未取得发送成功回执。");
+      if (!receipt.error && j.status === "pending") return state("pending", "待发送", "wait", "云端预约仍在等待执行" + (j.executeAt ? "，预约时间 " + fmtHM(Date.parse(j.executeAt)) : "") + "。");
     }
-    // 已到时刻：在聊天记录里找到点后 3 小时内TA发出的那条
-    const sent = msgs.find((m) => m.role === "assistant" && m.t >= w.fireAt - 90000 && m.t <= w.fireAt + 3 * 3600000);
-    if (!sent) return { cls: "on", heart: "♥", badge: '<span class="badge done" title="聊天记录里没找到对应消息：可能没发成，也可能超出了可读的最近 200 条">已到时刻</span>' };
-    const rep = msgs.find((m) => m.role === "user" && m.t > sent.t);
-    return rep
-      ? { cls: "on", heart: "♥", badge: '<span class="badge replied">已发出 · 你回了</span>', sent }
-      : { cls: "on", heart: "♥", badge: '<span class="badge sent">已发出</span>', sent };
+    if (!w.act) return state("skipped", "作罢", "off", "没有起念，不会发送。");
+    if (w.fireAt > Date.now()) return state("pending", "待发送", w.delivery === "push" ? "wait" : "local",
+      w.delivery === "push" ? "已预约离线推送；实际发送结果以执行回执为准。" : "仅在线路径，到点时页面需要开着。");
+    return state("unknown", "待确认", "done", receipt && receipt.error || "没有可核实的对应预约回执，无法确认是否发送；普通聊天消息不作为发送凭据。");
   }
 
   /* ================= 时刻详情弹层 ================= */
   const HIST_KIND = { plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核" };
 
-  function detailHtml(w, plan, msgs) {
+  function detailHtml(w, plan) {
     const cx = cur();
     let h = '<div class="d-hd"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" +
-      (msgs ? decStatus(w, msgs).badge : '<span class="badge off">查记录中…</span>') + adjBadge(w) + "</div>";
+      decStatus(w).badge + adjBadge(w) + "</div>";
 
     // 判断
     h += '<div class="d-sec"><div class="d-t">判 断</div>';
@@ -3215,24 +3512,12 @@
 
     // 执行
     h += '<div class="d-sec"><div class="d-t">执 行</div>';
-    if (!w.act) {
-      h += '<div class="d-why">没有起念，不会发送。</div>';
-    } else if (w.fireAt > Date.now()) {
-      h += '<div class="d-why">待发 · ' + (w.delivery === "push" ? "已预约离线推送，浏览器关着也会送达。" : "仅在线路径" + (w.reason ? "（" + esc(w.reason) + "）" : "") + "，到点时页面要开着才发。") + "</div>";
-    } else if (!msgs) {
-      h += '<div class="d-why">正在对照聊天记录…</div>';
-    } else {
-      const st = decStatus(w, msgs);
-      if (st.sent) {
-        h += '<div class="d-why">' + fmtHM(st.sent.t) + " 发出：</div><div class=\"d-msg\">" + esc(st.sent.c) + "</div>";
-        const rep = msgs.find((m) => m.role === "user" && m.t > st.sent.t);
-        h += rep
-          ? '<div class="d-why">你在 ' + fmtHM(rep.t) + " 回了TA。</div>"
-          : '<div class="d-why">你还没回这条。</div>';
-      } else {
-        h += '<div class="d-why">已到时刻，但最近 200 条聊天里没找到对应消息：可能没发成，也可能已超出可读范围。</div>';
-      }
-    }
+    const st = decStatus(w);
+    h += '<div class="d-why">' + esc(st.explanation) + '</div>';
+    if (st.sentAt) h += '<div class="d-why">回执完成时间：' + esc(fmtHM(st.sentAt)) + '</div>';
+    const receipt = receiptFor(w);
+    if (receipt && receipt.error && receipt.job) h += '<div class="d-why">本次刷新失败，以上为上次回执：' + esc(receipt.error) + '</div>';
+    if (w.wakeId && cloudCfg()) h += '<button class="tgl" id="btn-refresh-receipt">刷新回执</button>';
     h += "</div>";
 
     const si = plan && plan.date === todayStr() ? ((cx.day && cx.day.schedule) || []).findIndex((x) => x.time === w.time) : -1;
@@ -3244,23 +3529,28 @@
     return h;
   }
 
-  function openDetail(w, plan, msgs) {
+  function openDetail(w, plan) {
     const cx = cur();
     S._detailW = w; S._detailSi = -1;
     $("#dsheet-title").textContent = "时 刻 详 情";
-    $("#dsheet-body").innerHTML = detailHtml(w, plan, msgs || null);
     document.body.classList.add("dsheet-open");
-    if (!msgs) {
-      readRecentChat(cx, 200).then((m) => {
-        m.sort((a, b) => a.t - b.t);
-        if (S._detailW === w && document.body.classList.contains("dsheet-open")) {
-          $("#dsheet-body").innerHTML = detailHtml(w, plan, m);
-        }
-      }).catch(() => { /* 详情页缺聊天对照不算错误 */ });
-    }
+    const alive = () => S._detailW === w && cur() === cx && document.body.classList.contains("dsheet-open");
+    const draw = () => {
+      if (!alive()) return;
+      $("#dsheet-body").innerHTML = detailHtml(w, plan);
+      const button = $("#btn-refresh-receipt");
+      if (button) button.onclick = () => update(true);
+    };
+    const update = async (force) => {
+      const button = $("#btn-refresh-receipt");
+      if (button) { button.disabled = true; button.textContent = "查询中…"; }
+      try { await refreshReceipts(cx, [w], force); }
+      finally { cx.archive = null; draw(); }
+    };
+    draw();
+    update(false).catch(() => { /* 回执错误已显示在详情内 */ });
   }
   function closeDetail() { document.body.classList.remove("dsheet-open"); S._detailW = null; S._detailSi = -1; }
-
   /* ---- 日程条目详情：细化 / 重新生成 / 删除 ---- */
   function schedDetailHtml(i) {
     const cx = cur();
@@ -3450,13 +3740,11 @@
     await saveSchedule(cx, sched, "细排了 " + it.time + "「" + it.title + "」" + steps.length + " 条", false);
     return ((cx.day && cx.day.schedule) || []).findIndex((x) => x.time === it.time && x.title === it.title);
   }
-
-  function decRow(w, msgs) {
-    const st = decStatus(w, msgs);
+  function decRow(w) {
+    const st = decStatus(w);
     return '<div class="dec ' + st.cls + '" data-t="' + esc(w.time) + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + adjBadge(w) + "</div>" +
       '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
-      (st.sent ? '<div class="why" style="color:var(--tx3)">' + fmtHM(st.sent.t) + " · " + esc(st.sent.c.length > 46 ? st.sent.c.slice(0, 46) + "…" : st.sent.c) + "</div>" : "") +
       "</div>";
   }
 
@@ -3475,23 +3763,23 @@
     // 近 7 天统计
     const d7 = new Date(); d7.setDate(d7.getDate() - 6);
     const from = d7.getFullYear() + "-" + pad(d7.getMonth() + 1) + "-" + pad(d7.getDate());
-    let nAct = 0, nSent = 0, nRep = 0;
+    let nAct = 0, nSent = 0, nUnknown = 0;
     for (const date of arc.dates) {
       if (date < from) continue;
       const p = arc.byDate[date].plan;
       for (const w of (p && p.items) || []) {
         if (!w.act) continue;
         nAct++;
-        const st = decStatus(w, arc.msgs);
-        if (st.badge.indexOf("已发出") >= 0) nSent++;
-        if (st.badge.indexOf("你回了") >= 0) nRep++;
+        const st = decStatus(w);
+        if (st.status === "sent") nSent++;
+        if (st.status === "unknown") nUnknown++;
       }
     }
     let html =
       '<div class="stats">' +
       '<div class="stat"><div class="num">' + nAct + '</div><div class="cap">7天起念</div></div>' +
       '<div class="stat" style="animation-delay:60ms"><div class="num">' + nSent + '</div><div class="cap">已发出</div></div>' +
-      '<div class="stat" style="animation-delay:120ms"><div class="num">' + (nSent ? Math.round(nRep / nSent * 100) + "%" : "—") + '</div><div class="cap">回复率</div></div>' +
+      '<div class="stat" style="animation-delay:120ms"><div class="num">' + nUnknown + '</div><div class="cap">待确认</div></div>' +
       "</div>";
 
     if (!arc.dates.length) {
@@ -3519,11 +3807,11 @@
         // 折叠成一行，免得整张卡片读起来像把日程复读一遍
         const actedItems = items.filter((w) => w.act);
         const skippedItems = items.filter((w) => !w.act);
-        body += actedItems.map((w) => decRow(w, arc.msgs)).join("");
+        body += actedItems.map((w) => decRow(w)).join("");
         if (!actedItems.length) body += '<div class="archive-note">这天TA一个时刻都没起念，想安静地过。</div>';
         if (skippedItems.length) {
           body += '<details class="skip-fold"><summary>♡ 还有 ' + skippedItems.length + ' 个时刻没起念 · 看看为什么</summary>' +
-            skippedItems.map((w) => decRow(w, arc.msgs)).join("") + "</details>";
+            skippedItems.map((w) => decRow(w)).join("") + "</details>";
         }
       } else {
         body += '<div class="archive-note">这天没有编排记录' + (day ? "（只生成了生活面）" : "") + "</div>";
@@ -3536,14 +3824,14 @@
         '<span class="arr">▶</span></summary>' +
         '<div class="day-body">' + body + "</div></details>";
     });
-    html += '<div class="archive-note">发出 / 回复状态是对照最近 200 条聊天记录推断的，更早的日子可能显示「已到时刻」。点任意时刻看详情。</div>';
+    html += '<div class="archive-note">发送状态按对应预约回执确认；旧记录、仅在线发送或回执缺失显示「待确认」。不再根据普通聊天推算发送和回复率。点任意时刻可刷新回执。</div>';
     v.innerHTML = html;
     v.querySelectorAll(".dec").forEach((el) => {
       el.onclick = () => {
         const card = el.closest(".day-card");
         const rec = card && arc.byDate[card.dataset.d];
         const w = rec && rec.plan && (rec.plan.items || []).find((x) => x.time === el.dataset.t);
-        if (w) openDetail(w, rec.plan, arc.msgs);
+        if (w) openDetail(w, rec.plan);
       };
     });
   }
@@ -3714,21 +4002,21 @@
       ? '<div class="archive-note">按TA此刻的状态生成一句话，不发送、不进聊天、不占额度，花一次模型调用。</div>' + previewZone()
       : '<div class="archive-note">TA的今天还没生成，没有状态可看。</div>', cx.day ? "" : "没状态", "");
     { const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur()); }
-    // 各类由头发出去之后你接没接话：云端复核记的账，分量和骰子概率都按它涨落（发过不到 3 次不算数）
+    // 云端回音账只给有限正反馈，不把用户忙碌、睡眠或未读造成的沉默当负面偏好。
     {
       const KIND_LABEL = { plan: "早上定的", extra: "临时起念", thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久" };
       const fb = (S.settings.fbState || {})[cx.character ? cx.character.id : ""] || {};
       const rows = Object.keys(fb).filter((k) => Array.isArray(fb[k]) && +fb[k][0] > 0)
         .sort((a, b) => (+fb[b][0] || 0) - (+fb[a][0] || 0));
-      const mod = (sent, rep) => sent < 3 ? 1 : Math.max(0.6, Math.min(1.4, 0.6 + 0.8 * (rep + 1) / (sent + 2)));
+      const mod = (sent, rep) => { const n = Math.max(0, Math.min(sent, rep)); return n < 3 ? 1 : 1 + Math.min(0.2, (n - 2) * 0.04); };
       const total = rows.reduce((n, k) => n + (+fb[k][0] || 0), 0);
       fill("echo", rows.length
         ? rows.map((k) => {
             const sent = +fb[k][0] || 0, rep = +fb[k][1] || 0, m = mod(sent, rep);
-            return '<div class="diag-item"><b>' + esc(KIND_LABEL[k] || k) + "</b> 发过 " + sent + " 次 · 回了 " + rep + " 次" +
-              (sent >= 3 ? ' <span class="badge ' + (m < 0.9 ? "cool" : "") + '">分量 ×' + m.toFixed(2) + "</span>" : ' <span class="badge cool">还没满 3 次</span>') + "</div>";
-          }).join("") + '<div class="archive-note">TA主动发的每一条，到点 3 小时后云端看一眼你有没有接话。某类念头你回得少，它的分量和骰子概率就一起降，模型也会被告知「这种话TA不太接」。</div>'
-        : '<div class="archive-note">还没有账。云端复核会在TA每条主动消息发出 3 小时后记一笔：你接了话算「回了」。</div>',
+            return '<div class="diag-item"><b>' + esc(KIND_LABEL[k] || k) + "</b> 发过 " + sent + " 次 · 之后接话 " + rep + " 次" +
+              (m > 1 ? ' <span class="badge">正向参考 ×' + m.toFixed(2) + "</span>" : ' <span class="badge cool">保持中性</span>') + "</div>";
+          }).join("") + '<div class="archive-note">按实际发送后的 3 小时窗口统计是否有后续接话（若启用你的睡眠时段，会跳过该时段计时），不代表对这条消息的明确喜好。你可能在忙、睡觉或没看到：未接话不扣分，也不会被告诉模型是「不喜欢」。至少 3 次接话后才给轻微正向参考，最多 ×1.20；未回应降速仍独立生效，避免连续打扰。</div>'
+        : '<div class="archive-note">还没有账。云端复核会在TA每条主动消息发出、累计等待 3 小时后记一笔（启用的用户睡眠时段不计时）：之后有接话就记一笔正向参考，没有接话保持中性。</div>',
         total ? total + " 条 · " + rows.length + " 类" : "还没有", "");
     }
     // 日志是本地现成的，先画上，别让整页都在等云端
@@ -3939,7 +4227,6 @@
     const rp = $("#btn-replan"); if (rp) rp.onclick = () => orchestrate(cur());
     const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur());
   }
-
   /* ================= 设置弹层：schema 驱动 =================
      加一项配置 = 往 SET_SECTIONS 某一节的 groups 里加一条 + 往 SET_DEF 里补个默认值，
      渲染 / 回填 / 读表三处都不用再动。 */
@@ -3951,11 +4238,15 @@
         { type: "stepper", key: "tokenDailyCap", min: 0, max: 5000000, step: 50000, label: "一天最多", unit: "token" },
       ], hint: "本机和云端、所有挂念的人合计。生成一天、编排、复核、改日程，以及云端的生成、复核、到点发送，每次调用都记一笔；到了上限当天就不再调，明天自动归零。0 = 不限。「用量」页能看明细。" },
       { title: "免打扰时段", sub: "这段时间TA不会来找你", fields: [{ type: "timeRange", keys: ["quietStart", "quietEnd"] }] },
+      { title: "你的睡眠时段", sub: "可选，默认关闭；作息不固定可以不设", fields: [
+        { type: "toggles", items: [{ key: "userSleepOn", label: "睡眠时段暂停回音计时" }] },
+        { type: "timeRange", keys: ["userSleepStart", "userSleepEnd"] },
+      ], hint: "开启后每天按这段时间暂停回音统计的等待计时，醒来后继续累计，满 3 小时再统计。按保存时设备所在时区计算，可跨零点，起止时间不能相同。<br>只影响回音统计，不改变免打扰、TA的作息或未回应降速。未回复仍保持中性；不需要每天操作，也没有手动忙碌按钮。保存并成功同步计划后，对尚未结算的回音生效；旧统计不重算。" },
       { title: "自动生成TA的一天", fields: [
         { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }, { key: "cloudGen", label: "浏览器关着也生成（云端）" }] },
         { type: "timeRange", keys: ["autoGenAt"], label: "每天几点" },
       ], hint: "到点自动生成TA今天的状态、日程和心动时刻。挂念在后台也算开着。<br>开了「云端」：每次打开挂念会把明天的生成原料和一份和本地同源的提示词模板寄到你的个人云，到点由云函数生成并编排，你打开时直接接管；云端 45 分钟没生成会本地补。需要云连接和离线推送。<br>错过了这个点，下次打开时补。浏览器一整天没开就生成不了，那天只有云端的兜底问候。" },
-      { title: "什么时候生效", adv: true, fields: [], hint: "随用随判模式：额度、间隔、倾向这些改完，回「今天」页点「♥ 重置今天」把新设置寄到云上才生效（云端读的是那份计划里的快照）；复核门禁那几项保存即生效。<br>早上定完模式：额度、间隔、倾向、锚点改完要点「♥ 重新编排」重排一次。<br>两种模式下，聊天里临时起的念头都留着不动。", open: true },
+      { title: "什么时候生效", adv: true, fields: [], hint: "保存后本机设置立即更新；开着云端复核且已有今天的计划时，会同步现有计划的规则，是否成功看页面上的同步结果。<br>随用随判：同步成功后，下一次云端复核按新规则起念，不必为了上传设置而重置今天。<br>已经排好的时刻不会因保存而重排。要按新额度、间隔、免打扰、倾向或锚点重新安排，去「心动」页点「重新编排／重置今天」。切换起念模式会改变后续判断，但不会自动转换已有预约；如需整理今天的预约，也在该页操作。保留的临时起念不会随重排重建，其原预约的未回应降速阈值也不随保存更新。<br>今天的计划同步不等于明日生成原料已更新；明日原料在下次打开挂念或重新编排时刷新。", open: true },
     ] },
     { id: "pace", name: "分寸", groups: [
       { title: "主动倾向", sub: "TA有多想黏着你", fields: [{ type: "seg", key: "bias",
@@ -4011,7 +4302,7 @@
         { type: "stepper", key: "selfSilenceMin", min: 30, max: 480, step: 30, label: "多久没联系算安静", unit: "分钟" },
         { type: "stepper", key: "missDays", min: 0, max: 14, step: 1, label: "断了几天会想念", unit: "天 · 0 关" },
         { type: "toggles", items: [{ key: "echoOn", label: "想起昨天聊过的小事" }] },
-      ], hint: "云端每 5 分钟醒一次（cron 频率，见 README），先过这几道门，全过了才真的调一次模型。拦下来的不花钱，原因记在「诊断」。<br>自发起念分五种由头：刚做完一件要紧的事、惦记到点、安静太久、想念、余韵。安静太久按小时算；断到「想念」那么多天后就不再按小时追，整段断联只在白天掷一次骰子（56%）想不想TA；余韵是每天白天掷一次（24%），想起昨天聊过的一件轻松小事顺手提一句。TA自己起的念头发出去没回音时，这三种都不追。每次都调模型，所以单独限次，重新编排后清零。<br>保存即生效，不用重新部署云函数。" },
+      ], hint: "云端每 5 分钟醒一次（cron 频率，见 README），先过这几道门，全过了才真的调一次模型。拦下来的不花钱，原因记在「诊断」。<br>自发起念分五种由头：刚做完一件要紧的事、惦记到点、安静太久、想念、余韵。安静太久按小时算；断到「想念」那么多天后就不再按小时追，整段断联只在白天掷一次骰子（56%）想不想TA；余韵是每天白天掷一次（24%），想起昨天聊过的一件轻松小事顺手提一句。TA自己起的念头发出去没回音时，这三种都不追。每次都调模型，所以单独限次，重新编排后清零。<br>保存并成功同步今天的计划后，下一次云端复核使用新门禁；仅调整数值无需重新部署云函数。" },
       { title: "发送前复核", adv: true, sub: "到点真发之前再判一次", fields: [
         { type: "stepper", key: "presendMax", min: 30, max: 100, step: 5, label: "不合时宜度超过就不发", unit: "% · 100 从不拦" },
         { type: "stepper", key: "presendTalkingMin", min: 0, max: 120, step: 5, label: "你最后一句在多久内算正聊着", unit: "分钟" },
@@ -4155,7 +4446,11 @@
     $("#sheet-body").querySelectorAll(".seg button").forEach((b) => {
       b.onclick = () => { b.parentNode.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); };
     });
-    $("#sheet-body").querySelectorAll(".tgl").forEach((b) => { b.onclick = () => b.classList.toggle("on"); });
+    $("#sheet-body").querySelectorAll(".tgl").forEach((b) => { b.onclick = () => {
+      b.classList.toggle("on");
+      if (b.id === "set-userSleepOn") syncUserSleepFields();
+    }; });
+    syncUserSleepFields();
     const test = $("#btn-cloud-test");
     if (test) test.onclick = async () => {
       const r = $("#cloud-test-r");
@@ -4172,6 +4467,21 @@
           (mir ? " · 支持聊天镜像" : " · 版本偏旧：去小手机「设置→云服务部署」重新部署离线推送");
       } catch (e) { r.textContent = "✗ " + (e && e.message || e); }
     };
+  }
+
+  function syncUserSleepFields() {
+    const toggle = $("#set-userSleepOn");
+    const enabled = !!(toggle && toggle.classList.contains("on"));
+    for (const key of ["userSleepStart", "userSleepEnd"]) {
+      const input = $("#set-" + key);
+      if (input) input.disabled = !enabled;
+    }
+  }
+  function validateUserSleepSettings(settings) {
+    if (!settings.userSleepOn) return;
+    const valid = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(value || ""));
+    if (!valid(settings.userSleepStart) || !valid(settings.userSleepEnd)) throw new Error("请填写有效的睡眠开始和结束时间");
+    if (settings.userSleepStart === settings.userSleepEnd) throw new Error("睡眠开始和结束时间不能相同；不需要固定时段可关闭此选项");
   }
 
   function readSheet() {
@@ -4191,16 +4501,46 @@
     return out;
   }
 
+  // 保存只更新设置和计划上下文，不会自动撤销或重建已经存在的预约。
+  function settingsSaveEffects(before, after) {
+    const changed = (keys) => keys.some((key) => before[key] !== after[key]);
+    const notes = [];
+    if (changed(["userSleepOn", "userSleepStart", "userSleepEnd"])) notes.push(after.userSleepOn
+      ? "你的睡眠时段已保存；计划同步成功后，尚未结算的回音会跳过这段时间，已结算记录不重算。"
+      : "睡眠时段已关闭；计划同步成功后，尚未结算的回音恢复按发送后 3 小时统计。未回复仍保持中性。");
+    if (changed(["quota", "minGapMin", "bias", "quietStart", "quietEnd", "anchorSleep", "anchorMorning", "chatCandidates", "moodGate"])) {
+      notes.push(+after.impulseMode === 1 && after.cloudRecheck && cloudCfg()
+        ? "新规则同步成功后用于下一次云端起念。已有预约保持原样；如需一起调整，请到「心动」页重新安排。"
+        : "新规则已保存。要让今天已排的时刻按新规则重新安排，请到「心动」页点「重新编排」。");
+    }
+    if (changed(["maxUnanswered"])) notes.push("未回应降速的新阈值用于新建预约；已有预约保留原阈值。重新编排保留的临时起念也不会自动更新。");
+    if (changed(["impulseMode"])) notes.push("起念模式已保存，后续判断使用新模式；已有预约不会自动转换。如需整理今天的预约，请到「心动」页点「" + (+after.impulseMode === 1 && after.cloudRecheck && cloudCfg() ? "重置今天" : "重新编排") + "」。");
+    if (changed(["autoGen", "cloudGen", "autoGenAt"]) && after.autoGen && after.cloudGen) notes.push("本机自动生成设置已更新；云端明日生成原料会在下次打开挂念或重新编排时刷新，今天的同步结果不代表明日设置已更新。");
+    return notes;
+  }
+  function renderSettingsEffects() {
+    const box = $("#settings-effects");
+    if (!box) return;
+    const notes = S._settingsEffects || [];
+    box.hidden = !notes.length;
+    box.innerHTML = notes.length ? '<div class="card"><div class="sec-head"><span class="t">设置已保存 · 生效说明</span></div>' +
+      notes.map((note) => '<div class="d-why">' + esc(note) + '</div>').join("") + '</div>' : "";
+  }
+
   async function saveSettings() {
     const picked = Array.from(document.querySelectorAll(".char-cell.sel")).map((el) => el.dataset.id);
     const ids = picked.length ? picked : S.order.slice();
     const prevIds = S.order.slice();
     const removed = prevIds.filter((id) => !ids.includes(id));
     const added = ids.filter((id) => !prevIds.includes(id));
-    if (!ids.includes(S.cur)) S.cur = ids[0] || "";
     const sheet = readSheet();
+    validateUserSleepSettings(sheet);
+    if (!ids.includes(S.cur)) S.cur = ids[0] || "";
+    const before = Object.assign({}, S.settings);
     const cloudGenWas = !!S.settings.cloudGen;
     await patchSettings(() => Object.assign({ characterIds: ids, characterId: S.cur }, sheet));
+    S._settingsEffects = settingsSaveEffects(before, S.settings);
+    renderSettingsEffects();
     closeSheet();
     // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
     if (cloudGenWas && !S.settings.cloudGen) for (const cx of allCx()) await unfreezeGenTemplates(cx);
@@ -4217,19 +4557,21 @@
       await loadDayAndPlan(S.byId[id]);
     }
     S.order = ids;
+    const syncResults = [];
     for (const cx of allCx()) {
       cx._ctx = null; // 开关可能变了，强制重写一次（包括关掉时写空串撤销）
       await syncChatContext(cx, true);
-      if (!added.includes(cx.character.id)) {
-        await pullCloudDecisions(cx); // 同 recheck：不先并会把云端回填的 wakeId 盖掉
-        await uploadPlanCloud(cx, false); // 刚打开云复核开关的话，今天的计划立刻寄存一份
-      }
+      if (cloudCfg()) syncResults.push(await syncSavedPlan(cx, before.cloudRecheck !== S.settings.cloudRecheck || planSyncState(cx)?.operation === "control"));
     }
     syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
     render();
-    toast("已保存");
+    const incomplete = syncResults.some((r) => ["failed", "partial", "syncing"].includes(r.status));
+    toast(incomplete ? "本地已保存，云端同步未完成；请查看页面提示"
+      : !S.settings.cloudRecheck && syncResults.some((r) => r.status === "synced") ? "本地已保存，云端已确认关闭复核"
+      : syncResults.some((r) => r.status === "readonly") ? "本地已保存，部分角色由其他设备负责，未上传"
+      : syncResults.some((r) => r.status === "synced") ? "本地已保存，现有计划已同步云端"
+      : "本地已保存" + (cloudRecheckOn() ? "；生成今天的计划后再同步云端" : "；云端复核未启用"));
   }
-
   /* ================= 启动 ================= */
   async function init() {
     // 攒着的日志得在页面被收起前落盘，否则关掉小手机就丢了

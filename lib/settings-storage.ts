@@ -365,7 +365,7 @@ export function parsePresetFromJson(text: string, fallbackName: string = "导入
         if (typeof obj.openai_max_context === "number") preset.openai_max_context = obj.openai_max_context;
         if (Array.isArray(obj.enabled_generation_parameters)) {
             preset.enabled_generation_parameters = [
-                ...new Set(obj.enabled_generation_parameters.filter(isGenerationParameterKey)),
+                ...new Set((obj.enabled_generation_parameters as unknown[]).filter(isGenerationParameterKey)),
             ];
         }
         // New preset globals
@@ -784,7 +784,7 @@ function normalizeImageGenerationSettings(settings: Partial<ImageGenerationSetti
         : DEFAULT_IMAGE_GENERATION_SETTINGS.imageHosting.maxUploadBytes;
 
     const rawNai = settings?.novelai;
-    let naiPresets = Array.isArray(rawNai?.presets) && rawNai.presets.length > 0
+    const naiPresets = Array.isArray(rawNai?.presets) && rawNai.presets.length > 0
         ? rawNai.presets.map((p, idx) => normalizeNovelAiPreset(p, idx))
         : [DEFAULT_NOVELAI_PRESET];
     let activePresetId = typeof rawNai?.activePresetId === "string" ? rawNai.activePresetId : naiPresets[0].id;

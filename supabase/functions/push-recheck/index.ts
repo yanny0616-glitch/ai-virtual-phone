@@ -42,6 +42,12 @@ type PlanContext = {
   quota?: number;
   quietStart?: string;
   quietEnd?: string;
+  /** 用户自己的可选睡眠窗，仅用于回音等待计时，与角色作息独立。 */
+  userSleepOn?: number;
+  userSleepStart?: string;
+  userSleepEnd?: string;
+  userSleepTimeZone?: string;
+  userSleepTz?: number;
   minGapMin?: number;
   maxUnanswered?: number;
   chatCandidates?: string;
@@ -111,12 +117,12 @@ function affectionLine(aff: { tier?: string; relation?: string } | null | undefi
 }
 // 自发起念的由头分五种，各有口径：想念不催回复、余韵不求回应、惦记像随口问起、安静太久才是搭话
 const SELF_KIND: Record<string, string> = { thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久" };
-// 这类由头过去的回音，给模型一句实话：回得少就少发、发也更轻
+// 沉默无法证明不喜欢：不把未接话次数交给模型当负反馈。
 function fbLine(fb: FbBook | undefined, kind: string): string {
   const rec = fb && Array.isArray(fb[kind]) ? fb[kind] : [0, 0];
-  const sent = Number(rec[0]) || 0, replied = Number(rec[1]) || 0;
-  if (sent < 3) return "";
-  return `这类由头你之前发过 ${sent} 次，用户回了 ${replied} 次${replied / sent < 0.34 ? "——TA不太接这种话，要么不发，要么说得更轻" : ""}。`;
+  const replied = Math.max(0, Math.min(Number(rec[0]) || 0, Number(rec[1]) || 0));
+  if (replied < 3) return "没有足够的接话记录可判断偏好；用户可能在忙、睡觉或没有看到消息，未回复不代表不喜欢，不要因此责怪或催促。";
+  return `这类由头之后记录到用户接话 ${replied} 次，可作为轻微的正向参考，不代表每次都想聊。未回复不作为负面偏好，不据此判断用户冷淡或不喜欢，也不要催回复。`;
 }
 function selfBrief(kind: string, reason: string): string {
   if (kind === "miss") return `没有新对话。${reason}，最后一句是用户说的，不是你发了没人回。按你的性子和现在的关系想一想会不会有点想TA——本来就不主动的人、关系还生疏的，就不发。要发也只轻轻带一句想念或近况，不问「怎么不理我」，不催TA回。`;
@@ -124,20 +130,21 @@ function selfBrief(kind: string, reason: string): string {
   if (kind === "thread") return `没有新对话。由头是心里挂着的事：${reason}。像朋友随口问起，不像提醒或查岗；上面聊到的事已经了了就写 []。`;
   return `没有新对话。由头是你自己这边的事：${reason}。想一想此刻的你会不会想找用户说点什么——分享刚发生的、忽然想起TA、单纯想搭句话都行；上面聊到的事已经了了就写 []。`;
 }
-// 由头的分量：三分值（要紧 / 温度 / 急迫）合成 0–1，再乘各自的时间曲线和回音率。
+// 由头的分量：三分值（要紧 / 温度 / 急迫）合成 0–1，再乘各自的时间曲线和接话正反馈。
 // 曲线不是统一衰减：刚忙完几小时内掉光，约定靠近到点反而涨，想念断得越久越重，安静太久是平的
 const KIND_VAL: Record<string, [number, number, number]> = {
   thread: [0.7, 0.6, 0.7], done: [0.6, 0.5, 0.4], miss: [0.6, 0.9, 0.3], echo: [0.4, 0.7, 0.2],
   quiet: [0.3, 0.5, 0.2], extra: [0.7, 0.6, 0.6], plan: [0.5, 0.5, 0.4],
 };
 type FbBook = Record<string, [number, number]>;
-// 回音率修正：发过不到 3 次不算数；之后按（回了+1）/（发了+2）落在 0.6–1.4 倍
+// 只用正反馈：至少 3 次接话后轻微加权，最多 1.2 倍；未回应不会降低已有权重。
+// 保留旧 [发送数, 接话数] 数据格式，历史未回应无需迁移且不再扣分。
 function fbMod(fb: FbBook | undefined, kind: string): number {
   const rec = fb && Array.isArray(fb[kind]) ? fb[kind] : [0, 0];
-  const sent = Number(rec[0]) || 0, replied = Number(rec[1]) || 0;
-  if (sent < 3) return 1;
-  return Math.max(0.6, Math.min(1.4, 0.6 + 0.8 * (replied + 1) / (sent + 2)));
+  const replied = Math.max(0, Math.min(Number(rec[0]) || 0, Number(rec[1]) || 0));
+  return replied < 3 ? 1 : 1 + Math.min(0.2, (replied - 2) * 0.04);
 }
+
 function impulseValue(kind: string, curve: number, fb: FbBook | undefined): number {
   const [sal, warm, urg] = KIND_VAL[kind] || KIND_VAL.quiet;
   return Math.max(0, Math.min(1, (sal + urg * 0.9 + warm * 0.7) / 2.6 * Math.max(0, Math.min(1, curve)) * fbMod(fb, kind)));
@@ -146,8 +153,49 @@ function impulseValue(kind: string, curve: number, fb: FbBook | undefined): numb
 function valueFloor(remaining: number): number {
   return remaining <= 1 ? 0.65 : remaining === 2 ? 0.45 : 0;
 }
-// 记回音账：点亮过的时刻到点 3 小时后看 push_jobs 的执行结果——result_note 以 generated / sent 开头才算「发过」
-// （押后作罢、发送前拦下、睡着没发的都不算），用户在那之后 3 小时内接了话才算「回了」。
+// 累积 3 小时非睡眠时间；未满返回 null。按绝对分钟推进，保留秒/毫秒边界，
+// IANA 时区负责夏令时的重复/缺失小时；旧客户端没有开关时完全沿用原窗口。
+function feedbackWindowEnd(sentAt: number, context: PlanContext, nowMs: number): number | null {
+  const duration = 3 * 3600_000;
+  const regularEnd = sentAt + duration;
+  if (regularEnd > nowMs) return null;
+  if (context.userSleepOn !== 1) return regularEnd <= nowMs ? regularEnd : null;
+  const parse = (value: unknown): number | null => {
+    const m = /^(?:([01]\d|2[0-3])):([0-5]\d)$/.exec(String(value || ""));
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const start = parse(context.userSleepStart), end = parse(context.userSleepEnd);
+  if (start === null || end === null || start === end) return regularEnd <= nowMs ? regularEnd : null;
+  let format: Intl.DateTimeFormat | null = null;
+  try {
+    if (context.userSleepTimeZone) format = new Intl.DateTimeFormat("en-GB", {
+      timeZone: context.userSleepTimeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    });
+  } catch { /* 无效/不支持的时区使用上传时的 UTC 偏移 */ }
+  const offset = Math.max(-840, Math.min(840, Number(context.userSleepTz) || 0));
+  let remaining = duration, cursor = sentAt;
+  while (cursor < nowMs) {
+    let minute: number;
+    if (format) {
+      const parts = format.formatToParts(new Date(cursor));
+      minute = Number(parts.find(p => p.type === "hour")?.value) * 60 + Number(parts.find(p => p.type === "minute")?.value);
+    } else {
+      const local = new Date(cursor + offset * 60_000);
+      minute = local.getUTCHours() * 60 + local.getUTCMinutes();
+    }
+    const asleep = start < end ? minute >= start && minute < end : minute >= start || minute < end;
+    const next = Math.min(nowMs, (Math.floor(cursor / 60_000) + 1) * 60_000);
+    if (!asleep) {
+      if (remaining <= next - cursor) return cursor + remaining;
+      remaining -= next - cursor;
+    }
+    cursor = next;
+  }
+  return null;
+}
+// 记回音账：按实际发送后的有效 3 小时窗口统计接话，可选用户睡眠时段不计时；未接话不降低偏好权重。
+// 先看 push_jobs 的执行结果——result_note 以 generated / sent 开头才算「发过」
+// （押后作罢、发送前拦下、睡着没发的都不算），用户在有效等待窗口内接了话才算「回了」（启用睡眠暂停后可能跨到次日）。
 // 凭据是这条预约自己的结果，不拿聊天记录里恰好有的一句冒充。每个 wakeId 只记一次，不调模型
 async function feedbackRoll(
   rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, characterId: string,
@@ -170,18 +218,22 @@ async function feedbackRoll(
     const kind = String(it.kind || "plan");
     const job = jobs.find(j => j.trigger_key === `timedwake:${it.wakeId}`);
     if (job && (job.status === "pending" || job.status === "running")) continue; // 押后中，下轮再看
-    seen.push(it.wakeId);
     const sentAt = job && job.status === "done" && /^(generated|sent)/.test(String(job.result_note || "")) ? Date.parse(job.updated_at) : NaN;
-    if (!Number.isFinite(sentAt)) continue; // 没发出去：不算账，账本也不动
+    if (!Number.isFinite(sentAt)) { seen.push(it.wakeId); continue; } // 没发出去：不算账，账本也不动
+    // 押后发送的回应窗口从实际成功时间开始；窗口未结束不能把 wakeId 标成已结算。
+    const windowEnd = feedbackWindowEnd(sentAt, context, nowMs);
+    if (windowEnd === null) continue;
     const resp = await rest(
       `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
       + `&character_id=eq.${encodeURIComponent(characterId)}`
       + "&role=eq.user"
       + `&message_at=gt.${encodeURIComponent(new Date(sentAt).toISOString())}`
-      + `&message_at=lte.${encodeURIComponent(new Date(sentAt + 3 * 3600_000).toISOString())}`
+      + `&message_at=lte.${encodeURIComponent(new Date(windowEnd).toISOString())}`
       + "&select=message_at&limit=1",
     );
-    const replied = resp.ok && ((await resp.json()) as unknown[]).length > 0;
+    if (!resp.ok) continue; // 镜像暂时读不到，不等于用户没回应；下一轮重试。
+    const replied = ((await resp.json()) as unknown[]).length > 0;
+    seen.push(it.wakeId);
     const rec = fb[kind] || [0, 0];
     fb[kind] = [rec[0] + 1, rec[1] + (replied ? 1 : 0)];
     // 出自账本的那条真说出去了，才推进账本：话头了结、约定标「提过了」。App 的 settleFired 同一套规则
@@ -192,6 +244,38 @@ async function feedbackRoll(
     }
   }
   return { fb, fbSeen: seen.slice(-60), settled };
+}
+// 昨天的计划不会再走起念流程；今天统计时接上昨晚尚未结算的回音。
+// 昨天的累计账先并入今天的基线，已结算键一起带入，避免重算已记过的回复。
+async function feedbackWithPreviousDay(
+  rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, characterId: string,
+  planDate: string, items: PlanItem[], context: PlanContext, nowMs: number,
+): Promise<{ fb: FbBook; fbSeen: string[]; settled: string[] } | null> {
+  if (!context.userSleepStart) return feedbackRoll(rest, userId, characterId, items, context, nowMs);
+  const previous = new Date(planDate + "T12:00:00Z");
+  previous.setUTCDate(previous.getUTCDate() - 1);
+  const response = await rest(
+    `push_recheck_plans?user_id=eq.${encodeURIComponent(userId)}&character_id=eq.${encodeURIComponent(characterId)}`
+    + `&plan_date=eq.${previous.toISOString().slice(0, 10)}&select=items,context&limit=1`,
+  );
+  if (!response.ok) return null; // 基线读失败时保留待统计，下一轮再试。
+  const rows = await response.json() as { items?: PlanItem[]; context?: PlanContext }[];
+  const old = rows[0];
+  if (!old) return feedbackRoll(rest, userId, characterId, items, context, nowMs);
+  const fb: FbBook = {};
+  for (const book of [old.context?.fb || {}, context.fb || {}]) {
+    for (const [kind, counts] of Object.entries(book)) {
+      if (!Array.isArray(counts)) continue;
+      const current = fb[kind] || [0, 0];
+      fb[kind] = [Math.max(current[0], Number(counts[0]) || 0), Math.max(current[1], Number(counts[1]) || 0)];
+    }
+  }
+  const seen = [...new Set([...(old.context?.fbSeen || []), ...(context.fbSeen || [])])].slice(-60);
+  const combined = [...new Map([...(old.items || []), ...items].map(item => [item.wakeId, item])).values()];
+  const result = await feedbackRoll(rest, userId, characterId, combined, { ...context, fb, fbSeen: seen }, nowMs);
+  if (result) return result;
+  return JSON.stringify(fb) !== JSON.stringify(context.fb || {}) || JSON.stringify(seen) !== JSON.stringify(context.fbSeen || [])
+    ? { fb, fbSeen: seen, settled: [] } : null;
 }
 // ── 惦记账本（App index.html 同名函数的 tz 算术版；改一处要同步另一处）
 const THREAD_KIND: Record<string, string> = { topic: "话头", promise: "约定", date: "日子" };
@@ -1163,10 +1247,10 @@ Deno.serve(async (req: Request) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
   if (!supabaseUrl || !serviceKey) return new Response("missing env", { status: 200 });
 
-  const { userId, characterId, planDate, token } = await req.json().catch(() => ({})) as {
-    userId?: string; characterId?: string; planDate?: string; token?: string;
+  const { userId, characterId, planDate, token, action } = await req.json().catch(() => ({})) as {
+    userId?: string; characterId?: string; planDate?: string; token?: string; action?: string;
   };
-  if (!userId || !characterId || !planDate || !token) return new Response("bad request", { status: 400 });
+  if (!token || (action !== "capabilities" && (!userId || !characterId || !planDate))) return new Response("bad request", { status: 400 });
 
   const restHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" };
   const rest = (path: string, init?: RequestInit) => fetch(`${supabaseUrl}/rest/v1/${path}`, {
@@ -1181,9 +1265,11 @@ Deno.serve(async (req: Request) => {
   const cronSecret = secretRows[0]?.cron_secret || "";
   const payloadKey = secretRows[0]?.payload_key || "";
   if (!cronSecret || String(token) !== cronSecret) return new Response("forbidden", { status: 403 });
+  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1"] });
+  if (!userId || !characterId || !planDate) return new Response("bad request", { status: 400 });
   if (!payloadKey) return new Response("payload_key missing", { status: 200 });
 
-  const planFilter = `push_recheck_plans?user_id=eq.${encodeURIComponent(userId)}`
+  let planFilter = `push_recheck_plans?user_id=eq.${encodeURIComponent(userId)}`
     + `&character_id=eq.${encodeURIComponent(characterId)}`
     + `&plan_date=eq.${encodeURIComponent(planDate)}`;
 
@@ -1229,6 +1315,12 @@ Deno.serve(async (req: Request) => {
     else await work;
     return new Response("gen: started", { status: 200 });
   }
+  if (context.recheckEnabled === 0) {
+    await rest(planFilter, { method: "PATCH", body: JSON.stringify({ last_recheck_at: new Date().toISOString() }) }).catch(() => undefined);
+    return new Response("recheck disabled", { status: 200 });
+  }
+  // 关闭过程中，已在运行的旧复核不能把 context 写回去重新打开开关。
+  planFilter += "&or=(context->>recheckEnabled.is.null,context->>recheckEnabled.neq.0)";
   // 过了日子的行还会在 cron 的 36 小时窗口里待一天：没有待发时刻，但起念门可能还开着，
   // 每轮都可能白调一次模型，产出又全因为不是今天而被丢掉。
   const dayTz = context.day && typeof context.day === "object" ? Number((context.day as { tz?: number }).tz) : NaN;
@@ -1276,7 +1368,7 @@ Deno.serve(async (req: Request) => {
   const life = lifeRoll(context, nowMs);
   if (life) Object.assign(context, life.patch);
   // 回音账同样在门禁之前记，也不调模型
-  const fbRoll = await feedbackRoll(rest, userId, characterId, items, context, nowMs).catch(() => null);
+  const fbRoll = await feedbackWithPreviousDay(rest, userId, characterId, planDate, items, context, nowMs).catch(() => null);
   if (fbRoll) { context.fb = fbRoll.fb; context.fbSeen = fbRoll.fbSeen; }
   if (life || fbRoll) {
     if (life?.post) priorDecisions.push({ at: nowMs, kind: "post", note: `想发条朋友圈——${life.post.hint}`, by: "cloud" });
@@ -1677,6 +1769,11 @@ Deno.serve(async (req: Request) => {
     } finally {
       clearTimeout(timeout);
     }
+
+    // 模型请求期间可能已关闭复核；读不到仍启用的计划时，不再应用本轮结果。
+    const stillEnabled = await rest(`${planFilter}&select=plan_date&limit=1`).catch(() => undefined);
+    const activeRows = stillEnabled?.ok ? await stillEnabled.json().catch(() => []) : [];
+    if (!Array.isArray(activeRows) || activeRows.length === 0) return;
 
     // 门禁只放行了其中一组时，另一组的返回一律丢掉——提示词里已经要求写 []，
     // 但模型不一定听话，这里是硬拦。

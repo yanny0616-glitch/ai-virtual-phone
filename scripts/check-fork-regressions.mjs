@@ -5,10 +5,14 @@ import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {stripTypeScriptTypes} from 'node:module';
 import {webcrypto} from 'node:crypto';
+import {isIP} from 'node:net';
+import {Agent, MockAgent, fetch as undiciFetch} from 'undici';
+import {checkGuaNianBuild} from './build-gua-nian.mjs';
+checkGuaNianBuild();
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const results=[];
 const json=(v,status=200)=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json'}});
-const common={console,Date,Response,Request,Headers,URL,URLSearchParams,AbortController,TextEncoder,TextDecoder,Uint8Array,crypto:webcrypto,btoa,atob,setTimeout:()=>1,clearTimeout(){}};
+const common={console,Date,Response,Request,Headers,URL,URLSearchParams,AbortController,AbortSignal,TextEncoder,TextDecoder,Uint8Array,crypto:webcrypto,btoa,atob,setTimeout:()=>1,clearTimeout(){}};
 function moduleVM(file,extra={},expose=''){
   let src=stripTypeScriptTypes(fs.readFileSync(path.join(root,file),'utf8'));
   src=src.replace(/^import\s[\s\S]*?;\s*$/gm,'').replace(/^export\s*\{[^}]*\};?\s*$/gm,'').replace(/\bexport\s+(?=(?:async\s+)?function|const |class )/g,'');
@@ -19,8 +23,10 @@ function mirror(fetchImpl,extra={}){
   const kv=new Map([['chat_mirror_enabled_v1','1']]);
   const ctx=moduleVM('lib/chat-mirror-client.ts',{
     kvGet:k=>kv.get(k),kvSet:(k,v)=>kv.set(k,v),registerKvMigration(){},isPersonalPushCloudActive:()=>true,personalPushFetch:fetchImpl,
-    window:{setTimeout:()=>1,clearTimeout(){},setInterval:()=>1},loadChatSessions:()=>[],loadChatContacts:()=>[],loadChatMessages:()=>[],...extra,
-  },'globalThis.api={enqueue,flushQueue,flushChatMirrorNow,loadQueue,clearChatMirrorCloud};');
+    CHAT_MESSAGE_PUSHED_EVENT:'push',CHAT_MESSAGE_EDITED_EVENT:'edit',CHAT_MESSAGES_DELETED_EVENT:'delete',CHAT_RESPONSE_BATCH_REPLACED_EVENT:'replace',
+    window:{setTimeout:()=>1,clearTimeout(){},setInterval:()=>1},isChatStorageHydrated:()=>true,getChatMessagePreview:m=>m.content,
+    loadChatSessions:()=>[],loadChatContacts:()=>[],loadChatMessages:()=>[],...extra,
+  },'globalThis.api={enqueue,flushQueue,flushChatMirrorNow,loadQueue,clearChatMirrorCloud,installChatMirror,setChatMirrorEnabled};');
   ctx.api.seed=entries=>kv.set("chat_mirror_queue_v1",JSON.stringify(entries));
   return ctx.api;
 }
@@ -233,4 +239,435 @@ await test('Clearing during health probing prevents manual history backfill',asy
   await Promise.all([upload,clearing]);assert.equal(backfills,0);
   return {staleBackfillPrevented:true};
 });
+function outbound(lookup){
+  return moduleVM('lib/server/safe-outbound-fetch.ts',{
+    Agent,undiciFetch,lookup,isIP,
+    fetch:()=>{throw new Error('Must not mix the native fetch with npm Undici dispatchers');},
+  },'globalThis.api={safeOutboundFetch,secureLookup,directDispatcher};').api;
+}
+await test('Outbound fetch uses the matching dispatcher and still blocks private redirects',async()=>{
+  const a=outbound(async()=>[{address:'93.184.216.34',family:4}]);
+  const dispatcher=new MockAgent();dispatcher.disableNetConnect();
+  const pool=dispatcher.get('https://public.invalid');
+  pool.intercept({path:'/ok',method:'GET'}).reply(200,'works');
+  pool.intercept({path:'/redirect',method:'GET'}).reply(302,'',{headers:{location:'http://127.0.0.1/private'}});
+  try {
+    const response=await a.safeOutboundFetch('https://public.invalid/ok',{},dispatcher);
+    assert.equal(await response.text(),'works');
+    await assert.rejects(a.safeOutboundFetch('https://public.invalid/redirect',{},dispatcher),/不允许/);
+    dispatcher.assertNoPendingInterceptors();
+  } finally {await dispatcher.close();await a.directDispatcher.close();}
+  return {compatibleDispatcher:true,privateRedirectBlocked:true};
+});
+await test('Secure DNS supports all addresses and family filtering without permitting private IPs',async()=>{
+  let addresses=[{address:'93.184.216.34',family:4},{address:'2606:4700:4700::1111',family:6}];
+  const a=outbound(async()=>addresses);
+  const lookup=options=>new Promise((resolve,reject)=>a.secureLookup('public.invalid',options,(error,address,family)=>error?reject(error):resolve({address,family})));
+  try {
+    assert.deepEqual((await lookup({all:true})).address,addresses);
+    assert.deepEqual(await lookup({family:6}),{address:addresses[1].address,family:6});
+    assert.deepEqual((await lookup({all:true,family:4})).address,[addresses[0]]);
+    addresses=[addresses[0]];await assert.rejects(lookup({family:6}),/地址族/);
+    addresses.push({address:'127.0.0.1',family:4});await assert.rejects(lookup({all:true}),/内网/);
+  } finally {await a.directDispatcher.close();}
+  return {allAddresses:true,familyRespected:true,privateAddressBlocked:true};
+});
+function feedback(){
+  const source=fs.readFileSync(path.join(root,'supabase/functions/push-recheck/index.ts'),'utf8');
+  const fn=source.slice(source.indexOf('function feedbackWindowEnd('),source.indexOf('// ── 惦记账本'));
+  const ctx=vm.createContext(common);vm.runInContext(stripTypeScriptTypes(fn)+'\nglobalThis.roll=feedbackRoll;',ctx);return ctx.roll;
+}
+await test('Deferred feedback waits a full reply window and retries failed mirror reads',async()=>{
+  const roll=feedback(),hour=3600000,scheduled=Date.parse('2026-09-04T09:00:00Z'),sent=scheduled+3*hour-5*60000;
+  const items=[{act:true,wakeId:'w1',fireAt:scheduled,kind:'care'}],context={fb:{},fbSeen:[]};
+  let fail=false,mirrorReads=0;
+  const rest=async resource=>{
+    if(resource.startsWith('push_jobs'))return json([{trigger_key:'timedwake:w1',status:'done',result_note:'generated, pushed 1',updated_at:new Date(sent).toISOString()}]);
+    mirrorReads++;return fail?json({error:'unavailable'},503):json([{message_at:new Date(sent+15*60000).toISOString()}]);
+  };
+  Object.assign(context,await roll(rest,'owner','c',items,context,scheduled+3*hour));
+  assert.equal(mirrorReads,0);assert.equal(context.fbSeen.length,0);
+  fail=true;Object.assign(context,await roll(rest,'owner','c',items,context,sent+3*hour));
+  assert.equal(context.fbSeen.length,0);
+  fail=false;Object.assign(context,await roll(rest,'owner','c',items,context,sent+3*hour+60000));
+  assert.deepEqual(Array.from(context.fb.care),[1,1]);
+  assert.equal(await roll(rest,'owner','c',items,context,sent+4*hour),null);
+  return {fullWindowObserved:true,failedReadRetried:true,countedOnce:true};
+});
+function jobGateway(jobs,{fail=false}={}){
+  return gateway(async(url)=>{
+    const u=new URL(url);
+    if(!u.pathname.endsWith('/push_jobs'))return json([{payload_key:null}]);
+    if(fail)return json({error:'unavailable'},503);
+    let rows=jobs;
+    const filter=u.searchParams.get('trigger_key');
+    if(filter){const keys=JSON.parse('['+filter.slice(4,-1)+']');rows=rows.filter(row=>keys.includes(row.trigger_key));}
+    return json([...rows].sort((a,b)=>b.execute_at.localeCompare(a.execute_at)).slice(0,Number(u.searchParams.get('limit'))));
+  });
+}
+const jobRequest=params=>new Request('https://example.invalid?'+new URLSearchParams({action:'jobs',...params}),{headers:{'x-ai-phone-service-key':'test'}});
+await test('Exact job lookup validates keys and never reports database errors as empty success',async()=>{
+  const handler=jobGateway([]);
+  for(const keys of [[],Array(21).fill('timedwake:a'),['bad"filter'],[null]]){
+    assert.equal((await handler(jobRequest({triggerKeys:JSON.stringify(keys)}))).status,400);
+  }
+  assert.equal((await handler(jobRequest({triggerKeys:'not-json'}))).status,400);
+  assert.equal((await jobGateway([],{fail:true})(jobRequest({triggerKeys:'["timedwake:a"]'}))).status,500);
+  const response=await handler(jobRequest({triggerKeys:'["timedwake:a"]'}));
+  assert.deepEqual((await response.json()).queriedTriggerKeys,['timedwake:a']);return {validated:true,errorsRetriable:true};
+});
+function settlement(cloudFetch){
+  const now=Date.parse('2026-09-04T16:00:00Z');class Clock extends Date {static now(){return now;}}
+  const source=fs.readFileSync(path.join(root,'custom-apps/gua-nian/index.html'),'utf8');
+  const fn=source.slice(source.indexOf('  async function settleFired(cx)'),source.indexOf('  // 了结或删掉一条惦记时'));
+  let current;
+  const ctx=vm.createContext({...common,Date:Clock,S:{settings:{threadsOn:true}},cloudCfg:()=>true,cloudFetch,
+    saveThreads:async(cx,rows)=>{cx.threads=rows;},upsert:async(coll,match,patch)=>({...current.plan,...patch}),todayStr:()=> '2026-09-04',log:async()=>{}});
+  vm.runInContext(fn+'\nglobalThis.settle=settleFired;',ctx);
+  return async(cx)=>{current=cx;await ctx.settle(cx);};
+}
+await test('Settlement finds older successful jobs behind more than 20 future appointments',async()=>{
+  const scheduled=Date.parse('2026-09-04T09:00:00Z'),cx={character:{id:'c'},threads:[],plan:{items:[]}};
+  const jobs=Array.from({length:25},(_,i)=>({trigger_key:'timedwake:future'+i,execute_at:'2026-09-05T09:00:00Z',status:'pending'}));
+  for(let i=0;i<25;i++){
+    cx.threads.push({id:'t'+i,kind:'topic',text:'sent topic '+i,done:false});
+    cx.plan.items.push({act:true,from:'t'+i,wakeId:'sent'+i,fireAt:scheduled});
+    jobs.push({trigger_key:'timedwake:sent'+i,execute_at:new Date(scheduled).toISOString(),status:'done',result_note:'generated, pushed 1'});
+  }
+  const handler=jobGateway(jobs),batches=[];
+  const run=settlement(async(action,init,params)=>{
+    batches.push(JSON.parse(params.triggerKeys).length);
+    return (await handler(jobRequest(params))).json();
+  });
+  await run(cx);assert.deepEqual(batches,[20,5]);assert.ok(cx.threads.every(t=>t.done));assert.ok(cx.plan.items.every(w=>w.thDone));
+  return {settled:25,batches};
+});
+await test('Missing jobs and old gateways leave settlement available for retry',async()=>{
+  for(const legacy of [false,true]){
+    const cx={character:{id:'c'},threads:[{id:'t',kind:'topic',text:'waiting',done:false}],plan:{items:[{act:true,from:'t',wakeId:'w',fireAt:Date.parse('2026-09-04T09:00:00Z')}]}};
+    await settlement(async()=>({jobs:[],...(legacy?{}:{queriedTriggerKeys:['timedwake:w']})}))(cx);
+    assert.equal(cx.plan.items[0].thDone,undefined);assert.equal(cx.threads[0].done,false);
+  }
+  return {missingRetried:true,oldGatewayDetected:true};
+});
+await test('Feedback treats silence as neutral and caps positive reinforcement',async()=>{
+  const source=fs.readFileSync(path.join(root,'supabase/functions/push-recheck/index.ts'),'utf8');
+  const ctx=vm.createContext(common);
+  vm.runInContext(stripTypeScriptTypes(source.slice(source.indexOf('// 沉默无法证明不喜欢'),source.indexOf('function impulseValue(')))+'\nglobalThis.policy={fbMod,fbLine};',ctx);
+  const {fbMod,fbLine}=ctx.policy;
+  for(const sent of [0,2,3,50,1000])assert.equal(fbMod({quiet:[sent,0]},'quiet'),1);
+  assert.equal(fbMod({quiet:[3,3]},'quiet'),1.04);
+  assert.equal(fbMod({quiet:[100,3]},'quiet'),fbMod({quiet:[3,3]},'quiet'));
+  assert.equal(fbMod({quiet:[100,100]},'quiet'),1.2);
+  assert.equal(fbMod({quiet:[100,2]},'quiet'),1);
+  assert.match(fbLine({quiet:[100,0]},'quiet'),/未回复不代表不喜欢/);
+  assert.ok(!fbLine({quiet:[100,0]},'quiet').includes('不太接这种话'));
+  assert.match(fbLine({quiet:[100,3]},'quiet'),/轻微的正向参考/);
+  const diag=fs.readFileSync(path.join(root,'custom-apps/gua-nian/src/ui/diagnostics.js'),'utf8');
+  const mod=diag.match(/const mod = ([^\n]+);/)[1];
+  const local=vm.runInNewContext('('+mod+')');
+  for(const pair of [[0,0],[2,2],[3,3],[100,3],[100,100],[2,5]])assert.equal(local(...pair),fbMod({quiet:pair},'quiet'));
+  const roll=feedback(),sent=Date.parse('2026-09-04T09:00:00Z');
+  const context={fb:{quiet:[3,3]},fbSeen:[]};
+  const result=await roll(async resource=>resource.startsWith('push_jobs')
+    ? json([{trigger_key:'timedwake:w',status:'done',result_note:'generated, pushed 1',updated_at:new Date(sent).toISOString()}]) : json([]),
+    'owner','c',[{act:true,wakeId:'w',fireAt:sent,kind:'quiet'}],context,sent+3*3600000);
+  assert.equal(result.fb.quiet[0],4);assert.equal(result.fb.quiet[1],3);
+  assert.equal(fbMod(result.fb,'quiet'),fbMod(context.fb,'quiet'));
+  return {silenceNeutral:true,historicalPenaltiesRemoved:true,localCloudConsistent:true,maxBoost:1.2};
+});
+await test('Optional user sleep pauses feedback time across midnight and DST',async()=>{
+  const source=fs.readFileSync(path.join(root,'supabase/functions/push-recheck/index.ts'),'utf8');
+  const ctx=vm.createContext(common);
+  vm.runInContext(stripTypeScriptTypes(source.slice(source.indexOf('function feedbackWindowEnd('),source.indexOf('// 记回音账：')))+'\nglobalThis.end=feedbackWindowEnd;',ctx);
+  const end=ctx.end,at=Date.parse,hour=3600000;
+  const sleep={userSleepOn:1,userSleepStart:'23:30',userSleepEnd:'08:00',userSleepTimeZone:'Asia/Shanghai',userSleepTz:480};
+  const sent=at('2026-09-04T14:30:00Z'),deadline=at('2026-09-05T02:00:00Z');
+  assert.equal(end(sent,sleep,deadline-1),null);
+  assert.equal(end(sent,sleep,deadline),deadline);
+  assert.equal(end(sent,sleep,deadline+hour),deadline);
+  assert.equal(end(sent,{...sleep,userSleepOn:0},sent+3*hour),sent+3*hour);
+  assert.equal(end(sent,{},sent+3*hour),sent+3*hour);
+  for(const patch of [{userSleepStart:'99:99'},{userSleepEnd:'23:30'},{userSleepStart:''}])
+    assert.equal(end(sent,{...sleep,...patch},sent+3*hour),sent+3*hour);
+  assert.equal(end(at('2026-09-04T18:00:00Z'),sleep,at('2026-09-05T03:00:00Z')),at('2026-09-05T03:00:00Z'));
+  assert.equal(end(sent,{...sleep,userSleepTimeZone:'invalid/zone'},deadline),deadline);
+  const daytime={...sleep,userSleepStart:'10:00',userSleepEnd:'12:00',userSleepTimeZone:'UTC',userSleepTz:0};
+  assert.equal(end(at('2026-09-04T09:00:00Z'),daytime,at('2026-09-04T14:00:00Z')),at('2026-09-04T14:00:00Z'));
+  const ny={...sleep,userSleepStart:'01:00',userSleepEnd:'04:00',userSleepTimeZone:'America/New_York'};
+  for(const [from,to] of [['2026-03-08T05:30:00Z','2026-03-08T10:30:00Z'],['2026-11-01T04:30:00Z','2026-11-01T11:30:00Z']]){
+    assert.equal(end(at(from),ny,at(to)-1),null);assert.equal(end(at(from),ny,at(to)),at(to));
+  }
+  const fractional=at('2026-09-04T14:30:30.125Z');
+  assert.equal(end(fractional,sleep,deadline+30125),deadline+30125);
+  return {defaultOff:true,overnight:true,sentDuringSleep:true,DST:true,millisecondsPreserved:true};
+});
+await test('Feedback counts next-morning replies only after the paused window completes',async()=>{
+  const roll=feedback(),sent=Date.parse('2026-09-04T14:30:00Z'),deadline=Date.parse('2026-09-05T02:00:00Z');
+  const context={userSleepOn:1,userSleepStart:'23:30',userSleepEnd:'08:00',userSleepTimeZone:'Asia/Shanghai',fb:{},fbSeen:[]};
+  const items=[{act:true,wakeId:'sleep',fireAt:sent,kind:'quiet'}];let mirrorReads=0,fail=false;
+  const rest=async resource=>{
+    if(resource.startsWith('push_jobs'))return json([{trigger_key:'timedwake:sleep',status:'done',result_note:'generated, pushed 1',updated_at:new Date(sent).toISOString()}]);
+    mirrorReads++;assert.ok(resource.includes(encodeURIComponent(new Date(deadline).toISOString())));
+    return fail?json({},503):json([{message_at:'2026-09-05T01:00:00Z'}]);
+  };
+  Object.assign(context,await roll(rest,'owner','c',items,context,sent+3*3600000));
+  assert.equal(mirrorReads,0);assert.equal(context.fbSeen.length,0);
+  fail=true;Object.assign(context,await roll(rest,'owner','c',items,context,deadline));assert.equal(context.fbSeen.length,0);
+  fail=false;Object.assign(context,await roll(rest,'owner','c',items,context,deadline+60000));
+  assert.deepEqual(Array.from(context.fb.quiet),[1,1]);assert.equal(context.fbSeen.length,1);
+  assert.equal(await roll(rest,'owner','c',items,context,deadline+120000),null);
+  return {morningReplyCounted:true,failedReadRetried:true,countedOnce:true};
+});
+await test('Gateway preserves optional user sleep settings alongside unrelated plan context',async()=>{
+  let saved;
+  const handler=gateway(async(url,init)=>{
+    if(url.includes('/push_recheck_plans?on_conflict=')){saved=JSON.parse(init.body)[0];return json([]);}
+    return json([]);
+  });
+  for(const enabled of [0,1]){
+    const response=await handler(new Request('https://example.invalid?action=recheck-plan',{method:'POST',headers:{'x-ai-phone-service-key':'test'},body:JSON.stringify({
+      characterId:'c',planDate:'2026-09-04',items:[],context:{quota:4,quietStart:'22:00',quietEnd:'09:00',
+        userSleepOn:enabled,userSleepStart:'01:30',userSleepEnd:'09:45',userSleepTimeZone:'Asia/Shanghai',userSleepTz:480}
+    })}));
+    assert.equal(response.status,200);
+    assert.deepEqual((await response.json()).acceptedUserSleep,{enabled,start:'01:30',end:'09:45',timeZone:'Asia/Shanghai',tz:480});
+    assert.equal(saved.context.userSleepOn,enabled);assert.equal(saved.context.userSleepStart,'01:30');assert.equal(saved.context.userSleepEnd,'09:45');
+    assert.equal(saved.context.userSleepTimeZone,'Asia/Shanghai');assert.equal(saved.context.userSleepTz,480);
+    assert.equal(saved.context.quota,4);assert.equal(saved.context.quietStart,'22:00');
+  }
+  return {enabledAndDisabledRoundTrip:true,roleScheduleUnchanged:true};
+});
+await test('Today resumes last-night feedback without rerunning old impulses or recounting replies',async()=>{
+  const source=fs.readFileSync(path.join(root,'supabase/functions/push-recheck/index.ts'),'utf8');
+  const ctx=vm.createContext(common);
+  vm.runInContext(stripTypeScriptTypes(source.slice(source.indexOf('function feedbackWindowEnd('),source.indexOf('// ── 惦记账本')))+'\nglobalThis.resume=feedbackWithPreviousDay;',ctx);
+  const sent=Date.parse('2026-09-04T14:30:00Z'),deadline=Date.parse('2026-09-05T02:00:00Z');
+  const context={userSleepOn:1,userSleepStart:'23:30',userSleepEnd:'08:00',userSleepTimeZone:'Asia/Shanghai',fb:{},fbSeen:[]};
+  let baselineFails=false;
+  const rest=async resource=>{
+    if(resource.startsWith('push_recheck_plans')){
+      assert.ok(resource.includes('plan_date=eq.2026-09-04'));
+      return baselineFails?json({},503):json([{items:[{act:true,wakeId:'night',fireAt:sent,kind:'quiet'},{act:true,wakeId:'old',fireAt:sent-86400000,kind:'quiet'}],context:{fb:{quiet:[4,2]},fbSeen:['old']}}]);
+    }
+    if(resource.startsWith('push_jobs')){assert.ok(!resource.includes('timedwake%3Aold'));return json([{trigger_key:'timedwake:night',status:'done',result_note:'generated',updated_at:new Date(sent).toISOString()}]);}
+    return json([{message_at:new Date(deadline-60000).toISOString()}]);
+  };
+  Object.assign(context,await ctx.resume(rest,'owner','c','2026-09-05',[],context,deadline-1));
+  assert.deepEqual(Array.from(context.fb.quiet),[4,2]);assert.ok(!context.fbSeen.includes('night'));
+  baselineFails=true;assert.equal(await ctx.resume(rest,'owner','c','2026-09-05',[],context,deadline),null);
+  baselineFails=false;Object.assign(context,await ctx.resume(rest,'owner','c','2026-09-05',[],context,deadline));
+  assert.deepEqual(Array.from(context.fb.quiet),[5,3]);assert.ok(context.fbSeen.includes('night'));
+  assert.equal(await ctx.resume(rest,'owner','c','2026-09-05',[],context,deadline+60000),null);
+  assert.ok(source.includes('const fbRoll = await feedbackWithPreviousDay('));
+  return {priorDayResumed:true,baselinePreserved:true,noDoubleCounting:true};
+});
+await test('Gateway confirms worker support before atomically toggling current and future plans',async()=>{
+  const rows=[
+    {character_id:'c',plan_date:'2026-09-04',context:{owner:'mine',fbSeen:['old'],genKit:{date:'tomorrow'}},items:[{wakeId:'keep'}]},
+    {character_id:'c',plan_date:'2026-09-05',context:{owner:'mine',genKit:{date:'tomorrow'}}},
+    {character_id:'c',plan_date:'2026-09-03',context:{owner:'other'}},
+    {character_id:'other',plan_date:'2026-09-04',context:{owner:'other'}},
+  ];
+  let oldWorker=true, missingRPC=false, rpcCalls=0;
+  const handler=gateway(async(url,init)=>{
+    if(url.includes('push_server_config'))return json([{cron_secret:'cron-test'}]);
+    if(url.includes('/functions/v1/push-recheck'))return oldWorker ? new Response('bad request',{status:400}) : json({ok:true,capabilities:['recheck-control-v1','user-sleep-feedback-v1']});
+    if(url.includes('/rpc/push_recheck_set_enabled')){
+      rpcCalls++; if(missingRPC)return json({},404);
+      const body=JSON.parse(init.body);
+      const targets=rows.filter(row=>row.character_id===body.p_character_id&&row.plan_date>=body.p_from_date);
+      if(targets.some(row=>row.context.owner!==body.p_owner))return json(-1);
+      for(const row of targets)row.context.recheckEnabled=body.p_enabled?1:0;
+      return json(targets.length);
+    }
+    const query=new URL(url).searchParams;
+    assert.equal(query.get('character_id'),'eq.c');assert.equal(query.get('plan_date'),'gte.2026-09-04');
+    return json(rows.filter(row=>row.character_id==='c'&&row.plan_date>='2026-09-04'));
+  });
+  const send=(enabled)=>handler(new Request('https://example.invalid?action=recheck-control',{method:'POST',headers:{'x-ai-phone-service-key':'test'},body:JSON.stringify({characterId:'c',planDate:'2026-09-04',enabled,owner:'mine'})}));
+  assert.equal((await send(false)).status,409);assert.equal(rpcCalls,0);
+  oldWorker=false;missingRPC=true;
+  const missing=await send(false);assert.equal(missing.status,409);assert.match((await missing.json()).error,/schema/);
+  missingRPC=false;
+  for(const enabled of [false,true]){
+    const response=await send(enabled);assert.equal(response.status,200);assert.equal((await response.json()).recheckEnabled,enabled);
+    assert.equal(rows[0].context.recheckEnabled,enabled?1:0);assert.equal(rows[1].context.recheckEnabled,enabled?1:0);
+    assert.deepEqual(rows[0].items,[{wakeId:'keep'}]);assert.deepEqual(rows[0].context.fbSeen,['old']);
+    assert.deepEqual(rows[1].context.genKit,{date:'tomorrow'});assert.equal(rows[2].context.recheckEnabled,undefined);assert.equal(rows[3].context.recheckEnabled,undefined);
+  }
+  const before=rpcCalls;rows[1].context.owner='other';assert.equal((await send(false)).status,409);assert.equal(rpcCalls,before);
+  return {oldWorkerRejected:true,schemaUpgradeRequired:true,currentAndFutureConfirmed:true,unrelatedDataPreserved:true};
+});
+await test('Gateway keeps cloud feedback keys when a stale 60-entry list is uploaded',async()=>{
+  let saved;
+  const current=Array.from({length:60},(_,i)=>'w'+(i+1));
+  const handler=gateway(async(url,init)=>{
+    if(url.includes('on_conflict=')){saved=JSON.parse(init.body)[0];return json([]);}
+    return json([{context:{fbSeen:current,fb:{quiet:[61,5]}}}]);
+  });
+  const response=await handler(new Request('https://example.invalid?action=recheck-plan',{method:'POST',headers:{'x-ai-phone-service-key':'test'},body:JSON.stringify({
+    characterId:'c',planDate:'2026-09-04',items:[],context:{fbSeen:Array.from({length:60},(_,i)=>'w'+i),fb:{quiet:[60,4]}}
+  })}));
+  assert.equal(response.status,200);assert.deepEqual(saved.context.fbSeen,current);assert.deepEqual(saved.context.fb.quiet,[61,5]);
+  return {cloudKeyPreservedAtCapacity:true};
+});
+await test('Worker capability probe is authenticated and disabled plans skip all feedback and model work',async()=>{
+  let handler;const calls=[];
+  let context={recheckEnabled:0,day:{tz:0},fbSeen:['keep']};
+  moduleVM('supabase/functions/push-recheck/index.ts',{
+    Deno:{env:{get:k=>({SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'test'})[k]},serve:f=>handler=f},
+    fetch:async(url,init)=>{
+      calls.push({url,init});
+      if(url.includes('push_server_config'))return json([{cron_secret:'cron-test',payload_key:'test'}]);
+      assert.ok(url.includes('push_recheck_plans'));
+      if(init?.method==='PATCH'){
+        assert.deepEqual(Object.keys(JSON.parse(init.body)),['last_recheck_at']);return json([]);
+      }
+      return json([{context,items:[{wakeId:'keep',act:true,fireAt:Date.now()+3600000}]}]);
+    },
+  });
+  const send=body=>handler(new Request('https://example.invalid',{method:'POST',body:JSON.stringify(body)}));
+  assert.equal((await send({action:'capabilities',token:'wrong'})).status,403);
+  const cap=await send({action:'capabilities',token:'cron-test'});
+  assert.deepEqual((await cap.json()).capabilities,['user-sleep-feedback-v1','recheck-control-v1']);
+  calls.length=0;
+  const disabled=await send({token:'cron-test',userId:'owner',characterId:'c',planDate:'2026-09-04'});
+  assert.equal(await disabled.text(),'recheck disabled');assert.equal(calls.length,3);
+  context={recheckEnabled:0,genKit:{tz:0,autoGenAt:'07:30'}};
+  const future=await send({token:'cron-test',userId:'owner',characterId:'c',planDate:'2099-01-01'});
+  assert.equal(await future.text(),'gen: not that day yet'); // 关闭复核不取消独立的自动生成。
+  return {probeAuthenticated:true,noFeedbackOrModelWhenDisabled:true,generationRemainsIndependent:true};
+});
+
+await test('Mirror timeouts cover health, upload response bodies and clearing, retaining retriable records',async()=>{
+  for(const phase of ['health','post','body','delete']){
+    const started=deferred();let timeout,aborted=false,stalled=true,requests=0;
+    const a=mirror(async(action,init)=>{
+      requests++;
+      const target=phase==='health'?action==='health':phase==='delete'?init.method==='DELETE':init.method==='POST';
+      if(stalled&&target){
+        init.signal.addEventListener('abort',()=>aborted=true);
+        started.resolve();
+        if(phase==='body')return {ok:true,status:200,json:()=>new Promise(()=>{})};
+        return new Promise(()=>{});
+      }
+      return json({ok:true,capabilities:['chat-mirror']});
+    },{setTimeout:fn=>{timeout=fn;return 1;},clearTimeout(){}});
+    a.enqueue({id:'keep'});
+    const run=phase==='delete'?a.clearChatMirrorCloud():a.flushChatMirrorNow();
+    const rejected=assert.rejects(run,phase==='health'?/无法确认/:/15 秒/);
+    await started.promise;timeout();await rejected;
+    assert.ok(aborted);assert.equal(a.loadQueue().length,1);
+    const before=requests;stalled=false;
+    if(phase==='delete')await a.clearChatMirrorCloud();else await a.flushChatMirrorNow();
+    assert.ok(requests>before);assert.equal(a.loadQueue().length,0);
+  }
+  return {phases:4,queuePreserved:true,retryStartsNewRequest:true};
+});
+function mirrorEvents(){
+  const listeners=new Map(),uploaded=[];
+  const state={active:true,hydrated:true,local:[]};
+  const a=mirror(async(action,init)=>{
+    if(action==='health')return json({ok:true,capabilities:['chat-mirror']});
+    if(init.method==='POST')uploaded.push(...JSON.parse(init.body).entries);
+    return json({ok:true});
+  },{
+    window:{addEventListener:(name,fn)=>listeners.set(name,fn),setTimeout:()=>1,clearTimeout(){},setInterval:()=>1},
+    isPersonalPushCloudActive:()=>state.active,isChatStorageHydrated:()=>state.hydrated,
+    loadChatSessions:()=>[{id:'s',contactId:'c'}],loadChatMessages:(_session,limit)=>limit?state.local.slice(-limit):state.local,
+  });
+  a.installChatMirror();
+  const emit=(name,detail)=>listeners.get(name)({detail});
+  const msg=(id,content='old')=>({id,sessionId:'s',role:'assistant',content,createdAt:'2026-09-05T10:00:00Z'});
+  return {a,state,uploaded,emit,msg};
+}
+await test('Editing and deleting while mirror is off reconcile after reenable without uploading while off',async()=>{
+  const {a,state,uploaded,emit,msg}=mirrorEvents();
+  state.local=[msg('edit'),msg('delete')];
+  for(const message of state.local)emit('push',{message});
+  a.setChatMirrorEnabled(false);
+  const deleted=state.local[1];state.local=[msg('edit','latest')];
+  emit('edit',{message:state.local[0]});emit('delete',{messages:[deleted]});
+  await a.flushQueue();assert.equal(uploaded.length,0);
+  a.setChatMirrorEnabled(true);await a.flushChatMirrorNow();
+  assert.equal(uploaded.find(row=>row.id==='edit').content,'latest');
+  assert.equal(uploaded.find(row=>row.id==='delete').deleted,true);assert.equal(a.loadQueue().length,0);
+  return {offSendsNothing:true,editAndDeleteReconciled:true};
+});
+await test('Regenerating an already uploaded response while off deletes old cloud IDs and uploads the new batch',async()=>{
+  const {a,state,uploaded,emit,msg}=mirrorEvents();
+  state.local=[msg('old')];emit('push',{message:state.local[0]});await a.flushChatMirrorNow();
+  uploaded.length=0;a.setChatMirrorEnabled(false);
+  state.local=[msg('new','regenerated')];emit('replace',{messages:state.local,replacedIds:['old'],sessionId:'s'});
+  await a.flushQueue();assert.equal(uploaded.length,0);
+  a.setChatMirrorEnabled(true);await a.flushChatMirrorNow();
+  assert.equal(uploaded.find(row=>row.id==='old').deleted,true);
+  assert.equal(uploaded.find(row=>row.id==='old').characterId,'c');
+  assert.equal(uploaded.find(row=>row.id==='new').content,'regenerated');
+  return {oldCloudMessageRemoved:true,newBatchUploaded:true};
+});
+await test('Legacy pending entries reconcile with local originals even beyond recent history',async()=>{
+  const {a,state,uploaded,msg}=mirrorEvents();
+  a.setChatMirrorEnabled(false);
+  a.seed([msg('edit'),msg('missing')]);
+  state.local=[msg('edit','current'),...Array.from({length:220},(_,i)=>msg('recent'+i))];
+  a.setChatMirrorEnabled(true);await a.flushChatMirrorNow();
+  assert.equal(uploaded.find(row=>row.id==='edit').content,'current');
+  assert.equal(uploaded.find(row=>row.id==='missing').deleted,true);
+  return {staleQueueCorrected:true,missingOriginalDeleted:true};
+});
+await test('A disabled personal cloud retains new events, and unhydrated storage never fabricates deletions',async()=>{
+  const {a,state,uploaded,emit,msg}=mirrorEvents();
+  state.active=false;state.local=[msg('keep')];emit('push',{message:state.local[0]});
+  assert.equal(a.loadQueue().length,1);await a.flushQueue();assert.equal(uploaded.length,0);
+  state.active=true;state.hydrated=false;state.local=[];
+  a.setChatMirrorEnabled(true);await assert.rejects(a.flushChatMirrorNow(),/尚未加载/);
+  assert.equal(a.loadQueue()[0].deleted,undefined);assert.equal(uploaded.length,0);
+  state.hydrated=true;state.local=[msg('keep')];await a.flushChatMirrorNow();
+  assert.equal(uploaded[0].deleted,undefined);
+  return {inactiveCloudQueuesEvents:true,unloadedIsNotDeleted:true};
+});
+await test('Historical backfill never evicts pending delete operations from a full queue',async()=>{
+  const {a,state,msg}=mirrorEvents();
+  a.setChatMirrorEnabled(false);
+  a.seed(Array.from({length:5000},(_,i)=>({...msg('gone'+i),deleted:true,content:''})));
+  state.local=[msg('recent')];a.setChatMirrorEnabled(true);
+  assert.equal(a.loadQueue().length,5000);assert.equal(a.loadQueue()[0].id,'gone0');
+  assert.ok(a.loadQueue().every(row=>row.deleted));
+  return {pendingDeletesProtected:true};
+});
+
+
+await test('A late success after timeout cannot acknowledge a newer queued edit',async()=>{
+  const started=deferred(),late=deferred();let timeout,posts=0;
+  const a=mirror(async(action)=>{
+    if(action==='health')return json({ok:true,capabilities:['chat-mirror']});
+    if(++posts===1){started.resolve();return late.promise;}
+    return json({ok:true});
+  },{setTimeout:fn=>{timeout=fn;return 1;},clearTimeout(){}});
+  a.enqueue({id:'edit',content:'old'});
+  const run=a.flushChatMirrorNow();const rejected=assert.rejects(run,/15 秒/);
+  await started.promise;timeout();await rejected;
+  a.enqueue({id:'edit',content:'new'});late.resolve(json({ok:true}));
+  await Promise.resolve();await Promise.resolve();
+  assert.equal(a.loadQueue()[0].content,'new');
+  await a.flushChatMirrorNow();assert.equal(a.loadQueue().length,0);assert.equal(posts,2);
+  return {lateAckIgnored:true,newEditRetried:true};
+});
+await test('Never-enabled mirror does not start tracking messages or contacting the cloud',async()=>{
+  const kv=new Map(),listeners=new Map();let requests=0;
+  const a=mirror(async()=>{requests++;return json({ok:true});},{
+    kvGet:k=>kv.get(k),kvSet:(k,v)=>kv.set(k,v),
+    window:{addEventListener:(name,fn)=>listeners.set(name,fn),setTimeout:()=>1,clearTimeout(){},setInterval:()=>1},
+  });
+  a.installChatMirror();
+  const message={id:'m',sessionId:'s',role:'user',content:'local',createdAt:new Date().toISOString()};
+  for(const name of ['push','edit'])listeners.get(name)({detail:{message}});
+  listeners.get('delete')({detail:{messages:[message]}});
+  listeners.get('replace')({detail:{messages:[message],replacedIds:['old'],sessionId:'s'}});
+  await a.flushQueue();assert.equal(a.loadQueue().length,0);assert.equal(requests,0);
+  return {optInPreserved:true};
+});
+
 console.log(`Passed ${results.length} fork regression checks.`);

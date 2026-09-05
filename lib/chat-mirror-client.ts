@@ -7,6 +7,7 @@ import {
     CHAT_MESSAGES_DELETED_EVENT,
     CHAT_RESPONSE_BATCH_REPLACED_EVENT,
     getChatMessagePreview,
+    isChatStorageHydrated,
     loadChatContacts,
     loadChatMessages,
     loadChatSessions,
@@ -17,11 +18,13 @@ import { isPersonalPushCloudActive, personalPushFetch } from "./personal-push-cl
 
 const MIRROR_ENABLED_KEY = "chat_mirror_enabled_v1";
 const MIRROR_QUEUE_KEY = "chat_mirror_queue_v1";
+const MIRROR_TRACKING_KEY = "chat_mirror_tracking_v1";
 const QUEUE_CAP = 5_000;
 const FLUSH_BATCH = 50;
 const FLUSH_DEBOUNCE_MS = 2_500;
 const RETRY_INTERVAL_MS = 60_000;
 const CONTENT_MAX = 4_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 // 回填范围：开开关那次、以及队列为空时手动点「立即上传」抓的量。
 // 上限 = SESSIONS × PER_SESSION，要留在 QUEUE_CAP 以内，否则前面的会被挤掉。
 const BACKFILL_SESSIONS = 20;
@@ -29,6 +32,7 @@ const BACKFILL_PER_SESSION = 200;
 
 registerKvMigration(MIRROR_ENABLED_KEY);
 registerKvMigration(MIRROR_QUEUE_KEY);
+registerKvMigration(MIRROR_TRACKING_KEY);
 
 export type ChatMirrorEntry = {
     id: string;
@@ -49,6 +53,7 @@ let flushPromise: Promise<{ sent: number; queued: number }> | null = null;
 let clearPromise: Promise<void> | null = null;
 let flushTimer: number | null = null;
 let retryTimer: number | null = null;
+let queueNeedsRefresh = false;
 // null=未探测；旧版个人云函数没有 chat-mirror 动作，探测失败时静默停发（不丢队列）。
 let mirrorCapable: boolean | null = null;
 let capabilityCheckedAt = 0;
@@ -135,12 +140,38 @@ function toMirrorEntry(msg: ChatMessage, deleted?: true): ChatMirrorEntry | null
     };
 }
 
+/** 包含响应正文读取的超时；超时不确认队列，后续请求可重新发起。 */
+async function mirrorRequest(action: string, init: RequestInit = {}): Promise<{
+    response: Response;
+    data: { ok?: boolean; error?: string; capabilities?: string[] } | null;
+}> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+            reject(new Error("聊天镜像请求超过 15 秒，请检查网络后重试；待传记录已保留。"));
+            controller.abort();
+        }, REQUEST_TIMEOUT_MS);
+    });
+    try {
+        return await Promise.race([
+            (async () => {
+                const response = await personalPushFetch(action, { ...init, signal: controller.signal });
+                const data = await response.json().catch(() => null);
+                return { response, data };
+            })(),
+            timeout,
+        ]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
+
 async function checkMirrorCapability(): Promise<boolean> {
     if (mirrorCapable !== null && Date.now() - capabilityCheckedAt < CAPABILITY_TTL_MS) return mirrorCapable;
     mirrorCapable = null;
     try {
-        const res = await personalPushFetch("health", { method: "GET" });
-        const data = await res.json().catch(() => null) as { ok?: boolean; capabilities?: string[] } | null;
+        const { response: res, data } = await mirrorRequest("health", { method: "GET" });
         // 临时 HTTP 错误、网关错误页和无效 JSON 都不是“不支持”的证据。
         if (!res.ok || data?.ok !== true || !Array.isArray(data.capabilities)) return false;
         mirrorCapable = data.capabilities.includes("chat-mirror");
@@ -158,6 +189,8 @@ function uploadQueue(manual = false): Promise<{ sent: number; queued: number }> 
     if (flushPromise) return flushPromise;
     const run = async () => {
         if (!isChatMirrorEnabled()) throw new Error("聊天镜像开关未开启。");
+        if (!isChatStorageHydrated()) throw new Error("本地聊天记录尚未加载完成，请加载完成后重试镜像上传。");
+        if (queueNeedsRefresh) refreshQueuedMessages();
         if (!isPersonalPushCloudActive()) throw new Error("个人云离线推送未部署或未激活。");
         if (manual) mirrorCapable = null;
         if (!await checkMirrorCapability()) throw new Error("无法确认聊天镜像能力，请检查网络或重新部署离线推送。");
@@ -169,11 +202,10 @@ function uploadQueue(manual = false): Promise<{ sent: number; queued: number }> 
             if (clearPromise || !isChatMirrorEnabled() || !isPersonalPushCloudActive()) break;
             const batch = loadQueue().slice(0, FLUSH_BATCH);
             if (batch.length === 0) break;
-            const res = await personalPushFetch("chat-mirror", {
+            const { response: res, data } = await mirrorRequest("chat-mirror", {
                 method: "POST",
                 body: JSON.stringify({ entries: batch }),
             });
-            const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
             if (!res.ok || !data?.ok) throw new Error(data?.error || `上传失败：HTTP ${res.status}（已传 ${sent} 条）`);
             const acknowledged = new Set(batch.map(entry => entry.queueId));
             saveQueue(loadQueue().filter(entry => !acknowledged.has(entry.queueId)));
@@ -202,20 +234,47 @@ function enqueue(entry: ChatMirrorEntry): void {
     const queue = loadQueue().filter(item => item.id !== entry.id);
     queue.push({ ...entry, queueId: crypto.randomUUID() });
     saveQueue(queue);
-    scheduleFlush();
+    if (isChatMirrorEnabled()) scheduleFlush();
 }
 
 /** 开启时回填最近会话，让云端判断立刻有上下文可用。 */
 export function setChatMirrorEnabled(enabled: boolean): void {
+    if (enabled || isChatMirrorEnabled() || loadQueue().length > 0) kvSet(MIRROR_TRACKING_KEY, "1");
     kvSet(MIRROR_ENABLED_KEY, enabled ? "1" : "0");
     if (enabled) {
         mirrorCapable = null; // 用户刚可能重新部署过，重新探测
+        refreshQueuedMessages();
         backfillRecentChat();
         scheduleFlush();
     }
 }
 
+/** 重新开启/启动时以本地原件校正旧队列，包含不在近期回填范围里的消息。 */
+function refreshQueuedMessages(): void {
+    if (!isChatStorageHydrated()) { queueNeedsRefresh = true; return; } // 读取失败或尚未加载，不等于消息已删除。
+    const sessions = new Map<string, Map<string, ChatMessage>>();
+    const queue = loadQueue().map(entry => {
+        if (entry.deleted || !entry.sessionId) return entry;
+        let messages = sessions.get(entry.sessionId);
+        if (!messages) {
+            messages = new Map(loadChatMessages(entry.sessionId).map(message => [message.id, message]));
+            sessions.set(entry.sessionId, messages);
+        }
+        const current = messages.get(entry.id);
+        const latest = current ? toMirrorEntry(current) : null;
+        if (latest) {
+            const { queueId, ...previous } = entry;
+            return { ...latest, queueId: JSON.stringify(previous) === JSON.stringify(latest) ? queueId : crypto.randomUUID() };
+        }
+        // 原件已删除或已不属于可镜像的单聊，不再把旧正文传回云端。
+        return { ...entry, content: "", deleted: true as const, queueId: crypto.randomUUID() };
+    });
+    saveQueue(queue);
+    queueNeedsRefresh = false;
+}
+
 function backfillRecentChat(): void {
+    if (!isChatStorageHydrated()) return;
     try {
         const sessions = loadChatSessions()
             .filter(session => !session.isGroup)
@@ -226,6 +285,8 @@ function backfillRecentChat(): void {
         for (const session of sessions) {
             for (const msg of loadChatMessages(session.id, BACKFILL_PER_SESSION)) {
                 if (queued.has(msg.id)) continue;
+                // 历史回填不能挤掉已经排队的删除和新编辑。
+                if (queue.length >= QUEUE_CAP) { saveQueue(queue); return; }
                 const entry = toMirrorEntry(msg);
                 if (entry) {
                     queue.push(entry);
@@ -254,11 +315,10 @@ export function clearChatMirrorCloud(characterId?: string): Promise<void> {
     clearPromise = Promise.resolve().then(async () => {
         // 已发出的请求必须先结束，防止 DELETE 成功后旧 POST 又把消息写回来。
         await uploading?.catch(() => undefined);
-        const res = await personalPushFetch("chat-mirror", {
+        const { response: res, data } = await mirrorRequest("chat-mirror", {
             method: "DELETE",
             body: JSON.stringify(characterId ? { characterId } : {}),
         });
-        const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
         if (!res.ok || !data?.ok) {
             throw new Error(data?.error || `云函数返回 HTTP ${res.status}（旧版函数不支持聊天镜像，请到云服务部署里重新部署离线推送）`);
         }
@@ -273,18 +333,20 @@ export function clearChatMirrorCloud(characterId?: string): Promise<void> {
 export function installChatMirror(): void {
     if (installed || typeof window === "undefined") return;
     installed = true;
+    if (isChatMirrorEnabled() || kvGet(MIRROR_ENABLED_KEY) === "0" || loadQueue().length > 0) kvSet(MIRROR_TRACKING_KEY, "1");
     // 镜像跟着本地变：新增、编辑、整批重生成都按 id 覆盖，删除按 id 删。
     // 云端裁决读的就是这份镜像，本地删掉的话不该再被当成还在。
     // 只有 id 在手（整批重建顶掉的旧消息）：云端删除只认 id，其余字段填个能过表约束的空壳
     const mirrorDeletedIds = (ids: string[], sessionId: string) => {
-        if (!isChatMirrorEnabled() || !isPersonalPushCloudActive()) return;
+        if (!isChatMirrorEnabled() && kvGet(MIRROR_TRACKING_KEY) !== "1") return;
         for (const id of ids) {
             if (!id) continue;
-            enqueue({ id, sessionId, characterId: "", role: "assistant", content: "", createdAt: new Date().toISOString(), deleted: true });
+            enqueue({ id, sessionId, characterId: characterIdForSession(sessionId), role: "assistant", content: "", createdAt: new Date().toISOString(), deleted: true });
         }
     };
-    const mirrorMessages = (messages: ChatMessage[], deleted?: true) => {
-        if (!isChatMirrorEnabled() || !isPersonalPushCloudActive()) return;
+    const mirrorMessages = (messages: ChatMessage[], deleted?: true, changed = false) => {
+        // 关闭只暂停联网；曾经开启过的镜像仍在本地记住编辑/删除，重新开启后补同步。
+        if (!isChatMirrorEnabled() && !(changed && kvGet(MIRROR_TRACKING_KEY) === "1")) return;
         for (const message of messages) {
             const entry = toMirrorEntry(message, deleted);
             if (entry) enqueue(entry);
@@ -296,7 +358,7 @@ export function installChatMirror(): void {
     });
     window.addEventListener(CHAT_MESSAGE_EDITED_EVENT, event => {
         const message = (event as CustomEvent<{ message?: ChatMessage }>).detail?.message;
-        if (message) mirrorMessages([message]);
+        if (message) mirrorMessages([message], undefined, true);
     });
     window.addEventListener(CHAT_RESPONSE_BATCH_REPLACED_EVENT, event => {
         const detail = (event as CustomEvent<{ messages?: ChatMessage[]; replacedIds?: string[]; sessionId?: string }>).detail;
@@ -304,16 +366,19 @@ export function installChatMirror(): void {
         if (Array.isArray(detail?.replacedIds) && detail.replacedIds.length > 0) {
             mirrorDeletedIds(detail.replacedIds, detail.sessionId || "");
         }
-        if (Array.isArray(detail?.messages)) mirrorMessages(detail.messages);
+        if (Array.isArray(detail?.messages)) mirrorMessages(detail.messages, undefined, true);
     });
     window.addEventListener(CHAT_MESSAGES_DELETED_EVENT, event => {
         const messages = (event as CustomEvent<{ messages?: ChatMessage[] }>).detail?.messages;
-        if (Array.isArray(messages)) mirrorMessages(messages, true);
+        if (Array.isArray(messages)) mirrorMessages(messages, true, true);
     });
     if (retryTimer === null) {
         retryTimer = window.setInterval(() => {
             if (getChatMirrorQueueSize() > 0) void flushQueue();
         }, RETRY_INTERVAL_MS);
     }
-    if (isChatMirrorEnabled() && getChatMirrorQueueSize() > 0) scheduleFlush();
+    if (isChatMirrorEnabled() && getChatMirrorQueueSize() > 0) {
+        refreshQueuedMessages();
+        scheduleFlush();
+    }
 }
