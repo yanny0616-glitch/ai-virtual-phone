@@ -862,7 +862,7 @@ function normalizeGeminiUsage(usage: unknown): LlmUsage | undefined {
 }
 
 /** 合并流式过程中陆续到达的用量片段：后到的非空值覆盖先到的。 */
-export function mergeLlmUsage(base: LlmUsage | undefined, next: LlmUsage | undefined): LlmUsage | undefined {
+export function mergeLlmUsage(base: LlmUsage | undefined, next: LlmUsage | undefined, providerKind?: LlmProviderKind): LlmUsage | undefined {
     if (!next) return base;
     if (!base) return { ...next };
     const merged: LlmUsage = { ...base };
@@ -871,8 +871,10 @@ export function mergeLlmUsage(base: LlmUsage | undefined, next: LlmUsage | undef
         if (typeof value === "number" && value > 0) merged[key] = value;
     }
     // Anthropic 在 message_start 给输入量，在 message_delta 给输出量；后一个事件里的
-    // total 只是该事件可见的输出量，不能覆盖整次调用。字段合并后统一重算总量。
-    if (typeof merged.prompt_tokens === "number" && typeof merged.completion_tokens === "number") {
+    // total 只是该事件可见的输出量，不能覆盖整次调用；只对 Anthropic 重算。
+    // Gemini 等供应商的官方总数可能包含思考 token，不能用可见输入输出覆盖。
+    if ((providerKind === "anthropic" || merged.total_tokens === undefined)
+        && typeof merged.prompt_tokens === "number" && typeof merged.completion_tokens === "number") {
         merged.total_tokens = merged.prompt_tokens + merged.completion_tokens;
     }
     return merged;

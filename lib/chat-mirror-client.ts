@@ -46,10 +46,13 @@ export type ChatMirrorEntry = {
 
 let installed = false;
 let flushPromise: Promise<{ sent: number; queued: number }> | null = null;
+let clearPromise: Promise<void> | null = null;
 let flushTimer: number | null = null;
 let retryTimer: number | null = null;
 // null=未探测；旧版个人云函数没有 chat-mirror 动作，探测失败时静默停发（不丢队列）。
 let mirrorCapable: boolean | null = null;
+let capabilityCheckedAt = 0;
+const CAPABILITY_TTL_MS = 5 * 60_000;
 
 export function isChatMirrorEnabled(): boolean {
     return kvGet(MIRROR_ENABLED_KEY) === "1";
@@ -133,11 +136,15 @@ function toMirrorEntry(msg: ChatMessage, deleted?: true): ChatMirrorEntry | null
 }
 
 async function checkMirrorCapability(): Promise<boolean> {
-    if (mirrorCapable !== null) return mirrorCapable;
+    if (mirrorCapable !== null && Date.now() - capabilityCheckedAt < CAPABILITY_TTL_MS) return mirrorCapable;
+    mirrorCapable = null;
     try {
         const res = await personalPushFetch("health", { method: "GET" });
         const data = await res.json().catch(() => null) as { ok?: boolean; capabilities?: string[] } | null;
-        mirrorCapable = Boolean(res.ok && data?.ok && data.capabilities?.includes("chat-mirror"));
+        // 临时 HTTP 错误、网关错误页和无效 JSON 都不是“不支持”的证据。
+        if (!res.ok || data?.ok !== true || !Array.isArray(data.capabilities)) return false;
+        mirrorCapable = data.capabilities.includes("chat-mirror");
+        capabilityCheckedAt = Date.now();
     } catch {
         // 网络抖动不下结论，下次再探
         return false;
@@ -147,17 +154,19 @@ async function checkMirrorCapability(): Promise<boolean> {
 
 /** 自动和手动上传共用一个任务；确认时只删除实际送达的操作版本。 */
 function uploadQueue(manual = false): Promise<{ sent: number; queued: number }> {
+    if (clearPromise) return clearPromise.then(() => uploadQueue(manual));
     if (flushPromise) return flushPromise;
     const run = async () => {
         if (!isChatMirrorEnabled()) throw new Error("聊天镜像开关未开启。");
         if (!isPersonalPushCloudActive()) throw new Error("个人云离线推送未部署或未激活。");
         if (manual) mirrorCapable = null;
         if (!await checkMirrorCapability()) throw new Error("无法确认聊天镜像能力，请检查网络或重新部署离线推送。");
+        if (clearPromise) return { sent: 0, queued: getChatMirrorQueueSize() };
         if (manual && loadQueue().length === 0) backfillRecentChat();
         let sent = 0;
         for (;;) {
             // 用户关掉镜像后，不再发送下一批。
-            if (!isChatMirrorEnabled() || !isPersonalPushCloudActive()) break;
+            if (clearPromise || !isChatMirrorEnabled() || !isPersonalPushCloudActive()) break;
             const batch = loadQueue().slice(0, FLUSH_BATCH);
             if (batch.length === 0) break;
             const res = await personalPushFetch("chat-mirror", {
@@ -235,15 +244,30 @@ export async function flushChatMirrorNow(): Promise<{ sent: number; queued: numb
     return uploadQueue(true);
 }
 
-export async function clearChatMirrorCloud(characterId?: string): Promise<void> {
-    const res = await personalPushFetch("chat-mirror", {
-        method: "DELETE",
-        body: JSON.stringify(characterId ? { characterId } : {}),
+export function clearChatMirrorCloud(characterId?: string): Promise<void> {
+    if (clearPromise) return clearPromise.then(() => clearChatMirrorCloud(characterId));
+    // 划定清空边界；期间新增的操作（包括同一消息的新编辑）必须留下。
+    const beforeClear = new Set(loadQueue()
+        .filter(entry => !characterId || entry.characterId === characterId)
+        .map(entry => entry.queueId));
+    const uploading = flushPromise;
+    clearPromise = Promise.resolve().then(async () => {
+        // 已发出的请求必须先结束，防止 DELETE 成功后旧 POST 又把消息写回来。
+        await uploading?.catch(() => undefined);
+        const res = await personalPushFetch("chat-mirror", {
+            method: "DELETE",
+            body: JSON.stringify(characterId ? { characterId } : {}),
+        });
+        const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+        if (!res.ok || !data?.ok) {
+            throw new Error(data?.error || `云函数返回 HTTP ${res.status}（旧版函数不支持聊天镜像，请到云服务部署里重新部署离线推送）`);
+        }
+        saveQueue(loadQueue().filter(entry => !beforeClear.has(entry.queueId)));
+    }).finally(() => {
+        clearPromise = null;
+        if (isChatMirrorEnabled() && getChatMirrorQueueSize() > 0) scheduleFlush();
     });
-    const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-    if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || `云函数返回 HTTP ${res.status}（旧版函数不支持聊天镜像，请到云服务部署里重新部署离线推送）`);
-    }
+    return clearPromise;
 }
 
 export function installChatMirror(): void {

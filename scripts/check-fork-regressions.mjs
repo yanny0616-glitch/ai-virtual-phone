@@ -15,12 +15,12 @@ function moduleVM(file,extra={},expose=''){
   const ctx=vm.createContext({...common,...extra});
   vm.runInContext(src+'\n'+expose,ctx);return ctx;
 }
-function mirror(fetchImpl){
+function mirror(fetchImpl,extra={}){
   const kv=new Map([['chat_mirror_enabled_v1','1']]);
   const ctx=moduleVM('lib/chat-mirror-client.ts',{
     kvGet:k=>kv.get(k),kvSet:(k,v)=>kv.set(k,v),registerKvMigration(){},isPersonalPushCloudActive:()=>true,personalPushFetch:fetchImpl,
-    window:{setTimeout:()=>1,clearTimeout(){},setInterval:()=>1},loadChatSessions:()=>[],loadChatContacts:()=>[],loadChatMessages:()=>[],
-  },'globalThis.api={enqueue,flushQueue,flushChatMirrorNow,loadQueue};');
+    window:{setTimeout:()=>1,clearTimeout(){},setInterval:()=>1},loadChatSessions:()=>[],loadChatContacts:()=>[],loadChatMessages:()=>[],...extra,
+  },'globalThis.api={enqueue,flushQueue,flushChatMirrorNow,loadQueue,clearChatMirrorCloud};');
   ctx.api.seed=entries=>kv.set("chat_mirror_queue_v1",JSON.stringify(entries));
   return ctx.api;
 }
@@ -138,5 +138,99 @@ await test('Background already-running response also requeues the deferred reply
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(g.readDeferredReply('s').firedAt,undefined);
   assert.equal(g.takeDueDeferredReplies(now+20001)[0],'s');return {backgroundBusyRetried:true};
+});
+
+await test('Scoped clearing removes old queued operations and preserves other characters',async()=>{
+  const uploaded=[];
+  const a=mirror(async(action,opts)=>{
+    if(action==='health')return json({ok:true,capabilities:['chat-mirror']});
+    if(opts.method==='POST')uploaded.push(...JSON.parse(opts.body).entries);
+    return json({ok:true});
+  });
+  a.enqueue({id:'old',characterId:'a'});a.enqueue({id:'other',characterId:'b'});
+  await a.clearChatMirrorCloud('a');await a.flushQueue();
+  assert.deepEqual(uploaded.map(x=>x.id),['other']);return {oldNotReuploaded:true};
+});
+await test('Clear waits for in-flight upload and preserves edits made after clearing starts',async()=>{
+  const response=deferred(),started=deferred(),order=[],uploaded=[];
+  let posts=0;
+  const a=mirror(async(action,opts)=>{
+    if(action==='health')return json({ok:true,capabilities:['chat-mirror']});
+    order.push(opts.method);
+    if(opts.method==='POST'){
+      uploaded.push(...JSON.parse(opts.body).entries);
+      if(++posts===1){started.resolve();return response.promise;}
+    }
+    return json({ok:true});
+  });
+  for(let i=0;i<60;i++)a.enqueue({id:'m'+i,characterId:'a',content:'old'});
+  const uploading=a.flushQueue();await started.promise;
+  const clearing=a.clearChatMirrorCloud();
+  a.enqueue({id:'m0',characterId:'a',content:'new'});
+  const waiting=a.flushQueue();
+  await Promise.resolve();assert.deepEqual(order,['POST']);
+  response.resolve(json({ok:true}));await Promise.all([uploading,clearing,waiting]);
+  assert.deepEqual(order,['POST','DELETE','POST']);
+  assert.equal(uploaded.length,51);assert.equal(uploaded[50].content,'new');
+  assert.equal(a.loadQueue().length,0);return {deleteAfterUpload:true,newEditRetained:true};
+});
+await test('Failed clearing retains unsent queue',async()=>{
+  const a=mirror(async()=>json({ok:false},503));a.enqueue({id:'keep'});
+  await assert.rejects(a.clearChatMirrorCloud(),/503/);
+  assert.equal(a.loadQueue()[0].id,'keep');return {retained:true};
+});
+await test('Automatic upload recovers after transient health errors',async()=>{
+  for(const failure of [()=>json({ok:false},503),()=>new Response('bad JSON'),()=>{throw new Error('offline');}]){
+    let health=0,posts=0;
+    const a=mirror(async action=>{
+      if(action==='health'){if(++health===1)return failure();return json({ok:true,capabilities:['chat-mirror']});}
+      posts++;return json({ok:true});
+    });
+    a.enqueue({id:'retry'});await a.flushQueue();assert.equal(a.loadQueue().length,1);
+    await a.flushQueue();assert.equal(health,2);assert.equal(posts,1);assert.equal(a.loadQueue().length,0);
+  }
+  return {cases:3};
+});
+await test('Cached unsupported capability expires automatically',async()=>{
+  let now=1000,health=0,posts=0;
+  class Clock extends Date {static now(){return now;}}
+  const a=mirror(async action=>{
+    if(action==='health')return json({ok:true,capabilities:++health===1?[]:['chat-mirror']});
+    posts++;return json({ok:true});
+  },{Date:Clock});
+  a.enqueue({id:'retry'});await a.flushQueue();await a.flushQueue();assert.equal(health,1);
+  now+=300001;await a.flushQueue();assert.equal(health,2);assert.equal(posts,1);
+  return {automaticRecovery:true};
+});
+await test('Gemini streaming preserves official totals including thought tokens',async()=>{
+  const a=moduleVM('lib/llm-provider-adapter.ts',{},'globalThis.api={parseProviderStreamDelta,mergeLlmUsage};').api;
+  let usage;
+  for(const count of [1,20]){
+    const delta=a.parseProviderStreamDelta('gemini',{usageMetadata:{promptTokenCount:100,candidatesTokenCount:count,thoughtsTokenCount:50,totalTokenCount:150+count}});
+    usage=a.mergeLlmUsage(usage,delta.usage,'gemini');
+  }
+  assert.equal(usage.total_tokens,170);assert.equal(usage.completion_tokens,20);
+  return {officialTotal:usage.total_tokens};
+});
+await test('Anthropic streaming still combines input cache and output usage',async()=>{
+  const a=moduleVM('lib/llm-provider-adapter.ts',{},'globalThis.api={parseProviderStreamDelta,mergeLlmUsage};').api;
+  const first=a.parseProviderStreamDelta('anthropic',{type:'message_start',message:{usage:{input_tokens:100,cache_read_input_tokens:50,cache_creation_input_tokens:20,output_tokens:1}}});
+  const last=a.parseProviderStreamDelta('anthropic',{type:'message_delta',usage:{output_tokens:30}});
+  const usage=a.mergeLlmUsage(first.usage,last.usage,'anthropic');
+  assert.equal(usage.prompt_tokens,170);assert.equal(usage.completion_tokens,30);assert.equal(usage.total_tokens,200);
+  return {total:usage.total_tokens};
+});
+
+await test('Clearing during health probing prevents manual history backfill',async()=>{
+  const health=deferred(),started=deferred();let backfills=0;
+  const a=mirror(async action=>{
+    if(action==='health'){started.resolve();return health.promise;}
+    return json({ok:true});
+  },{loadChatSessions:()=>{backfills++;return [];}});
+  const upload=a.flushChatMirrorNow();await started.promise;
+  const clearing=a.clearChatMirrorCloud();
+  health.resolve(json({ok:true,capabilities:['chat-mirror']}));
+  await Promise.all([upload,clearing]);assert.equal(backfills,0);
+  return {staleBackfillPrevented:true};
 });
 console.log(`Passed ${results.length} fork regression checks.`);

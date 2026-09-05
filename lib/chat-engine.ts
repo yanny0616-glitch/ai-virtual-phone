@@ -771,7 +771,7 @@ async function readSseStream(
     const sseParser = createSseJsonParser();
     const handleParsed = async (parsed: unknown) => {
         const parts = parseProviderStreamDelta(providerKind, parsed);
-        usage = mergeLlmUsage(usage, parts.usage);
+        usage = mergeLlmUsage(usage, parts.usage, providerKind);
         if (parts.reasoning) {
             await callbacks?.onReasoningDelta?.(parts.reasoning);
         }
@@ -1176,7 +1176,7 @@ export async function sendLLMToolStreamRequest(
         const handleParsedDelta = async (data: unknown) => {
             {
                     const delta = parseProviderStreamDelta(request.providerKind, data);
-                    streamedUsage = mergeLlmUsage(streamedUsage, delta.usage);
+                    streamedUsage = mergeLlmUsage(streamedUsage, delta.usage, request.providerKind);
                     if (delta.reasoning) {
                         reasoning += delta.reasoning;
                         await callbacks?.onReasoningDelta?.(delta.reasoning);
