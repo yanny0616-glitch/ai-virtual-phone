@@ -117,6 +117,9 @@ function isValidEmbeddedWorldBook(x: unknown): x is EmbeddedWorldBook {
 }
 
 function toCharacterBook(book: EmbeddedWorldBook) {
+  const positions: Record<string, number> = {
+    before_char: 0, after_char: 1, before_an: 2, after_an: 3, before_em: 5, after_em: 6,
+  };
   return {
     name: book.name,
     description: book.description || "",
@@ -128,7 +131,7 @@ function toCharacterBook(book: EmbeddedWorldBook) {
       constant: entry.constant,
       insertion_order: entry.insertion_order ?? index,
       extensions: {
-        position: entry.position,
+        position: positions[String(entry.position)] ?? entry.position,
         depth: entry.depth ?? 0,
         probability: entry.probability ?? 100,
         useProbability: entry.useProbability ?? false,

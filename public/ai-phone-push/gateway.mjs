@@ -861,7 +861,14 @@ Deno.serve(async (request: Request) => {
         if (list.length === 0) return json({ ok: false, error: "缺少 entries。" }, 400);
         const rows: Record<string, unknown>[] = [];
         const deleteIds: string[] = [];
+        // 兼容旧客户端：同一消息的一批操作按最后一次为准（包括删除后恢复）。
+        const latest = new Map<string, Record<string, unknown>>();
         for (const item of list) {
+          const entry = item && typeof item === "object" ? item as Record<string, unknown> : {};
+          const id = cleanText(entry.id, 80);
+          if (id) { latest.delete(id); latest.set(id, entry); }
+        }
+        for (const item of latest.values()) {
           const entry = item && typeof item === "object" ? item as Record<string, unknown> : {};
           const id = cleanText(entry.id, 80);
           if (id && entry.deleted === true) { deleteIds.push(id); continue; }
@@ -892,7 +899,7 @@ Deno.serve(async (request: Request) => {
           }
         }
         if (deleteIds.length > 0) {
-          // 先写后删：同一批里「发出又删掉」的以删为准。id 会拼进 in.("…")，引号之类挡在入口
+          // 每个 id 只保留最后一次操作；id 会拼进 in.("…")，引号之类挡在入口
           const safe = deleteIds.map(id => id.replace(/[^A-Za-z0-9._:-]/g, "")).filter(Boolean).map(id => `"${id}"`);
           const del = safe.length > 0
             ? await rest(`push_chat_mirror?user_id=eq.${OWNER_ID}&id=in.(${encodeURIComponent(safe.join(","))})`, {

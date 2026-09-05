@@ -32,6 +32,8 @@ registerKvMigration(MIRROR_QUEUE_KEY);
 
 export type ChatMirrorEntry = {
     id: string;
+    /** 本地排队操作的版本，确认旧请求时不能删掉同一消息的新编辑。 */
+    queueId?: string;
     sessionId: string;
     characterId: string;
     role: "user" | "assistant";
@@ -43,7 +45,7 @@ export type ChatMirrorEntry = {
 };
 
 let installed = false;
-let flushing = false;
+let flushPromise: Promise<{ sent: number; queued: number }> | null = null;
 let flushTimer: number | null = null;
 let retryTimer: number | null = null;
 // null=未探测；旧版个人云函数没有 chat-mirror 动作，探测失败时静默停发（不丢队列）。
@@ -57,14 +59,24 @@ function loadQueue(): ChatMirrorEntry[] {
     try {
         const raw = kvGet(MIRROR_QUEUE_KEY);
         const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed) ? parsed as ChatMirrorEntry[] : [];
+        if (!Array.isArray(parsed)) return [];
+        const latest = new Map<string, ChatMirrorEntry>();
+        let changed = false;
+        for (const entry of parsed as ChatMirrorEntry[]) {
+            if (latest.has(entry.id)) { latest.delete(entry.id); changed = true; }
+            if (!entry.queueId) changed = true;
+            latest.set(entry.id, { ...entry, queueId: entry.queueId || crypto.randomUUID() });
+        }
+        const queue = [...latest.values()];
+        if (changed) saveQueue(queue);
+        return queue;
     } catch {
         return [];
     }
 }
 
 function saveQueue(queue: ChatMirrorEntry[]): void {
-    kvSet(MIRROR_QUEUE_KEY, JSON.stringify(queue.slice(-QUEUE_CAP)));
+    kvSet(MIRROR_QUEUE_KEY, JSON.stringify(queue.slice(-QUEUE_CAP).map(entry => ({ ...entry, queueId: entry.queueId || crypto.randomUUID() }))));
 }
 
 export function getChatMirrorQueueSize(): number {
@@ -133,28 +145,39 @@ async function checkMirrorCapability(): Promise<boolean> {
     return mirrorCapable;
 }
 
-async function flushQueue(): Promise<void> {
-    if (flushing || !isChatMirrorEnabled() || !isPersonalPushCloudActive()) return;
-    flushing = true;
-    try {
-        if (!await checkMirrorCapability()) return;
+/** 自动和手动上传共用一个任务；确认时只删除实际送达的操作版本。 */
+function uploadQueue(manual = false): Promise<{ sent: number; queued: number }> {
+    if (flushPromise) return flushPromise;
+    const run = async () => {
+        if (!isChatMirrorEnabled()) throw new Error("聊天镜像开关未开启。");
+        if (!isPersonalPushCloudActive()) throw new Error("个人云离线推送未部署或未激活。");
+        if (manual) mirrorCapable = null;
+        if (!await checkMirrorCapability()) throw new Error("无法确认聊天镜像能力，请检查网络或重新部署离线推送。");
+        if (manual && loadQueue().length === 0) backfillRecentChat();
+        let sent = 0;
         for (;;) {
-            const queue = loadQueue();
-            if (queue.length === 0) return;
-            const batch = queue.slice(0, FLUSH_BATCH);
+            // 用户关掉镜像后，不再发送下一批。
+            if (!isChatMirrorEnabled() || !isPersonalPushCloudActive()) break;
+            const batch = loadQueue().slice(0, FLUSH_BATCH);
+            if (batch.length === 0) break;
             const res = await personalPushFetch("chat-mirror", {
                 method: "POST",
                 body: JSON.stringify({ entries: batch }),
             });
-            const data = await res.json().catch(() => null) as { ok?: boolean } | null;
-            if (!res.ok || !data?.ok) return; // 留在队列里，等下一轮重试
-            saveQueue(loadQueue().slice(batch.length));
+            const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+            if (!res.ok || !data?.ok) throw new Error(data?.error || `上传失败：HTTP ${res.status}（已传 ${sent} 条）`);
+            const acknowledged = new Set(batch.map(entry => entry.queueId));
+            saveQueue(loadQueue().filter(entry => !acknowledged.has(entry.queueId)));
+            sent += batch.length;
         }
-    } catch {
-        // 静默：镜像永不打扰聊天主流程
-    } finally {
-        flushing = false;
-    }
+        return { sent, queued: getChatMirrorQueueSize() };
+    };
+    flushPromise = run().finally(() => { flushPromise = null; });
+    return flushPromise;
+}
+
+async function flushQueue(): Promise<void> {
+    try { await uploadQueue(); } catch { /* 自动上传失败留队，下一轮重试，不打扰聊天。 */ }
 }
 
 function scheduleFlush(): void {
@@ -167,8 +190,8 @@ function scheduleFlush(): void {
 }
 
 function enqueue(entry: ChatMirrorEntry): void {
-    const queue = loadQueue();
-    queue.push(entry);
+    const queue = loadQueue().filter(item => item.id !== entry.id);
+    queue.push({ ...entry, queueId: crypto.randomUUID() });
     saveQueue(queue);
     scheduleFlush();
 }
@@ -209,34 +232,7 @@ function backfillRecentChat(): void {
 
 /** 手动触发一次上传并暴露真实错误（设置页排障用；自动流程仍走静默的 flushQueue）。 */
 export async function flushChatMirrorNow(): Promise<{ sent: number; queued: number }> {
-    if (!isChatMirrorEnabled()) throw new Error("聊天镜像开关未开启。");
-    if (!isPersonalPushCloudActive()) throw new Error("个人云离线推送未部署或未激活。");
-    mirrorCapable = null; // 可能刚重新部署过，重新探测
-    const res = await personalPushFetch("health", { method: "GET" });
-    const health = await res.json().catch(() => null) as { ok?: boolean; capabilities?: string[]; error?: string } | null;
-    if (!res.ok || !health?.ok) throw new Error(health?.error || `健康检查失败：HTTP ${res.status}`);
-    if (!health.capabilities?.includes("chat-mirror")) {
-        throw new Error("云函数版本偏旧，不支持聊天镜像。请重新部署离线推送。");
-    }
-    mirrorCapable = true;
-    if (loadQueue().length === 0) backfillRecentChat();
-    let sent = 0;
-    for (;;) {
-        const queue = loadQueue();
-        if (queue.length === 0) break;
-        const batch = queue.slice(0, FLUSH_BATCH);
-        const post = await personalPushFetch("chat-mirror", {
-            method: "POST",
-            body: JSON.stringify({ entries: batch }),
-        });
-        const data = await post.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-        if (!post.ok || !data?.ok) {
-            throw new Error(data?.error || `上传失败：HTTP ${post.status}（已传 ${sent} 条，剩 ${queue.length} 条）`);
-        }
-        sent += batch.length;
-        saveQueue(loadQueue().slice(batch.length));
-    }
-    return { sent, queued: getChatMirrorQueueSize() };
+    return uploadQueue(true);
 }
 
 export async function clearChatMirrorCloud(characterId?: string): Promise<void> {

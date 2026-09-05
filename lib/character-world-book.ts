@@ -34,8 +34,9 @@ function keyList(entry: Record<string, unknown>): string {
  * `extensions.position` 数字里（0/1 角色前后、2/3 作者注前后、4 按深度插入、5/6 示例对话前后），数字优先。
  */
 function resolvePosition(entry: Record<string, unknown>, ext: Record<string, unknown>): WorldBookEntry["position"] {
-  const numeric = Number(ext.position ?? entry.position);
-  if (Number.isFinite(numeric) && typeof (ext.position ?? entry.position) !== "string") {
+  const value = ext.position ?? entry.position;
+  const numeric = Number(value);
+  if (value !== undefined && value !== null && value !== "" && Number.isInteger(numeric)) {
     switch (numeric) {
       case 0: return "before_char";
       case 1: return "after_char";
@@ -46,7 +47,7 @@ function resolvePosition(entry: Record<string, unknown>, ext: Record<string, unk
       default: return numeric;
     }
   }
-  const named = text(entry.position).trim();
+  const named = text(value).trim();
   if (named === "before_char" || named === "after_char" || named === "before_em"
     || named === "after_em" || named === "before_an" || named === "after_an") {
     return named;
@@ -73,7 +74,12 @@ function convertEntry(raw: unknown, index: number): WorldBookEntry | null {
     constant: Boolean(entry.constant),
     position: resolvePosition(entry, ext),
     depth: Number(ext.depth ?? entry.depth) || 0,
-    probability: Number(ext.probability ?? entry.probability) || 100,
+    probability: (() => {
+      const raw = ext.probability ?? entry.probability;
+      const n = Number(raw);
+      return raw === undefined || raw === null || raw === "" || !Number.isFinite(n)
+        ? 100 : Math.max(0, Math.min(100, n));
+    })(),
     useProbability: Boolean(ext.useProbability ?? entry.useProbability),
     role: Number(ext.role ?? entry.role) || 0,
     insertion_order: Number(entry.insertion_order ?? entry.order ?? ext.display_index ?? index),

@@ -126,7 +126,7 @@ import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
 import { DebugPromptPanel } from "@/components/debug-prompt-panel";
 import { QuickActionFloat } from "@/components/quick-action-float";
-import { takeDueDeferredReplies } from "@/lib/chat-reply-gate";
+import { retryBusyDeferredReply, takeDueDeferredReplies } from "@/lib/chat-reply-gate";
 import { CHAT_MESSAGE_PUSHED_EVENT, CHAT_REQUEST_REPLY_EVENT, hydrateChatStorage, loadChatSessions, loadChatMessages, pushChatMessage, type ChatMessage, type ChatSession } from "@/lib/chat-storage";
 import { ensureGlobalBindingDefaults, resolveUserIdentity } from "@/lib/settings-storage";
 import { loadCharacters } from "@/lib/character-storage";
@@ -2469,6 +2469,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
         characterId?: string;
         handled?: boolean;
         replayed?: boolean;
+        source?: string;
+        deferredAt?: number;
       }>).detail;
       if (!detail || detail.replayed) return;
 
@@ -2481,7 +2483,11 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       window.setTimeout(() => {
         if (detail.handled) return;
         detail.handled = true;
-        void requestBackgroundChatReply(sessionId);
+        void requestBackgroundChatReply(sessionId).then(result => {
+          if (detail.source === "reply_gate" && typeof detail.deferredAt === "number" && result.skipped === "already_running") {
+            retryBusyDeferredReply(sessionId, detail.deferredAt);
+          }
+        });
       }, 0);
     };
 
@@ -2492,8 +2498,12 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
   // 押后的被动回复到点了就发一次回复请求：聊天室开着由它接，没开走上面的后台生成
   useEffect(() => {
     const tick = () => {
-      for (const sessionId of takeDueDeferredReplies()) {
-        window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, { detail: { source: "reply_gate", sessionId, handled: false } }));
+      const nowMs = Date.now();
+      for (const sessionId of takeDueDeferredReplies(nowMs)) {
+        const detail = { source: "reply_gate", sessionId, deferredAt: nowMs, handled: false, busy: false };
+        window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, { detail }));
+        // 聊天室的事件处理是同步的；busy 时重新排队，不把未执行的任务当成完成。
+        if (detail.busy) retryBusyDeferredReply(sessionId, nowMs);
       }
     };
     tick();

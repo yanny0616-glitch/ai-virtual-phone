@@ -198,6 +198,13 @@ export function takeDueDeferredReplies(nowMs = Date.now()): string[] {
     return due;
 }
 
+/** 忙碌拒绝不是执行完成；只退回本次领取，避免覆盖期间新增的等待或紧急回复。 */
+export function retryBusyDeferredReply(sessionId: string, firedAt: number, nowMs = Date.now()): void {
+    const rec = readDeferredReply(sessionId);
+    if (!rec || rec.firedAt !== firedAt) return;
+    writeDeferredReply(sessionId, { until: nowMs + 20_000, note: rec.note });
+}
+
 /** 押后 / 吵醒的那次回复，提示词里补一句为什么现在才回、该是什么状态 */
 export function formatReplyGateNoteForPrompt(sessionId: string, nowMs = Date.now()): string {
     const rec = readDeferredReply(sessionId);
