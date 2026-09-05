@@ -6,6 +6,17 @@
       "</div>";
   }
 
+  function momentHistoryHtml(cx) {
+    const records = momentRecords(cx).slice().sort((a, b) => b.at - a.at);
+    const states = { sent: "已发布", pending: "待发布", failed: "发布失败", skipped: "未发布" };
+    return '<div class="card"><div class="sec-head"><span class="t">朋友圈记录</span></div>' +
+      (records.length ? records.map(r => '<div class="d-why"><strong>' + esc(states[r.status] || "待确认") + '</strong> · ' +
+        esc(dateStrOf(new Date(r.at)) + " " + fmtHM(r.at)) + ' · ' + (r.by === "cloud" ? "云端起意" : "本地起意") +
+        '<div>「' + esc(r.hint) + '」</div><div class="archive-note">' + esc(r.note || "") +
+        (r.postId ? ' · 帖子编号 ' + esc(r.postId) : '') + '</div></div>').join("") :
+        '<div class="archive-note">暂无挂念发圈记录。旧版帖子和宿主其他入口发布的朋友圈不会自动补入。</div>') + '</div>';
+  }
+
   async function renderArchive() {
     const cx = cur();
     const v = $("#view");
@@ -38,7 +49,7 @@
       '<div class="stat"><div class="num">' + nAct + '</div><div class="cap">7天起念</div></div>' +
       '<div class="stat" style="animation-delay:60ms"><div class="num">' + nSent + '</div><div class="cap">已发出</div></div>' +
       '<div class="stat" style="animation-delay:120ms"><div class="num">' + nUnknown + '</div><div class="cap">待确认</div></div>' +
-      "</div>";
+      "</div>" + momentHistoryHtml(cx);
 
     if (!arc.dates.length) {
       html += '<div class="card empty"><div class="art">🌱</div><p>还没有任何记录。<br>回「今天」页生成TA的一天，这里就会开始留痕。</p></div>';

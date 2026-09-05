@@ -183,7 +183,7 @@
         await applyChatSchedEdits(cx, parsed.sched, nowMs);
         await applyThreads(cx, parsed, nowMs, "app");
         const postHint = canPost && parsed.post && typeof parsed.post === "object" ? String(parsed.post.hint || "") : "";
-        if (postHint && await postMoment(cx, postHint, nowMs, "app")) await moNote(cx, nowMs);
+        if (postHint) await postMoment(cx, postHint, nowMs, "app");
       }
 
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,

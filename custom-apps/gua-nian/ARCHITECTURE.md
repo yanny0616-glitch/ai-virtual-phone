@@ -142,3 +142,12 @@ npm run gua-nian:package
 worker 的 `capabilities` 请求仍校验 cron token，只返回能力，不生成或复核。停用检查在独立的 genKit 分支之后、生活和回音计算之前；上下文 PATCH 带启用条件，模型返回后再次确认启用状态。关闭不是取消已有预约，已经进入执行阶段的请求仍可能完成。设备接管并发协议继续保持原约定，不在本次修复范围。
 
 开启用户睡眠后，今天计划和未来生成原料都核对实际 worker 的 `user-sleep-feedback-v1` 能力与网关 `acceptedUserSleep` 回显。能力缺失、读取失败或保存值不一致均不显示成功。应用拉取及网关上传都按内容合并 `fbSeen`，去重后保留最后 60 条，修复等长记录漏合并。
+
+
+## 发圈回执与记录
+
+`planning/moments.js` 在 `settings.momentHistory[characterId]` 持久保存最近 60 个起意结果，`ui/history.js` 在记录页展示；独立于当天计划和 120 条滚动运行日志。发布成功必须收到宿主 postId，成功记录和本地周计数同一次 patchSettings 保存；失败、未创建及待配额不记为已发布。云端预留的 momentsLast/momentsWeekN 不当作已发布回执合入本地。
+
+云端待发列表按起意时间选最新一条，较早项明确记录合并未发布，入口重新检查最小间隔与周额度，并用实际时间发帖。运行时 outbox/发帖锁防止同页并发；稳定 requestId 由宿主按 APP 和角色隔离，MomentPost 保存该编号，重试返回已有帖子编号。历史记录用于跨日去重，不再只依赖 plan.postedIds。
+
+宿主 moments-engine 保留本轮的一个完整朋友圈动作自行入库，只把其他类型动作交给通用分发器。去掉思考标签区后解析完整朋友圈块，未标记草稿或未闭合正文不发布。变化需同时更新宿主与 APP，不涉及云函数和 schema。

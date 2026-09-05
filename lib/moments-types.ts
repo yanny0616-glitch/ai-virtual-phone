@@ -6,6 +6,7 @@ export type MomentPost = {
     authorType: "user" | "character";
     authorId: string;               // characterId or "user"
     content: string;
+    requestId?: string;             // 自定义 APP 发帖重试的稳定标识
     photoUrl?: string;              // user-uploaded base64 image
     photoDescription?: string;      // AI-generated photo description (for placeholder rendering)
     photoUseReferenceImage?: boolean; // AI-generated photo should use character reference image

@@ -2634,14 +2634,16 @@ export function cancelCustomAppTimedWake(appId: string, rawId: string): { ok: bo
   return { ok: exists };
 }
 
-export async function postCustomAppMoment(record: Record<string, unknown>): Promise<{ postId: string | null }> {
+export async function postCustomAppMoment(record: Record<string, unknown>, appId = ""): Promise<{ postId: string | null }> {
   const characterId = cleanText(record.characterId, 160);
   if (!characterId) throw new Error("moments.post 缺少 characterId。");
   if (!loadCharacters().some((c) => c.id === characterId)) throw new Error("moments.post：角色不存在。");
   const hint = cleanText(record.hint, 600);
   const at = record.createdAt === undefined ? NaN : typeof record.createdAt === "number" ? record.createdAt : Date.parse(String(record.createdAt));
   const createdAt = Number.isFinite(at) && at > 0 ? new Date(at).toISOString() : undefined;
-  const postId = await postMomentForCharacter(characterId, hint, createdAt);
+  const requestKey = cleanText(record.requestId, 160);
+  const requestId = appId && requestKey ? `${appId}:${requestKey}` : undefined;
+  const postId = await postMomentForCharacter(characterId, hint, createdAt, requestId);
   return { postId };
 }
 
@@ -2686,7 +2688,7 @@ export async function executeCustomAppHostAction(
     case "variables.unset":
       return accessSharedVariable(actionType, payload);
     case "moments.post":
-      return postCustomAppMoment(payload);
+      return postCustomAppMoment(payload, app.id);
     case "chat.updateCard":
       return updateCustomAppCard(app, payload);
     case "chat.history":

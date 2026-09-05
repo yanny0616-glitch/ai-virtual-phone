@@ -299,7 +299,7 @@ async function resolveAssemblerInput(
 
 // ── AI Post Generation ──
 
-async function triggerAIPost(characterId: string, hint = "", createdAt?: string): Promise<string | null> {
+async function triggerAIPost(characterId: string, hint = "", createdAt?: string, requestId?: string): Promise<string | null> {
     isGenerating = true;
     // Always update schedule first to prevent retry storms on failure
     updateScheduleAfterPost(characterId, createdAt ? Date.parse(createdAt) : Date.now());
@@ -319,7 +319,7 @@ async function triggerAIPost(characterId: string, hint = "", createdAt?: string)
         // Append trigger instruction
         llmMessages.push({
             role: "user",
-            content: hint.trim() ? `请发一条朋友圈。\n${hint.trim()}` : "请发一条朋友圈。",
+            content: "请发一条朋友圈，用 [朋友圈]正文[/朋友圈] 包裹最终内容。只写一条，不要把分析、草稿或写作说明放进正文。" + (hint.trim() ? `\n${hint.trim()}` : ""),
             _debugMeta: { marker: "moments_trigger" },
         });
 
@@ -336,14 +336,17 @@ async function triggerAIPost(characterId: string, hint = "", createdAt?: string)
         if (!responseText) return null;
 
         // Extract cross-engine actions before moments-specific parsing
-        const { cleanText: postText, actions } = parseActionTags(responseText);
-        if (actions.length > 0) {
-            dispatchActions(actions, { characterId, sourceEngine: "moments" })
+        const { actions } = parseActionTags(cleanMomentGenerationText(responseText));
+        // 本轮的朋友圈只由这里入库并返回 postId；通用动作不能提前发掉正文。
+        const otherActions = actions.filter(action => action.type !== "朋友圈");
+        if (otherActions.length > 0) {
+            dispatchActions(otherActions, { characterId, sourceEngine: "moments" })
                 .catch(err => console.warn("[Moments] Action dispatch failed:", err));
         }
 
-        const parsed = parseMomentPostResponse(postText);
-        if (!parsed) return null;
+        const ownPost = actions.find(action => action.type === "朋友圈" && (!action.actor || action.actor === character.name));
+        const parsed = ownPost ? parseMomentPostResponse(ownPost.rawText || "") : null;
+        if (!parsed) throw new Error("模型未返回有效的朋友圈正文，本次没有发布，请重试。");
 
         // 内容去重：生图前先判重，命中直接丢弃（防止同一内容经多路径重复入库）
         if (findRecentDuplicateMomentPost({
@@ -366,6 +369,7 @@ async function triggerAIPost(characterId: string, hint = "", createdAt?: string)
             content: parsed.content,
             photoDescription: parsed.photoDescription,
             photoUseReferenceImage: parsed.photoUseReferenceImage === true,
+            requestId,
             photoGenerationStatus: parsed.photoDescription ? "pending" : undefined,
             visibility,
             createdAt,
@@ -398,9 +402,13 @@ async function triggerAIPost(characterId: string, hint = "", createdAt?: string)
  * 自定义 APP（挂念）替角色起意发一条：走和定时发帖一样的整条管线（人设、记忆、去重、配图、NPC 互动），
  * 不过 moments.beforePost——念头已经在 APP 那边定了。createdAt 传过去的时间就补成那个时间点的帖子。
  */
-export async function postMomentForCharacter(characterId: string, hint = "", createdAt?: string): Promise<string | null> {
+export async function postMomentForCharacter(characterId: string, hint = "", createdAt?: string, requestId?: string): Promise<string | null> {
+    if (requestId) {
+        const existing = loadMomentPosts().find(post => post.authorType === "character" && post.authorId === characterId && post.requestId === requestId);
+        if (existing) return existing.id;
+    }
     if (isGenerating) throw new Error("朋友圈正在生成另一条，稍后再试。");
-    return triggerAIPost(characterId, hint, createdAt);
+    return triggerAIPost(characterId, hint, createdAt, requestId);
 }
 
 /** Called when user publishes a post — trigger AI reactions. */
@@ -1173,13 +1181,19 @@ export function onUserComment(postId: string): void {
 
 // ── Response Parser ──
 
+function cleanMomentGenerationText(rawText: string): string {
+    return rawText.replace(/<(think|thinking|analysis|reasoning)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+        .replace(/<(?:think|thinking|analysis|reasoning)\b[^>]*>[\s\S]*$/gi, "");
+}
+
 export function parseMomentPostResponse(rawText: string): {
     content: string;
     photoDescription?: string;
     photoUseReferenceImage?: boolean;
 } | null {
-    const blockMatch = rawText.match(/\[朋友圈\]\s*([\s\S]*?)\s*\[\/朋友圈\]/);
-    const text = blockMatch ? blockMatch[1] : rawText;
+    const blockMatch = cleanMomentGenerationText(rawText).match(/\[(?:["“][^"”]+["”]\s*)?朋友圈\]\s*([\s\S]*?)\s*\[\/朋友圈\]/);
+    if (!blockMatch) return null;
+    const text = blockMatch[1];
 
     const explicitPhotoMatch = text.match(/\[照片[:：]\s*(使用参考图|不使用参考图)\s*[:：]\s*([\s\S]*?)\]/);
     const legacyPhotoMatch = explicitPhotoMatch ? null : text.match(/\[照片[:：]\s*([\s\S]*?)\]/);

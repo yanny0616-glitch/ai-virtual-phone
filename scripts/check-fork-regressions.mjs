@@ -670,4 +670,33 @@ await test('Never-enabled mirror does not start tracking messages or contacting 
   return {optInPreserved:true};
 });
 
+
+await test('Moments generation publishes one tagged post, returns its ID, and never publishes surrounding drafts',async()=>{
+  const actions=moduleVM('lib/action-parser.ts',{},'globalThis.parse=parseActionTags;');
+  const posts=[],dispatched=[],h={response:'换个切入。\n[朋友圈]周六。[照片：不使用参考图：书房][/朋友圈]\n符合他的风格：极简。\n[朋友圈]额外一条[/朋友圈]',calls:0};
+  const ctx=moduleVM('lib/moments-engine.ts',{
+    h,parseActionTags:actions.parse,dispatchActions:async a=>dispatched.push(...a),
+    updateScheduleAfterPost(){},assemblePromptPayload:()=>[],findRecentDuplicateMomentPost:()=>null,
+    loadChatContacts:()=>[{characterId:'c'}],loadMomentPosts:()=>posts,
+    addMomentPost:p=>{const post={...p,id:'p'+(posts.length+1)};posts.push(post);return post;},
+    incrementEventCounter(){},maybeRunSummarization:async()=>{},
+  },`resolveAssemblerInput=async()=>({input:{},apiConfig:{},preset:{},character:{id:'c',name:'角色'}});
+     callLLM=async()=>{h.calls++;return h.response;};
+     attachMomentPhotoInBackground=()=>{};generateNPCReactions=async()=>{};
+     globalThis.api={postMomentForCharacter,parseMomentPostResponse};`);
+  const id=await ctx.api.postMomentForCharacter('c','由头',undefined,'app:one');
+  assert.equal(id,'p1');assert.equal(posts.length,1);assert.equal(posts[0].content,'周六。');
+  assert.equal(posts[0].photoDescription,'书房');assert.equal(dispatched.length,0);
+  assert.equal(await ctx.api.postMomentForCharacter('c','重试',undefined,'app:one'),'p1');assert.equal(h.calls,1);
+  for(const response of ['换个切入。符合他的风格：极简。','[朋友圈]没有结束标签','<think>[朋友圈]分析里的草稿[/朋友圈]</think>']){
+    h.response=response;await assert.rejects(ctx.api.postMomentForCharacter('c'),/未返回有效/);
+  }
+  assert.equal(posts.length,1);
+  h.response='<think>起草过程</think>[朋友圈]正文[/朋友圈][消息]顺便打招呼[/消息]';
+  assert.equal(await ctx.api.postMomentForCharacter('c'),'p2');
+  assert.deepEqual(dispatched.map(a=>a.type),['消息']);assert.equal(posts[1].content,'正文');
+  assert.equal(ctx.api.parseMomentPostResponse('无标签草稿'),null);
+  return {singlePublication:true,correctReceipt:true,draftsRejected:true,idempotentRetry:true,otherActionsPreserved:true};
+});
+
 console.log(`Passed ${results.length} fork regression checks.`);

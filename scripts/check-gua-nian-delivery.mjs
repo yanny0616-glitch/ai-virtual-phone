@@ -28,7 +28,7 @@ function app() {
   };
   const ctx = vm.createContext({ Date: Clock, document, h, URLSearchParams, console, AbortController,
     setTimeout: (fn) => { h.timeout = fn; return 1; }, clearTimeout: () => {},
-    AiPhone: { db: {
+    AiPhone: { moments: { post: async input => h.momentsPost(input) }, db: {
       list: async (table) => table === "plans" ? [h.cx.plan] : [],
       update: async (table, _id, patch) => {
         if (table === "plans") return h.cx.plan = { ...h.cx.plan, ...patch };
@@ -46,7 +46,7 @@ function app() {
     syncUsageCloud = async () => {};
     readSheet = () => h.sheet;
     globalThis.api = { S, ctxOf, cur, refreshReceipts, decStatus, detailHtml, openDetail, closeDetail,
-      uploadPlanCloud, syncSavedPlan, pullCloudDecisionsBody, planSyncState, retryPlanSync, renderCloudSync, saveSettings, renderArchive, todayStr, settingsSaveEffects, validateUserSleepSettings, userSleepContext, SET_DEF };
+      uploadPlanCloud, syncSavedPlan, pullCloudDecisionsBody, planSyncState, retryPlanSync, renderCloudSync, saveSettings, renderArchive, todayStr, settingsSaveEffects, validateUserSleepSettings, userSleepContext, momentRecords, momentHistoryHtml, consumeOutbox, postMoment, moState, SET_DEF };
   `;
   vm.runInContext(source.replace(/  init\(\);\s*\}\)\(\);\s*$/, expose + "\n})();"), ctx);
   const a = ctx.api;
@@ -323,4 +323,54 @@ await test("回音去重记录满 60 条仍合并云端新键，重复读取不�
   await a.pullCloudDecisionsBody(cx, true); await a.pullCloudDecisionsBody(cx, true);
   assert.deepEqual(Array.from(cx.plan.fbSeen), ["local-only", "w60", "cloud-only"]);
 });
+
+await test("云端积压三条只发布最新一条，使用实际时间，记录合并原因和帖子编号", async () => {
+  const {a,cx,h}=app(), posted=[];
+  Object.assign(a.S.settings,{momentsOn:true,momentsGapH:6,momentsWeekly:3});
+  h.momentsPost=async input=>{posted.push(input);return {postId:'actual-post'};};
+  const outbox=[1,2,3].map(i=>({id:'o'+i,hint:'起意'+i,at:now-i*3600000}));
+  await a.consumeOutbox(cx,{outbox,momentsLast:now,momentsWeekN:3,momentsWeekStart:a.moState(cx).weekStart});
+  assert.equal(posted.length,1);assert.equal(posted[0].hint,'起意1');assert.equal(posted[0].createdAt,now);
+  const records=a.momentRecords(cx);assert.equal(records.filter(r=>r.status==='skipped').length,2);
+  assert.equal(records.find(r=>r.status==='sent').postId,'actual-post');assert.equal(a.moState(cx).weekN,1);
+  await a.consumeOutbox(cx,{outbox});assert.equal(posted.length,1);
+  assert.match(a.momentHistoryHtml(cx),/已发布/);assert.match(a.momentHistoryHtml(cx),/actual-post/);
+});
+await test("发圈间隔和周额度在补发入口也生效，等待状态进入记录", async () => {
+  for (const exhausted of [false,true]) {
+    const {a,cx,h}=app();let calls=0;
+    Object.assign(a.S.settings,{momentsOn:true,momentsGapH:6,momentsWeekly:3,momentsState:{c:{lastAt:exhausted?0:now-3600000,weekStart:a.moState(cx).weekStart,weekN:exhausted?3:1}}});
+    h.momentsPost=async()=>{calls++;return {postId:'bad'};};
+    await a.consumeOutbox(cx,{outbox:[{id:'wait',hint:'等待',at:now-3600000}]});
+    assert.equal(calls,0);assert.equal(a.momentRecords(cx)[0].status,'pending');assert.equal(cx.plan.outbox.length,1);
+  }
+});
+await test("宿主未创建或生成失败不记为成功，不扣周额度；失败可沿同一编号重试", async () => {
+  const {a,cx,h}=app();
+  Object.assign(a.S.settings,{momentsOn:true,momentsGapH:6,momentsWeekly:3});
+  h.momentsPost=async()=>({postId:null});
+  await a.postMoment(cx,'重复',now,'app','skip');assert.equal(a.momentRecords(cx)[0].status,'skipped');assert.equal(a.moState(cx).weekN,0);
+  h.momentsPost=async()=>{throw Error('正文格式不正确');};
+  await a.postMoment(cx,'失败',now,'app','retry');assert.equal(a.momentRecords(cx).find(r=>r.id==='retry').status,'failed');
+  h.momentsPost=async input=>{assert.equal(input.requestId,'retry');return {postId:'recovered'};};
+  await a.postMoment(cx,'失败',now,'app','retry');assert.equal(a.moState(cx).weekN,1);
+  assert.equal(a.momentRecords(cx).find(r=>r.id==='retry').postId,'recovered');
+  await a.postMoment(cx,'失败',now,'app','retry');assert.equal(a.moState(cx).weekN,1);
+});
+await test("并发读取 outbox 不重复发帖，发圈记录独立于当天计划并转义文本", async () => {
+  const {a,cx,h,el}=app(),gate=deferred(),started=deferred();let calls=0;
+  Object.assign(a.S.settings,{momentsOn:true,momentsGapH:6,momentsWeekly:3});
+  h.momentsPost=async()=>{calls++;started.resolve();await gate.promise;return {postId:'one'};};
+  const data={outbox:[{id:'one',hint:'<img src=x onerror=bad()>',at:now}]};
+  const first=a.consumeOutbox(cx,data);await started.promise;await a.consumeOutbox(cx,data);gate.resolve();await first;
+  assert.equal(calls,1);cx.plan={date:'tomorrow',items:[]};
+  assert.equal(a.momentRecords(cx)[0].postId,'one');assert.ok(!a.momentHistoryHtml(cx).includes('<img'));
+  a.S.tab='archive';cx.archive={at:now,dates:[],byDate:{}};await a.renderArchive();
+  assert.match(h.stored.momentHistory.c[0].postId,/one/);
+  assert.match(el("#view").innerHTML,/朋友圈记录/);assert.match(el("#view").innerHTML,/帖子编号 one/);
+  cx.plan = {id:"new-plan",date:a.todayStr(),characterId:"c",items:[]};
+  await a.consumeOutbox(cx,{outbox:[{id:"one",hint:"旧起意",at:now-3600000},{id:"new",hint:"新起意",at:now}]});
+  assert.equal(a.momentRecords(cx).find(r=>r.id==="cloud:one").status,"sent");assert.equal(calls,1);
+});
+
 console.log(`Passed ${passed} gua-nian delivery/sync checks.`);
