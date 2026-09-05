@@ -29,6 +29,7 @@ type Props = {
     onRequestDelete?: (postId: string) => void;
     onOpenCommentComposer?: (post: MomentPost) => void;
     onOpenReplyComposer?: (post: MomentPost, comment: MomentComment, replyName: string) => void;
+    onOpenProfile?: (authorType: "user" | "character", authorId: string) => void;
 };
 
 const DEFAULT_MOMENT_AVATAR_SRC = "/images/default-moment-avatar.png";
@@ -37,7 +38,7 @@ function MomentDefaultAvatar({ alt = "" }: { alt?: string }) {
     return <img src={DEFAULT_MOMENT_AVATAR_SRC} alt={alt} className="feed-default-avatar w-full h-full object-cover" />;
 }
 
-export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentComposer, onOpenReplyComposer }: Props) {
+export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentComposer, onOpenReplyComposer, onOpenProfile }: Props) {
     const [comments, setComments] = useState<MomentComment[]>(() => loadMomentComments(post.id));
     const [showPhotoPromptEditor, setShowPhotoPromptEditor] = useState(false);
     const [photoPromptDraft, setPhotoPromptDraft] = useState("");
@@ -274,7 +275,8 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
             {/* Header row: avatar + name */}
             <div className="feed-post-header flex items-center gap-3 mb-3">
                 <div
-                    className="feed-post-author-avatar w-[40px] h-[40px] rounded-full shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center"
+                    className={`feed-post-author-avatar w-[40px] h-[40px] rounded-full shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center${onOpenProfile ? " cursor-pointer" : ""}`}
+                    onClick={onOpenProfile ? () => onOpenProfile(post.authorType, post.authorId) : undefined}
                 >
                     {authorAvatar ? (
                         <img src={authorAvatar} alt="" className="feed-post-author-avatar-image w-full h-full object-cover" />
@@ -283,7 +285,10 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                     )}
                 </div>
                 <div className="feed-post-author flex-1 flex items-center gap-1">
-                    <span className="feed-post-author-name ts-16 font-medium text-[var(--c-text-title)]">{authorName}</span>
+                    <span
+                        className={`feed-post-author-name ts-16 font-medium text-[var(--c-text-title)]${onOpenProfile ? " cursor-pointer" : ""}`}
+                        onClick={onOpenProfile ? () => onOpenProfile(post.authorType, post.authorId) : undefined}
+                    >{authorName}</span>
                 </div>
                 <button
                     ref={postActionsBtnRef}

@@ -7,6 +7,7 @@ import { resolveUserIdentity } from "@/lib/settings-storage";
 import { saveChatImageToIndexedDB, getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
 import type { MomentComment, MomentPost } from "@/lib/moments-types";
 import { MomentPostCard } from "./moment-post-card";
+import { MomentProfilePage } from "./moment-profile-page";
 import { MomentsCompose } from "./moments-compose";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { PageShell } from "@/components/ui/page-shell";
@@ -51,6 +52,7 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
     const coverInputRef = useRef<HTMLInputElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const userIdentity = resolveUserIdentity(undefined, "chat");
+    const [profile, setProfile] = useState<{ type: "user" | "character"; id: string } | null>(null);
     const [signature, setSignature] = useState(() => {
         if (typeof window !== "undefined") {
             return kvGet("moments_signature") || "make every day count (●ˇ∀ˇ●)";
@@ -554,6 +556,7 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
                             onRequestDelete={setConfirmDeleteId}
                             onOpenCommentComposer={openCommentComposer}
                             onOpenReplyComposer={openReplyComposer}
+                            onOpenProfile={(type, id) => setProfile({ type, id })}
                         />
                     ))
                 )}
@@ -616,6 +619,20 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
             )}
 
         </PageShell>
+        {profile && (
+            // 主页盖在动态页上面、评论弹层（fixed z-120）下面，评论/回复照走动态页那套输入框
+            <div className="moments-profile-layer absolute inset-0 z-30" style={{ background: "var(--c-page-body-bg)" }}>
+                <MomentProfilePage
+                    authorType={profile.type}
+                    authorId={profile.id}
+                    onBack={() => setProfile(null)}
+                    onUpdate={refreshPosts}
+                    onRequestDelete={setConfirmDeleteId}
+                    onOpenCommentComposer={openCommentComposer}
+                    onOpenReplyComposer={openReplyComposer}
+                />
+            </div>
+        )}
         </>
     );
 }
