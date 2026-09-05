@@ -44,6 +44,7 @@
         // 先认锁：另一台在管的话，下面的接管、寄原料、复核、取裁决全都不该做
         cx._ownAt = Date.now();
         await readOwner(cx);
+        if (generationStopState(cx) && generationStopState(cx).status !== "synced") await stopCloudGeneration(cx);
         await syncChatContext(cx, true);
         await adoptCloudDay(cx);
         uploadGenKitCloud(cx).catch(() => { /* 已在函数内记日志 */ });
@@ -80,6 +81,8 @@
             await readOwner(cx).catch(() => { /* 读不到按没锁算 */ });
             if (was !== owns(cx)) render();
           }
+          if (cx.day && (cx.day.cloudAdopting || (cx.day.by === "cloud" && !cx.plan))) await adoptCloudDay(cx).catch(() => {});
+          await flushJudgeFinish(cx).catch(() => {});
           await maybeAutoGen(cx).catch(() => { /* 已在函数内记日志 */ });
           await settleFired(cx).catch(() => { /* 已在函数内记日志 */ });
           await syncChatContext(cx).catch(() => { /* 已在函数内记日志 */ });

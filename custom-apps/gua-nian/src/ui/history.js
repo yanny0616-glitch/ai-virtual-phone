@@ -6,15 +6,15 @@
       "</div>";
   }
 
-  function momentHistoryHtml(cx) {
-    const records = momentRecords(cx).slice().sort((a, b) => b.at - a.at);
+  function momentHistoryHtml(cx, date) {
+    const records = momentRecords(cx).filter(r => !date || dateStrOf(new Date(r.at)) === date).sort((a, b) => b.at - a.at);
+    if (!records.length) return "";
     const states = { sent: "已发布", pending: "待发布", failed: "发布失败", skipped: "未发布" };
-    return '<div class="card"><div class="sec-head"><span class="t">朋友圈记录</span></div>' +
-      (records.length ? records.map(r => '<div class="d-why"><strong>' + esc(states[r.status] || "待确认") + '</strong> · ' +
-        esc(dateStrOf(new Date(r.at)) + " " + fmtHM(r.at)) + ' · ' + (r.by === "cloud" ? "云端起意" : "本地起意") +
+    return '<details class="skip-fold moment-history"><summary>朋友圈记录 · ' + records.length + ' 条</summary>' +
+      records.map(r => '<div class="d-why"><strong>' + esc(states[r.status] || "待确认") + '</strong> · ' +
+        esc(fmtHM(r.at)) + ' · ' + (r.by === "cloud" ? "云端起意" : "本地起意") +
         '<div>「' + esc(r.hint) + '」</div><div class="archive-note">' + esc(r.note || "") +
-        (r.postId ? ' · 帖子编号 ' + esc(r.postId) : '') + '</div></div>').join("") :
-        '<div class="archive-note">暂无挂念发圈记录。旧版帖子和宿主其他入口发布的朋友圈不会自动补入。</div>') + '</div>';
+        (r.postId ? ' · 帖子编号 ' + esc(r.postId) : '') + '</div></div>').join("") + '</details>';
   }
 
   async function renderArchive() {
@@ -28,6 +28,13 @@
       return;
     }
     if (req !== S._arcReq || S.tab !== "archive") return; // 期间切走了就不画
+    // 只有发圈记录、没有日程或私聊计划的日期也保留日期卡片，不修改读取缓存。
+    arc = { ...arc, byDate: { ...arc.byDate } };
+    for (const record of momentRecords(cx)) {
+      const date = dateStrOf(new Date(record.at));
+      if (!arc.byDate[date]) arc.byDate[date] = { day: null, plan: null };
+    }
+    arc.dates = Object.keys(arc.byDate).sort().reverse();
 
     // 近 7 天统计
     const d7 = new Date(); d7.setDate(d7.getDate() - 6);
@@ -49,7 +56,7 @@
       '<div class="stat"><div class="num">' + nAct + '</div><div class="cap">7天起念</div></div>' +
       '<div class="stat" style="animation-delay:60ms"><div class="num">' + nSent + '</div><div class="cap">已发出</div></div>' +
       '<div class="stat" style="animation-delay:120ms"><div class="num">' + nUnknown + '</div><div class="cap">待确认</div></div>' +
-      "</div>" + momentHistoryHtml(cx);
+      "</div>";
 
     if (!arc.dates.length) {
       html += '<div class="card empty"><div class="art">🌱</div><p>还没有任何记录。<br>回「今天」页生成TA的一天，这里就会开始留痕。</p></div>';
@@ -61,6 +68,7 @@
       const day = rec.day, plan = rec.plan;
       const items = (plan && plan.items) || [];
       const acted = items.filter((w) => w.act).length;
+      const momentCount = momentRecords(cx).filter(r => dateStrOf(new Date(r.at)) === date).length;
       const wd = "日一二三四五六"[new Date(date + "T00:00:00").getDay()];
       const isToday = date === todayStr();
       let body = "";
@@ -83,12 +91,13 @@
             skippedItems.map((w) => decRow(w)).join("") + "</details>";
         }
       } else {
-        body += '<div class="archive-note">这天没有编排记录' + (day ? "（只生成了生活面）" : "") + "</div>";
+        body += '<div class="archive-note">这天没有私聊编排记录' + (day ? "（只生成了生活面）" : "") + "</div>";
       }
+      body += momentHistoryHtml(cx, date);
       html += '<details class="day-card" data-d="' + esc(date) + '"' + (isToday || (di === 0 && !arc.byDate[todayStr()]) ? " open" : "") + ' style="animation-delay:' + Math.min(di * 50, 400) + 'ms">' +
         '<summary class="day-sum"><span class="emo">' + esc(day && day.moodEmoji || "🗓️") + "</span>" +
         '<span class="mid"><span class="d1">' + esc(date.slice(5).replace("-", " / ")) + '<span class="wd">周' + wd + (isToday ? " · 今天" : "") + "</span>" +
-        (acted ? '<span class="hearts">♥×' + acted + "</span>" : '<span class="hearts" style="color:var(--tx3)">安静的一天</span>') + "</span>" +
+        (acted ? '<span class="hearts">♥×' + acted + "</span>" : '<span class="hearts" style="color:var(--tx3)">' + (momentCount ? '朋友圈记录 ×' + momentCount : '安静的一天') + '</span>') + "</span>" +
         '<span class="d2">' + esc(day && day.mood || "没有生活面记录") + "</span></span>" +
         '<span class="arr">▶</span></summary>' +
         '<div class="day-body">' + body + "</div></details>";

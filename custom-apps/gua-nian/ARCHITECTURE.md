@@ -146,8 +146,37 @@ worker 的 `capabilities` 请求仍校验 cron token，只返回能力，不生�
 
 ## 发圈回执与记录
 
-`planning/moments.js` 在 `settings.momentHistory[characterId]` 持久保存最近 60 个起意结果，`ui/history.js` 在记录页展示；独立于当天计划和 120 条滚动运行日志。发布成功必须收到宿主 postId，成功记录和本地周计数同一次 patchSettings 保存；失败、未创建及待配额不记为已发布。云端预留的 momentsLast/momentsWeekN 不当作已发布回执合入本地。
+`planning/moments.js` 在 `settings.momentHistory[characterId]` 持久保存最近 60 个起意结果，`ui/history.js` 按日期归入记录卡片、放在私聊记录后并默认折叠展示；独立于当天计划和 120 条滚动运行日志。发布成功必须收到宿主 postId，成功记录和本地周计数同一次 patchSettings 保存；失败、未创建及待配额不记为已发布。云端预留的 momentsLast/momentsWeekN 不当作已发布回执合入本地。
 
 云端待发列表按起意时间选最新一条，较早项明确记录合并未发布，入口重新检查最小间隔与周额度，并用实际时间发帖。运行时 outbox/发帖锁防止同页并发；稳定 requestId 由宿主按 APP 和角色隔离，MomentPost 保存该编号，重试返回已有帖子编号。历史记录用于跨日去重，不再只依赖 plan.postedIds。
 
 宿主 moments-engine 保留本轮的一个完整朋友圈动作自行入库，只把其他类型动作交给通用分发器。去掉思考标签区后解析完整朋友圈块，未标记草稿或未闭合正文不发布。变化需同时更新宿主与 APP，不涉及云函数和 schema。
+
+
+## 本机复核调用间隔
+
+`planning/recheck.js` 在调用模型前向当天计划保存 `recheckAttemptAt`；打开与定时入口均按它和成功时间 `recheckAt` 的较大值遵守 `recheckMin`（至少 1 分钟）。仅在检测到新用户消息、且准备调用模型时记录尝试；写入失败不调用模型，调用后处理失败仍保留间隔且不冒充成功。未回应降速不受模型调用间隔阻挡。计划锁在 finally 中释放，即使上下文同步失败也不会卡住后续复核。这个尝试字段只管理本机间隔；本机与云端的互斥由下述独立判断租约处理，多设备接管锁仍保持原实现。
+
+`presets.json` 的起意预设只规定判断原则和 JSON 输出要求，字段结构以初次编排或聊天复核各自的动态任务为准，避免固定的旧 decisions 示例覆盖新增字段。
+
+
+## P1 失败恢复与自动生成停用
+
+自动复核使用 pullCloudDecisionsBody(cx, true)，严格读取失败不进入模型及上传；saveSchedule 在复核外调用 syncSavedPlan，复核内由外层提交。applyThreads 接收可选的本轮 planItems，了结关联预约时调用 dropThreadSlots；撤销失败不清除编号、不标记了结，成功后同时更新暂存计划，避免末尾覆盖。
+
+adoptCloudDay 先保存 cloudAdopting=true，计划完成后置 false。入口允许中断接管和旧版 cloud day 无 plan 的记录继续，分钟循环也会续接；已完成或本地生成的生活面不被重复接管覆盖。
+
+cloud/day.js 的 stopCloudGeneration 与 generationStopState 管理独立的 settings.generationStops[characterId] 状态，以云地址限定作用范围；ui/sync-status.js 单独展示未确认停用和重试入口。generation-stop 通过 schema 9 的 push_recheck_stop_generation 仅设置尚未生成的 genKit 行 genEnabled=0，保留既有 day、items、jobs。worker 进入 genKit 分支及模型调用前后检查，最终保存还校验 updated_at；重新开启后由正常原料上传创建可执行的新上下文。不会为了关闭自动生成而撤销已应用的预约。
+
+
+## 六项 P2 修复与 schema 10
+
+接管与上传保留 from、until、origFireAt、held。单条日程重写合并旧字段；开始时间移动且未指定新结束时，按旧时长平移结束时间，拒绝跨午夜或结束早于开始，并使旧细排失效。明确 busy=false 优先于标题推断；未标注的旧日程仍按同一标题规则兜底，本机、云端生成、展望及到点发送保持一致。
+
+用量快照按云地址和设备隔离，仅成功读取缓存 5 分钟；失败保留上次结果并显示合计未确认，首次失败显示云端未知，可立即强制刷新。有调用上限而云端账本无法确认时暂停新的本机模型调用，不把未知当作零。
+
+schema 10 增加 push_recheck_judge 原子 RPC 与独立 judge_token/judge_until/judged_chat_at/judged_at 列。网关 judge-task 和 worker 共享同角色当天判断租约（10 分钟），本机每分钟续租、应用结果前再次确认；已处理聊天不重复调用。云端结果与聊天游标在同一次带版本和任务编号条件的 PATCH 保存；本机完成回执与本地结果一起落盘，失败由分钟循环或下次打开重试。门禁日志不推进处理游标，失败调用不提交成功状态。该租约不修改此前暂缓的设备接管协议；长期断网直至租约被其他执行者接手，旧结果回执无法保证补入，会明确记录过期。
+
+cloud/day.js 冻结 companion + impulse 的独立 judge 模板，cloudContext 寄存模板键；worker 优先使用其完整请求，保留人设、世界书、预设及生成参数，只替换任务占位符。旧计划没有独立模板时保留原预约上下文并追加判断任务。daily 预设也不再把整天日程结构强加给单条重写/细排任务。最终朋友圈成文仍走宿主原朋友圈管线。
+
+scripts/check-gua-nian-p2.mjs 覆盖以上六项的真实 APP 和云函数入口，接入 gua-nian:test。scripts/check-gua-nian-judge-sql.mjs 使用独立安装的 PGlite 验证真实 PostgreSQL 函数、重复迁移、互斥、续租、失败重试、过期及游标，依赖路径由命令参数传入，不增加宿主运行依赖。上线需要安装新版 APP、执行 schema 10 并更新网关、push-recheck、push-generate；本地回归不等同于手机与个人云实测。

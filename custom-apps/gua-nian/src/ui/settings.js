@@ -309,12 +309,19 @@
     if (!ids.includes(S.cur)) S.cur = ids[0] || "";
     const before = Object.assign({}, S.settings);
     const cloudGenWas = !!S.settings.cloudGen;
+    const generationResults = [];
     await patchSettings(() => Object.assign({ characterIds: ids, characterId: S.cur }, sheet));
     S._settingsEffects = settingsSaveEffects(before, S.settings);
     renderSettingsEffects();
     closeSheet();
     // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
     if (cloudGenWas && !S.settings.cloudGen) for (const cx of allCx()) await unfreezeGenTemplates(cx);
+    if (cloudCfg() && !(S.settings.autoGen && S.settings.cloudGen)) {
+      for (const cx of allCx()) {
+        const pendingStop = generationStopState(cx);
+        if ((before.autoGen && before.cloudGen) || (pendingStop && pendingStop.status !== "synced")) generationResults.push(await stopCloudGeneration(cx));
+      }
+    }
     // 不再挂念的人：身上注入的状态得撤掉，不然TA会一直以为自己在过挂念的那一天
     for (const id of removed) {
       const cx = S.byId[id];
@@ -336,7 +343,7 @@
     }
     syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
     render();
-    const incomplete = syncResults.some((r) => ["failed", "partial", "syncing"].includes(r.status));
+    const incomplete = [...syncResults, ...generationResults].some((r) => ["failed", "partial", "syncing"].includes(r.status));
     toast(incomplete ? "本地已保存，云端同步未完成；请查看页面提示"
       : !S.settings.cloudRecheck && syncResults.some((r) => r.status === "synced") ? "本地已保存，云端已确认关闭复核"
       : syncResults.some((r) => r.status === "readonly") ? "本地已保存，部分角色由其他设备负责，未上传"

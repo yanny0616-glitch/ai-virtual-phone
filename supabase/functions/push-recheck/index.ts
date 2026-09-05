@@ -485,6 +485,7 @@ type PlanRow = {
   context: PlanContext;
   items: PlanItem[];
   decisions: unknown[];
+  judged_chat_at?: number; judged_at?: number;
   last_recheck_at: string | null;
   recheck_count: number;
   updated_at: string | null;
@@ -692,19 +693,25 @@ function extractResponseText(providerKind: ProviderKind, data: unknown): string 
     || (typeof d.response === "string" ? d.response.trim() : "");
 }
 
-/** 裁决只要一段 JSON：借快照的 url/headers/model，但不重放整份角色提示词。 */
+/** 保留人设、预设和世界书；专用模板仅替换任务占位符，旧预约快照在末尾追加判断任务。 */
 function buildJudgeBody(template: JobPayload["request"], prompt: string): Record<string, unknown> {
-  const model = template.body.model;
-  if (template.providerKind === "anthropic") {
-    return { model, max_tokens: 900, messages: [{ role: "user", content: prompt }] };
+  const body = JSON.parse(JSON.stringify(template.body)) as Record<string, unknown>;
+  const task = "【后台判断任务：本轮仅按下面要求输出 JSON，不生成聊天回复、不调用工具】\n" + prompt;
+  if (!fillTemplate(body, template.providerKind, task)) {
+    if (template.providerKind === "gemini") {
+      body.contents = [...(Array.isArray(body.contents) ? body.contents : []), { role: "user", parts: [{ text: task }] }];
+    } else {
+      body.messages = [...(Array.isArray(body.messages) ? body.messages : []), { role: "user", content: task }];
+    }
   }
+  delete body.tools; delete body.tool_choice; delete body.toolConfig;
   if (template.providerKind === "gemini") {
-    return {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 900, temperature: 0.8 },
-    };
+    body.generationConfig = { maxOutputTokens: 2048, ...((body.generationConfig || {}) as Record<string, unknown>) };
+  } else {
+    body.stream = false; delete body.stream_options;
+    if (!body.max_tokens && !body.max_completion_tokens) body.max_tokens = 2048;
   }
-  return { model, messages: [{ role: "user", content: prompt }], temperature: 0.8, max_tokens: 900, stream: false };
+  return body;
 }
 
 /** 模型爱把 JSON 裹在解释或 ``` 里，取最外层的一对花括号。 */
@@ -843,11 +850,11 @@ function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, setti
     note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
     mood: String(pickField(it, ["mood", "情绪", "心情"]) || "").slice(0, 24),
     cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
-    busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
+    busy: pickField(it, ["busy", "顾不上", "忙"]) === "" ? undefined : isTrue(pickField(it, ["busy", "顾不上", "忙"])),
   }));
   for (const it of existing) {
     const hit = sched.find((x) => x.time === it.startTime);
-    if (!hit) sched.push({ time: String(it.startTime || ""), title: String(it.title || ""), place: it.location || "", note: it.location || "日程表上的安排", busy: it.lock === "busy" });
+    if (!hit) sched.push({ time: String(it.startTime || ""), title: String(it.title || ""), place: it.location || "", note: it.location || "日程表上的安排", busy: it.lock ? it.lock === "busy" : undefined });
     else if (it.lock) hit.busy = it.lock === "busy";
   }
   sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
@@ -984,7 +991,7 @@ function dayOutlook(day: GenDay, planDate: string, tz: number, nowMs: number,
     const b = it.end ? timeToMs(String(it.end)) : null;
     if ((b || a) < nowMs) continue;
     if (a - cursor > 20 * 60_000) push(Math.round((Math.max(cursor, nowMs) + a) / 2), "空着", false, "");
-    push(Math.max(a, nowMs), String(it.title || ""), !!it.busy, String(it.end || ""));
+    push(Math.max(a, nowMs), String(it.title || ""), typeof it.busy === "boolean" ? it.busy : /上课|课堂|听课|自习|复习|预习|写作业|做作业|赶作业|做题|考试|测验|开会|会议|值班|实习|训练|排练|实验|赶稿|写稿|编程|写代码|专注|集中精神|通勤|赶路|开车|面试|汇报|手术|门诊/.test(String(it.title || "")) && !/睡觉|睡眠|午睡|午休|补觉|休息|发呆|摸鱼|放松|吃饭|用餐|散步|刷视频|看番|打游戏|玩游戏|聊天|自由时间|准备睡|洗漱|刚醒|起床|看剧|逛/.test(String(it.title || "")), String(it.end || ""));
     cursor = Math.max(cursor, b || a);
   }
   if (endMs - cursor > 20 * 60_000) push(Math.round((Math.max(cursor, nowMs) + endMs) / 2), "睡前自己待着", false, "");
@@ -1055,6 +1062,11 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
     guard && plan.updated_at ? `${planFilter}&updated_at=eq.${encodeURIComponent(plan.updated_at)}` : planFilter,
     { method: "PATCH", headers: { Prefer: guard ? "return=representation" : "return=minimal" }, body: JSON.stringify(body) },
   ).catch(() => undefined);
+  const active = async () => {
+    const response = await rest(`${planFilter}${plan.updated_at ? "&updated_at=eq." + encodeURIComponent(plan.updated_at) : ""}&select=plan_date&limit=1`).catch(() => undefined);
+    const rows = response?.ok ? await response.json().catch(() => []) : [];
+    return Array.isArray(rows) && rows.length > 0;
+  };
   const armedKeys: string[] = [];
   try {
     // 借模板：daily / impulse 两份 push.freeze 冻的完整提示词，加上哨兵聊天快照（点亮预约要克隆它）
@@ -1090,12 +1102,14 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
     // ── 生成TA的一天（与 App generateDay 同一份指令、同一套归一）
     const budgetTz = (await usageBudget(rest, userId)).tz;
     const record = (providerKind: ProviderKind, data: unknown) => usageAdd(rest, userId, budgetTz, "cloud-gen", providerKind, data);
+    if (!await active()) return;
     const raw = await generateJsonWith(tplDaily, instruction, log, record);
+    if (!await active()) return;
     const dayFull = parseDayResult(raw, existing, settings, nowMs);
     const day: GuanianDay & Record<string, unknown> = {
       tz, mood: dayFull.mood, energy: dayFull.energy, location: dayFull.location, doing: dayFull.doing,
       wake: dayFull.wake, bed: dayFull.bed,
-      schedule: dayFull.schedule.map(it => ({ time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +(it.cost || 0), mood: it.mood || "", busy: !!it.busy })),
+      schedule: dayFull.schedule.map(it => ({ time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +(it.cost || 0), mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined })),
       conds: dayFull.conds.map(c => ({ startAt: c.startAt, halfLifeMin: c.halfLifeMin, intensity: c.intensity, energyDelta: c.energyDelta, mood: c.mood, cause: c.cause })),
     };
     log("生成今日生活面：" + dayFull.schedule.length + " 条日程（日程表已定 " + existing.length + " 条），作息 " + dayFull.wake + " 起 " + dayFull.bed + " 睡，心情「" + dayFull.mood + "」"
@@ -1127,7 +1141,9 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
       const lines = chatExcerpt(chat, judgeLinesOf(context.judgeLines));
       chatUsed = lines.length;
       if (lines.length) log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
+      if (!await active()) return;
       const parsed = await generateJsonWith(tplImpulse, buildImpulseInstruction(dayFull, outlook, hhmm(nowMs, tz), lines, settings, String(context.bias || ""), threadLines(context, nowMs, tz)), log, record);
+      if (!await active()) return;
       const raw: Impulse[] = Array.isArray(parsed?.impulses) ? parsed.impulses : [];
       log("TA提了 " + raw.length + " 个念头：" + (raw.map(x => normHM(x?.time) + "·" + String(x?.about || "")).join("，") || "（一个都没有）"));
 
@@ -1265,7 +1281,7 @@ Deno.serve(async (req: Request) => {
   const cronSecret = secretRows[0]?.cron_secret || "";
   const payloadKey = secretRows[0]?.payload_key || "";
   if (!cronSecret || String(token) !== cronSecret) return new Response("forbidden", { status: 403 });
-  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1"] });
+  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1"] });
   if (!userId || !characterId || !planDate) return new Response("bad request", { status: 400 });
   if (!payloadKey) return new Response("payload_key missing", { status: 200 });
 
@@ -1274,20 +1290,22 @@ Deno.serve(async (req: Request) => {
     + `&plan_date=eq.${encodeURIComponent(planDate)}`;
 
   const planResponse = await rest(
-    `${planFilter}&select=session_id,context,items,decisions,last_recheck_at,recheck_count,updated_at&limit=1`,
+    `${planFilter}&select=session_id,context,items,decisions,last_recheck_at,recheck_count,updated_at,judged_chat_at,judged_at&limit=1`,
   );
   const planRows = planResponse.ok ? await planResponse.json() as PlanRow[] : [];
   const plan = planRows[0];
   if (!plan) return new Response("no plan", { status: 200 });
 
   const nowMs = Date.now();
-  const lastRecheckMs = plan.last_recheck_at ? Date.parse(plan.last_recheck_at) : NaN;
+  const lastRecheckMs = Math.max(plan.last_recheck_at ? Date.parse(plan.last_recheck_at) || 0 : 0, +plan.judged_at || 0) || NaN;
   const context = plan.context || {};
 
   // 云端生成：这一行还只是 App 寄来的生成原料（没有 day，也没有时刻），到点才动，
   // 生成之前不走下面的复核——没有生活面的复核和自发起念都无从判起。
   const kit = context.genKit && typeof context.genKit === "object" ? context.genKit : null;
   if (kit && context.generatedBy !== "cloud") {
+    if (context.genEnabled === 0) return new Response("gen: disabled", { status: 200 });
+    planFilter += "&or=(context->>genEnabled.is.null,context->>genEnabled.neq.0)";
     const tz = Number(kit.tz) || 0;
     const local = new Date(nowMs + tz * 60_000);
     const localDate = `${local.getUTCFullYear()}-${pad2(local.getUTCMonth() + 1)}-${pad2(local.getUTCDate())}`;
@@ -1399,7 +1417,7 @@ Deno.serve(async (req: Request) => {
 
     // 没新消息就没有新信息，再判一次只是烧额度。首次复核回看 6 小时，
     // 别把开机前的对话全算成"新"。
-    const sinceMs = Number.isFinite(lastRecheckMs) ? lastRecheckMs : nowMs - 6 * 3600_000;
+    const sinceMs = (+plan.judged_chat_at || nowMs - 6 * 3600_000);
     const freshResponse = await rest(
       `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
       + `&character_id=eq.${encodeURIComponent(characterId)}`
@@ -1598,7 +1616,8 @@ Deno.serve(async (req: Request) => {
   const touch = (extra: Record<string, unknown> = {}, guard = false) => rest(
     // 乐观锁：这一轮手里的 items 是几十秒前读到的，期间 App 重新编排会整份覆盖这行，
     // 无条件写回就把新计划打回旧的。带上读到的 updated_at，被改过就一行也匹配不上。
-    guard && plan.updated_at ? `${planFilter}&updated_at=eq.${encodeURIComponent(plan.updated_at)}` : planFilter,
+    (guard && plan.updated_at ? `${planFilter}&updated_at=eq.${encodeURIComponent(plan.updated_at)}` : planFilter)
+      + (guard && judgeTask ? `&judge_token=eq.${encodeURIComponent(judgeTask.token)}` : ""),
     {
       method: "PATCH",
       headers: { Prefer: guard ? "return=representation" : "return=minimal" },
@@ -1607,7 +1626,8 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({ last_recheck_at: new Date().toISOString(), ...extra }),
     },
   ).catch(() => undefined);
-  await touch();
+  let judgeTask: { token: string; chatAt: number } | null = null;
+  let judgeApplied = false;
 
   const run = async (): Promise<void> => {
     // 时区：计划里的 time 是用户本地 HH:MM，fireAt 是绝对毫秒。两者一减就还原出本地偏移，
@@ -1635,6 +1655,9 @@ Deno.serve(async (req: Request) => {
     // 哨兵预约（App 编排时挂的、48 小时后才到点的模板）也算在内：一个时刻都没点亮的日子全靠它。
     const sentinelWakeId = typeof context.sentinelWakeId === "string" ? context.sentinelWakeId : "";
     const wakeKeys = items.map(item => item.wakeId).concat(sentinelWakeId).filter(Boolean).map(id => `"timedwake:${id}"`);
+    const judgeKey = typeof context.judgeTemplate === "string" ? context.judgeTemplate : "";
+    if (judgeKey) wakeKeys.push(`"${judgeKey.replace(/[^A-Za-z0-9._:-]/g, "")}"`);
+    let judgeTemplate: JobPayload | null = null;
     let found: JobPayload | null = null;
     const jobsByKey = new Map<string, JobRow>();
     if (wakeKeys.length > 0) {
@@ -1648,14 +1671,15 @@ Deno.serve(async (req: Request) => {
       // 待发的快照最新，已发过的是今早的上下文——克隆和裁决都优先用前者。
       jobRows.sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending"));
       for (const row of jobRows) {
-        if (found) break;
         try {
-          found = JSON.parse(await decryptPayload(row.payload, payloadKey)) as JobPayload;
+          if (row.trigger_key === judgeKey) judgeTemplate = JSON.parse(await decryptPayload(row.payload, payloadKey)) as JobPayload;
+          else if (!found) found = JSON.parse(await decryptPayload(row.payload, payloadKey)) as JobPayload;
         } catch { /* 单条解不开就换下一条 */ }
       }
     }
     if (!found) return;
     const template = found;
+    const judgeRequest = (judgeTemplate || template).request;
 
     const mirrorResponse = await rest(
       `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
@@ -1750,20 +1774,30 @@ Deno.serve(async (req: Request) => {
         : "",
     ].filter(Boolean).join("\n");
 
+    const chatAt = selfReason ? 0 : mirrorRows.filter(m => m.role === "user").reduce((at, m) => Math.max(at, Date.parse(m.message_at) || 0), 0);
+    const token = "cloud-" + nowMs + "-" + Math.random().toString(36).slice(2);
+    const claimResponse = await rest("rpc/push_recheck_judge", { method: "POST", body: JSON.stringify({
+      p_user_id: userId, p_character_id: characterId, p_date: planDate, p_token: token, p_action: "claim", p_chat_at: chatAt,
+    }) }).catch(() => undefined);
+    const claim = claimResponse?.ok ? await claimResponse.json().catch(() => null) : null;
+    if (!claim?.claimed) return;
+    judgeTask = { token, chatAt };
+    await touch();
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
     let judgeText = "";
     try {
-      const response = await fetch(template.request.url, {
+      const response = await fetch(judgeRequest.url, {
         method: "POST",
-        headers: template.request.headers,
-        body: JSON.stringify(buildJudgeBody(template.request, prompt)),
+        headers: judgeRequest.headers,
+        body: JSON.stringify(buildJudgeBody(judgeRequest, prompt)),
         signal: controller.signal,
       });
       if (!response.ok) return;
       const judgeData = await response.json();
-      await usageAdd(rest, userId, budgetTz, "cloud-recheck", template.request.providerKind, judgeData);
-      judgeText = extractResponseText(template.request.providerKind, judgeData);
+      await usageAdd(rest, userId, budgetTz, "cloud-recheck", judgeRequest.providerKind, judgeData);
+      judgeText = extractResponseText(judgeRequest.providerKind, judgeData);
     } catch {
       return;
     } finally {
@@ -1801,11 +1835,14 @@ Deno.serve(async (req: Request) => {
     const postDecision = post ? { at: nowMs, kind: "post", note: `想发条朋友圈——${post.hint}`, by: "cloud" } : null;
     const ctxDirty = !!selfReason || !!threadsNext || !!post;
     if (decisions.length === 0 && extra.length === 0) {
-      await touch({
+      const saved = await touch({
+        judged_chat_at: Math.max(+plan.judged_chat_at || 0, judgeTask?.chatAt || 0), judged_at: Date.now(),
         recheck_count: (plan.recheck_count || 0) + 1,
         ...(postDecision ? { decisions: [...priorDecisions, postDecision].slice(-60) } : {}),
         ...(ctxDirty ? { context: { ...context, ...ctxPatch, ...(selfReason ? { selfUsed: selfUsed + 1 } : {}) } } : {}),
-      });
+      }, true);
+      const rows = saved?.ok ? await saved.json().catch(() => []) : [];
+      judgeApplied = Array.isArray(rows) && rows.length > 0;
       return;
     }
 
@@ -1971,13 +2008,14 @@ Deno.serve(async (req: Request) => {
     if (selfReason) applied.push({ at: Date.now(), kind: "self", note: `自发起念（${SELF_KIND[selfKind] ? SELF_KIND[selfKind] + "：" : ""}${selfReason}）——${lit > litCount ? "起了一个念头" : "想了想，没找你"}`, by: "cloud" });
     if (postDecision) applied.push(postDecision);
     const saved = await touch({
+      judged_chat_at: Math.max(+plan.judged_chat_at || 0, judgeTask?.chatAt || 0), judged_at: Date.now(),
       items: nextItems,
       decisions: [...priorDecisions, ...applied].slice(-60),
       recheck_count: (plan.recheck_count || 0) + 1,
       ...(ctxDirty ? { context: { ...context, ...ctxPatch, ...(selfReason ? { selfUsed: selfUsed + 1 } : {}) } } : {}),
     }, true);
     const rows = saved?.ok ? await saved.json().catch(() => []) as unknown[] : [];
-    if (Array.isArray(rows) && rows.length > 0) return;
+    if (Array.isArray(rows) && rows.length > 0) { judgeApplied = true; return; }
     // 没写进去 = App 在这轮期间换了计划，我们的裁决作废。刚挂上的预约必须一起撤掉：
     // 新计划里没有它们的 wakeId，留着就是任何界面都查不到出处的孤儿，到点照发。
     if (armedKeys.length) {
@@ -1990,7 +2028,13 @@ Deno.serve(async (req: Request) => {
     }
   };
 
-  const work = run().catch(() => undefined);
+  const work = run().catch(() => undefined).finally(async () => {
+    if (!judgeTask) return;
+    await rest("rpc/push_recheck_judge", { method: "POST", body: JSON.stringify({
+      p_user_id: userId, p_character_id: characterId, p_date: planDate, p_token: judgeTask.token,
+      p_action: "finish", p_chat_at: judgeTask.chatAt, p_success: judgeApplied,
+    }) }).catch(() => undefined);
+  });
   const edgeRuntime = (globalThis as { EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void } }).EdgeRuntime;
   if (edgeRuntime?.waitUntil) edgeRuntime.waitUntil(work);
   else await work;

@@ -22,7 +22,7 @@
     "gua-nian:build": "node scripts/build-gua-nian.mjs",
     "gua-nian:check": "node scripts/build-gua-nian.mjs --check",
     "gua-nian:package": "node scripts/build-gua-nian.mjs --package",
-    "gua-nian:test": "node scripts/check-gua-nian-domain.mjs && node scripts/check-gua-nian-delivery.mjs"
+    "gua-nian:test": "node scripts/check-gua-nian-domain.mjs && node scripts/check-gua-nian-delivery.mjs && node scripts/check-gua-nian-p1.mjs && node scripts/check-gua-nian-p2.mjs"
   },
   "dependencies": {
     "@gltf-transform/functions": "^4.4.1",

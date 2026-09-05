@@ -18,23 +18,26 @@
   const CLOUD_DIAG_IDS = { lock: 1, cloud: 1, jobs: 1, recheck: 1 };
   const DIAG_TTL = 60000;
 
-  async function renderUsage() {
+  async function renderUsage(force) {
     const v = $("#subview") || $("#view");
     const req = (S._usageReq = (S._usageReq || 0) + 1);
     v.innerHTML = '<div class="card empty"><div class="art">⏳</div><p>正在统计…</p></div>';
     await readLocalUsage(true);
-    await syncUsageCloud(false);
+    await syncUsageCloud(!!force);
     if (!(S.tab === "back" && S.sub === "usage") || req !== S._usageReq) return;
     const t = usageTotals();
     const stat = (n, cap) => '<div class="stat"><div class="num">' + n + '</div><div class="cap">' + cap + "</div></div>";
     const bar = (n, cap) => cap > 0 ? '<div class="usage-bar"><div class="fill" style="width:' + Math.min(100, Math.round(n / cap * 100)) + '%"></div></div>' : "";
     let html = '<div class="card"><div class="sec-head"><span class="t">今 日 用 量</span>' +
-      '<span class="badge' + (usageOver() ? " warn" : (t.capCalls || t.capTokens ? " ok" : "")) + '">' + (usageOver() ? "到上限了" : (t.capCalls || t.capTokens ? "额度内" : "没设上限")) + "</span></div>" +
-      '<div class="stats four">' + stat(t.calls + (t.capCalls ? "<small>/" + t.capCalls + "</small>" : ""), "调 用") + stat(fmtTok(t.tokens) + (t.capTokens ? "<small>/" + fmtTok(t.capTokens) + "</small>" : ""), "token") +
-      stat(t.localCalls + (t.otherCalls ? "<small>+" + t.otherCalls + "</small>" : ""), "本 机") + stat(t.cloudCalls, "云 端") + "</div>" +
+      '<span class="badge' + (!t.complete || usageOver() ? " warn" : (t.capCalls || t.capTokens ? " ok" : "")) + '">' + (!t.complete ? "合计未确认" : usageOver() ? "到上限了" : (t.capCalls || t.capTokens ? "额度内" : "没设上限")) + "</span></div>" +
+      '<div class="stats four">' + stat((t.complete ? "" : "≥") + t.calls + (t.capCalls ? "<small>/" + t.capCalls + "</small>" : ""), "调 用") + stat((t.complete ? "" : "≥") + fmtTok(t.tokens) + (t.capTokens ? "<small>/" + fmtTok(t.capTokens) + "</small>" : ""), "token") +
+      stat(t.localCalls + (t.otherCalls ? "<small>+" + t.otherCalls + "</small>" : ""), "本 机") + stat(t.cloudCalls == null ? "未知" : t.cloudCalls, "云 端") + "</div>" +
       bar(t.calls, t.capCalls) + bar(t.tokens, t.capTokens) +
       '<div class="archive-note">上限在设置「模型调用」里改。本机按次和 token 都由宿主统计；云端由云函数记账，聊天离线兜底的调用只记不限。'
       + (t.otherCalls ? "「本机」后面的 +" + t.otherCalls + " 是另一台设备今天调的，也占同一份上限。" : "") + "</div></div>";
+    if (cloudCfg()) html += '<div class="card"><div class="archive-note">' + (t.complete ? '云端统计已同步' :
+      (t.lastSuccessAt ? '显示上次取得的云端数据（' + esc(fmtHM(t.lastSuccessAt)) + '），合计仅为已知下限。' : '尚未取得云端统计，合计仅含已知本机用量。') + ' ' + esc(t.error)) +
+      '</div><button class="tgl" id="btn-usage-retry">刷新用量</button></div>';
     const srcRows = [{ source: myUsageSrc(), calls: t.localCalls, prompt: (S._useLocal || {}).prompt || 0, completion: (S._useLocal || {}).completion || 0 }]
       .concat(t.rows.map((r) => ({ source: r.source, calls: +r.calls || 0, prompt: +r.prompt_tokens || 0, completion: +r.completion_tokens || 0 }))
         .filter((r) => r.calls || r.prompt || r.completion));
@@ -43,7 +46,7 @@
       (cloudCfg() ? "" : '<div class="archive-note">没配云连接，只有本机的数。</div>') + "</div>";
     const byDay = {};
     for (const d of ((S._useLocal || {}).days || [])) byDay[d.date] = { calls: d.calls, tokens: d.prompt + d.completion };
-    for (const r of ((S._use || {}).rows || [])) {
+    for (const r of (S._use && S._use.scope === usageCloudScope() ? S._use.rows : [])) {
       if (r.source === myUsageSrc() || r.source === "app") continue; // 自己那行已经在 byDay 里了
       const x = byDay[r.day] = byDay[r.day] || { calls: 0, tokens: 0 };
       x.calls += +r.calls || 0; x.tokens += (+r.prompt_tokens || 0) + (+r.completion_tokens || 0);
@@ -53,6 +56,8 @@
       (days.length ? days.map((d) => '<div class="diag-item"><b>' + esc(d.slice(5)) + "</b> " + byDay[d].calls + " 次 · " + fmtTok(byDay[d].tokens) + " token" + (d === todayStr() ? ' <span class="badge cool">今天</span>' : "") + "</div>").join("")
         : '<div class="archive-note">还没有记录。</div>') + "</div>";
     v.innerHTML = html;
+    const retry = $("#btn-usage-retry");
+    if (retry) retry.onclick = () => renderUsage(true);
   }
 
   async function renderDiag() {

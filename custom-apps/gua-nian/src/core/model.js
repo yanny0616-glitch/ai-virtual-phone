@@ -59,36 +59,48 @@
     return out;
   }
   // 云端账本：上报本机今天的用量和上限，再把最近几天各来源拉回来
-  async function syncUsageCloud(force) {
-    if (!cloudCfg()) return null;
-    if (!force && S._use && Date.now() - S._use.at < 5 * 60000) return S._use;
-    const local = await readLocalUsage(force);
-    try {
-      // 0.9.6 之前本机那行统一叫 "app"。留着它会和新的 app-<设备> 行一起被云端上限
-      // 重复计一遍，所以每次启动清零一次（清不掉就最多多算今天这一天）。
-      if (!S._legacyZeroed) {
-        S._legacyZeroed = true;
-        try { await cloudFetch("usage", { method: "POST", body: JSON.stringify({ set: { day: todayStr(), source: "app", calls: 0, promptTokens: 0, completionTokens: 0 } }) }); }
-        catch (e) { /* 旧云函数没有 usage 动作，下面那次 POST 会一起报错 */ }
+  function usageCloudScope() { return (cloudCfg() || {}).url + ":" + myUsageSrc(); }
+  function syncUsageCloud(force) {
+    if (!cloudCfg()) return Promise.resolve(null);
+    if (S._usageSync) return S._usageSync;
+    const run = async () => {
+      const scope = usageCloudScope();
+      const previous = S._use && S._use.scope === scope ? S._use : null;
+      if (!force && previous && previous.status === "ok" && Date.now() - previous.at < 5 * 60000) return previous;
+      const local = await readLocalUsage(force);
+      try {
+        if (S._legacyZeroed !== scope) {
+          await cloudFetchBounded("usage", { method: "POST", body: JSON.stringify({ set: { day: todayStr(), source: "app", calls: 0, promptTokens: 0, completionTokens: 0 } }) });
+          S._legacyZeroed = scope;
+        }
+        await cloudFetchBounded("usage", { method: "POST", body: JSON.stringify({
+          limits: { dailyCalls: +S.settings.apiDailyCap || 0, dailyTokens: +S.settings.tokenDailyCap || 0, tz: -new Date().getTimezoneOffset() },
+          set: { day: todayStr(), source: myUsageSrc(), calls: local.calls, promptTokens: local.prompt, completionTokens: local.completion },
+        }) });
+        const r = await cloudFetchBounded("usage", { method: "GET" }, { days: 7 });
+        if (!Array.isArray(r.rows)) throw new Error("云端未返回有效用量记录");
+        if (scope !== usageCloudScope()) return null;
+        S._use = { scope, at: Date.now(), date: todayStr(), rows: r.rows, limits: r.limits || null, status: "ok", error: "" };
+      } catch (e) {
+        if (scope !== usageCloudScope()) return null;
+        const error = String(e && e.message || e).slice(0, 200);
+        S._use = { ...(previous || { at: 0, rows: [], limits: null }), scope, status: "failed", error };
+        await log(cur(), "云端用量同步失败（本机统计保留，云端合计未确认）：" + error);
       }
-      await cloudFetch("usage", { method: "POST", body: JSON.stringify({
-        limits: { dailyCalls: +S.settings.apiDailyCap || 0, dailyTokens: +S.settings.tokenDailyCap || 0, tz: -new Date().getTimezoneOffset() },
-        set: { day: todayStr(), source: myUsageSrc(), calls: local.calls, promptTokens: local.prompt, completionTokens: local.completion },
-      }) });
-      const r = await cloudFetch("usage", { method: "GET" }, { days: 7 });
-      S._use = { at: Date.now(), rows: Array.isArray(r.rows) ? r.rows : [], limits: r.limits || null };
-    } catch (e) {
-      if (!S._useWarned) { S._useWarned = true; await log(cur(), "云端用量账本读写失败（旧版云函数没有 usage 动作，重部署一次即可）：" + (e && e.message || e)); }
-      S._use = S._use || { at: Date.now(), rows: [], limits: null };
-    }
-    return S._use;
+      return S._use;
+    };
+    S._usageSync = run().finally(() => { S._usageSync = null; });
+    return S._usageSync;
   }
   // 今天合计：本机用最新的本地数（自己那行是自己报的，不从账本里再算一遍），
   // 云端各来源和另一台设备的本机数都用账本里的。旧的 "app" 行已清零，一律不算。
   function usageTotals() {
     const local = S._useLocal || { calls: apiUseToday().n, prompt: 0, completion: 0 };
     const mine = myUsageSrc();
-    const rows = ((S._use && S._use.rows) || []).filter((r) => r.day === todayStr() && r.source !== mine && r.source !== "app");
+    const state = S._use && S._use.scope === usageCloudScope() ? S._use : null;
+    const cloudKnown = !cloudCfg() || !!(state && state.at && state.date === todayStr());
+    const complete = !cloudCfg() || !!(cloudKnown && state.status === "ok" && Date.now() - state.at < 5 * 60000);
+    const rows = ((state && state.rows) || []).filter((r) => r.day === todayStr() && r.source !== mine && r.source !== "app");
     let cloudCalls = 0, cloudTokens = 0, otherCalls = 0, otherTokens = 0, capCalls = 0, capTokens = 0;
     for (const r of rows) {
       const t = (+r.prompt_tokens || 0) + (+r.completion_tokens || 0);
@@ -97,7 +109,8 @@
       if (r.source !== "cloud-chat") { capCalls += +r.calls || 0; capTokens += t; }
     }
     const localCalls = Math.max(local.calls, apiUseToday().n), localTokens = local.prompt + local.completion;
-    return { localCalls, localTokens, cloudCalls, cloudTokens, otherCalls, otherTokens, rows,
+    return { localCalls, localTokens, cloudCalls: cloudKnown ? cloudCalls : null, cloudTokens: cloudKnown ? cloudTokens : null, otherCalls, otherTokens, rows, complete, cloudKnown,
+      error: state && state.error || "", lastSuccessAt: state && state.at || 0,
       calls: localCalls + capCalls, tokens: localTokens + capTokens,
       capCalls: +S.settings.apiDailyCap || 0, capTokens: +S.settings.tokenDailyCap || 0 };
   }
@@ -110,6 +123,10 @@
   const fmtTok = (n) => n >= 1000000 ? (n / 1000000).toFixed(2) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
   async function spendApi(cx) {
     await readLocalUsage(false);
+    if (cloudCfg() && (S.settings.apiDailyCap > 0 || S.settings.tokenDailyCap > 0)) {
+      await syncUsageCloud(false);
+      if (!usageTotals().complete) throw new Error("云端用量尚未确认，暂缓本次调用；请在后台用量页重试同步");
+    }
     const over = usageOver();
     if (over) throw new Error(over);
     S.settings.apiUse = { date: todayStr(), n: apiUseToday().n + 1 };

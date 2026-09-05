@@ -554,7 +554,7 @@ function guanianBusyUntil(day: GuanianDay, hm: string): string {
   const end = typeof cur.end === "string" && cur.end > String(cur.time) ? cur.end : "";
   if (!end || hm >= end) return "";
   const title = String(cur.title || "");
-  const busy = cur.busy === true || (GUANIAN_BUSY_RE.test(title) && !GUANIAN_NOT_BUSY_RE.test(title));
+  const busy = typeof cur.busy === "boolean" ? cur.busy : (GUANIAN_BUSY_RE.test(title) && !GUANIAN_NOT_BUSY_RE.test(title));
   return busy ? end : "";
 }
 // 本地 HH:MM → 下一次到达它的 UTC 毫秒（已过就算明天的）

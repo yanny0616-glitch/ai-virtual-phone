@@ -26,9 +26,9 @@ function app() {
     querySelector: (id) => id === "#btn-refresh-receipt" && !el("#dsheet-body").innerHTML.includes('id="btn-refresh-receipt"') ? null : el(id),
     querySelectorAll: (selector) => selector === ".char-cell.sel" ? [{ dataset: { id: "c" } }] : [],
   };
-  const ctx = vm.createContext({ Date: Clock, document, h, URLSearchParams, console, AbortController,
+  const ctx = vm.createContext({ Date: class extends Clock { static now() { return h.now ?? now; } }, document, h, URLSearchParams, console, AbortController,
     setTimeout: (fn) => { h.timeout = fn; return 1; }, clearTimeout: () => {},
-    AiPhone: { moments: { post: async input => h.momentsPost(input) }, db: {
+    AiPhone: { ai: { generate: async req => h.generate(req) }, moments: { post: async input => h.momentsPost(input) }, db: {
       list: async (table) => table === "plans" ? [h.cx.plan] : [],
       update: async (table, _id, patch) => {
         if (table === "plans") return h.cx.plan = { ...h.cx.plan, ...patch };
@@ -39,14 +39,21 @@ function app() {
   const expose = `
     cloudFetch = (...args) => { h.calls.push(args); return h.cloudFetch(...args); };
     cloudContext = () => ({ quota: S.settings.quota, ...userSleepContext() });
-    log = async () => {};
+    log = async (_cx, message) => (h.logs ||= []).push(message);
     render = () => renderCloudSync();
     toast = (message) => h.toasts.push(message);
     syncChatContext = async () => {};
     syncUsageCloud = async () => {};
     readSheet = () => h.sheet;
     globalThis.api = { S, ctxOf, cur, refreshReceipts, decStatus, detailHtml, openDetail, closeDetail,
-      uploadPlanCloud, syncSavedPlan, pullCloudDecisionsBody, planSyncState, retryPlanSync, renderCloudSync, saveSettings, renderArchive, todayStr, settingsSaveEffects, validateUserSleepSettings, userSleepContext, momentRecords, momentHistoryHtml, consumeOutbox, postMoment, moState, SET_DEF };
+      uploadPlanCloud, syncSavedPlan, pullCloudDecisionsBody, planSyncState, retryPlanSync, renderCloudSync, saveSettings, renderArchive, todayStr, settingsSaveEffects, validateUserSleepSettings, userSleepContext, momentRecords, momentHistoryHtml, consumeOutbox, postMoment, moState, SET_DEF, recheck, generateJson,
+      setupRecheck: () => {
+        spendApi = async () => {};
+        readRecentChat = async () => h.chat;
+        applyChatSchedEdits = async () => { if (h.failApply) throw Error("save failed"); };
+        applyThreads = async () => {};
+        syncChatContext = async () => { if (h.failSync) throw Error("context failed"); };
+      } };
   `;
   vm.runInContext(source.replace(/  init\(\);\s*\}\)\(\);\s*$/, expose + "\n})();"), ctx);
   const a = ctx.api;
@@ -371,6 +378,65 @@ await test("并发读取 outbox 不重复发帖，发圈记录独立于当天计
   cx.plan = {id:"new-plan",date:a.todayStr(),characterId:"c",items:[]};
   await a.consumeOutbox(cx,{outbox:[{id:"one",hint:"旧起意",at:now-3600000},{id:"new",hint:"新起意",at:now}]});
   assert.equal(a.momentRecords(cx).find(r=>r.id==="cloud:one").status,"sent");assert.equal(calls,1);
+});
+
+function recheckApp() {
+  const result = app(), { a, cx, h } = result;
+  a.S.settings = h.stored = { ...a.SET_DEF, ...a.S.settings, cloudRecheck: false, momentsOn: false, recheckMin: 15 };
+  cx.day = { mood: "平静", energy: 60, schedule: [] };
+  cx.plan.plannedAt = now - 60000;
+  h.chat = [{ role: "user", t: now - 1000, c: "用啊" }];
+  h.generations = [];
+  h.generate = async req => { h.generations.push(req); return {text: '```json\n{"decisions":[],"extra":[],"sched":[],"keep":[],"settle":[],"post":null}\n```'}; };
+  a.setupRecheck();
+  return result;
+}
+await test("回复后的保存失败不会在一分钟内再次调用模型，重开也保留间隔", async () => {
+  const { a, cx, h } = recheckApp();
+  h.failApply = true;
+  await a.recheck(cx, "打开");
+  await a.recheck(cx, "定时");
+  assert.equal(h.generations.length, 1);
+  assert.equal(cx.plan.recheckAt || 0, 0, "失败不能冒充成功复核");
+  const reopened = recheckApp();
+  reopened.cx.plan = structuredClone(cx.plan);
+  reopened.h.now = now + 30000;
+  await reopened.a.recheck(reopened.cx, "打开");
+  assert.equal(reopened.h.generations.length, 0);
+  reopened.h.now = now + 15 * 60000;
+  await reopened.a.recheck(reopened.cx, "定时");
+  assert.equal(reopened.h.generations.length, 1, "到期应能重试未处理的聊天");
+});
+await test("有新聊天也遵守复核间隔，到期后再判断，同一段已处理聊天不重判", async () => {
+  const { a, cx, h } = recheckApp();
+  await a.recheck(cx, "打开");
+  h.now = now + 30000;
+  h.chat.push({role: "user", t: h.now - 1000, c: "再聊一句"});
+  await a.recheck(cx, "打开");
+  assert.equal(h.generations.length, 1);
+  h.now = now + 15 * 60000;
+  await a.recheck(cx, "定时");
+  assert.equal(h.generations.length, 2);
+  h.now += 15 * 60000;
+  await a.recheck(cx, "定时");
+  assert.equal(h.generations.length, 2);
+});
+await test("并发入口只调用一次，正常 JSON 代码块无需格式重试", async () => {
+  const { a, cx, h } = recheckApp(), gate = deferred(), started = deferred();
+  const generate = h.generate;
+  h.generate = async req => { started.resolve(); await gate.promise; return generate(req); };
+  const first = a.recheck(cx, "打开");
+  await started.promise;
+  await a.recheck(cx, "定时");
+  gate.resolve(); await first;
+  assert.equal(h.generations.length, 1);
+  assert.ok(!h.logs.some(line => line.includes("未得到 JSON")));
+});
+await test("上下文同步失败也会释放计划锁", async () => {
+  const { a, cx, h } = recheckApp();
+  h.failSync = true;
+  await a.recheck(cx, "打开").catch(() => {});
+  assert.equal(cx._planLock, false);
 });
 
 console.log(`Passed ${passed} gua-nian delivery/sync checks.`);

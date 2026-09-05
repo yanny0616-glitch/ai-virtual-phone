@@ -2,6 +2,17 @@
   // 官方陪伴插件式的「判断随状态刷新」：打开小手机时（以及在页时每隔 recheckMin 分钟），
   // 按最新聊天重审今天还没到点的时刻——未回应降速是硬规则，聊崩了会取消，
   // 聊出没聊完的话头时可以临时起一个新念头。
+  async function flushJudgeFinish(cx) {
+    const receipt = cx.plan && cx.plan.judgeFinish;
+    if (!receipt || receipt.cloudUrl !== (cloudCfg() || {}).url || cx._judgeFinishing) return;
+    cx._judgeFinishing = true;
+    try {
+      const result = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify(receipt) });
+      if (!result.claimed && result.reason !== "lost" && result.reason !== "no-plan") throw new Error("云端未确认复核结果");
+      cx.plan = await upsert("plans", x => x.date === receipt.planDate && x.characterId === cx.character.id, { judgeFinish: null });
+      if (!result.claimed) await log(cx, "复核完成回执已过期，本地结果保留；云端是否处理过以最新计划为准");
+    } finally { cx._judgeFinishing = false; }
+  }
   async function recheck(cx, trigger) {
     if (cx.busy || cx._planLock || !owns(cx)) return;
     if (!S.settings || !(S.settings.recheckMin > 0)) return;
@@ -16,18 +27,20 @@
       && cx.plan.items.filter((w) => w.act).length < S.settings.quota;
     if (!canJudge && !canImpulse) return;
     cx._planLock = true;
+    let lease = null, succeeded = false, heartbeat = 0;
     try {
       // 必须先并再判：下面那次 uploadPlanCloud 会整行盖掉计划行的 items，
       // 云端点亮回填的 wakeId 跟着没，那条预约就撤不掉了，到点照发。
-      const pulled = await pullCloudDecisionsBody(cx).catch(() => 0);
+      await flushJudgeFinish(cx);
+      const pulled = await pullCloudDecisionsBody(cx, true);
       if (pulled) render();
-      const since = cx.plan.recheckAt || cx.plan.plannedAt || 0;
+      const since = Math.max(cx.plan.recheckAt || cx.plan.plannedAt || 0, +cx.plan.judgedChatAt || 0);
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
       const fresh = chat.filter((m) => m.role === "user" && m.t > since);
       const streak = unansweredStreak(chat);
       const cooling = S.settings.maxUnanswered > 0 && streak >= S.settings.maxUnanswered;
-      if (!fresh.length && !cooling) { cx._planLock = false; return; } // 没有新信息，维持原判断
+      if (!fresh.length && !cooling) return; // 没有新信息，维持原判断
       const items = cx.plan.items.slice();
       let changed = 0, added = 0;
 
@@ -44,6 +57,29 @@
         }
         if (changed) await log(cx, "复核（" + trigger + "）：连续 " + streak + " 轮未回 ≥ 降速阈值 " + S.settings.maxUnanswered + "，取消 " + changed + " 个待发时刻");
       } else {
+        // 打开和定时入口共用持久间隔；不能只靠页面内的 _rcTry。
+        // 先记尝试、后调模型：回复后写日程/账本失败时，也不能立刻重复付费判断。
+        const lastAttempt = Math.max(+cx.plan.recheckAttemptAt || 0, +cx.plan.recheckAt || 0, +cx.plan.judgedAt || 0);
+        if (lastAttempt && nowMs - lastAttempt < Math.max(1, S.settings.recheckMin) * 60000) return;
+        if (cloudRecheckOn()) {
+          await requireRecheckFeatures(["judge-task-v1"]);
+          const task = { characterId: cx.character.id, planDate: todayStr(), token: "app-" + nowMs + "-" + Math.random().toString(36).slice(2), chatAt: Math.max(...fresh.map(m => m.t)) };
+          const claim = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...task, op: "claim" }) });
+          if (!claim.claimed) { await log(cx, "本机复核跳过：云端正在处理或已判断过这段聊天"); return; }
+          lease = { ...task, active: true };
+          const renew = async () => {
+            if (!lease) return;
+            try {
+              const r = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...task, op: "renew" }) });
+              if (lease) lease.active = !!r.claimed;
+            } catch (e) { if (lease) lease.active = false; }
+            if (lease && lease.active) heartbeat = setTimeout(renew, 60000);
+          };
+          heartbeat = setTimeout(renew, 60000);
+        }
+        cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
+          { recheckAttemptAt: nowMs });
+        await log(cx, "本机复核开始（" + trigger + "）：读取 " + fresh.length + " 条新用户消息");
         const lines = chatExcerpt(chat, S.settings.judgeLines);
         const remaining = items.filter((w) => w.fireAt > nowMs + 2 * 60000);
         const usedQuota = items.filter((w) => w.act).length;
@@ -56,7 +92,7 @@
             canJudge
               ? "你是当前角色的内心。之前TA为今天定过一批想不想给用户发消息的判断；现在聊天有了新进展，请只对下面「还没到点」的时刻重新判断"
                 + (canImpulse ? "，并允许临时起最多一个新念头。" : "。")
-              : "你是当前角色的内心。今天排好的时刻都已经过点了，没有要重判的。只看刚才聊的内容里有没有值得临时起一个新念头的事：聊到一半没说完的话头、约好了要说的、答应了要问的。只是随口聊到、没落实的事不算。",
+              : "你是当前角色的内心。当前没有需要复核的候选消息时刻，生活日程仍按原安排继续。只看刚才聊的内容里有没有值得临时起一个新念头的事：聊到一半没说完的话头、约好了要说的、答应了要问的。只是随口聊到、没落实的事不算。",
             "TA今天的生活面：" + JSON.stringify({ mood: cx.day.mood, energy: energyAt(cx.day, nowMs) }),
             "最近聊天（「我」=用户，从旧到新，越靠后越新）：", lines.join("\n"),
             streak ? "注意：TA最近连发了 " + streak + " 条用户还没回。没回就少发、缓发，别显得追着人跑。" : null,
@@ -83,6 +119,10 @@
               + "；extra 的时间必须晚于现在（" + fmtHM(nowMs) + "）。",
           ].filter((s) => s !== null).join("\n"),
         });
+        if (lease) {
+          const renewed = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...lease, op: "renew" }) });
+          if (!renewed.claimed) throw new Error("复核任务租约已失效，本轮结果未应用");
+        }
         const feel = parsed && parsed.feel;
         if (feel && String(feel.mood || "").trim()) {
           await pushCond(cx, {
@@ -181,13 +221,16 @@
           } catch (e) { await log(cx, "复核临时起念预约失败：" + (e && e.message || e)); }
         }
         await applyChatSchedEdits(cx, parsed.sched, nowMs);
-        await applyThreads(cx, parsed, nowMs, "app");
+        await applyThreads(cx, parsed, nowMs, "app", items);
         const postHint = canPost && parsed.post && typeof parsed.post === "object" ? String(parsed.post.hint || "") : "";
         if (postHint) await postMoment(cx, postHint, nowMs, "app");
       }
 
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        { date: todayStr(), characterId: cx.character.id, items, chatUsed: cx.plan.chatUsed || 0, plannedAt: cx.plan.plannedAt || nowMs, recheckAt: nowMs });
+        { date: todayStr(), characterId: cx.character.id, items, chatUsed: cx.plan.chatUsed || 0, plannedAt: cx.plan.plannedAt || nowMs, recheckAt: nowMs,
+          ...(lease ? { judgedChatAt: lease.chatAt, judgedAt: nowMs,
+            judgeFinish: { ...lease, op: "finish", success: true, cloudUrl: (cloudCfg() || {}).url } } : {}) });
+      succeeded = true;
       await uploadPlanCloud(cx, false);
       if (changed || added) {
         cx.archive = null;
@@ -196,8 +239,18 @@
         render();
       }
     } catch (e) {
-      await log(cx, "复核失败（原计划不受影响）：" + (e && e.message || e));
+      await log(cx, "复核未完成（部分改动可能已保存，将按复核间隔重试）：" + (e && e.message || e));
+    } finally {
+      clearTimeout(heartbeat);
+      if (lease) {
+        const finished = lease; lease = null;
+        try {
+          if (succeeded) await flushJudgeFinish(cx);
+          else await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...finished, op: "finish", success: false }) });
+        } catch (e) { await log(cx, succeeded ? "复核完成回执待同步，下次打开或分钟检查会重试" : "复核任务释放失败，租约最长 10 分钟后失效"); }
+      }
+      try { await syncChatContext(cx); }
+      catch (e) { await log(cx, "复核后同步聊天上下文失败：" + (e && e.message || e)); }
+      finally { cx._planLock = false; }
     }
-    await syncChatContext(cx);
-    cx._planLock = false;
   }

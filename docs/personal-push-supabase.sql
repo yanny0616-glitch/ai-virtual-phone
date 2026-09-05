@@ -35,7 +35,7 @@ create table if not exists public.ai_phone_cloud_meta (
   updated_at timestamptz not null default now()
 );
 insert into public.ai_phone_cloud_meta (id, schema_version, updated_at)
-values ('personal-cloud', 8, now())
+values ('personal-cloud', 10, now())
 on conflict (id) do update set schema_version = excluded.schema_version, updated_at = excluded.updated_at;
 
 create table if not exists public.push_server_config (
@@ -557,3 +557,72 @@ end;
 $$;
 revoke all on function public.push_recheck_set_enabled(text, text, text, boolean, text) from public, anon, authenticated;
 grant execute on function public.push_recheck_set_enabled(text, text, text, boolean, text) to service_role;
+
+
+-- 只停用尚未执行的生成原料；已应用的日程、计划和 push_jobs 保持原样。
+create or replace function public.push_recheck_stop_generation(
+  p_user_id text, p_character_id text, p_from_date text, p_owner text
+) returns integer
+language plpgsql security invoker set search_path = public
+as $$
+declare affected integer;
+begin
+  perform 1 from public.push_recheck_plans
+    where user_id = p_user_id and character_id = p_character_id and plan_date >= p_from_date
+      and jsonb_typeof(context->'genKit') = 'object' and coalesce(context->>'generatedBy', '') <> 'cloud'
+    for update;
+  if exists (
+    select 1 from public.push_recheck_plans
+      where user_id = p_user_id and character_id = p_character_id and plan_date >= p_from_date
+        and jsonb_typeof(context->'genKit') = 'object' and coalesce(context->>'generatedBy', '') <> 'cloud'
+        and coalesce(context->>'owner', '') <> '' and context->>'owner' <> coalesce(p_owner, '')
+  ) then return -1; end if;
+  update public.push_recheck_plans
+    set context = jsonb_set(context, '{genEnabled}', '0'::jsonb, true), updated_at = now()
+    where user_id = p_user_id and character_id = p_character_id and plan_date >= p_from_date
+      and jsonb_typeof(context->'genKit') = 'object' and coalesce(context->>'generatedBy', '') <> 'cloud';
+  get diagnostics affected = row_count;
+  return affected;
+end;
+$$;
+revoke all on function public.push_recheck_stop_generation(text, text, text, text) from public, anon, authenticated;
+grant execute on function public.push_recheck_stop_generation(text, text, text, text) to service_role;
+
+-- 独立于设备所有权及整份 context 上传的判断租约/聊天游标。
+alter table public.push_recheck_plans add column if not exists judge_token text;
+alter table public.push_recheck_plans add column if not exists judge_until timestamptz;
+alter table public.push_recheck_plans add column if not exists judged_chat_at bigint not null default 0;
+alter table public.push_recheck_plans add column if not exists judged_at bigint not null default 0;
+create or replace function public.push_recheck_judge(
+ p_user_id text, p_character_id text, p_date text, p_token text, p_action text,
+ p_chat_at bigint default 0, p_success boolean default false
+) returns jsonb language plpgsql security invoker set search_path=public as $$
+declare r public.push_recheck_plans%rowtype; stamp bigint := floor(extract(epoch from clock_timestamp()) * 1000);
+begin
+ select * into r from public.push_recheck_plans where user_id=p_user_id and character_id=p_character_id and plan_date=p_date for update;
+ if not found then return jsonb_build_object('claimed',false,'reason','no-plan'); end if;
+ if p_action='finish' then
+  if r.judge_token is distinct from p_token then
+   if p_success and p_chat_at>0 and r.judged_chat_at>=p_chat_at then return jsonb_build_object('claimed',true,'reason','already-finished'); end if;
+   return jsonb_build_object('claimed',false,'reason','lost');
+  end if;
+  update public.push_recheck_plans set judge_token=null, judge_until=null,
+   judged_chat_at=case when p_success then greatest(judged_chat_at, least(p_chat_at,stamp)) else judged_chat_at end,
+   judged_at=case when p_success then stamp else judged_at end
+   where user_id=p_user_id and character_id=p_character_id and plan_date=p_date;
+  return jsonb_build_object('claimed',true);
+ end if;
+ if p_action not in ('claim','renew') or coalesce(p_token,'')='' then raise exception 'invalid judge action'; end if;
+ if (p_action='renew' and r.judge_token is distinct from p_token) or
+    (r.judge_token is distinct from p_token and r.judge_until>now()) then
+  return jsonb_build_object('claimed',false,'reason','busy','chatAt',r.judged_chat_at,'judgedAt',r.judged_at);
+ end if;
+ if p_action='claim' and p_chat_at>0 and p_chat_at<=r.judged_chat_at then
+  return jsonb_build_object('claimed',false,'reason','handled','chatAt',r.judged_chat_at,'judgedAt',r.judged_at);
+ end if;
+ update public.push_recheck_plans set judge_token=p_token, judge_until=now()+interval '10 minutes'
+  where user_id=p_user_id and character_id=p_character_id and plan_date=p_date;
+ return jsonb_build_object('claimed',true,'chatAt',r.judged_chat_at,'judgedAt',r.judged_at);
+end $$;
+revoke all on function public.push_recheck_judge(text,text,text,text,text,bigint,boolean) from public,anon,authenticated;
+grant execute on function public.push_recheck_judge(text,text,text,text,text,bigint,boolean) to service_role;

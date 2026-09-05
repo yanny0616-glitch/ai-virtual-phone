@@ -1009,7 +1009,19 @@ Deno.serve(async (request: Request) => {
       }
     }
 
-    if (action === "recheck-capabilities" || action === "recheck-control") {
+    if (action === "judge-task" && request.method === "POST") {
+      const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+      const characterId = cleanText(body.characterId, 80), date = cleanText(body.planDate, 10), token = cleanText(body.token, 100), op = cleanText(body.op, 10);
+      if (!characterId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !token || !["claim", "renew", "finish"].includes(op)) return json({ ok: false, error: "判断任务参数无效" }, 400);
+      const response = await rest("rpc/push_recheck_judge", { method: "POST", body: JSON.stringify({
+        p_user_id: OWNER_ID, p_character_id: characterId, p_date: date, p_token: token, p_action: op,
+        p_chat_at: Math.max(0, Math.min(Date.now(), Math.floor(Number(body.chatAt) || 0))), p_success: body.success === true,
+      }) });
+      if (response.status === 404) return json({ ok: false, error: "请更新个人云数据库和云函数以支持本机/云端复核去重" }, 409);
+      return json({ ok: true, ...await readJson<Record<string, unknown>>(response) });
+    }
+
+    if (action === "recheck-capabilities" || action === "recheck-control" || action === "generation-stop") {
       // 直接询问实际执行的 worker；不把网关自身的新版本当作 worker 已更新。
       const configs = await readJson<{ cron_secret?: string }[]>(await rest("push_server_config?id=eq.main&select=cron_secret&limit=1"));
       if (!configs[0]?.cron_secret) return json({ ok: false, error: "请先完成个人云部署。" }, 409);
@@ -1023,6 +1035,25 @@ Deno.serve(async (request: Request) => {
       } catch { /* 旧 worker 或网络失败，不执行写入，也不报告支持 */ }
       const capabilities = worker?.ok && Array.isArray(worker.capabilities) ? worker.capabilities : [];
       if (action === "recheck-capabilities" && request.method === "GET") return json({ ok: true, capabilities });
+      if (action === "generation-stop" && request.method === "POST") {
+        if (!capabilities.includes("generation-stop-v1")) return json({ ok: false, error: "请更新网关和 push-recheck，再重试停用自动生成。" }, 409);
+        const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        const characterId = cleanText(body.characterId, 80), owner = cleanText(body.owner, 40), fromDate = cleanText(body.planDate, 10);
+        if (!characterId || !/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) return json({ ok: false, error: "缺少角色或日期。" }, 400);
+        const filter = `push_recheck_plans?user_id=eq.${OWNER_ID}&character_id=eq.${encodeURIComponent(characterId)}&plan_date=gte.${fromDate}`;
+        await readJson(await rest(`${filter}&select=plan_date,context,updated_at`));
+        const changed = await rest("rpc/push_recheck_stop_generation", {
+          method: "POST", body: JSON.stringify({ p_user_id: OWNER_ID, p_character_id: characterId, p_from_date: fromDate, p_owner: owner }),
+        });
+        if (changed.status === 404) return json({ ok: false, error: "请更新个人云数据库 schema，再重试停用自动生成。" }, 409);
+        const count = await readJson<number>(changed);
+        if (count < 0) return json({ ok: false, error: "待生成计划由其他设备负责，未修改。" }, 409);
+        const verified = await readJson<{ context?: Record<string, unknown> }[]>(await rest(`${filter}&select=context`));
+        if (verified.some(row => row.context?.genKit && row.context.generatedBy !== "cloud" && row.context.genEnabled !== 0)) {
+          return json({ ok: false, error: "自动生成尚未全部停用，请重试。" }, 409);
+        }
+        return json({ ok: true, stopped: true, plans: count, capabilities });
+      }
       if (action !== "recheck-control" || request.method !== "POST") return json({ ok: false, error: "不支持的操作。" }, 405);
       if (!capabilities.includes("recheck-control-v1")) return json({ ok: false, error: "无法确认云端支持停用控制，请重新部署网关和 push-recheck 后重试。" }, 409);
       const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -1108,7 +1139,7 @@ Deno.serve(async (request: Request) => {
             wakeId: cleanText(it.wakeId, 80).replace(/[^A-Za-z0-9._-]/g, ""),
             // 念头的保质期和改约前的原时刻：云端改约、到点押后都拿它们封顶
             until: Number(it.until) || 0,
-            origFireAt: Number(it.origFireAt) || 0,
+            origFireAt: Number(it.origFireAt) || 0, held: it.held === true,
             from: cleanText(it.from, 16).replace(/[^A-Za-z0-9_-]/g, ""),
             kind: cleanText(it.kind, 12).replace(/[^a-z]/g, ""),
           };
@@ -1143,6 +1174,7 @@ Deno.serve(async (request: Request) => {
           // 云端点亮时自己造预约 id 要用的前缀，宿主只认 timed_wake_capp_<appId>_ 开头的
           wakePrefix: cleanText(rawContext.wakePrefix, 120).replace(/[^A-Za-z0-9._-]/g, ""),
           // 哨兵预约 id 会拼进 PostgREST 的 in.("…") 过滤器，和 wakeId 一样只留安全字符
+          judgeTemplate: cleanText(rawContext.judgeTemplate, 180).replace(/[^A-Za-z0-9._:-]/g, ""),
           sentinelWakeId: cleanText(rawContext.sentinelWakeId, 80).replace(/[^A-Za-z0-9._-]/g, ""),
           affection: cleanAffection(rawContext.affection),
           threads: cleanThreads(rawContext.threads),
@@ -1221,7 +1253,7 @@ Deno.serve(async (request: Request) => {
         if (!characterId) return json({ ok: false, error: "缺少 characterId。" }, 400);
         let query = `push_recheck_plans?user_id=eq.${OWNER_ID}`
           + `&character_id=eq.${encodeURIComponent(characterId)}`
-          + "&select=plan_date,session_id,context,items,decisions,last_recheck_at,recheck_count"
+          + "&select=plan_date,session_id,context,items,decisions,last_recheck_at,recheck_count,judged_chat_at,judged_at"
           + "&order=plan_date.desc&limit=1";
         if (planDate) query += `&plan_date=eq.${encodeURIComponent(planDate)}`;
         const rows = await readJson<Record<string, unknown>[]>(await rest(query));

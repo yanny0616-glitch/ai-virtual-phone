@@ -16,6 +16,12 @@
     } catch (e) { if (requireRead) throw e; return 0; }
     const p = data && data.plan;
     if (!p || p.plan_date !== date) return 0;
+    if ((+p.judged_chat_at || 0) > (+cx.plan.judgedChatAt || 0) || (+p.judged_at || 0) > (+cx.plan.judgedAt || 0)) {
+      cx.plan = await upsert("plans", x => x.date === date && x.characterId === cx.character.id, {
+        judgedChatAt: Math.max(+p.judged_chat_at || 0, +cx.plan.judgedChatAt || 0),
+        judgedAt: Math.max(+p.judged_at || 0, +cx.plan.judgedAt || 0),
+      });
+    }
     const decs = Array.isArray(p.decisions) ? p.decisions : [];
     // 门禁记录不带 time，下面的合并循环会跳过它；这里单独捞出来写进诊断。
     // 只在本次会话里去重（云端每次拉取后会清空 decisions，靠 at 比时间戳不可靠）。

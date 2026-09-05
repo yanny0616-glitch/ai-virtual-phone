@@ -15,7 +15,7 @@
       doing: String(cx.day.doing || ""),
       wake: String(cx.day.wake || ""), bed: String(cx.day.bed || ""),
       schedule: (cx.day.schedule || []).map((it) => ({
-        time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +it.cost || 0, mood: it.mood || "", busy: !!it.busy,
+        time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +it.cost || 0, mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined,
         steps: Array.isArray(it.steps) ? it.steps.map((x) => ({ time: x.time, what: x.what })) : undefined,
       })),
       conds: (cx.day.conds || []).filter((c) => condWeight(c, Date.now()) > 0.08).map((c) => ({
@@ -55,6 +55,7 @@
             chatCandidates: S.settings.chatCandidates ? "允许临时起念" : "不允许临时起念",
             bias: biasText(),
             wakePrefix: wakePrefix,
+            judgeTemplate: ((S.settings.judgeTemplates || {})[cx.character.id] || {}).cloudUrl === (cloudCfg() || {}).url ? ((S.settings.judgeTemplates || {})[cx.character.id] || {}).id || "" : "",
             sentinelWakeId: (sentinelOf(cx) && sentinelOf(cx).wakeId) || "",
             gateDailyCap: S.settings.gateDailyCap,
             gateGapMin: S.settings.gateGapMin,
@@ -130,6 +131,7 @@
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
       if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
+      await freezeJudgeTemplate(cx);
       const expectedSleep = userSleepContext();
       const r = await cloudFetchBounded("recheck-plan", {
         method: "POST",
@@ -143,7 +145,7 @@
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
             wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0, from: w.from || "",
-            kind: w.kind || "",
+            kind: w.kind || "", held: !!w.held,
           })),
         }),
       });

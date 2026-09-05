@@ -826,36 +826,48 @@ return Object.freeze(exports);
     return out;
   }
   // 云端账本：上报本机今天的用量和上限，再把最近几天各来源拉回来
-  async function syncUsageCloud(force) {
-    if (!cloudCfg()) return null;
-    if (!force && S._use && Date.now() - S._use.at < 5 * 60000) return S._use;
-    const local = await readLocalUsage(force);
-    try {
-      // 0.9.6 之前本机那行统一叫 "app"。留着它会和新的 app-<设备> 行一起被云端上限
-      // 重复计一遍，所以每次启动清零一次（清不掉就最多多算今天这一天）。
-      if (!S._legacyZeroed) {
-        S._legacyZeroed = true;
-        try { await cloudFetch("usage", { method: "POST", body: JSON.stringify({ set: { day: todayStr(), source: "app", calls: 0, promptTokens: 0, completionTokens: 0 } }) }); }
-        catch (e) { /* 旧云函数没有 usage 动作，下面那次 POST 会一起报错 */ }
+  function usageCloudScope() { return (cloudCfg() || {}).url + ":" + myUsageSrc(); }
+  function syncUsageCloud(force) {
+    if (!cloudCfg()) return Promise.resolve(null);
+    if (S._usageSync) return S._usageSync;
+    const run = async () => {
+      const scope = usageCloudScope();
+      const previous = S._use && S._use.scope === scope ? S._use : null;
+      if (!force && previous && previous.status === "ok" && Date.now() - previous.at < 5 * 60000) return previous;
+      const local = await readLocalUsage(force);
+      try {
+        if (S._legacyZeroed !== scope) {
+          await cloudFetchBounded("usage", { method: "POST", body: JSON.stringify({ set: { day: todayStr(), source: "app", calls: 0, promptTokens: 0, completionTokens: 0 } }) });
+          S._legacyZeroed = scope;
+        }
+        await cloudFetchBounded("usage", { method: "POST", body: JSON.stringify({
+          limits: { dailyCalls: +S.settings.apiDailyCap || 0, dailyTokens: +S.settings.tokenDailyCap || 0, tz: -new Date().getTimezoneOffset() },
+          set: { day: todayStr(), source: myUsageSrc(), calls: local.calls, promptTokens: local.prompt, completionTokens: local.completion },
+        }) });
+        const r = await cloudFetchBounded("usage", { method: "GET" }, { days: 7 });
+        if (!Array.isArray(r.rows)) throw new Error("云端未返回有效用量记录");
+        if (scope !== usageCloudScope()) return null;
+        S._use = { scope, at: Date.now(), date: todayStr(), rows: r.rows, limits: r.limits || null, status: "ok", error: "" };
+      } catch (e) {
+        if (scope !== usageCloudScope()) return null;
+        const error = String(e && e.message || e).slice(0, 200);
+        S._use = { ...(previous || { at: 0, rows: [], limits: null }), scope, status: "failed", error };
+        await log(cur(), "云端用量同步失败（本机统计保留，云端合计未确认）：" + error);
       }
-      await cloudFetch("usage", { method: "POST", body: JSON.stringify({
-        limits: { dailyCalls: +S.settings.apiDailyCap || 0, dailyTokens: +S.settings.tokenDailyCap || 0, tz: -new Date().getTimezoneOffset() },
-        set: { day: todayStr(), source: myUsageSrc(), calls: local.calls, promptTokens: local.prompt, completionTokens: local.completion },
-      }) });
-      const r = await cloudFetch("usage", { method: "GET" }, { days: 7 });
-      S._use = { at: Date.now(), rows: Array.isArray(r.rows) ? r.rows : [], limits: r.limits || null };
-    } catch (e) {
-      if (!S._useWarned) { S._useWarned = true; await log(cur(), "云端用量账本读写失败（旧版云函数没有 usage 动作，重部署一次即可）：" + (e && e.message || e)); }
-      S._use = S._use || { at: Date.now(), rows: [], limits: null };
-    }
-    return S._use;
+      return S._use;
+    };
+    S._usageSync = run().finally(() => { S._usageSync = null; });
+    return S._usageSync;
   }
   // 今天合计：本机用最新的本地数（自己那行是自己报的，不从账本里再算一遍），
   // 云端各来源和另一台设备的本机数都用账本里的。旧的 "app" 行已清零，一律不算。
   function usageTotals() {
     const local = S._useLocal || { calls: apiUseToday().n, prompt: 0, completion: 0 };
     const mine = myUsageSrc();
-    const rows = ((S._use && S._use.rows) || []).filter((r) => r.day === todayStr() && r.source !== mine && r.source !== "app");
+    const state = S._use && S._use.scope === usageCloudScope() ? S._use : null;
+    const cloudKnown = !cloudCfg() || !!(state && state.at && state.date === todayStr());
+    const complete = !cloudCfg() || !!(cloudKnown && state.status === "ok" && Date.now() - state.at < 5 * 60000);
+    const rows = ((state && state.rows) || []).filter((r) => r.day === todayStr() && r.source !== mine && r.source !== "app");
     let cloudCalls = 0, cloudTokens = 0, otherCalls = 0, otherTokens = 0, capCalls = 0, capTokens = 0;
     for (const r of rows) {
       const t = (+r.prompt_tokens || 0) + (+r.completion_tokens || 0);
@@ -864,7 +876,8 @@ return Object.freeze(exports);
       if (r.source !== "cloud-chat") { capCalls += +r.calls || 0; capTokens += t; }
     }
     const localCalls = Math.max(local.calls, apiUseToday().n), localTokens = local.prompt + local.completion;
-    return { localCalls, localTokens, cloudCalls, cloudTokens, otherCalls, otherTokens, rows,
+    return { localCalls, localTokens, cloudCalls: cloudKnown ? cloudCalls : null, cloudTokens: cloudKnown ? cloudTokens : null, otherCalls, otherTokens, rows, complete, cloudKnown,
+      error: state && state.error || "", lastSuccessAt: state && state.at || 0,
       calls: localCalls + capCalls, tokens: localTokens + capTokens,
       capCalls: +S.settings.apiDailyCap || 0, capTokens: +S.settings.tokenDailyCap || 0 };
   }
@@ -877,6 +890,10 @@ return Object.freeze(exports);
   const fmtTok = (n) => n >= 1000000 ? (n / 1000000).toFixed(2) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
   async function spendApi(cx) {
     await readLocalUsage(false);
+    if (cloudCfg() && (S.settings.apiDailyCap > 0 || S.settings.tokenDailyCap > 0)) {
+      await syncUsageCloud(false);
+      if (!usageTotals().complete) throw new Error("云端用量尚未确认，暂缓本次调用；请在后台用量页重试同步");
+    }
     const over = usageOver();
     if (over) throw new Error(over);
     S.settings.apiUse = { date: todayStr(), n: apiUseToday().n + 1 };
@@ -1081,7 +1098,7 @@ return Object.freeze(exports);
     anchorSleep: true,   // 睡前锚点
     anchorMorning: false,// 早安锚点
     chatCandidates: true,// 复核时允许因聊天临时起念
-    recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开app时也会复核一次）
+    recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开 app 也检查，但仍遵守上次尝试的间隔）
     judgeLines: 24,      // 编排/复核/云端裁决喂给模型的最近几句聊天
     moodGate: true,      // 精力低/心情差时更克制
     injectChat: true,    // 把TA此刻的状态注入聊天提示词（需 chat.context 权限）
@@ -1299,7 +1316,7 @@ return Object.freeze(exports);
       doing: String(cx.day.doing || ""),
       wake: String(cx.day.wake || ""), bed: String(cx.day.bed || ""),
       schedule: (cx.day.schedule || []).map((it) => ({
-        time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +it.cost || 0, mood: it.mood || "", busy: !!it.busy,
+        time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +it.cost || 0, mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined,
         steps: Array.isArray(it.steps) ? it.steps.map((x) => ({ time: x.time, what: x.what })) : undefined,
       })),
       conds: (cx.day.conds || []).filter((c) => condWeight(c, Date.now()) > 0.08).map((c) => ({
@@ -1339,6 +1356,7 @@ return Object.freeze(exports);
             chatCandidates: S.settings.chatCandidates ? "允许临时起念" : "不允许临时起念",
             bias: biasText(),
             wakePrefix: wakePrefix,
+            judgeTemplate: ((S.settings.judgeTemplates || {})[cx.character.id] || {}).cloudUrl === (cloudCfg() || {}).url ? ((S.settings.judgeTemplates || {})[cx.character.id] || {}).id || "" : "",
             sentinelWakeId: (sentinelOf(cx) && sentinelOf(cx).wakeId) || "",
             gateDailyCap: S.settings.gateDailyCap,
             gateGapMin: S.settings.gateGapMin,
@@ -1414,6 +1432,7 @@ return Object.freeze(exports);
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
       if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
+      await freezeJudgeTemplate(cx);
       const expectedSleep = userSleepContext();
       const r = await cloudFetchBounded("recheck-plan", {
         method: "POST",
@@ -1427,7 +1446,7 @@ return Object.freeze(exports);
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
             wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0, from: w.from || "",
-            kind: w.kind || "",
+            kind: w.kind || "", held: !!w.held,
           })),
         }),
       });
@@ -1526,6 +1545,29 @@ return Object.freeze(exports);
       render();
     }
   }
+  function generationStopState(cx) {
+    const state = ((S.settings || {}).generationStops || {})[cx.character.id];
+    return state && state.cloudUrl === (cloudCfg() || {}).url && !(S.settings.autoGen && S.settings.cloudGen) ? state : null;
+  }
+  async function stopCloudGeneration(cx) {
+    if (!cloudCfg()) return { status: "disabled" };
+    const save = async (status, message) => {
+      const state = { status, message, cloudUrl: cloudCfg().url, at: Date.now() };
+      await patchSettings(s => ({ generationStops: { ...s.generationStops, [cx.character.id]: state } }));
+      renderCloudSync(); return state;
+    };
+    if (cx._genStopping) return generationStopState(cx) || { status: "syncing" };
+    cx._genStopping = true;
+    try {
+      await save("syncing", "正在停用云端尚未执行的自动生成任务…");
+      const r = await cloudFetchBounded("generation-stop", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr(), owner: myDev() }) });
+      if (!r.stopped || !(r.capabilities || []).includes("generation-stop-v1")) throw new Error("云端未确认，请更新数据库、网关和 push-recheck 后重试");
+      return await save("synced", "云端已停用尚未执行的自动生成；已生成日程和已有预约保留");
+    } catch (e) {
+      return await save("failed", "自动生成在本机已关闭，云端尚未确认停用：" + String(e && e.message || e).slice(0, 180));
+    } finally { cx._genStopping = false; renderCloudSync(); }
+  }
+
   /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
   function cloudGenOn() {
     return !!(cloudCfg() && S.settings && S.settings.autoGen && S.settings.cloudGen);
@@ -1547,6 +1589,17 @@ return Object.freeze(exports);
     if (out.daily && out.impulse) await log(cx, "云端生成：两份模板已冻到云端（7 天内有效，6 小时后再续）");
     return out;
   }
+  async function freezeJudgeTemplate(cx) {
+    const old = (S.settings.judgeTemplates || {})[cx.character.id];
+    if (old && old.id && old.cloudUrl === (cloudCfg() || {}).url && Date.now() - old.at < 6 * 3600000) return old.id;
+    if (!AiPhone.push || !AiPhone.push.freeze) return "";
+    try {
+      const r = await AiPhone.push.freeze({ characterId: cx.character.id, appTags: ["companion", "impulse"], key: "judge" });
+      if (!r || !r.armed) return "";
+      await patchSettings(s => ({ judgeTemplates: { ...s.judgeTemplates, [cx.character.id]: { id: r.id, at: Date.now(), cloudUrl: (cloudCfg() || {}).url } } }));
+      return r.id;
+    } catch (e) { await log(cx, "判断模板冻结失败，云端暂用原预约中的人设快照：" + (e && e.message || e)); return ""; }
+  }
   async function readCalendarOn(cx, date) {
     try {
       const r = await AiPhone.calendar.read({ ownerType: "character", ownerId: cx.character.id, date: date });
@@ -1564,7 +1617,7 @@ return Object.freeze(exports);
     if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
     cx._kitAt = Date.now();
     const tpl = await freezeGenTemplates(cx, false);
-    if (!tpl.daily || !tpl.impulse) return;
+    if (!tpl.daily || !tpl.impulse || !cloudGenOn()) return;
     const at = S.settings.autoGenAt || SET_DEF.autoGenAt;
     const tm = new Date(); tm.setDate(tm.getDate() + 1);
     const dates = [dateStrOf(tm)];
@@ -1584,6 +1637,7 @@ return Object.freeze(exports);
           anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
           kitAt: Date.now(),
         };
+        if (!cloudGenOn()) return;
         const r = await cloudFetchBounded("recheck-plan", {
           method: "POST",
           body: JSON.stringify({ characterId: cx.character.id, planDate: date, sessionId: "", resetDecisions: true, context: ctx, items: [] }),
@@ -1604,7 +1658,7 @@ return Object.freeze(exports);
   }
   // 云端生成好了今天：把它当成自己生成的接过来——落库、写回系统日程、接管预约，再走正常的复核流程。
   async function adoptCloudDay(cx) {
-    if (!cloudGenOn() || !cx.character || cx.day || cx.busy || cx._planLock) return false;
+    if (!cloudGenOn() || !cx.character || (cx.day && !cx.day.cloudAdopting && !(cx.day.by === "cloud" && !cx.plan)) || cx.busy || cx._planLock) return false;
     if (!owns(cx)) return false; // 接管云端生成会接手那批预约，只有管事那台能做
     let data;
     try { data = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() }); }
@@ -1616,19 +1670,21 @@ return Object.freeze(exports);
     try {
       const genAt = +ctx.genAt || Date.now();
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull));
+        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull, { cloudAdopting: true }));
       const existing = await readTodayCalendar(cx);
       const wrote = await syncCalendar(cx, existing);
       const items = (Array.isArray(p.items) ? p.items : []).map((w) => ({
         time: w.time, fireAt: +w.fireAt || 0, source: w.source || "", act: !!w.act,
         why: w.why || "", intent: w.intent || "", wakeId: w.wakeId || "",
         delivery: w.act && w.wakeId ? "push" : "", reason: w.act && !w.wakeId ? (w.reason || "云端没有可借的聊天模板") : "",
+        from: String(w.from || ""), until: +w.until || 0, origFireAt: +w.origFireAt || 0, held: !!w.held,
         sem: w.sem || "", topic: w.topic || "", score: w.score || calcScore(+w.fireAt || 0, 0, 0, 0), kind: w.kind || "plan",
         hist: Array.isArray(w.hist) && w.hist.length ? w.hist : [{ at: genAt, kind: w.act ? "plan" : "skip", note: w.act ? (w.intent || "") : (w.why || "TA这会儿不想"), by: "cloud" }],
       })).sort((a, b) => a.fireAt - b.fireAt);
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
         { date: todayStr(), characterId: cx.character.id, items: items, chatUsed: +ctx.genChatUsed || 0,
           plannedAt: genAt, recheckAt: 0, selfUsed: +ctx.selfUsed || 0, cloudAckAt: genAt, by: "cloud" });
+      cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id, { cloudAdopting: false });
       cx.archive = null;
       for (const line of (Array.isArray(ctx.genLog) ? ctx.genLog : []).slice(0, 30)) await log(cx, "云端生成：" + line);
       await log(cx, "接管云端生成的今天：" + cx.day.schedule.length + " 条日程，写回系统日程 " + wrote + " 条，" + items.filter((w) => w.act).length + " 个想起你的时刻");
@@ -1663,6 +1719,12 @@ return Object.freeze(exports);
     } catch (e) { if (requireRead) throw e; return 0; }
     const p = data && data.plan;
     if (!p || p.plan_date !== date) return 0;
+    if ((+p.judged_chat_at || 0) > (+cx.plan.judgedChatAt || 0) || (+p.judged_at || 0) > (+cx.plan.judgedAt || 0)) {
+      cx.plan = await upsert("plans", x => x.date === date && x.characterId === cx.character.id, {
+        judgedChatAt: Math.max(+p.judged_chat_at || 0, +cx.plan.judgedChatAt || 0),
+        judgedAt: Math.max(+p.judged_at || 0, +cx.plan.judgedAt || 0),
+      });
+    }
     const decs = Array.isArray(p.decisions) ? p.decisions : [];
     // 门禁记录不带 time，下面的合并循环会跳过它；这里单独捞出来写进诊断。
     // 只在本次会话里去重（云端每次拉取后会清空 decisions，靠 at 比时间戳不可靠）。
@@ -2048,18 +2110,21 @@ return Object.freeze(exports);
   }
   // 了结或删掉一条惦记时，由它起的、还没到点的时刻一起撤掉——不然人在面板上把事划掉了，
   // 到点TA还照着这条由头发消息。
-  async function dropThreadSlots(cx, id, why) {
+  async function dropThreadSlots(cx, id, why, planItems) {
     if (!cx.plan || !Array.isArray(cx.plan.items)) return 0;
+    const items = (planItems || cx.plan.items).map(w => ({ ...w, hist: (w.hist || []).slice() }));
     const now = Date.now(); let n = 0;
-    for (const w of cx.plan.items) {
+    for (const w of items) {
       if (w.from !== id || !w.act || w.fireAt <= now) continue;
-      if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
-      w.act = false; w.wakeId = ""; w.why = why;
-      (w.hist = w.hist || []).push({ at: now, kind: "recheck", note: why });
+      // 失败时保留原编号和激活状态，下一轮可按同一编号重试撤销。
+      if (w.wakeId) await AiPhone.push.cancelWake(w.wakeId);
+      w.act = false; w.wakeId = ""; w.delivery = ""; w.why = why;
+      w.hist.push({ at: now, kind: "recheck", note: why });
       n++;
     }
     if (n) {
-      cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items: cx.plan.items });
+      cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items });
+      if (planItems) planItems.splice(0, planItems.length, ...items);
       await log(cx, "惦记账本：" + why + "，撤掉 " + n + " 个时刻");
     }
     return n;
@@ -2197,11 +2262,12 @@ return Object.freeze(exports);
         { postedIds: posted.slice(-60), outbox: left });
     } finally { cx._outboxBusy = false; }
   }
-  async function applyThreads(cx, parsed, nowMs, by) {
+  async function applyThreads(cx, parsed, nowMs, by, planItems) {
     if (!S.settings.threadsOn || !parsed) return 0;
-    const list = (cx.threads || []).slice(), notes = [];
+    const list = (cx.threads || []).map(t => ({ ...t })), notes = [];
     for (const id of (Array.isArray(parsed.settle) ? parsed.settle : []).slice(0, 6)) {
       const t = list.find((x) => x.id === String(id).replace(/[\[\]]/g, "").trim());
+      if (t) await dropThreadSlots(cx, t.id, "这件事你说了结了", planItems);
       if (t && !t.done) { t.done = true; t.at = nowMs; t.by = by; notes.push("了结「" + t.text + "」"); }
     }
     for (const k of (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2)) {
@@ -2278,11 +2344,11 @@ return Object.freeze(exports);
       note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
       mood: String(pickField(it, ["mood", "情绪", "心情"]) || "").slice(0, 24),
       cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
-      busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
+      busy: pickField(it, ["busy", "顾不上", "忙"]) === "" ? undefined : isTrue(pickField(it, ["busy", "顾不上", "忙"])),
     }));
     for (const it of existing) { // 模型漏掉的已定安排补回来；定死了忙闲的以日程表为准
       const hit = sched.find((x) => x.time === it.startTime);
-      if (!hit) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排", busy: it.lock === "busy" });
+      if (!hit) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排", busy: it.lock ? it.lock === "busy" : undefined });
       else if (it.lock) hit.busy = it.lock === "busy";
     }
     sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
@@ -2394,7 +2460,7 @@ return Object.freeze(exports);
       const b = it.end ? timeToMs(it.end) : null;
       if ((b || a) < now) continue;
       if (a - cursor > 20 * 60000) push(Math.round((Math.max(cursor, now) + a) / 2), "空着", false);
-      push(Math.max(a, now), String(it.title || ""), it.busy, it.end || "");
+      push(Math.max(a, now), String(it.title || ""), isBusyItem(it), it.end || "");
       cursor = Math.max(cursor, b || a);
     }
     if (endMs - cursor > 20 * 60000) push(Math.round((Math.max(cursor, now) + endMs) / 2), "睡前自己待着", false);
@@ -2487,8 +2553,8 @@ return Object.freeze(exports);
   // 不再挂念的人：今天的预约、48 小时哨兵、云端计划行全撤，否则两天后TA还会按哨兵的由头来找你
   async function unfreezeGenTemplates(cx) {
     if (!AiPhone.push || !AiPhone.push.unfreeze) return;
-    for (const k of ["daily", "impulse"]) { try { await AiPhone.push.unfreeze({ characterId: cx.character.id, key: k }); } catch (e) { /* 旧宿主没这个接口 */ } }
-    await patchSettings((s) => { const g = Object.assign({}, s.genTpls); delete g[cx.character.id]; return { genTpls: g }; });
+    for (const k of ["daily", "impulse", "judge"]) { try { await AiPhone.push.unfreeze({ characterId: cx.character.id, key: k }); } catch (e) { /* 旧宿主没这个接口 */ } }
+    await patchSettings((s) => { const g = Object.assign({}, s.genTpls); delete g[cx.character.id]; const judges = { ...s.judgeTemplates }; delete judges[cx.character.id]; return { genTpls: g, judgeTemplates: judges }; });
   }
   async function forgetCharacter(cx) {
     await unfreezeGenTemplates(cx);
@@ -2630,6 +2696,17 @@ return Object.freeze(exports);
   // 官方陪伴插件式的「判断随状态刷新」：打开小手机时（以及在页时每隔 recheckMin 分钟），
   // 按最新聊天重审今天还没到点的时刻——未回应降速是硬规则，聊崩了会取消，
   // 聊出没聊完的话头时可以临时起一个新念头。
+  async function flushJudgeFinish(cx) {
+    const receipt = cx.plan && cx.plan.judgeFinish;
+    if (!receipt || receipt.cloudUrl !== (cloudCfg() || {}).url || cx._judgeFinishing) return;
+    cx._judgeFinishing = true;
+    try {
+      const result = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify(receipt) });
+      if (!result.claimed && result.reason !== "lost" && result.reason !== "no-plan") throw new Error("云端未确认复核结果");
+      cx.plan = await upsert("plans", x => x.date === receipt.planDate && x.characterId === cx.character.id, { judgeFinish: null });
+      if (!result.claimed) await log(cx, "复核完成回执已过期，本地结果保留；云端是否处理过以最新计划为准");
+    } finally { cx._judgeFinishing = false; }
+  }
   async function recheck(cx, trigger) {
     if (cx.busy || cx._planLock || !owns(cx)) return;
     if (!S.settings || !(S.settings.recheckMin > 0)) return;
@@ -2644,18 +2721,20 @@ return Object.freeze(exports);
       && cx.plan.items.filter((w) => w.act).length < S.settings.quota;
     if (!canJudge && !canImpulse) return;
     cx._planLock = true;
+    let lease = null, succeeded = false, heartbeat = 0;
     try {
       // 必须先并再判：下面那次 uploadPlanCloud 会整行盖掉计划行的 items，
       // 云端点亮回填的 wakeId 跟着没，那条预约就撤不掉了，到点照发。
-      const pulled = await pullCloudDecisionsBody(cx).catch(() => 0);
+      await flushJudgeFinish(cx);
+      const pulled = await pullCloudDecisionsBody(cx, true);
       if (pulled) render();
-      const since = cx.plan.recheckAt || cx.plan.plannedAt || 0;
+      const since = Math.max(cx.plan.recheckAt || cx.plan.plannedAt || 0, +cx.plan.judgedChatAt || 0);
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
       const fresh = chat.filter((m) => m.role === "user" && m.t > since);
       const streak = unansweredStreak(chat);
       const cooling = S.settings.maxUnanswered > 0 && streak >= S.settings.maxUnanswered;
-      if (!fresh.length && !cooling) { cx._planLock = false; return; } // 没有新信息，维持原判断
+      if (!fresh.length && !cooling) return; // 没有新信息，维持原判断
       const items = cx.plan.items.slice();
       let changed = 0, added = 0;
 
@@ -2672,6 +2751,29 @@ return Object.freeze(exports);
         }
         if (changed) await log(cx, "复核（" + trigger + "）：连续 " + streak + " 轮未回 ≥ 降速阈值 " + S.settings.maxUnanswered + "，取消 " + changed + " 个待发时刻");
       } else {
+        // 打开和定时入口共用持久间隔；不能只靠页面内的 _rcTry。
+        // 先记尝试、后调模型：回复后写日程/账本失败时，也不能立刻重复付费判断。
+        const lastAttempt = Math.max(+cx.plan.recheckAttemptAt || 0, +cx.plan.recheckAt || 0, +cx.plan.judgedAt || 0);
+        if (lastAttempt && nowMs - lastAttempt < Math.max(1, S.settings.recheckMin) * 60000) return;
+        if (cloudRecheckOn()) {
+          await requireRecheckFeatures(["judge-task-v1"]);
+          const task = { characterId: cx.character.id, planDate: todayStr(), token: "app-" + nowMs + "-" + Math.random().toString(36).slice(2), chatAt: Math.max(...fresh.map(m => m.t)) };
+          const claim = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...task, op: "claim" }) });
+          if (!claim.claimed) { await log(cx, "本机复核跳过：云端正在处理或已判断过这段聊天"); return; }
+          lease = { ...task, active: true };
+          const renew = async () => {
+            if (!lease) return;
+            try {
+              const r = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...task, op: "renew" }) });
+              if (lease) lease.active = !!r.claimed;
+            } catch (e) { if (lease) lease.active = false; }
+            if (lease && lease.active) heartbeat = setTimeout(renew, 60000);
+          };
+          heartbeat = setTimeout(renew, 60000);
+        }
+        cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
+          { recheckAttemptAt: nowMs });
+        await log(cx, "本机复核开始（" + trigger + "）：读取 " + fresh.length + " 条新用户消息");
         const lines = chatExcerpt(chat, S.settings.judgeLines);
         const remaining = items.filter((w) => w.fireAt > nowMs + 2 * 60000);
         const usedQuota = items.filter((w) => w.act).length;
@@ -2684,7 +2786,7 @@ return Object.freeze(exports);
             canJudge
               ? "你是当前角色的内心。之前TA为今天定过一批想不想给用户发消息的判断；现在聊天有了新进展，请只对下面「还没到点」的时刻重新判断"
                 + (canImpulse ? "，并允许临时起最多一个新念头。" : "。")
-              : "你是当前角色的内心。今天排好的时刻都已经过点了，没有要重判的。只看刚才聊的内容里有没有值得临时起一个新念头的事：聊到一半没说完的话头、约好了要说的、答应了要问的。只是随口聊到、没落实的事不算。",
+              : "你是当前角色的内心。当前没有需要复核的候选消息时刻，生活日程仍按原安排继续。只看刚才聊的内容里有没有值得临时起一个新念头的事：聊到一半没说完的话头、约好了要说的、答应了要问的。只是随口聊到、没落实的事不算。",
             "TA今天的生活面：" + JSON.stringify({ mood: cx.day.mood, energy: energyAt(cx.day, nowMs) }),
             "最近聊天（「我」=用户，从旧到新，越靠后越新）：", lines.join("\n"),
             streak ? "注意：TA最近连发了 " + streak + " 条用户还没回。没回就少发、缓发，别显得追着人跑。" : null,
@@ -2711,6 +2813,10 @@ return Object.freeze(exports);
               + "；extra 的时间必须晚于现在（" + fmtHM(nowMs) + "）。",
           ].filter((s) => s !== null).join("\n"),
         });
+        if (lease) {
+          const renewed = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...lease, op: "renew" }) });
+          if (!renewed.claimed) throw new Error("复核任务租约已失效，本轮结果未应用");
+        }
         const feel = parsed && parsed.feel;
         if (feel && String(feel.mood || "").trim()) {
           await pushCond(cx, {
@@ -2809,13 +2915,16 @@ return Object.freeze(exports);
           } catch (e) { await log(cx, "复核临时起念预约失败：" + (e && e.message || e)); }
         }
         await applyChatSchedEdits(cx, parsed.sched, nowMs);
-        await applyThreads(cx, parsed, nowMs, "app");
+        await applyThreads(cx, parsed, nowMs, "app", items);
         const postHint = canPost && parsed.post && typeof parsed.post === "object" ? String(parsed.post.hint || "") : "";
         if (postHint) await postMoment(cx, postHint, nowMs, "app");
       }
 
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        { date: todayStr(), characterId: cx.character.id, items, chatUsed: cx.plan.chatUsed || 0, plannedAt: cx.plan.plannedAt || nowMs, recheckAt: nowMs });
+        { date: todayStr(), characterId: cx.character.id, items, chatUsed: cx.plan.chatUsed || 0, plannedAt: cx.plan.plannedAt || nowMs, recheckAt: nowMs,
+          ...(lease ? { judgedChatAt: lease.chatAt, judgedAt: nowMs,
+            judgeFinish: { ...lease, op: "finish", success: true, cloudUrl: (cloudCfg() || {}).url } } : {}) });
+      succeeded = true;
       await uploadPlanCloud(cx, false);
       if (changed || added) {
         cx.archive = null;
@@ -2824,10 +2933,20 @@ return Object.freeze(exports);
         render();
       }
     } catch (e) {
-      await log(cx, "复核失败（原计划不受影响）：" + (e && e.message || e));
+      await log(cx, "复核未完成（部分改动可能已保存，将按复核间隔重试）：" + (e && e.message || e));
+    } finally {
+      clearTimeout(heartbeat);
+      if (lease) {
+        const finished = lease; lease = null;
+        try {
+          if (succeeded) await flushJudgeFinish(cx);
+          else await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...finished, op: "finish", success: false }) });
+        } catch (e) { await log(cx, succeeded ? "复核完成回执待同步，下次打开或分钟检查会重试" : "复核任务释放失败，租约最长 10 分钟后失效"); }
+      }
+      try { await syncChatContext(cx); }
+      catch (e) { await log(cx, "复核后同步聊天上下文失败：" + (e && e.message || e)); }
+      finally { cx._planLock = false; }
     }
-    await syncChatContext(cx);
-    cx._planLock = false;
   }
   /* ================= 预览 ================= */
   async function preview(cx) {
@@ -2924,7 +3043,7 @@ return Object.freeze(exports);
   const NOT_BUSY_RE = /睡觉|睡眠|午睡|午休|补觉|休息|发呆|摸鱼|放松|吃饭|用餐|散步|刷视频|看番|打游戏|玩游戏|聊天|自由时间|准备睡|洗漱|刚醒|起床|看剧|逛/;
   function isBusyItem(it) {
     if (!it) return false;
-    if (it.busy === true) return true;
+    if (typeof it.busy === "boolean") return it.busy;
     const t = String(it.title || "");
     return BUSY_RE.test(t) && !NOT_BUSY_RE.test(t);
   }
@@ -3017,7 +3136,8 @@ return Object.freeze(exports);
     const box = $("#cloud-sync");
     if (!box) return;
     const rows = cloudCfg() ? allCx().map((cx) => ({ cx, state: planSyncState(cx) })).filter((x) => x.state) : [];
-    box.hidden = !rows.length;
+    const genRows = cloudCfg() ? allCx().map(cx => ({ cx, state: generationStopState(cx) })).filter(x => x.state && x.state.status !== "synced") : [];
+    box.hidden = !rows.length && !genRows.length;
     box.innerHTML = rows.map(({ cx, state }) => {
       const busy = cx._syncRetrying || state.status === "syncing" && (!!cx._uploadQ || cx._controlActive);
       const ok = state.status === "synced";
@@ -3029,6 +3149,10 @@ return Object.freeze(exports);
         (!ok && state.status !== "readonly" ? '<button class="tgl" data-sync-retry="' + esc(cx.character.id) + '"' +
           (busy || cx.busy || cx._planLock ? ' disabled' : '') + '>重试同步</button>' : '') + '</div>';
     }).join("");
+    box.innerHTML += genRows.map(({ cx, state }) => '<div class="card"><div class="d-why">' + esc(cx.character.name) + ' · ' + esc(state.message) + '</div><button class="tgl" data-gen-retry="' + esc(cx.character.id) + '"' + (cx._genStopping ? ' disabled' : '') + '>重试停用自动生成</button></div>').join("");
+    box.querySelectorAll("[data-gen-retry]").forEach(button => {
+      button.onclick = () => stopCloudGeneration(S.byId[button.dataset.genRetry]).catch(() => toast("停用未确认，请重试"));
+    });
     box.querySelectorAll("[data-sync-retry]").forEach((button) => {
       button.onclick = () => {
         const cx = S.byId[button.dataset.syncRetry];
@@ -3679,10 +3803,22 @@ return Object.freeze(exports);
     try { await syncCalendar(cx, await readTodayCalendar(cx)); } catch (e) { await log(cx, "日程改动写回系统日程失败：" + (e && e.message || e)); }
     await log(cx, note);
     await syncChatContext(cx);
-    await pullCloudDecisions(cx); // 同 recheck：不先并会把云端回填的 wakeId 盖掉
-    await uploadPlanCloud(cx, false);
+    // 复核内部的日程编辑由外层统一提交；手动编辑走严格读后合并入口。
+    if (!cx._planLock) await syncSavedPlan(cx, false);
     render();
     toast(planStale === false || liveMode() ? note : note + "；心动时刻还是按旧日程排的，要跟上就点「♥ 重新编排」");
+  }
+  function mergeScheduleItem(it, patch) {
+    const next = { ...it, ...patch };
+    if (next.time !== it.time && !Object.prototype.hasOwnProperty.call(patch, "end") && it.end) {
+      const minutes = hm => +hm.split(":")[0] * 60 + +hm.split(":")[1];
+      const duration = minutes(it.end) - minutes(it.time);
+      if (duration > 0 && minutes(next.time) + duration < 1440) next.end = addMin(next.time, duration);
+      else throw new Error("改后的日程跨过午夜，请明确调整结束时间");
+    }
+    if (next.end && next.end <= next.time) throw new Error("结束时间必须晚于开始时间");
+    if (next.time !== it.time || next.end !== it.end || next.title !== it.title) delete next.steps;
+    return next;
   }
   async function refineSchedItem(cx, i, ask) {
     const sched = ((cx.day && cx.day.schedule) || []).slice();
@@ -3694,16 +3830,16 @@ return Object.freeze(exports);
       instruction: [
         "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
         "以当前角色的人设、作息和职业为依据，改写TA今天日程里的这一条。",
-        "当前这条：" + JSON.stringify({ time: it.time, title: it.title, note: it.note || "", cost: +it.cost || 0 }),
+        "当前这条：" + JSON.stringify({ time: it.time, end: it.end, busy: it.busy, title: it.title, note: it.note || "", cost: +it.cost || 0 }),
         "同一天其余日程（不要撞时间、不要写成重复的事）：" + JSON.stringify(others),
         ask ? "用户的要求：" + ask : "没有具体要求，换一个更贴合TA的写法，时间可以微调。",
-        '输出严格 JSON，第一个字符必须是 {：{"time":"HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完之后TA的情绪（8字内）","detail":"这件事的细化描写（60字内，写具体发生了什么、TA注意到了什么，第三人称）","cost":这件事做完对精力的影响-40到40的整数}',
+        '输出严格 JSON，第一个字符必须是 {：{"time":"HH:MM","end":"结束时间HH:MM，未修改可不填","busy":顾不上看手机为true、能看为false，未修改可不填,"title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完之后TA的情绪（8字内）","detail":"这件事的细化描写（60字内，写具体发生了什么、TA注意到了什么，第三人称）","cost":这件事做完对精力的影响-40到40的整数}',
         "cost 负数=消耗（开会、通勤、应酬、体力活），正数=回血（午睡、吃饭、散步、发呆），平淡的事给 0。",
         "mood 用可感的状态词（清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空）带一点原因或身体感受，要和 cost 对得上。",
       ].filter(Boolean).join("\n"),
     });
     const time = normHM(pickField(d, ["time", "时间", "at"])) || it.time;
-    sched[i] = {
+    const patch = {
       time: time,
       title: String(pickField(d, ["title", "标题", "事项", "name"]) || it.title),
       place: String(pickField(d, ["place", "地点", "位置", "在哪"]) || it.place || "").slice(0, 16),
@@ -3712,6 +3848,11 @@ return Object.freeze(exports);
       detail: String(pickField(d, ["detail", "细化", "描写"]) || "").slice(0, 200),
       cost: Math.max(-40, Math.min(40, Math.round(+pickField(d, ["cost", "精力影响", "消耗"]) || 0))),
     };
+    if (d.end != null && String(d.end).trim()) {
+      const end = normHM(d.end); if (!end) throw new Error("结束时间无效"); patch.end = end;
+    }
+    if (typeof d.busy === "boolean") patch.busy = d.busy;
+    sched[i] = mergeScheduleItem(it, patch);
     const moved = sched[i];
     await saveSchedule(cx, sched, "重写了 " + it.time + "「" + it.title + "」→ " + moved.time + "「" + moved.title + "」");
     return ((cx.day && cx.day.schedule) || []).findIndex((x) => x.time === moved.time && x.title === moved.title);
@@ -3750,7 +3891,7 @@ return Object.freeze(exports);
       } else if (op === "move") {
         const at = normHM(x.newTime);
         if (!at || at <= nowHM || sched.some((y) => y.time === at)) continue;
-        const moved = Object.assign({}, sched[k], { time: at, from: "chat", why: why });
+        const moved = mergeScheduleItem(sched[k], { time: at, from: "chat", why: why });
         delete moved.steps; // 细排是按原时段排的，挪了时间就不再成立
         sched[k] = moved; touched++;
         await log(cx, "聊天改日程：" + hm + "「" + moved.title + "」挪到 " + at + "——" + why);
@@ -3798,15 +3939,15 @@ return Object.freeze(exports);
       "</div>";
   }
 
-  function momentHistoryHtml(cx) {
-    const records = momentRecords(cx).slice().sort((a, b) => b.at - a.at);
+  function momentHistoryHtml(cx, date) {
+    const records = momentRecords(cx).filter(r => !date || dateStrOf(new Date(r.at)) === date).sort((a, b) => b.at - a.at);
+    if (!records.length) return "";
     const states = { sent: "已发布", pending: "待发布", failed: "发布失败", skipped: "未发布" };
-    return '<div class="card"><div class="sec-head"><span class="t">朋友圈记录</span></div>' +
-      (records.length ? records.map(r => '<div class="d-why"><strong>' + esc(states[r.status] || "待确认") + '</strong> · ' +
-        esc(dateStrOf(new Date(r.at)) + " " + fmtHM(r.at)) + ' · ' + (r.by === "cloud" ? "云端起意" : "本地起意") +
+    return '<details class="skip-fold moment-history"><summary>朋友圈记录 · ' + records.length + ' 条</summary>' +
+      records.map(r => '<div class="d-why"><strong>' + esc(states[r.status] || "待确认") + '</strong> · ' +
+        esc(fmtHM(r.at)) + ' · ' + (r.by === "cloud" ? "云端起意" : "本地起意") +
         '<div>「' + esc(r.hint) + '」</div><div class="archive-note">' + esc(r.note || "") +
-        (r.postId ? ' · 帖子编号 ' + esc(r.postId) : '') + '</div></div>').join("") :
-        '<div class="archive-note">暂无挂念发圈记录。旧版帖子和宿主其他入口发布的朋友圈不会自动补入。</div>') + '</div>';
+        (r.postId ? ' · 帖子编号 ' + esc(r.postId) : '') + '</div></div>').join("") + '</details>';
   }
 
   async function renderArchive() {
@@ -3820,6 +3961,13 @@ return Object.freeze(exports);
       return;
     }
     if (req !== S._arcReq || S.tab !== "archive") return; // 期间切走了就不画
+    // 只有发圈记录、没有日程或私聊计划的日期也保留日期卡片，不修改读取缓存。
+    arc = { ...arc, byDate: { ...arc.byDate } };
+    for (const record of momentRecords(cx)) {
+      const date = dateStrOf(new Date(record.at));
+      if (!arc.byDate[date]) arc.byDate[date] = { day: null, plan: null };
+    }
+    arc.dates = Object.keys(arc.byDate).sort().reverse();
 
     // 近 7 天统计
     const d7 = new Date(); d7.setDate(d7.getDate() - 6);
@@ -3841,7 +3989,7 @@ return Object.freeze(exports);
       '<div class="stat"><div class="num">' + nAct + '</div><div class="cap">7天起念</div></div>' +
       '<div class="stat" style="animation-delay:60ms"><div class="num">' + nSent + '</div><div class="cap">已发出</div></div>' +
       '<div class="stat" style="animation-delay:120ms"><div class="num">' + nUnknown + '</div><div class="cap">待确认</div></div>' +
-      "</div>" + momentHistoryHtml(cx);
+      "</div>";
 
     if (!arc.dates.length) {
       html += '<div class="card empty"><div class="art">🌱</div><p>还没有任何记录。<br>回「今天」页生成TA的一天，这里就会开始留痕。</p></div>';
@@ -3853,6 +4001,7 @@ return Object.freeze(exports);
       const day = rec.day, plan = rec.plan;
       const items = (plan && plan.items) || [];
       const acted = items.filter((w) => w.act).length;
+      const momentCount = momentRecords(cx).filter(r => dateStrOf(new Date(r.at)) === date).length;
       const wd = "日一二三四五六"[new Date(date + "T00:00:00").getDay()];
       const isToday = date === todayStr();
       let body = "";
@@ -3875,12 +4024,13 @@ return Object.freeze(exports);
             skippedItems.map((w) => decRow(w)).join("") + "</details>";
         }
       } else {
-        body += '<div class="archive-note">这天没有编排记录' + (day ? "（只生成了生活面）" : "") + "</div>";
+        body += '<div class="archive-note">这天没有私聊编排记录' + (day ? "（只生成了生活面）" : "") + "</div>";
       }
+      body += momentHistoryHtml(cx, date);
       html += '<details class="day-card" data-d="' + esc(date) + '"' + (isToday || (di === 0 && !arc.byDate[todayStr()]) ? " open" : "") + ' style="animation-delay:' + Math.min(di * 50, 400) + 'ms">' +
         '<summary class="day-sum"><span class="emo">' + esc(day && day.moodEmoji || "🗓️") + "</span>" +
         '<span class="mid"><span class="d1">' + esc(date.slice(5).replace("-", " / ")) + '<span class="wd">周' + wd + (isToday ? " · 今天" : "") + "</span>" +
-        (acted ? '<span class="hearts">♥×' + acted + "</span>" : '<span class="hearts" style="color:var(--tx3)">安静的一天</span>') + "</span>" +
+        (acted ? '<span class="hearts">♥×' + acted + "</span>" : '<span class="hearts" style="color:var(--tx3)">' + (momentCount ? '朋友圈记录 ×' + momentCount : '安静的一天') + '</span>') + "</span>" +
         '<span class="d2">' + esc(day && day.mood || "没有生活面记录") + "</span></span>" +
         '<span class="arr">▶</span></summary>' +
         '<div class="day-body">' + body + "</div></details>";
@@ -3921,23 +4071,26 @@ return Object.freeze(exports);
   const CLOUD_DIAG_IDS = { lock: 1, cloud: 1, jobs: 1, recheck: 1 };
   const DIAG_TTL = 60000;
 
-  async function renderUsage() {
+  async function renderUsage(force) {
     const v = $("#subview") || $("#view");
     const req = (S._usageReq = (S._usageReq || 0) + 1);
     v.innerHTML = '<div class="card empty"><div class="art">⏳</div><p>正在统计…</p></div>';
     await readLocalUsage(true);
-    await syncUsageCloud(false);
+    await syncUsageCloud(!!force);
     if (!(S.tab === "back" && S.sub === "usage") || req !== S._usageReq) return;
     const t = usageTotals();
     const stat = (n, cap) => '<div class="stat"><div class="num">' + n + '</div><div class="cap">' + cap + "</div></div>";
     const bar = (n, cap) => cap > 0 ? '<div class="usage-bar"><div class="fill" style="width:' + Math.min(100, Math.round(n / cap * 100)) + '%"></div></div>' : "";
     let html = '<div class="card"><div class="sec-head"><span class="t">今 日 用 量</span>' +
-      '<span class="badge' + (usageOver() ? " warn" : (t.capCalls || t.capTokens ? " ok" : "")) + '">' + (usageOver() ? "到上限了" : (t.capCalls || t.capTokens ? "额度内" : "没设上限")) + "</span></div>" +
-      '<div class="stats four">' + stat(t.calls + (t.capCalls ? "<small>/" + t.capCalls + "</small>" : ""), "调 用") + stat(fmtTok(t.tokens) + (t.capTokens ? "<small>/" + fmtTok(t.capTokens) + "</small>" : ""), "token") +
-      stat(t.localCalls + (t.otherCalls ? "<small>+" + t.otherCalls + "</small>" : ""), "本 机") + stat(t.cloudCalls, "云 端") + "</div>" +
+      '<span class="badge' + (!t.complete || usageOver() ? " warn" : (t.capCalls || t.capTokens ? " ok" : "")) + '">' + (!t.complete ? "合计未确认" : usageOver() ? "到上限了" : (t.capCalls || t.capTokens ? "额度内" : "没设上限")) + "</span></div>" +
+      '<div class="stats four">' + stat((t.complete ? "" : "≥") + t.calls + (t.capCalls ? "<small>/" + t.capCalls + "</small>" : ""), "调 用") + stat((t.complete ? "" : "≥") + fmtTok(t.tokens) + (t.capTokens ? "<small>/" + fmtTok(t.capTokens) + "</small>" : ""), "token") +
+      stat(t.localCalls + (t.otherCalls ? "<small>+" + t.otherCalls + "</small>" : ""), "本 机") + stat(t.cloudCalls == null ? "未知" : t.cloudCalls, "云 端") + "</div>" +
       bar(t.calls, t.capCalls) + bar(t.tokens, t.capTokens) +
       '<div class="archive-note">上限在设置「模型调用」里改。本机按次和 token 都由宿主统计；云端由云函数记账，聊天离线兜底的调用只记不限。'
       + (t.otherCalls ? "「本机」后面的 +" + t.otherCalls + " 是另一台设备今天调的，也占同一份上限。" : "") + "</div></div>";
+    if (cloudCfg()) html += '<div class="card"><div class="archive-note">' + (t.complete ? '云端统计已同步' :
+      (t.lastSuccessAt ? '显示上次取得的云端数据（' + esc(fmtHM(t.lastSuccessAt)) + '），合计仅为已知下限。' : '尚未取得云端统计，合计仅含已知本机用量。') + ' ' + esc(t.error)) +
+      '</div><button class="tgl" id="btn-usage-retry">刷新用量</button></div>';
     const srcRows = [{ source: myUsageSrc(), calls: t.localCalls, prompt: (S._useLocal || {}).prompt || 0, completion: (S._useLocal || {}).completion || 0 }]
       .concat(t.rows.map((r) => ({ source: r.source, calls: +r.calls || 0, prompt: +r.prompt_tokens || 0, completion: +r.completion_tokens || 0 }))
         .filter((r) => r.calls || r.prompt || r.completion));
@@ -3946,7 +4099,7 @@ return Object.freeze(exports);
       (cloudCfg() ? "" : '<div class="archive-note">没配云连接，只有本机的数。</div>') + "</div>";
     const byDay = {};
     for (const d of ((S._useLocal || {}).days || [])) byDay[d.date] = { calls: d.calls, tokens: d.prompt + d.completion };
-    for (const r of ((S._use || {}).rows || [])) {
+    for (const r of (S._use && S._use.scope === usageCloudScope() ? S._use.rows : [])) {
       if (r.source === myUsageSrc() || r.source === "app") continue; // 自己那行已经在 byDay 里了
       const x = byDay[r.day] = byDay[r.day] || { calls: 0, tokens: 0 };
       x.calls += +r.calls || 0; x.tokens += (+r.prompt_tokens || 0) + (+r.completion_tokens || 0);
@@ -3956,6 +4109,8 @@ return Object.freeze(exports);
       (days.length ? days.map((d) => '<div class="diag-item"><b>' + esc(d.slice(5)) + "</b> " + byDay[d].calls + " 次 · " + fmtTok(byDay[d].tokens) + " token" + (d === todayStr() ? ' <span class="badge cool">今天</span>' : "") + "</div>").join("")
         : '<div class="archive-note">还没有记录。</div>') + "</div>";
     v.innerHTML = html;
+    const retry = $("#btn-usage-retry");
+    if (retry) retry.onclick = () => renderUsage(true);
   }
 
   async function renderDiag() {
@@ -4599,12 +4754,19 @@ return Object.freeze(exports);
     if (!ids.includes(S.cur)) S.cur = ids[0] || "";
     const before = Object.assign({}, S.settings);
     const cloudGenWas = !!S.settings.cloudGen;
+    const generationResults = [];
     await patchSettings(() => Object.assign({ characterIds: ids, characterId: S.cur }, sheet));
     S._settingsEffects = settingsSaveEffects(before, S.settings);
     renderSettingsEffects();
     closeSheet();
     // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
     if (cloudGenWas && !S.settings.cloudGen) for (const cx of allCx()) await unfreezeGenTemplates(cx);
+    if (cloudCfg() && !(S.settings.autoGen && S.settings.cloudGen)) {
+      for (const cx of allCx()) {
+        const pendingStop = generationStopState(cx);
+        if ((before.autoGen && before.cloudGen) || (pendingStop && pendingStop.status !== "synced")) generationResults.push(await stopCloudGeneration(cx));
+      }
+    }
     // 不再挂念的人：身上注入的状态得撤掉，不然TA会一直以为自己在过挂念的那一天
     for (const id of removed) {
       const cx = S.byId[id];
@@ -4626,7 +4788,7 @@ return Object.freeze(exports);
     }
     syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
     render();
-    const incomplete = syncResults.some((r) => ["failed", "partial", "syncing"].includes(r.status));
+    const incomplete = [...syncResults, ...generationResults].some((r) => ["failed", "partial", "syncing"].includes(r.status));
     toast(incomplete ? "本地已保存，云端同步未完成；请查看页面提示"
       : !S.settings.cloudRecheck && syncResults.some((r) => r.status === "synced") ? "本地已保存，云端已确认关闭复核"
       : syncResults.some((r) => r.status === "readonly") ? "本地已保存，部分角色由其他设备负责，未上传"
@@ -4679,6 +4841,7 @@ return Object.freeze(exports);
         // 先认锁：另一台在管的话，下面的接管、寄原料、复核、取裁决全都不该做
         cx._ownAt = Date.now();
         await readOwner(cx);
+        if (generationStopState(cx) && generationStopState(cx).status !== "synced") await stopCloudGeneration(cx);
         await syncChatContext(cx, true);
         await adoptCloudDay(cx);
         uploadGenKitCloud(cx).catch(() => { /* 已在函数内记日志 */ });
@@ -4715,6 +4878,8 @@ return Object.freeze(exports);
             await readOwner(cx).catch(() => { /* 读不到按没锁算 */ });
             if (was !== owns(cx)) render();
           }
+          if (cx.day && (cx.day.cloudAdopting || (cx.day.by === "cloud" && !cx.plan))) await adoptCloudDay(cx).catch(() => {});
+          await flushJudgeFinish(cx).catch(() => {});
           await maybeAutoGen(cx).catch(() => { /* 已在函数内记日志 */ });
           await settleFired(cx).catch(() => { /* 已在函数内记日志 */ });
           await syncChatContext(cx).catch(() => { /* 已在函数内记日志 */ });

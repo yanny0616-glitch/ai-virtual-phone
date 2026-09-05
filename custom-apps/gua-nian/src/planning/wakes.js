@@ -17,7 +17,7 @@
       const b = it.end ? timeToMs(it.end) : null;
       if ((b || a) < now) continue;
       if (a - cursor > 20 * 60000) push(Math.round((Math.max(cursor, now) + a) / 2), "空着", false);
-      push(Math.max(a, now), String(it.title || ""), it.busy, it.end || "");
+      push(Math.max(a, now), String(it.title || ""), isBusyItem(it), it.end || "");
       cursor = Math.max(cursor, b || a);
     }
     if (endMs - cursor > 20 * 60000) push(Math.round((Math.max(cursor, now) + endMs) / 2), "睡前自己待着", false);
@@ -110,8 +110,8 @@
   // 不再挂念的人：今天的预约、48 小时哨兵、云端计划行全撤，否则两天后TA还会按哨兵的由头来找你
   async function unfreezeGenTemplates(cx) {
     if (!AiPhone.push || !AiPhone.push.unfreeze) return;
-    for (const k of ["daily", "impulse"]) { try { await AiPhone.push.unfreeze({ characterId: cx.character.id, key: k }); } catch (e) { /* 旧宿主没这个接口 */ } }
-    await patchSettings((s) => { const g = Object.assign({}, s.genTpls); delete g[cx.character.id]; return { genTpls: g }; });
+    for (const k of ["daily", "impulse", "judge"]) { try { await AiPhone.push.unfreeze({ characterId: cx.character.id, key: k }); } catch (e) { /* 旧宿主没这个接口 */ } }
+    await patchSettings((s) => { const g = Object.assign({}, s.genTpls); delete g[cx.character.id]; const judges = { ...s.judgeTemplates }; delete judges[cx.character.id]; return { genTpls: g, judgeTemplates: judges }; });
   }
   async function forgetCharacter(cx) {
     await unfreezeGenTemplates(cx);

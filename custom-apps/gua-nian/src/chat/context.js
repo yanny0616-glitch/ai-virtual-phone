@@ -93,7 +93,7 @@
   const NOT_BUSY_RE = /睡觉|睡眠|午睡|午休|补觉|休息|发呆|摸鱼|放松|吃饭|用餐|散步|刷视频|看番|打游戏|玩游戏|聊天|自由时间|准备睡|洗漱|刚醒|起床|看剧|逛/;
   function isBusyItem(it) {
     if (!it) return false;
-    if (it.busy === true) return true;
+    if (typeof it.busy === "boolean") return it.busy;
     const t = String(it.title || "");
     return BUSY_RE.test(t) && !NOT_BUSY_RE.test(t);
   }

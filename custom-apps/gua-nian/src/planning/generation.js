@@ -1,8 +1,9 @@
-  async function applyThreads(cx, parsed, nowMs, by) {
+  async function applyThreads(cx, parsed, nowMs, by, planItems) {
     if (!S.settings.threadsOn || !parsed) return 0;
-    const list = (cx.threads || []).slice(), notes = [];
+    const list = (cx.threads || []).map(t => ({ ...t })), notes = [];
     for (const id of (Array.isArray(parsed.settle) ? parsed.settle : []).slice(0, 6)) {
       const t = list.find((x) => x.id === String(id).replace(/[\[\]]/g, "").trim());
+      if (t) await dropThreadSlots(cx, t.id, "这件事你说了结了", planItems);
       if (t && !t.done) { t.done = true; t.at = nowMs; t.by = by; notes.push("了结「" + t.text + "」"); }
     }
     for (const k of (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2)) {
@@ -79,11 +80,11 @@
       note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
       mood: String(pickField(it, ["mood", "情绪", "心情"]) || "").slice(0, 24),
       cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
-      busy: isTrue(pickField(it, ["busy", "顾不上", "忙"])),
+      busy: pickField(it, ["busy", "顾不上", "忙"]) === "" ? undefined : isTrue(pickField(it, ["busy", "顾不上", "忙"])),
     }));
     for (const it of existing) { // 模型漏掉的已定安排补回来；定死了忙闲的以日程表为准
       const hit = sched.find((x) => x.time === it.startTime);
-      if (!hit) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排", busy: it.lock === "busy" });
+      if (!hit) sched.push({ time: it.startTime, title: it.title, place: it.location || "", note: it.location || "日程表上的安排", busy: it.lock ? it.lock === "busy" : undefined });
       else if (it.lock) hit.busy = it.lock === "busy";
     }
     sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));

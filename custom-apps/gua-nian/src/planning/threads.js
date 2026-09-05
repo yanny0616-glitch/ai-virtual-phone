@@ -121,18 +121,21 @@
   }
   // 了结或删掉一条惦记时，由它起的、还没到点的时刻一起撤掉——不然人在面板上把事划掉了，
   // 到点TA还照着这条由头发消息。
-  async function dropThreadSlots(cx, id, why) {
+  async function dropThreadSlots(cx, id, why, planItems) {
     if (!cx.plan || !Array.isArray(cx.plan.items)) return 0;
+    const items = (planItems || cx.plan.items).map(w => ({ ...w, hist: (w.hist || []).slice() }));
     const now = Date.now(); let n = 0;
-    for (const w of cx.plan.items) {
+    for (const w of items) {
       if (w.from !== id || !w.act || w.fireAt <= now) continue;
-      if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
-      w.act = false; w.wakeId = ""; w.why = why;
-      (w.hist = w.hist || []).push({ at: now, kind: "recheck", note: why });
+      // 失败时保留原编号和激活状态，下一轮可按同一编号重试撤销。
+      if (w.wakeId) await AiPhone.push.cancelWake(w.wakeId);
+      w.act = false; w.wakeId = ""; w.delivery = ""; w.why = why;
+      w.hist.push({ at: now, kind: "recheck", note: why });
       n++;
     }
     if (n) {
-      cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items: cx.plan.items });
+      cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items });
+      if (planItems) planItems.splice(0, planItems.length, ...items);
       await log(cx, "惦记账本：" + why + "，撤掉 " + n + " 个时刻");
     }
     return n;

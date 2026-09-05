@@ -530,7 +530,7 @@ await test('Worker capability probe is authenticated and disabled plans skip all
   const send=body=>handler(new Request('https://example.invalid',{method:'POST',body:JSON.stringify(body)}));
   assert.equal((await send({action:'capabilities',token:'wrong'})).status,403);
   const cap=await send({action:'capabilities',token:'cron-test'});
-  assert.deepEqual((await cap.json()).capabilities,['user-sleep-feedback-v1','recheck-control-v1']);
+  assert.deepEqual((await cap.json()).capabilities,['user-sleep-feedback-v1','recheck-control-v1','generation-stop-v1','judge-task-v1']);
   calls.length=0;
   const disabled=await send({token:'cron-test',userId:'owner',characterId:'c',planDate:'2026-09-04'});
   assert.equal(await disabled.text(),'recheck disabled');assert.equal(calls.length,3);

@@ -29,7 +29,7 @@
     anchorSleep: true,   // 睡前锚点
     anchorMorning: false,// 早安锚点
     chatCandidates: true,// 复核时允许因聊天临时起念
-    recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开app时也会复核一次）
+    recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开 app 也检查，但仍遵守上次尝试的间隔）
     judgeLines: 24,      // 编排/复核/云端裁决喂给模型的最近几句聊天
     moodGate: true,      // 精力低/心情差时更克制
     injectChat: true,    // 把TA此刻的状态注入聊天提示词（需 chat.context 权限）

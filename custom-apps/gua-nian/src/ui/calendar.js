@@ -76,10 +76,22 @@
     try { await syncCalendar(cx, await readTodayCalendar(cx)); } catch (e) { await log(cx, "日程改动写回系统日程失败：" + (e && e.message || e)); }
     await log(cx, note);
     await syncChatContext(cx);
-    await pullCloudDecisions(cx); // 同 recheck：不先并会把云端回填的 wakeId 盖掉
-    await uploadPlanCloud(cx, false);
+    // 复核内部的日程编辑由外层统一提交；手动编辑走严格读后合并入口。
+    if (!cx._planLock) await syncSavedPlan(cx, false);
     render();
     toast(planStale === false || liveMode() ? note : note + "；心动时刻还是按旧日程排的，要跟上就点「♥ 重新编排」");
+  }
+  function mergeScheduleItem(it, patch) {
+    const next = { ...it, ...patch };
+    if (next.time !== it.time && !Object.prototype.hasOwnProperty.call(patch, "end") && it.end) {
+      const minutes = hm => +hm.split(":")[0] * 60 + +hm.split(":")[1];
+      const duration = minutes(it.end) - minutes(it.time);
+      if (duration > 0 && minutes(next.time) + duration < 1440) next.end = addMin(next.time, duration);
+      else throw new Error("改后的日程跨过午夜，请明确调整结束时间");
+    }
+    if (next.end && next.end <= next.time) throw new Error("结束时间必须晚于开始时间");
+    if (next.time !== it.time || next.end !== it.end || next.title !== it.title) delete next.steps;
+    return next;
   }
   async function refineSchedItem(cx, i, ask) {
     const sched = ((cx.day && cx.day.schedule) || []).slice();
@@ -91,16 +103,16 @@
       instruction: [
         "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
         "以当前角色的人设、作息和职业为依据，改写TA今天日程里的这一条。",
-        "当前这条：" + JSON.stringify({ time: it.time, title: it.title, note: it.note || "", cost: +it.cost || 0 }),
+        "当前这条：" + JSON.stringify({ time: it.time, end: it.end, busy: it.busy, title: it.title, note: it.note || "", cost: +it.cost || 0 }),
         "同一天其余日程（不要撞时间、不要写成重复的事）：" + JSON.stringify(others),
         ask ? "用户的要求：" + ask : "没有具体要求，换一个更贴合TA的写法，时间可以微调。",
-        '输出严格 JSON，第一个字符必须是 {：{"time":"HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完之后TA的情绪（8字内）","detail":"这件事的细化描写（60字内，写具体发生了什么、TA注意到了什么，第三人称）","cost":这件事做完对精力的影响-40到40的整数}',
+        '输出严格 JSON，第一个字符必须是 {：{"time":"HH:MM","end":"结束时间HH:MM，未修改可不填","busy":顾不上看手机为true、能看为false，未修改可不填,"title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完之后TA的情绪（8字内）","detail":"这件事的细化描写（60字内，写具体发生了什么、TA注意到了什么，第三人称）","cost":这件事做完对精力的影响-40到40的整数}',
         "cost 负数=消耗（开会、通勤、应酬、体力活），正数=回血（午睡、吃饭、散步、发呆），平淡的事给 0。",
         "mood 用可感的状态词（清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空）带一点原因或身体感受，要和 cost 对得上。",
       ].filter(Boolean).join("\n"),
     });
     const time = normHM(pickField(d, ["time", "时间", "at"])) || it.time;
-    sched[i] = {
+    const patch = {
       time: time,
       title: String(pickField(d, ["title", "标题", "事项", "name"]) || it.title),
       place: String(pickField(d, ["place", "地点", "位置", "在哪"]) || it.place || "").slice(0, 16),
@@ -109,6 +121,11 @@
       detail: String(pickField(d, ["detail", "细化", "描写"]) || "").slice(0, 200),
       cost: Math.max(-40, Math.min(40, Math.round(+pickField(d, ["cost", "精力影响", "消耗"]) || 0))),
     };
+    if (d.end != null && String(d.end).trim()) {
+      const end = normHM(d.end); if (!end) throw new Error("结束时间无效"); patch.end = end;
+    }
+    if (typeof d.busy === "boolean") patch.busy = d.busy;
+    sched[i] = mergeScheduleItem(it, patch);
     const moved = sched[i];
     await saveSchedule(cx, sched, "重写了 " + it.time + "「" + it.title + "」→ " + moved.time + "「" + moved.title + "」");
     return ((cx.day && cx.day.schedule) || []).findIndex((x) => x.time === moved.time && x.title === moved.title);
@@ -147,7 +164,7 @@
       } else if (op === "move") {
         const at = normHM(x.newTime);
         if (!at || at <= nowHM || sched.some((y) => y.time === at)) continue;
-        const moved = Object.assign({}, sched[k], { time: at, from: "chat", why: why });
+        const moved = mergeScheduleItem(sched[k], { time: at, from: "chat", why: why });
         delete moved.steps; // 细排是按原时段排的，挪了时间就不再成立
         sched[k] = moved; touched++;
         await log(cx, "聊天改日程：" + hm + "「" + moved.title + "」挪到 " + at + "——" + why);

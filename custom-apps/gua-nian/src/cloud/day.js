@@ -1,3 +1,26 @@
+  function generationStopState(cx) {
+    const state = ((S.settings || {}).generationStops || {})[cx.character.id];
+    return state && state.cloudUrl === (cloudCfg() || {}).url && !(S.settings.autoGen && S.settings.cloudGen) ? state : null;
+  }
+  async function stopCloudGeneration(cx) {
+    if (!cloudCfg()) return { status: "disabled" };
+    const save = async (status, message) => {
+      const state = { status, message, cloudUrl: cloudCfg().url, at: Date.now() };
+      await patchSettings(s => ({ generationStops: { ...s.generationStops, [cx.character.id]: state } }));
+      renderCloudSync(); return state;
+    };
+    if (cx._genStopping) return generationStopState(cx) || { status: "syncing" };
+    cx._genStopping = true;
+    try {
+      await save("syncing", "正在停用云端尚未执行的自动生成任务…");
+      const r = await cloudFetchBounded("generation-stop", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr(), owner: myDev() }) });
+      if (!r.stopped || !(r.capabilities || []).includes("generation-stop-v1")) throw new Error("云端未确认，请更新数据库、网关和 push-recheck 后重试");
+      return await save("synced", "云端已停用尚未执行的自动生成；已生成日程和已有预约保留");
+    } catch (e) {
+      return await save("failed", "自动生成在本机已关闭，云端尚未确认停用：" + String(e && e.message || e).slice(0, 180));
+    } finally { cx._genStopping = false; renderCloudSync(); }
+  }
+
   /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
   function cloudGenOn() {
     return !!(cloudCfg() && S.settings && S.settings.autoGen && S.settings.cloudGen);
@@ -19,6 +42,17 @@
     if (out.daily && out.impulse) await log(cx, "云端生成：两份模板已冻到云端（7 天内有效，6 小时后再续）");
     return out;
   }
+  async function freezeJudgeTemplate(cx) {
+    const old = (S.settings.judgeTemplates || {})[cx.character.id];
+    if (old && old.id && old.cloudUrl === (cloudCfg() || {}).url && Date.now() - old.at < 6 * 3600000) return old.id;
+    if (!AiPhone.push || !AiPhone.push.freeze) return "";
+    try {
+      const r = await AiPhone.push.freeze({ characterId: cx.character.id, appTags: ["companion", "impulse"], key: "judge" });
+      if (!r || !r.armed) return "";
+      await patchSettings(s => ({ judgeTemplates: { ...s.judgeTemplates, [cx.character.id]: { id: r.id, at: Date.now(), cloudUrl: (cloudCfg() || {}).url } } }));
+      return r.id;
+    } catch (e) { await log(cx, "判断模板冻结失败，云端暂用原预约中的人设快照：" + (e && e.message || e)); return ""; }
+  }
   async function readCalendarOn(cx, date) {
     try {
       const r = await AiPhone.calendar.read({ ownerType: "character", ownerId: cx.character.id, date: date });
@@ -36,7 +70,7 @@
     if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
     cx._kitAt = Date.now();
     const tpl = await freezeGenTemplates(cx, false);
-    if (!tpl.daily || !tpl.impulse) return;
+    if (!tpl.daily || !tpl.impulse || !cloudGenOn()) return;
     const at = S.settings.autoGenAt || SET_DEF.autoGenAt;
     const tm = new Date(); tm.setDate(tm.getDate() + 1);
     const dates = [dateStrOf(tm)];
@@ -56,6 +90,7 @@
           anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
           kitAt: Date.now(),
         };
+        if (!cloudGenOn()) return;
         const r = await cloudFetchBounded("recheck-plan", {
           method: "POST",
           body: JSON.stringify({ characterId: cx.character.id, planDate: date, sessionId: "", resetDecisions: true, context: ctx, items: [] }),
@@ -76,7 +111,7 @@
   }
   // 云端生成好了今天：把它当成自己生成的接过来——落库、写回系统日程、接管预约，再走正常的复核流程。
   async function adoptCloudDay(cx) {
-    if (!cloudGenOn() || !cx.character || cx.day || cx.busy || cx._planLock) return false;
+    if (!cloudGenOn() || !cx.character || (cx.day && !cx.day.cloudAdopting && !(cx.day.by === "cloud" && !cx.plan)) || cx.busy || cx._planLock) return false;
     if (!owns(cx)) return false; // 接管云端生成会接手那批预约，只有管事那台能做
     let data;
     try { data = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() }); }
@@ -88,19 +123,21 @@
     try {
       const genAt = +ctx.genAt || Date.now();
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull));
+        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull, { cloudAdopting: true }));
       const existing = await readTodayCalendar(cx);
       const wrote = await syncCalendar(cx, existing);
       const items = (Array.isArray(p.items) ? p.items : []).map((w) => ({
         time: w.time, fireAt: +w.fireAt || 0, source: w.source || "", act: !!w.act,
         why: w.why || "", intent: w.intent || "", wakeId: w.wakeId || "",
         delivery: w.act && w.wakeId ? "push" : "", reason: w.act && !w.wakeId ? (w.reason || "云端没有可借的聊天模板") : "",
+        from: String(w.from || ""), until: +w.until || 0, origFireAt: +w.origFireAt || 0, held: !!w.held,
         sem: w.sem || "", topic: w.topic || "", score: w.score || calcScore(+w.fireAt || 0, 0, 0, 0), kind: w.kind || "plan",
         hist: Array.isArray(w.hist) && w.hist.length ? w.hist : [{ at: genAt, kind: w.act ? "plan" : "skip", note: w.act ? (w.intent || "") : (w.why || "TA这会儿不想"), by: "cloud" }],
       })).sort((a, b) => a.fireAt - b.fireAt);
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
         { date: todayStr(), characterId: cx.character.id, items: items, chatUsed: +ctx.genChatUsed || 0,
           plannedAt: genAt, recheckAt: 0, selfUsed: +ctx.selfUsed || 0, cloudAckAt: genAt, by: "cloud" });
+      cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id, { cloudAdopting: false });
       cx.archive = null;
       for (const line of (Array.isArray(ctx.genLog) ? ctx.genLog : []).slice(0, 30)) await log(cx, "云端生成：" + line);
       await log(cx, "接管云端生成的今天：" + cx.day.schedule.length + " 条日程，写回系统日程 " + wrote + " 条，" + items.filter((w) => w.act).length + " 个想起你的时刻");
