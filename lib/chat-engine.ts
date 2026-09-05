@@ -2615,7 +2615,7 @@ async function generateChatCompletionCore(
     }
 
     if (toolsEnabled && nativeToolProtocolForConfig(config) && getEnabledTools(options?.appId ?? "chat").length > 0) {
-        return generateNativeChatCompletion({
+        const completion = await generateNativeChatCompletion({
             session,
             llmMessages,
             character,
@@ -2627,6 +2627,12 @@ async function generateChatCompletionCore(
             callbacks,
             bailoutRef,
         });
+        if (completion.parts.some(part => part.text?.trim())) {
+            incrementEventCounter(character.id);
+            incrementEventCounter(character.id);
+            void maybeRunSummarization(character.id, character.name).catch(err => console.warn("[ChatEngine] Memory summarization failed:", err));
+        }
+        return completion;
     }
 
     // ── Tool calling loop with real-time callbacks ──

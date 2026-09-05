@@ -6,7 +6,7 @@ export default {
     id: "affection-ledger",
     name: "好感与关系",
     apiVersion: 1,
-    version: "1.5.1",
+    version: "1.6.0",
     author: "自制",
     description: "角色回复里自带心里话与好感变化量，插件累加成慢变的好感；关系按角色各自存，由TA按人设自己定，转折时可选经你确认或TA自己改。区间、提示词、数值都在面板里改。",
     permissions: ["chat.read", "chat.write", "ui", "storage"],
@@ -96,11 +96,22 @@ export default {
       const st = load(cid);
       const cap = num("dailyCap"), up = num("maxUp"), down = num("maxDown");
       if (st.todayDate !== today()) { st.todayDate = today(); st.todayDelta = 0; }
-      let d = r1(Number(delta) || 0);
+      const requestedDelta = r1(Number(delta) || 0);
+      let d = requestedDelta;
+      let limit = "";
       if (!manual) {
         d = clamp(d, -down, up);
-        if (d > 0) d = r1(Math.max(0, Math.min(d, cap - st.todayDelta)));
+        if (d !== requestedDelta) limit = "per-reply-cap";
+        if (d > 0) {
+          const allowed = r1(Math.max(0, Math.min(d, cap - st.todayDelta)));
+          if (allowed !== d) limit = "daily-cap";
+          d = allowed;
+        }
       }
+      // 记录实际入账量，满 100 后不能继续显示上涨或消耗每日额度。
+      const actual = r1(clamp(st.score + d, 0, 100) - st.score);
+      if (actual !== d) limit = "score-limit";
+      d = actual;
       if (d !== 0) {
         st.score += d;
         if (!manual) st.todayDelta = r1(st.todayDelta + Math.max(0, d));
@@ -108,7 +119,7 @@ export default {
       }
       st.updatedAt = Date.now();
       save(cid, st);
-      return d;
+      return { delta: d, requestedDelta, changeStatus: limit || (d ? "applied" : "unchanged") };
     }
 
     // ── 提示词：心里话 + 变化量 + 关系转折，都在同一次回复里带出来 ──
@@ -142,7 +153,7 @@ export default {
       const from = para >= 0 ? para : text.lastIndexOf("\n", start - 1) + 1;
       return { inner: text.slice(from), strip: text.slice(from) };
     };
-    const RE_DELTA = /^\s*[\[（(]?好感\s*[:：]?\s*([+-]?\s*\d+(?:\.\d+)?)\s*[|｜：:]\s*([^\]\n]*)[\]）)]?\s*$/m;
+    const RE_DELTA = /^\s*[\[【（(]?(?:\*\*)?好感(?:度)?(?:变化(?:量)?)?(?:\*\*)?\s*[:：]?\s*([+\-＋－−]?\s*\d+(?:\.\d+)?)\s*[|｜：:]\s*([^\]】）)\n]*)[\]】）)]?\s*$/m;
     const RE_REL = /^\s*[\[（(]?关系\s*(?:→|->|:|：)\s*([^|｜\]\n]+?)\s*(?:[|｜]\s*([^\]\n]*))?[\]）)]?\s*$/m;
     ctx.hooks.transform("llm.response", (p) => {
       if (!p.sessionId) return p;
@@ -154,8 +165,12 @@ export default {
       const md = inner.match(RE_DELTA), mr = inner.match(RE_REL);
       if (md) inner = inner.replace(RE_DELTA, "");
       if (mr) inner = inner.replace(RE_REL, "");
-      const pend = { thought: inner.trim(), delta: 0, reason: "", relTo: "", relReason: "" };
-      if (md) { pend.delta = applyDelta(cid, Number(md[1].replace(/\s/g, "")), md[2]); pend.reason = md[2].trim().slice(0, 40); }
+      const pend = { thought: inner.trim(), delta: 0, changeStatus: "missing", reason: "", relTo: "", relReason: "" };
+      if (md) {
+        const amount = Number(md[1].replace(/\s/g, "").replace(/＋/g, "+").replace(/[－−]/g, "-"));
+        Object.assign(pend, applyDelta(cid, amount, md[2]));
+        pend.reason = md[2].trim().slice(0, 40);
+      }
       if (mr) {
         pend.relTo = mr[1].trim().slice(0, 12); pend.relReason = (mr[2] || "").trim().slice(0, 40);
         const st = load(cid);
@@ -193,35 +208,22 @@ export default {
 
     // ── 气泡下：默认只有一个小折叠头，点开才看 ──
     ctx.ui.injectCSS(`
-      .afl-side{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:var(--c-icon,#8e8e93);font-size:15px;line-height:1;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;opacity:.85}
-      .afl-side:active{opacity:.5}
-      @keyframes aflUp{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
-      .afl-th{--rose:#d94f7c;--rose-2:#f2a3bd;position:absolute;left:0;right:0;bottom:0;max-height:78%;display:flex;flex-direction:column;border-radius:22px 22px 0 0;background:var(--c-panel,#fff);color:var(--c-text-title,var(--c-text,#111));box-shadow:0 -6px 30px rgba(0,0,0,.14);animation:aflUp .3s cubic-bezier(.16,1,.3,1);padding:8px 0 calc(14px + env(safe-area-inset-bottom,0px));font-size:calc(14px*var(--app-text-scale,1));line-height:1.6}
-      .afl-th *{box-sizing:border-box}
-      .afl-th .hdl{align-self:center;width:38px;height:4px;margin:2px 0 10px;border-radius:999px;background:color-mix(in srgb,currentColor 22%,transparent)}
-      .afl-th .hd{display:flex;align-items:center;gap:8px;padding:0 14px 8px}
-      .afl-th .hd b{flex:1;text-align:center;font-size:calc(16px*var(--app-text-scale,1));font-weight:600}
-      .afl-th .hd .x,.afl-th .hd .sp{width:34px;height:34px;flex:0 0 auto}
-      .afl-th .hd .x{border:0;border-radius:50%;background:color-mix(in srgb,currentColor 7%,transparent);color:inherit;font-size:20px;line-height:34px;cursor:pointer}
-      .afl-th .bd{flex:1;min-height:0;overflow-y:auto;padding:4px 18px 6px}
-      .afl-th .stat{display:flex;align-items:center;gap:14px;padding:12px 14px;border-radius:16px;background:linear-gradient(135deg,rgba(217,79,124,.10),rgba(150,90,220,.08))}
-      .afl-th .sc{display:flex;align-items:baseline;gap:2px;color:var(--rose)}
-      .afl-th .sc b{font-size:30px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums;line-height:1}
-      .afl-th .sc small{font-size:11px;opacity:.7}
-      .afl-th .pills{display:flex;flex-wrap:wrap;gap:6px;flex:1}
-      .afl-th .pill{padding:2px 10px;border-radius:999px;font-size:12px;background:color-mix(in srgb,currentColor 7%,transparent)}
-      .afl-th .pill.rose{background:rgba(217,79,124,.14);color:var(--rose);font-weight:600}
-      .afl-th .bar{position:absolute;left:14px;right:14px;bottom:0;height:3px;border-radius:999px;background:rgba(217,79,124,.12);overflow:hidden}
-      .afl-th .bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--rose-2),var(--rose))}
-      .afl-th .stat{position:relative;overflow:hidden}
-      .afl-th .lab{margin:16px 0 6px;font-size:11px;letter-spacing:1px;opacity:.5}
-      .afl-th .q{padding:12px 14px;border-radius:14px;border-left:3px solid var(--rose);background:rgba(217,79,124,.06);white-space:pre-wrap;line-height:1.75}
-      .afl-th .ft{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;font-size:12px}
-      .afl-th .tag{display:inline-flex;align-items:center;padding:2px 10px;border-radius:999px;background:color-mix(in srgb,currentColor 7%,transparent)}
-      .afl-th .tag.up{background:rgba(217,79,124,.12);color:var(--rose)}
-      .afl-th .tag.down{background:rgba(92,107,192,.12);color:#5c6bc0}
-      .afl-th .tag.rel{background:rgba(150,90,220,.10);color:#8a5cd6}
-      .afl-th .time{margin-left:auto;opacity:.45;font-size:11px}
+      .afl-side{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:6px;border:0;background:transparent;border-radius:50%;color:var(--c-icon,#999);cursor:pointer;-webkit-tap-highlight-color:transparent;transition:color .2s}
+      .afl-side[aria-expanded="true"]{color:#e74c5e}
+      .afl-side:focus-visible{outline:2px solid #cf7f8c;outline-offset:2px}
+      .afl-note-card{margin-top:6px;margin-bottom:8px;overflow-wrap:anywhere}
+      .afl-note-card[hidden]{display:none!important}
+      .afl-note-card .afl-score-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px;margin:8px 0;color:#8a6b46;font-size:calc(11px*var(--app-text-scale,1))}
+      .afl-note-card .afl-score-row strong{font-size:calc(17px*var(--app-text-scale,1));font-variant-numeric:tabular-nums;font-weight:600}
+      .afl-note-card .afl-score-row small{opacity:.65;font-size:inherit}
+      .afl-note-card .afl-note-pill{padding:2px 7px;border-radius:6px;background:rgba(201,169,110,.12);font-size:calc(10px*var(--app-text-scale,1))}
+      .afl-note-card .afl-note-change{margin-top:10px;padding-top:8px;border-top:1px dashed rgba(196,160,106,.3);color:#947551;font-size:calc(11px*var(--app-text-scale,1));line-height:1.7}
+      .afl-note-card .afl-note-delta{font-weight:600;font-variant-numeric:tabular-nums}
+      .afl-note-card .afl-note-delta.up{color:#b96d79}.afl-note-card .afl-note-delta.down{color:#7b82a5}
+      .afl-note-card .afl-note-why{margin-top:2px;opacity:.85}
+      .afl-note-card .chat-thought-sig{display:flex;justify-content:space-between;gap:8px}
+      .afl-note-card time{font-style:normal;font-size:calc(9px*var(--app-text-scale,1));opacity:.8}
+      @media (prefers-reduced-motion:reduce){.afl-side{transition:none}.afl-note-card{animation:none}}
 
       .afl-sheet{--rose:#d94f7c;--rose-2:#f2a3bd;--rose-soft:rgba(217,79,124,.10);--ink:#2a2226;--mute:rgba(42,34,38,.55);--line:rgba(42,34,38,.09);--paper:#fffaf7;--card:#fff;
         width:min(100%,400px);max-height:100%;display:flex;flex-direction:column;border-radius:28px;overflow:hidden;background:var(--paper);color:var(--ink);font-size:13px;line-height:1.5;
@@ -336,38 +338,71 @@ export default {
         .afl-close{background:rgba(255,255,255,.1)}
       }
     `);
-    function openThoughtSheet(m, pend) {
-      ctx.ui.openModal((el, api) => {
-        el.style.cssText = "display:contents";
-        const showD = bool("showDelta", true);
-        const hasScore = Number.isFinite(Number(pend.score));
-        const tags = [];
-        if (showD && pend.delta) tags.push(`<span class="tag ${pend.delta > 0 ? "up" : "down"}">好感 ${pend.delta > 0 ? "+" : ""}${pend.delta}${pend.reason ? " · " + esc(pend.reason) : ""}</span>`);
-        if (pend.relTo) tags.push(`<span class="tag rel">关系→${esc(pend.relTo)}${pend.relReason ? " · " + esc(pend.relReason) : ""}</span>`);
-        el.innerHTML = `<div class="afl-th" role="dialog" aria-label="TA的心里话">
-          <div class="hdl"></div>
-          <div class="hd"><span class="sp"></span><b>TA的心里话</b><button class="x" data-x aria-label="关闭">×</button></div>
-          <div class="bd">
-            ${hasScore && showD ? `<div class="stat"><div class="sc"><b>${pend.score}</b><small>/ 100</small></div><div class="pills">${pend.tier ? `<span class="pill rose">${esc(pend.tier)}</span>` : ""}${pend.relation ? `<span class="pill">${esc(pend.relation)}</span>` : ""}</div><div class="bar"><i style="width:${Math.max(0, Math.min(100, Number(pend.score)))}%"></i></div></div>` : ""}
-            <div class="lab">那一刻的念头</div>
-            <div class="q">${esc(pend.thought || "（没写心里话）")}</div>
-            <div class="ft">${tags.join("")}${pend.at ? `<span class="time">${fmt(pend.at)}</span>` : ""}</div>
-          </div>
-        </div>`;
-        el.querySelector("[data-x]").addEventListener("click", () => api.close());
-        el.querySelector(".afl-th").addEventListener("click", (e) => e.stopPropagation());
-      });
+    // 一个聊天中只展开一张，和内置心里话卡片的交互一致。
+    let openThoughtId = null;
+    const thoughtViews = new Set();
+    function watchThought(render) {
+      thoughtViews.add(render); render();
+      return () => thoughtViews.delete(render);
+    }
+    function thoughtFor(m) {
+      if (!m || m.role !== "assistant" || !bool("showThought", true)) return null;
+      const pend = ctx.system.storage.get("m:" + m.id);
+      return pend && (pend.thought || pend.delta || pend.changeStatus || pend.relTo) ? pend : null;
+    }
+    function changeNote(pend) {
+      if (pend.changeStatus === "missing") return "模型未写好感变化，本轮未结算";
+      if (pend.changeStatus === "daily-cap") return pend.delta ? "已按每日上涨上限结算" : "今日上涨已达上限";
+      if (pend.changeStatus === "per-reply-cap") return "已按单轮涨跌上限结算";
+      if (pend.changeStatus === "score-limit") return "已到好感数值边界";
+      if (pend.changeStatus === "unchanged") return "本轮好感未变";
+      if (!pend.changeStatus && !pend.delta) return "这条旧消息未记录变化原因";
+      return "";
+    }
+    function thoughtCardHtml(m, pend) {
+      const showD = bool("showDelta", true);
+      const hasScore = pend.score != null && Number.isFinite(Number(pend.score));
+      const cid = charOf(m.sessionId);
+      const name = (cid && ctx.data.characters.get(cid)?.name) || "TA";
+      const note = changeNote(pend);
+      const delta = Number(pend.delta) || 0;
+      return `<div class="chat-thought-tape-left" aria-hidden="true"></div><div class="chat-thought-tape-right" aria-hidden="true"></div>
+        <div class="chat-thought-title">💭 内心独白</div>
+        ${hasScore && showD ? `<div class="afl-score-row"><span>好感</span><strong>${esc(pend.score)}</strong><small>/ 100</small>${pend.tier ? `<span class="afl-note-pill">${esc(pend.tier)}</span>` : ""}${pend.relation ? `<span class="afl-note-pill">${esc(pend.relation)}</span>` : ""}</div>` : ""}
+        <div class="chat-thought-body">${esc(pend.thought || "这一刻，没有写下心里话。")}</div>
+        ${showD ? `<div class="afl-note-change"><span class="afl-note-delta ${delta > 0 ? "up" : delta < 0 ? "down" : ""}">${pend.changeStatus === "missing" ? "未结算" : "本轮 " + (delta > 0 ? "+" : "") + delta}</span>${note ? " · " + esc(note) : ""}${pend.reason ? `<div class="afl-note-why">${esc(pend.reason)}</div>` : ""}</div>` : ""}
+        ${pend.relTo ? `<div class="afl-note-change">关系 → ${esc(pend.relTo)}${pend.relReason ? " · " + esc(pend.relReason) : ""}</div>` : ""}
+        <div class="chat-thought-sig"><time>${pend.at ? esc(fmt(pend.at)) : ""}</time><span>— ${esc(name)}</span></div>`;
     }
     ctx.ui.slot("message.side", (el, props) => {
       const m = props.message;
-      if (!m || m.role !== "assistant" || !bool("showThought", true)) return;
-      const pend = ctx.system.storage.get("m:" + m.id);
-      if (!pend || (!pend.thought && !pend.delta)) return;
+      if (!thoughtFor(m)) return;
       const btn = document.createElement("button");
-      btn.type = "button"; btn.className = "afl-side"; btn.textContent = "💭"; btn.setAttribute("aria-label", "看TA的心里话");
-      btn.addEventListener("pointerdown", (e) => e.stopPropagation()); // 气泡有长按菜单
-      btn.addEventListener("click", (e) => { e.stopPropagation(); openThoughtSheet(m, pend); });
+      btn.type = "button"; btn.className = "afl-side";
+      btn.innerHTML = '<svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path d="M8 14s-6-4-6-8c0-2.5 1.5-4 3.5-4 1 0 2 .5 2.5 1.5C8.5 2.5 9.5 2 10.5 2 12.5 2 14 3.5 14 6c0 4-6 8-6 8z" fill="currentColor"/></svg>';
+      btn.setAttribute("aria-controls", "afl-thought-" + m.id);
+      btn.addEventListener("pointerdown", (e) => e.stopPropagation());
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openThoughtId = openThoughtId === m.id ? null : m.id;
+        thoughtViews.forEach(render => render());
+      });
       el.appendChild(btn);
+      return watchThought(() => {
+        btn.setAttribute("aria-expanded", String(openThoughtId === m.id));
+        btn.setAttribute("aria-label", openThoughtId === m.id ? "收起心里话" : "展开心里话");
+      });
+    });
+    ctx.ui.slot("message.panel", (el, props) => {
+      const m = props.message, pend = thoughtFor(m);
+      if (!pend) return;
+      const card = document.createElement("section");
+      card.id = "afl-thought-" + m.id;
+      card.className = "chat-thought-card afl-note-card";
+      card.setAttribute("aria-label", "心里话与好感");
+      card.innerHTML = thoughtCardHtml(m, pend);
+      el.appendChild(card);
+      return watchThought(() => { card.hidden = openThoughtId !== m.id; });
     });
 
     // ── 面板：入口在输入栏「+」面板里 ──

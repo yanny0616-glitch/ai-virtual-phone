@@ -7,10 +7,11 @@ import { DEFAULT_SUMMARIZATION_PROMPT } from "./memory-types";
 import {
     loadMemoryConfig,
     loadMemoryEntries,
-    saveMemoryEntry,
+    saveMemoryBatch,
     deleteMemoryEntries,
     getEventCounter,
     resetEventCounter,
+    consumeEventCounter,
     getLastSummarizedTimestamp,
     setLastSummarizedTimestamp,
     incrementCoreMemoryCounter,
@@ -20,6 +21,7 @@ import { loadNativeTimeline, formatTimelineForSummarization, filterTimelineByAll
 import { generateEmbedding, resolveEmbeddingModel } from "./memory-embedding";
 import { simpleLLMCall } from "./api-helpers";
 import { maybeRunCoreMemoryPipeline } from "./core-memory-builder";
+import { maybeRunShiguang } from "./shiguang-summarizer";
 
 /** Per-character lock to prevent concurrent summarization. */
 const summarizingSet = new Set<string>();
@@ -34,18 +36,14 @@ export async function maybeRunSummarization(
     characterName: string
 ): Promise<void> {
     const config = loadMemoryConfig();
-    if (!config.autoSummarizeEnabled) return;
-
-    const counter = getEventCounter(characterId);
-    if (counter < config.summarizationEventInterval) return;
-
-    if (summarizingSet.has(characterId)) return;
-    summarizingSet.add(characterId);
-    try {
-        await runSummarizationPipeline(characterId, characterName);
-    } finally {
-        summarizingSet.delete(characterId);
+    // Independent cadence and progress: neither pipeline resets the other.
+    const tasks: Promise<unknown>[] = [maybeRunShiguang(characterId, characterName)];
+    if (config.autoSummarizeEnabled && getEventCounter(characterId) >= config.summarizationEventInterval && !summarizingSet.has(characterId)) {
+        tasks.push(runSummarizationPipeline(characterId, characterName).then(result => {
+            if (!result.success) console.warn("[MemorySummarizer]", result.error);
+        }));
     }
+    await Promise.allSettled(tasks);
 }
 
 /**
@@ -63,7 +61,23 @@ export async function runSummarizationPipeline(
         sinceTimestamp?: string;
     }
 ): Promise<{ success: boolean; error?: string }> {
+    if (summarizingSet.has(characterId)) return { success: false, error: "该角色正在整理记忆，请等待完成" };
+    summarizingSet.add(characterId);
+    try {
+        // Also coordinate manual/automatic requests across browser tabs when available.
+        if (typeof navigator !== "undefined" && navigator.locks) {
+            return await navigator.locks.request(`memory-summary:${characterId}`, { ifAvailable: true }, lock =>
+                lock ? summarizeUnlocked(characterId, characterName, options) : Promise.resolve({ success: false, error: "另一页面正在整理该角色的记忆" }));
+        }
+        return await summarizeUnlocked(characterId, characterName, options);
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : "记忆整理失败" };
+    } finally { summarizingSet.delete(characterId); }
+}
+
+async function summarizeUnlocked(characterId: string, characterName: string, options?: { force?: boolean; sinceTimestamp?: string }): Promise<{ success: boolean; error?: string }> {
     const config = loadMemoryConfig();
+    const counterAtStart = getEventCounter(characterId);
 
     // Resolve API from auxiliary binding
     const apiConfig = resolveAuxiliaryApiConfig("memorySummaryApiConfigId");
@@ -96,10 +110,11 @@ export async function runSummarizationPipeline(
     // Use user-editable prompt template from config, with placeholder substitution
     const promptTemplate = config.summarizationPrompt?.trim() || DEFAULT_SUMMARIZATION_PROMPT;
     const summaryPrompt = promptTemplate
-        .replace(/\{\{char\}\}/gi, characterName)
-        .replace(/\{\{earliest\}\}/gi, earliest)
-        .replace(/\{\{latest\}\}/gi, latest)
-        .replace(/\{\{events\}\}/gi, eventsText);
+        .replace(/\{\{char\}\}/gi, () => characterName)
+        .replace(/\{\{earliest\}\}/gi, () => earliest)
+        .replace(/\{\{latest\}\}/gi, () => latest)
+        .replace(/\{\{events\}\}/gi, () => eventsText)
+        + (/\{\{events\}\}/i.test(promptTemplate) ? "" : `\n事件记录：\n${eventsText}`);
 
     // Call LLM for summarization — compatible with all providers
     // label 用于在「底层调用大模型日志」中标识这是记忆总结调用
@@ -164,21 +179,23 @@ export async function runSummarizationPipeline(
             sourceSessionIds,
         },
     };
-    await saveMemoryEntry(longTermEntry);
+    await saveMemoryBatch([longTermEntry]);
 
     // Update last summarized timestamp + reset counter
-    setLastSummarizedTimestamp(characterId, latest);
-    resetEventCounter(characterId);
+    const previousWatermark = getLastSummarizedTimestamp(characterId);
+    setLastSummarizedTimestamp(characterId, previousWatermark && previousWatermark > latest ? previousWatermark : latest);
+    consumeEventCounter(characterId, counterAtStart);
 
     // Enforce long-term limit
-    const allLongTerm = await loadMemoryEntries(characterId);
+    const allLongTerm = (await loadMemoryEntries(characterId)).filter(entry => entry.type === "long_term");
     if (allLongTerm.length > config.maxLongTermEntries) {
         const excess = allLongTerm.slice(0, allLongTerm.length - config.maxLongTermEntries);
         await deleteMemoryEntries(excess.map(e => e.id));
     }
 
     incrementCoreMemoryCounter(characterId);
-    await maybeRunCoreMemoryPipeline(characterId, characterName);
+    try { await maybeRunCoreMemoryPipeline(characterId, characterName); }
+    catch (error) { console.warn("[MemorySummarizer] 长期记忆已保存，核心记忆整理失败:", error); }
 
     console.log(`[MemorySummarizer] Summarized ${allEntries.length} entries → 1 long-term memory`);
     return { success: true };

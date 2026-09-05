@@ -4,6 +4,7 @@ import { Component, useState, useEffect, useCallback, type CSSProperties, type R
 import { Trash2, Zap, Clock, Users, Archive, AlertCircle, Search, Brain, FileText, MoreHorizontal, Plus, Edit3, X, Check, ChevronRight, Filter, type LucideIcon } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { MemoryTimeline } from "./memory-timeline";
+import { ShiguangPanel } from "./shiguang-panel";
 import { Toggle } from "@/components/ui/form";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -31,7 +32,7 @@ import { generateEmbedding, resolveEmbeddingModel } from "@/lib/memory-embedding
 import { BINDING_ACCENTS } from "@/lib/ui-accent-colors";
 
 type MemoryView = "list" | "detail" | "settings";
-type MemoryTab = "short" | "shared" | "core" | "long";
+type MemoryTab = "short" | "shared" | "core" | "long" | "shiguang";
 type MemoryBudgetKey = "shortTermTokenBudget" | "coreMemoryTokenBudget" | "longTermTokenBudget";
 
 const MEMORY_TOKEN_BUDGET_MAX = 100000;
@@ -174,6 +175,7 @@ type CharacterMemoryInfo = {
     character: Character;
     longTermCount: number;
     coreCount: number;
+    shiguangCount: number;
     shortTermCount: number;
 };
 
@@ -231,19 +233,21 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
             seen.add(id);
             let ltCount = 0;
             let coreCount = 0;
+            let shiguangCount = 0;
             try {
-                [ltCount, coreCount] = await Promise.all([
+                [ltCount, coreCount, shiguangCount] = await Promise.all([
                     getMemoryCountByType(id, "long_term"),
                     getMemoryCountByType(id, "core"),
+                    loadMemoryEntriesByType(id, "shiguang").then(entries => entries.filter(e => e.shiguang && !e.shiguang.deletedAt).length),
                 ]);
             } catch { /* ignore */ }
-            infos.push({ character: char, longTermCount: ltCount, coreCount, shortTermCount: 0 });
+            infos.push({ character: char, longTermCount: ltCount, coreCount, shiguangCount, shortTermCount: 0 });
         }
 
         // Remaining characters
         for (const char of allChars) {
             if (seen.has(char.id)) continue;
-            infos.push({ character: char, longTermCount: 0, coreCount: 0, shortTermCount: 0 });
+            infos.push({ character: char, longTermCount: 0, coreCount: 0, shiguangCount: 0, shortTermCount: 0 });
         }
 
         if (isCancelled?.()) return;
@@ -701,6 +705,8 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                 userName={resolveUserIdentity(selectedCharId!)?.name || "用户"}
                             />
                         )
+                    ) : activeTab === "shiguang" ? (
+                        <ShiguangPanel key={selectedChar.id} characterId={selectedChar.id} characterName={selectedChar.name} userName={resolveUserIdentity(selectedChar.id)?.name || "你"}/>
                     ) : activeTab === "core" ? (
                         renderMemoryEntries("core", coreEntries, "暂无核心记忆。长期记忆累计到设定条数后会自动提炼，也可以手动新增。")
                     ) : (
@@ -711,10 +717,11 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                 </div>
 
                 {/* Bottom tab bar — floating above bottom */}
-                <div className="chat-tab-bar" style={{ position: "absolute", bottom: 40, left: 40, right: 40, zIndex: 10, borderRadius: 28, borderTop: "none", padding: "10px 0" }}>
+                <div className="chat-tab-bar" style={{ position: "absolute", bottom: 40, left: 16, right: 16, zIndex: 10, borderRadius: 28, borderTop: "none", padding: "10px 0" }}>
                     {([
                         { key: "short" as const, icon: Clock, label: "短期" },
                         { key: "shared" as const, icon: Users, label: "共享事件" },
+                        { key: "shiguang" as const, icon: FileText, label: "拾光" },
                         { key: "long" as const, icon: Archive, label: "长期" },
                         { key: "core" as const, icon: Archive, label: "核心" },
                     ]).map(tab => (
@@ -1008,6 +1015,21 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                 </div>
 
                 {/* Token budget sliders */}
+                <p className="menu-group-desc mx-2">拾光 · 重要记忆</p>
+                <div className="menu-group">
+                    <div className="menu-item">
+                        <MemorySettingsIcon icon={FileText} color={BINDING_ACCENTS.memory}/>
+                        <div className="menu-label-group"><span className="menu-label">记录与回忆拾光</span><span className="menu-desc">从原聊天消息独立提取重要内容；关闭后保留记录，但不再提取或带入对话。</span></div>
+                        <div className="menu-right"><Toggle checked={config.shiguangEnabled} onChange={value => { const next = { ...config, shiguangEnabled: value }; setConfig(next); saveMemoryConfig(next); }}/></div>
+                    </div>
+                    <div className="menu-item">
+                        <MemorySettingsIcon icon={Clock} color={BINDING_ACCENTS.memory}/>
+                        <div className="menu-label-group"><span className="menu-label">自动整理拾光</span><span className="menu-desc">独立请求，使用已绑定的记忆总结模型。关闭自动整理后仍可手动整理。</span></div>
+                        <div className="menu-right"><Toggle checked={config.shiguangAutoEnabled} onChange={value => { const next = { ...config, shiguangAutoEnabled: value }; setConfig(next); saveMemoryConfig(next); }}/></div>
+                    </div>
+                    <MemorySettingsSliderItem icon={Clock} color={BINDING_ACCENTS.memory} label="拾光请求间隔（轮）" desc="拾光每隔这些私聊回复轮次单独请求一次；同批气泡算一轮，与长期记忆频率及进度互不影响。" value={config.shiguangRoundInterval} min={5} max={80} step={5} onChange={value => { const next = { ...config, shiguangRoundInterval: value }; setConfig(next); saveMemoryConfig(next); }}/>
+                    <MemorySettingsSliderItem icon={Brain} color={BINDING_ACCENTS.embedding} label="拾光回忆预算（Token）" desc="优先保留重要相处信息，再按话题和日期选取完整记忆；只在后台处理，不在卡片中显示。" value={config.shiguangTokenBudget} min={200} max={4000} step={200} onChange={value => { const next = { ...config, shiguangTokenBudget: value }; setConfig(next); saveMemoryConfig(next); }}/>
+                </div>
                 <p className="menu-group-desc mx-2">控制截断量</p>
                 <div className="menu-group">
                     <MemorySettingsSliderItem
@@ -1209,7 +1231,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
 
                     <div className="mem-picker-footer">
                         <span>OBSERVER · 记忆观察员</span>
-                        <span>{characters.length} PROFILES · {characters.reduce((s, c) => s + c.shortTermCount + c.coreCount + c.longTermCount, 0)} RECORDS</span>
+                        <span>{characters.length} PROFILES · {characters.reduce((s, c) => s + c.shortTermCount + c.coreCount + c.longTermCount + c.shiguangCount, 0)} RECORDS</span>
                         <span>{new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" })}</span>
                     </div>
                 </div>

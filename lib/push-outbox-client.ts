@@ -1,5 +1,5 @@
 // 离线推送·回端合并：App 打开/回前台时拉取服务端生成的原始输出，
-// 用客户端同一条解析管线（输出正则 → parseAndSaveResponse）落进聊天记录。
+// 用客户端同一条解析管线（回复插件 → 输出正则 → parseAndSaveResponse）落进聊天记录。
 
 import { parseAndSaveResponse, scheduleFollowUp } from "./follow-up-service";
 import { applyOutputRegex } from "./llm-prompt-assembler";
@@ -14,6 +14,8 @@ import { removeTimedWakeSchedule } from "./timed-wake-storage";
 import { closeChatPushNotifications } from "./notification-avatar-cache";
 import { appendBridgeFeed } from "./reality-bridge/storage";
 import { loadScreenChatSettings, saveScreenChatAck } from "./reality-bridge/storage";
+import { getChatPluginRuntime } from "./chat-plugin-runtime";
+import { runChatPluginTransform } from "./chat-plugin-hooks";
 
 type OutboxEntry = {
     id: string;
@@ -56,6 +58,11 @@ function clearTimedWakeIfHandled(triggerKey: string | null): void {
     if (timedWakeId) removeTimedWakeSchedule(timedWakeId);
 }
 
+async function transformOutboxResponse(rawText: string, sessionId: string, appId = "chat"): Promise<string> {
+    const result = await runChatPluginTransform("llm.response", { text: rawText.trim(), sessionId, purpose: appId });
+    return stripHallucinatedTimestamps(typeof result.text === "string" ? result.text : rawText.trim());
+}
+
 export async function consumeServerOutbox(options?: { silent?: boolean; force?: boolean }): Promise<void> {
     if (typeof window === "undefined") return;
     // 共享回传箱已紧急停用：没有个人 Supabase 时直接结束，不请求 status/outbox。
@@ -64,10 +71,14 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
     if (options?.force !== true && Date.now() - lastConsumeAt < OUTBOX_FOREGROUND_CHECK_INTERVAL_MS) return;
     // 没有任何设备订阅推送时，服务端不可能产生普通离线回传；避免所有在线用户空轮询。
     if (!loadScreenChatSettings().enabled && !(await hasAccountPushSubscription())) return;
+    // 订阅检查会让出执行权；回前台与 SW 事件同时触发时，再次确认没有另一个消费者。
+    if (consuming) return;
     consuming = true;
     lastConsumeAt = Date.now();
     const passStartMs = Date.now();
     try {
+        // 冷启动时先等启用的插件注册完，再消费回传，避免 [内心] 被原生解析器抢走。
+        await getChatPluginRuntime().ensureStarted();
         // 共享回传箱已停用，只读取用户自己的 Supabase。
         const sources: Array<"personal" | "shared"> = ["personal"];
         const handledTriggerKeys = new Set<string>();
@@ -105,15 +116,15 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         const replyMeta = bridgeMeta.reply || null;
                         const replySessionId = applied.sessionId || replyMeta?.sessionId || "";
                         if (entry.raw_text.trim() && replySessionId) {
-                            const responseBatchId = typeof bridgeMeta.screenChatResponseBatchId === "string"
+                            const responseBatchId = typeof bridgeMeta.screenChatResponseBatchId === "string" && bridgeMeta.screenChatResponseBatchId
                                 ? bridgeMeta.screenChatResponseBatchId
-                                : undefined;
+                                : `push-outbox:${entry.id}`;
                             const existing = loadChatMessages(replySessionId);
                             const alreadyImported = Boolean(
                                 responseBatchId && existing.some(message => message.responseBatchId === responseBatchId),
                             );
                             if (!alreadyImported) {
-                                let text = stripHallucinatedTimestamps(entry.raw_text.trim());
+                                let text = await transformOutboxResponse(entry.raw_text, replySessionId, replyMeta?.appId);
                                 const regexes = Array.isArray(replyMeta?.regexes) ? replyMeta.regexes : [];
                                 if (regexes.length > 0) {
                                     const macroEngine = new MacroEngine(replyMeta?.characterName ?? "", replyMeta?.userName ?? "用户");
@@ -188,6 +199,14 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
 
                     const followUpIndex = typeof meta.followUpIndex === "number" ? meta.followUpIndex : undefined;
                     const existingMessages = loadChatMessages(sessionId);
+                    // 回执确认失败时可能再次拉到同一条；先查持久批次，避免插件重复结算好感。
+                    const responseBatchId = `push-outbox:${entry.id}`;
+                    if (existingMessages.some(message => message.responseBatchId === responseBatchId)) {
+                        clearTimedWakeIfHandled(entry.trigger_key);
+                        consumedIds.push(entry.id);
+                        if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
+                        continue;
+                    }
                     if (followUpIndex && existingMessages.some(m => m.role === "assistant" && m.followUpIndex === followUpIndex)) {
                         clearTimedWakeIfHandled(entry.trigger_key);
                         consumedIds.push(entry.id);
@@ -207,7 +226,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         continue;
                     }
 
-                    let text = stripHallucinatedTimestamps(entry.raw_text.trim());
+                    let text = await transformOutboxResponse(entry.raw_text, sessionId, meta.appId);
                     const regexes = Array.isArray(meta.regexes) ? meta.regexes : [];
                     if (regexes.length > 0) {
                         const macroEngine = new MacroEngine(meta.characterName ?? "", meta.userName ?? "用户");
@@ -234,7 +253,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         meta.prevCount ?? 0,
                         followUpIndex,
                         existingMessages,
-                        { silent: options?.silent !== false, ...(shortcutMarker ? { shortcutMarker } : {}) },
+                        { silent: options?.silent !== false, responseBatchId, ...(shortcutMarker ? { shortcutMarker } : {}) },
                     );
                     if (hasVisible && newCount < 10) scheduleFollowUp(sessionId, newCount, stateValues);
                     clearTimedWakeIfHandled(entry.trigger_key);

@@ -56,17 +56,51 @@ function runRequest<T>(req: IDBRequest<T>): Promise<T> {
 
 export async function saveMemoryEntry(entry: MemoryEntry): Promise<void> {
     const db = await openDb();
-    if (!db) return;
+    if (!db) {
+        if (entry.type === "shiguang") throw new Error("拾光数据库不可用，未保存修改");
+        return;
+    }
     try {
         const tx = db.transaction(STORE_NAME, "readwrite");
         tx.objectStore(STORE_NAME).put(entry);
         await new Promise<void>((res, rej) => {
             tx.oncomplete = () => res();
             tx.onerror = () => rej(tx.error);
+            tx.onabort = () => rej(tx.error || new Error("记忆保存已取消"));
         });
     } finally {
         db.close();
     }
+}
+
+/** Commit a batch atomically before advancing its pipeline's progress. */
+export async function saveMemoryBatch(entries: MemoryEntry[]): Promise<void> {
+    const db = await openDb();
+    if (!db) throw new Error("记忆数据库不可用，未保存本次整理");
+    try {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const done = new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onabort = () => reject(tx.error || new Error("记忆保存已取消"));
+            tx.onerror = () => reject(tx.error);
+        });
+        const store = tx.objectStore(STORE_NAME);
+        for (const entry of entries) {
+            if (entry.type !== "shiguang") { store.put(entry); continue; }
+            const request = store.get(entry.id);
+            request.onsuccess = () => {
+                const current = request.result as MemoryEntry | undefined;
+                if (current?.shiguang?.deletedAt) return;
+                const base = entry.metadata?.shiguangBaseUpdatedAt;
+                if (current && ((current.shiguang?.userEdited && base !== current.updatedAt) || (base && base !== current.updatedAt))) return;
+                const metadata = { ...entry.metadata };
+                delete metadata.shiguangBaseUpdatedAt;
+                store.put({ ...entry, metadata });
+            };
+        }
+        await done;
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("shiguang-updated"));
+    } finally { db.close(); }
 }
 
 export async function loadMemoryEntries(characterId: string): Promise<MemoryEntry[]> {
@@ -95,8 +129,16 @@ export async function loadMemoryEntriesByType(
     characterId: string,
     type: MemoryEntry["type"],
 ): Promise<MemoryEntry[]> {
-    const entries = await loadMemoryEntries(characterId);
-    return entries.filter(entry => entry.type === type);
+    const db = await openDb();
+    if (!db) return [];
+    try {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const entries: MemoryEntry[] = await runRequest(tx.objectStore(STORE_NAME).index("by_character_type").getAll([characterId, type]));
+        return entries.sort((a,b) => a.createdAt.localeCompare(b.createdAt));
+    } catch {
+        // Restored older databases may not yet contain the composite index.
+        return (await loadMemoryEntries(characterId)).filter(entry => entry.type === type);
+    } finally { db.close(); }
 }
 
 export async function deleteMemoryEntry(id: string): Promise<void> {
@@ -197,11 +239,23 @@ const EVENT_COUNTER_PREFIX = "ai_phone_mem_evt_count_";
 const LAST_SUMMARY_TS_PREFIX = "ai_phone_mem_last_sum_";
 const CORE_COUNTER_PREFIX = "ai_phone_mem_core_count_";
 const LAST_CORE_SUMMARY_TS_PREFIX = "ai_phone_mem_last_core_sum_";
+const SHIGUANG_PROGRESS_PREFIX = "ai_phone_shiguang_last_sum_";
 registerKvMigration(CONFIG_KEY);
 registerDynamicPrefix(EVENT_COUNTER_PREFIX);
 registerDynamicPrefix(LAST_SUMMARY_TS_PREFIX);
 registerDynamicPrefix(CORE_COUNTER_PREFIX);
 registerDynamicPrefix(LAST_CORE_SUMMARY_TS_PREFIX);
+registerDynamicPrefix(SHIGUANG_PROGRESS_PREFIX);
+
+export function getShiguangWatermark(characterId: string): string | undefined {
+    return typeof window === "undefined" ? undefined : kvGet(SHIGUANG_PROGRESS_PREFIX + characterId) || undefined;
+}
+
+export function setShiguangWatermark(characterId: string, timestamp: string): void {
+    if (typeof window === "undefined") return;
+    const current = getShiguangWatermark(characterId);
+    if (!current || timestamp > current) kvSet(SHIGUANG_PROGRESS_PREFIX + characterId, timestamp);
+}
 
 export function getEventCounter(characterId: string): number {
     if (typeof window === "undefined") return 0;
@@ -220,6 +274,11 @@ export function incrementEventCounter(characterId: string): number {
 export function resetEventCounter(characterId: string): void {
     if (typeof window === "undefined") return;
     kvSet(EVENT_COUNTER_PREFIX + characterId, "0");
+}
+
+export function consumeEventCounter(characterId: string, count: number): void {
+    if (typeof window === "undefined") return;
+    kvSet(EVENT_COUNTER_PREFIX + characterId, String(Math.max(0, getEventCounter(characterId) - count)));
 }
 
 export function getLastSummarizedTimestamp(characterId: string): string | null {

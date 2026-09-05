@@ -1128,5 +1128,9 @@ export async function parseAndSaveResponse(
         window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId, type: triggerCall } }));
     }
 
+    if (sess && !sess.isGroup && savedMessages.length > 0) {
+        void import("./shiguang-summarizer").then(mod => mod.maybeRunShiguang(sess.contactId, charName))
+            .catch(error => console.warn("[FollowUp] 拾光整理失败:", error));
+    }
     return { hasVisible: true, newCount: currentCount + 1, stateValues };
 }

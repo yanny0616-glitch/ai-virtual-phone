@@ -1,4 +1,4 @@
-const CACHE_VERSION = "ai-phone-pwa-v12";
+const CACHE_VERSION = "ai-phone-pwa-v14";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 // 角色头像缓存：页面启动时写入（lib/notification-avatar-cache.ts），

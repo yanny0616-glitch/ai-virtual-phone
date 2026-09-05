@@ -56,6 +56,7 @@ export type NativeTimelineEntry = {
     authorType?: "user" | "character" | "npc"; // who authored this entry
     postAuthorType?: "user" | "character"; // for moments: who owns the parent post
     sessionId?: string;
+    responseBatchId?: string;
     groupSessionId?: string; // for group chat: which group session
     groupName?: string;      // for group chat: display name of the group
     timestamp: string; // ISO date
@@ -265,6 +266,9 @@ export function loadNativeTimeline(
                 id: msg.id,
                 sourceApp: "chat",
                 sourceDetail: "group",
+                authorType: msg.role === "user" ? "user" : msg.role === "assistant" ? "character" : undefined,
+                sessionId: gs.id,
+                responseBatchId: msg.responseBatchId,
                 groupSessionId: gs.id,
                 groupName: gs.groupName || "群聊",
                 timestamp: msg.createdAt,
@@ -383,6 +387,9 @@ export function loadNativeTimeline(
                 id: msg.id,
                 sourceApp: "chat",
                 sourceDetail: "direct",
+                authorType: msg.role === "user" ? "user" : msg.role === "assistant" ? "character" : undefined,
+                sessionId: session.id,
+                responseBatchId: msg.responseBatchId,
                 timestamp: msg.createdAt,
                 content: `${msgLabel} ${sender}: ${content}`,
             });

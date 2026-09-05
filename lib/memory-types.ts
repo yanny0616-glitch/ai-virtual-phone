@@ -1,12 +1,14 @@
 // lib/memory-types.ts
 
 import type { ContentAppId } from "./settings-types";
+import type { ShiguangData } from "./shiguang-types";
 
 export type MemoryEntry = {
     id: string;
     characterId: string;
     sourceApp: ContentAppId;
-    type: "long_term" | "core";
+    type: "long_term" | "core" | "shiguang";
+    shiguang?: ShiguangData;
     content: string;
     embedding?: number[];
     importance: number;         // 0-1
@@ -17,6 +19,10 @@ export type MemoryEntry = {
 };
 
 export type MemoryConfig = {
+    shiguangEnabled: boolean;
+    shiguangAutoEnabled: boolean;
+    shiguangRoundInterval: number;
+    shiguangTokenBudget: number;
     autoSummarizeEnabled: boolean;          // whether auto-summarization runs after N events
     autoBuildCoreEnabled: boolean;          // whether core memories rebuild after long-term summarization
     vectorRecallEnabled: boolean;           // whether vector embedding recall is used for memory retrieval
@@ -104,6 +110,10 @@ export const DEFAULT_CORE_MEMORY_PROMPT = `你是一个核心记忆整理助手�
 核心记忆总结：`;
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
+    shiguangEnabled: true,
+    shiguangAutoEnabled: true,
+    shiguangRoundInterval: 20,
+    shiguangTokenBudget: 800,
     autoSummarizeEnabled: true,
     autoBuildCoreEnabled: true,
     vectorRecallEnabled: true,

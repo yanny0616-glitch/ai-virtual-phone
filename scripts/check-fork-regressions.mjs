@@ -699,4 +699,6 @@ await test('Moments generation publishes one tagged post, returns its ID, and ne
   return {singlePublication:true,correctReceipt:true,draftsRejected:true,idempotentRetry:true,otherActionsPreserved:true};
 });
 
-console.log(`Passed ${results.length} fork regression checks.`);
+await import('./check-push-outbox-plugins.mjs');
+await import('./check-shiguang.mjs');
+console.log(`Passed ${results.length} fork regression checks, push outbox plugin checks and Shiguang checks.`);

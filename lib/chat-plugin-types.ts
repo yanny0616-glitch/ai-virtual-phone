@@ -201,6 +201,7 @@ export type ChatPluginSlotName =
     | "chat.inputToolbar"
     | "message.footer"
     | "message.side"
+    | "message.panel"
     | "settings.section";
 
 export type ChatPluginSlotProps = {
@@ -208,7 +209,7 @@ export type ChatPluginSlotProps = {
     isGroup?: boolean;
     /** chat.presence / list.avatar 坑位携带该单聊对方的角色 id */
     characterId?: string;
-    /** message.footer / message.side 坑位携带当前消息 */
+    /** message.footer / message.side / message.panel 坑位携带当前消息 */
     message?: ChatMessage;
 };
 

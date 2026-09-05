@@ -176,7 +176,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
   {
     id: "memory",
     label: "记忆",
-    description: "长期记忆、核心记忆、事件计数与摘要时间戳",
+    description: "长期记忆、核心记忆、拾光、事件计数与各自整理进度",
     variant: "warning",
     critical: true,
     sources: [
@@ -190,6 +190,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "ai_phone_mem_last_sum_",
           "ai_phone_mem_core_count_",
           "ai_phone_mem_last_core_sum_",
+          "ai_phone_shiguang_last_sum_",
           "note_wall_events_",
           "ai_phone_interview_magazine_events_",
           "ai_phone_cocreate_events_",

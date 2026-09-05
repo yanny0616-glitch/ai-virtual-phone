@@ -6132,6 +6132,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     {msg.role === "user" && <div className="w-[40px] shrink-0" />}
                                 </div>
                             )}
+                            {!msg.isRetracted && (
+                                <ChatPluginSlot name="message.panel" slotProps={{ sessionId: msg.sessionId, message: msg }} />
+                            )}
                             {/* 状态栏：一律裸渲染，不套便利贴外框（自定义模式下交给用户的渲染代码，
                                 否则 [状态栏] 原文直接走 markdown/内联 HTML，让 AI 直出的卡片自己当外框）。
                                 状态值跟内心独白走（留在便利贴里）；这轮没有内心独白时便利贴不出现，
