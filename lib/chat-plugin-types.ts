@@ -79,6 +79,7 @@ export type ChatPluginTransformPoint =
     | "llm.request"
     | "llm.response"
     | "message.beforePersist"
+    | "message.beforeReveal"
     | "moments.beforePost"
     | "moments.schedule";
 
@@ -120,6 +121,31 @@ export type MessageBeforePersistPayload = {
     message: ChatMessage;
 };
 
+/**
+ * 角色一轮回复被切成多条气泡后，每条气泡展示并落库之前（异步，可等待）。
+ * 宿主默认节奏：第一条 0ms，其余 800ms；流式预览已经展示过（streamed）时全部 0ms。
+ * 等待期间聊天页顶部的「对方正在输入」保持显示。
+ */
+export type MessageBeforeRevealPayload = {
+    sessionId: string;
+    isGroup: boolean;
+    /** 群聊里是发言角色；单聊是对方 */
+    characterId?: string;
+    /** 同一轮回复的批次 id，一轮内所有气泡相同 */
+    responseBatchId: string;
+    /** 这条气泡在本轮中的序号（从 0 起）与本轮总条数 */
+    index: number;
+    total: number;
+    content: string;
+    mediaType?: string;
+    /** 流式预览已经把内容展示过一遍（此时宿主默认不再等待） */
+    streamed: boolean;
+    /** 展示前等待的毫秒数，可改写；宿主在 transform 之后才开始等 */
+    delayMs: number;
+    /** 置为 true 这条气泡不展示也不落库 */
+    cancelled: boolean;
+};
+
 export type MomentsBeforePostPayload = {
     characterId: string;
     /** 上一条定时/手动发帖的时间，0 表示还没发过 */
@@ -146,6 +172,7 @@ export type ChatPluginTransformPayloadMap = {
     "llm.request": LlmRequestPayload;
     "llm.response": LlmResponsePayload;
     "message.beforePersist": MessageBeforePersistPayload;
+    "message.beforeReveal": MessageBeforeRevealPayload;
     "moments.beforePost": MomentsBeforePostPayload;
     "moments.schedule": MomentsSchedulePayload;
 };

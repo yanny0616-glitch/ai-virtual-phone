@@ -2379,6 +2379,33 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         };
     };
 
+    // 每条气泡放出前过一遍插件 transform（message.beforeReveal）：插件可改等待时长或取消这条。
+    // 宿主默认节奏：第一条 0、其余 800ms；流式预览已展示过则全部 0。
+    const paceBubbleReveal = async (
+        bubble: { responseBatchId: string; index: number; total: number; content: string; mediaType?: string; characterId?: string },
+        streamed: boolean,
+        signal?: AbortSignal,
+    ): Promise<{ cancelled: boolean }> => {
+        const defaultDelay = bubble.index === 0 || streamed ? 0 : 800;
+        const payload = await runChatPluginTransform("message.beforeReveal", {
+            sessionId: session.id,
+            isGroup: !!session.isGroup,
+            characterId: bubble.characterId ?? (session.isGroup ? undefined : session.contactId),
+            responseBatchId: bubble.responseBatchId,
+            index: bubble.index,
+            total: bubble.total,
+            content: bubble.content,
+            mediaType: bubble.mediaType,
+            streamed,
+            delayMs: defaultDelay,
+            cancelled: false,
+        });
+        if (payload.cancelled) return { cancelled: true };
+        const delay = Number.isFinite(payload.delayMs) ? Math.max(0, Math.min(payload.delayMs, 120_000)) : defaultDelay;
+        if (delay > 0) await abortableDelay(delay, signal);
+        return { cancelled: false };
+    };
+
     // Helper: process group chat AI response parts with media filtering
     const processGroupParts = async (
         results: { characterId: string; characterName: string; responseText: string }[],
@@ -2408,7 +2435,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             currentStateByCharacter.set(characterId, latest);
             return latest;
         };
-        let isFirst = true;
         for (const r of results) {
             throwIfGenerationStopped(guard);
             // 被踢出或禁言中的角色本轮不再发声
@@ -2419,6 +2445,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const parts = stripInvalidStickerParts(rawParts, r.characterId);
             let attachedState = false;
             let savedAnyPart = false;
+            let revealIndex = 0;
+            const revealTotal = parts.length;
             for (const part of parts) {
                 throwIfGenerationStopped(guard);
                 // Filter action types
@@ -2481,11 +2509,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     continue;
                 }
                 if (part.mediaType === "group_admin_notice") {
-                    if (!isFirst && !revealOptions?.instantReveal) await abortableDelay(800, guard?.signal);
-                    throwIfGenerationStopped(guard);
                     const applied = applyAIGroupAdminAction(r.characterId, part.mediaData);
                     if (!applied) continue; // 无权限/名字不合法：整个标签静默丢弃
-                    isFirst = false;
+                    const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: applied.content, mediaType: part.mediaType, characterId: r.characterId }, !!revealOptions?.instantReveal, guard?.signal);
+                    throwIfGenerationStopped(guard);
+                    if (reveal.cancelled) continue;
                     // 带上段落自己的 batch 元数据（与拍一拍同款）：
                     // 投影层按 batch 连续排布，缺了会被后续气泡挤到整段末尾
                     const msg = pushChatMessage({
@@ -2509,9 +2537,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 if (part.mediaType === "poke") {
                     const pokeSender = (part.mediaData?.pokeSender === "我" ? r.characterName : part.mediaData?.pokeSender) || r.characterName;
                     const pokeTarget = part.mediaData?.pokeTarget || "某人";
-                    if (!isFirst && !revealOptions?.instantReveal) await abortableDelay(800, guard?.signal);
+                    const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: `${pokeSender} 拍了拍 ${pokeTarget}`, mediaType: part.mediaType, characterId: r.characterId }, !!revealOptions?.instantReveal, guard?.signal);
                     throwIfGenerationStopped(guard);
-                    isFirst = false;
+                    if (reveal.cancelled) continue;
                     const msg = pushChatMessage({
                         sessionId: session.id, role: "assistant",
                         content: `${pokeSender} 拍了拍 ${pokeTarget}`,
@@ -2535,9 +2563,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     });
                     continue;
                 }
-                if (!isFirst && !revealOptions?.instantReveal) await abortableDelay(800, guard?.signal);
+                const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: part.content, mediaType: part.mediaType, characterId: r.characterId }, !!revealOptions?.instantReveal, guard?.signal);
                 throwIfGenerationStopped(guard);
-                isFirst = false;
+                if (reveal.cancelled) continue;
                 const attachHere = !attachedState && canCarryFoldedPanel(part);
                 const draft = buildAssistantMessageDraft(part, {
                     sessionId: session.id,
@@ -2985,17 +3013,20 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return msg;
         };
 
-        // Display messages one by one with staggered delays; update preview and notice with the same rhythm.
-        // 流式预览已经按段展示过一遍时（instantReveal）直接全部放出，避免二次「重播」。
-        if (messageDrafts.length <= 1 || options?.instantReveal) {
-            messageDrafts.forEach(publishVisibleMessage);
-        } else {
-            publishVisibleMessage(messageDrafts[0]);
-            for (let i = 1; i < messageDrafts.length; i++) {
-                await abortableDelay(800, options?.signal);
-                throwIfGenerationStopped(options);
-                publishVisibleMessage(messageDrafts[i]);
-            }
+        // Display messages one by one; the rhythm goes through message.beforeReveal so plugins can pace or cancel.
+        // 流式预览已经按段展示过一遍时（instantReveal）宿主默认不再等，避免二次「重播」。
+        for (let i = 0; i < messageDrafts.length; i++) {
+            const entry = messageDrafts[i];
+            const reveal = await paceBubbleReveal({
+                responseBatchId,
+                index: i,
+                total: messageDrafts.length,
+                content: entry.draft.content,
+                mediaType: entry.draft.mediaType,
+            }, !!options?.instantReveal, options?.signal);
+            throwIfGenerationStopped(options);
+            if (reveal.cancelled) continue;
+            publishVisibleMessage(entry);
         }
         if (imageReplacementTasks.length > 0) {
             await Promise.allSettled(imageReplacementTasks);
@@ -3620,9 +3651,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         const parts = stripInvalidStickerParts(rawParts, senderInfo.characterId);
                         let attachedState = false;
                         let savedAnyPart = false;
+                        let revealIndex = 0;
                         for (const part of parts) {
                             throwIfGenerationStopped(generationGuard);
                             if (!part.content.trim() && !part.mediaType) continue;
+                            const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: parts.length, content: part.content, mediaType: part.mediaType, characterId: senderInfo.characterId }, true, generationGuard?.signal);
+                            throwIfGenerationStopped(generationGuard);
+                            if (reveal.cancelled) continue;
                             const draft = buildAssistantMessageDraft(part, {
                                 sessionId: session.id,
                                 role: "assistant",

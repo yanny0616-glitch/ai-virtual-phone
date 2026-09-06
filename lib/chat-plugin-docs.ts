@@ -96,6 +96,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 | llm.request | 每次 LLM 请求发出前 | { messages, purpose, sessionId?, temperature?, maxTokens? } —— messages 为 OpenAI 形状数组，可增删改；设置 temperature/maxTokens 覆盖采样参数 |
 | llm.response | 模型原始回复文本落地前 | { text, sessionId?, purpose } —— 改 text 即改写回复（在内置正则之前） |
 | message.beforePersist | 任何消息写入存储前（**同步**，处理函数不能是 async） | { message } —— 可修改 message 的字段 |
+| message.beforeReveal | 角色一轮回复切成多条气泡后，每条气泡展示并落库前（异步，可等待；等待期间「对方正在输入」一直显示） | { sessionId, isGroup, characterId?, responseBatchId, index, total, content, mediaType?, streamed, delayMs, cancelled } —— 改 delayMs 即改这条气泡放出前的等待毫秒数（宿主默认：第一条 0、其余 800、streamed 时全 0；上限 120000）；cancelled=true 这条不展示不落库。要做"一句句慢慢发"的节奏就挂这里，宿主在 transform 返回后才开始等，处理函数本身不要 sleep |
 | moments.beforePost | 朋友圈定时发帖到点、真正生成前（手动「立即发帖」不经过） | { characterId, lastPostTime, cancelled, retryAfterMs?, hint } —— cancelled=true 这次不发、retryAfterMs 后再问（默认 1 小时）；hint 追加到「请发一条朋友圈。」后面当由头 |
 | moments.schedule | 朋友圈算下次到点时间时（**同步**）；reason: init 首次建档 / afterPost 发完一条 / postponed 被插件押后 | { characterId, reason, lastPostTime, nextPostAfter } —— 改 nextPostAfter 即改时机 |
 

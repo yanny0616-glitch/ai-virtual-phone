@@ -816,7 +816,7 @@ export const CHAT_PLUGIN_PROMPT = `===== 聊天插件写作规范 =====
 聊天插件是一段 ES Module 源码，与宿主同环境执行（无沙箱），在聊天管线的固定钩子上改数据、听事件、画界面。它作用于**线上聊天**（单聊 + 群聊）与朋友圈发帖节奏，与独家特调的机括、桌面组件完全无关。
 
 能力边界（最重要）：
-· 插件只能挂在宿主已经开出来的钩子上：transform 点（user.beforeSend / prompt.system / llm.request / llm.response / message.beforePersist / moments.beforePost / moments.schedule）和 on 事件（app.ready / session.opened / message.persisted / message.updated / message.deleted / llm.streamChunk / plugins.changed / variables.changed），完整表在「读取插件规格」里。
+· 插件只能挂在宿主已经开出来的钩子上：transform 点（user.beforeSend / prompt.system / llm.request / llm.response / message.beforePersist / message.beforeReveal / moments.beforePost / moments.schedule）和 on 事件（app.ready / session.opened / message.persisted / message.updated / message.deleted / llm.streamChunk / plugins.changed / variables.changed），完整表在「读取插件规格」里。
 · 需求落不进这些钩子时，**不要硬凑、不要编造钩子名或 ctx 字段**。如实告诉用户：这个要宿主加钩子，并给出一条具体的加钩子建议（建议的点名、时机、payload 该带哪些字段），用户会拿去改宿主。
 · 官方插件（presence-status / affection-ledger / moments-rhythm 等，列出插件里 official=true）由宿主自动升级，直接改会被覆盖：想改它的规则，读取插件拿源码 → 换 id 装成副本 → 禁用官方那份。
 
@@ -829,6 +829,7 @@ export const CHAT_PLUGIN_PROMPT = `===== 聊天插件写作规范 =====
 
 写法要点：
 · message.beforePersist 与 moments.schedule 是同步钩子，处理函数不能 async；其余 transform 默认 8 秒超时，做慢活要传 timeoutMs
+· 想让回复"一句句慢慢发出来"用 message.beforeReveal：只改 delayMs 让宿主去等，不要在处理函数里 sleep（会撞 8 秒超时）；等待期间"对方正在输入"由宿主显示，不用自己画。官方插件 typing-rhythm 就是这么做的，用户只想调速度时让 ta 改设置即可
 · 每个注册动作都返回 Disposable；setup 里返回的清理函数会在禁用/卸载时执行，别把定时器、事件监听漏在外面
 · 要暴露给用户调的参数走 manifest.settings，插件里经 ctx.system.settings 读，不要把数值写死
 · 持久状态走 ctx.data（插件私有）或共享变量池；跨插件/自定义 APP 要共用的才放共享变量池

@@ -647,3 +647,10 @@
 - 小卷新增第 11 套工具 `chat_plugin_pack`：读取插件规格 / 列出插件 / 读取插件 / 安装插件 / 更新插件 / 启停插件（执行器 `lib/chat-plugin-mascot-tools.ts`，规范 `CHAT_PLUGIN_PROMPT`）。照独家特调套件的样子做：先读规格再写，没有卸载工具。
 - 规范里写死能力边界：只能用宿主已开的钩子，落不进去时如实说"要宿主加钩子"并给具体的点名/时机/payload 建议，不许编钩子名。官方插件（index.json 里的 id）拒绝安装/更新，防止被自动升级覆盖；想改就换 id 装副本。
 - 上游同日合入（`96492ab`）：机括 rawReply / lastReply 钩子、核对材料、旧轮次懒加载、线下摘要自动补提开关。`docs/mixology-supabase.sql` 的 kind 约束补了 preface，已建过表的 Supabase 要手动 ALTER。
+
+
+### 钩子 `message.beforeReveal` + 官方插件「打字节奏」（2026-09-06）
+
+- 宿主原来有一段写死的节奏：一轮回复切成多条气泡后，关流式时第二条起各等 800ms 再放出，开流式则一次放完，插件碰不到。现在这段改走新 transform 点 `message.beforeReveal`（`components/chat/chat-room.tsx` 的 `paceBubbleReveal`，五处放出路径都过它：单聊 `splitAndSaveAIMessages`、群聊 `processGroupParts` 的正文/拍一拍/群管理通知、群聊流式 `onTextPart`）。payload 带会话/角色/批次 id、序号与总数、内容、`streamed`；插件改 `delayMs`（上限 120 秒）宿主去等，`cancelled=true` 这条不展示不落库。默认值等于原行为，没装插件零变化。等待期间 `isGenerating` 仍为 true，顶部「对方正在输入」一直显示。
+- `chat-plugins/typing-rhythm.js`：每条等待 = 去空白字数 ÷ 每秒字数 × 随机浮动，夹在最短/最长之间；表情图片固定时长；第一条可单独设；开了流式是否照样按节奏、群聊是否生效都是开关。只改 delayMs，不 sleep（会撞 8 秒 transform 超时）。
+- 小卷的插件规范加了一条：做"一句句慢慢发"用这个钩子，不要在处理函数里 sleep；用户只想调速度就让 ta 改插件设置。
