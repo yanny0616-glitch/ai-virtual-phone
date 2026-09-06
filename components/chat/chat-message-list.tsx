@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useSyncExternalStore } from "react";
 import { ChevronLeft } from "lucide-react";
-import { loadChatSessions, loadChatContacts, ChatSession, createOrGetSession, createGroupSession, pushChatMessage, addChatContact, loadChatMessages, getLastVisibleSessionMessage, getChatMessagePreview } from "@/lib/chat-storage";
+import { loadChatSessions, loadChatContacts, ChatSession, createOrGetSession, createGroupSession, pushChatMessage, addChatContact, loadChatMessages, getLastVisibleSessionMessage, getChatMessagePreview, CHAT_UNREAD_UPDATED_EVENT } from "@/lib/chat-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { Character } from "@/lib/character-types";
 import { resolveUserIdentity } from "@/lib/settings-storage";
@@ -146,11 +146,19 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
 
     useEffect(() => {
         const refreshSessions = () => setSessions(loadChatSessions());
+        let unreadTimer = 0;
+        const refreshUnreadSoon = () => {
+            if (unreadTimer) return;
+            unreadTimer = window.setTimeout(() => { unreadTimer = 0; refreshSessions(); }, 150);
+        };
         window.addEventListener("weixin-messages-updated", refreshSessions);
         window.addEventListener("chat-messages-updated", refreshSessions);
+        window.addEventListener(CHAT_UNREAD_UPDATED_EVENT, refreshUnreadSoon);
         return () => {
             window.removeEventListener("weixin-messages-updated", refreshSessions);
             window.removeEventListener("chat-messages-updated", refreshSessions);
+            window.removeEventListener(CHAT_UNREAD_UPDATED_EVENT, refreshUnreadSoon);
+            if (unreadTimer) window.clearTimeout(unreadTimer);
         };
     }, []);
 
@@ -759,6 +767,12 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
     const onlinePreview = lastVisibleMessage ? (getChatMessagePreview(lastVisibleMessage) || lastVisibleMessage.content) : "";
     const preview = offlineIsNewer ? getChatOfflineTurnPreview(lastOfflineTurn) : onlinePreview;
     const displayTime = pickLaterTime(lastVisibleMessage?.createdAt, lastOfflineTurn?.createdAt) || session.updatedAt;
+    const unread = session.unreadCount > 0 ? session.unreadCount : 0;
+    const unreadBadge = unread > 0
+        ? (session.isMuted
+            ? <span className="chat-unread-dot" aria-label={`${unread} 条未读`} />
+            : <span className="minimal-unread-count chat-unread-badge">{unread > 99 ? "99+" : unread}</span>)
+        : null;
 
     // Group chat: build grid of participant avatars (2×2)
     const isGroup = session.isGroup;
@@ -778,6 +792,7 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
             className={`minimal-list-item${isPinned ? ' chat-pinned' : ''}`}
             onClick={onSelect}
         >
+            <div className="relative shrink-0">
             {isGroup ? (
                 <div className="minimal-avatar-wrapper grid grid-cols-2 grid-rows-2 gap-[1px] p-[2px] bg-[var(--c-card-border)] rounded-full overflow-hidden">
                     {groupAvatarItems.map((c) => (
@@ -803,6 +818,8 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
                     <ChatPluginSlot name="list.avatar" slotProps={{ sessionId: session.id, characterId: session.contactId }} className="chat-plugin-list-avatar" />
                 </div>
             )}
+            {unreadBadge}
+            </div>
             <div className="flex-1 overflow-hidden h-[48px] flex flex-col justify-center gap-1">
                 <div className="flex justify-between items-center">
                     <span className="ts-16 font-medium text-[var(--c-text-title)] truncate">

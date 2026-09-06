@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled } from "@/lib/chat-storage";
+import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, markChatSessionRead, CHAT_MESSAGE_PUSHED_EVENT } from "@/lib/chat-storage";
 import { cleanStreamText, splitStreamPreviewSegments, stripLiteralTexts, stripXmlTagBlocks } from "@/lib/stream-preview";
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
@@ -1164,6 +1164,29 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     useEffect(() => {
         emitChatPluginEvent("session.opened", { sessionId: session.id, isGroup: !!session.isGroup });
     }, [session.id, session.isGroup]);
+
+    // 未读角标：聊天页可见时把本会话未读清零；后台生成/推送落库的消息在页面不可见时才计数。
+    // 先落库再清零（同一 tick 内），列表此时不在前台，看不到闪动。
+    useEffect(() => {
+        const clearIfVisible = () => {
+            if (document.visibilityState !== "visible") return;
+            if (!isChatRoomElementVisible(wrapperRef.current)) return;
+            markChatSessionRead(session.id);
+        };
+        const onPushed = (e: Event) => {
+            const detail = (e as CustomEvent<{ message?: { sessionId?: string } }>).detail;
+            if (detail?.message?.sessionId === session.id) clearIfVisible();
+        };
+        clearIfVisible();
+        window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, onPushed);
+        document.addEventListener("visibilitychange", clearIfVisible);
+        window.addEventListener("focus", clearIfVisible);
+        return () => {
+            window.removeEventListener(CHAT_MESSAGE_PUSHED_EVENT, onPushed);
+            document.removeEventListener("visibilitychange", clearIfVisible);
+            window.removeEventListener("focus", clearIfVisible);
+        };
+    }, [session.id]);
 
     // 聊天插件：监听插件 toast（支持常驻加载态 + 手动关闭）
     const chatToastIdRef = useRef<string | null>(null);

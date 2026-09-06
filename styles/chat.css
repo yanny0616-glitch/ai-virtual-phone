@@ -234,6 +234,28 @@
   pointer-events: none;
   z-index: 1;
 }
+/* 会话列表未读角标：挂在头像右上角；免打扰会话只给一个红点 */
+.chat-unread-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  z-index: 2;
+  background: #fa5151;
+  box-shadow: 0 0 0 1.5px var(--c-page-body-bg, #fff);
+  pointer-events: none;
+}
+.chat-unread-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  z-index: 2;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fa5151;
+  box-shadow: 0 0 0 1.5px var(--c-page-body-bg, #fff);
+  pointer-events: none;
+}
 .minimal-unread-count {
   background: var(--c-action-blue, #246bfd);
   color: #fff;

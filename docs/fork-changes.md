@@ -654,3 +654,9 @@
 - 宿主原来有一段写死的节奏：一轮回复切成多条气泡后，关流式时第二条起各等 800ms 再放出，开流式则一次放完，插件碰不到。现在这段改走新 transform 点 `message.beforeReveal`（`components/chat/chat-room.tsx` 的 `paceBubbleReveal`，五处放出路径都过它：单聊 `splitAndSaveAIMessages`、群聊 `processGroupParts` 的正文/拍一拍/群管理通知、群聊流式 `onTextPart`）。payload 带会话/角色/批次 id、序号与总数、内容、`streamed`；插件改 `delayMs`（上限 120 秒）宿主去等，`cancelled=true` 这条不展示不落库。默认值等于原行为，没装插件零变化。等待期间 `isGenerating` 仍为 true，顶部「对方正在输入」一直显示。
 - `chat-plugins/typing-rhythm.js`：每条等待 = 去空白字数 ÷ 每秒字数 × 随机浮动，夹在最短/最长之间；表情图片固定时长；第一条可单独设；开了流式是否照样按节奏、群聊是否生效都是开关。只改 delayMs，不 sleep（会撞 8 秒 transform 超时）。
 - 小卷的插件规范加了一条：做"一句句慢慢发"用这个钩子，不要在处理函数里 sleep；用户只想调速度就让 ta 改插件设置。
+
+
+### 会话列表未读角标（2026-09-06）
+
+- `ChatSession.unreadCount` 字段一直存在但从没人加过。现在 `pushChatMessage` / `upsertImportedChatMessage` 落库角色消息（role=assistant 且能进列表预览的）时 +1 并广播 `chat-unread-updated`；聊天页可见时（挂载、visibilitychange、focus、本会话有新消息落库）调 `markChatSessionRead` 清零。后台生成、离线推送、镜像同步进来的消息在页面不可见时才会累计。
+- 列表头像右上角红色数字（`.chat-unread-badge`，99+ 封顶），免打扰会话只给红点（`.chat-unread-dot`）。角标放在头像外层的 relative 容器里，避免被群头像的 overflow-hidden 裁掉。`getTotalChatUnread()` 备着给桌面图标用，还没接。

@@ -1148,6 +1148,41 @@ export function createToolExecutionId(): string {
     return `toolrun_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** 会话未读数变化（列表据此刷新角标） */
+export const CHAT_UNREAD_UPDATED_EVENT = "chat-unread-updated";
+
+function emitUnreadUpdated(sessionId: string): void {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent(CHAT_UNREAD_UPDATED_EVENT, { detail: { sessionId } }));
+}
+
+/** 角色发来的、会出现在列表预览里的消息才算未读；用户自己发的和工具痕迹不算 */
+function isUnreadCandidate(msg: ChatMessage): boolean {
+    return msg.role === "assistant" && !msg.isRetracted && isSessionPreviewCandidate(msg);
+}
+
+function bumpSessionUnread(sessionId: string): void {
+    const idx = _sessionsCache.findIndex(s => s.id === sessionId);
+    if (idx === -1) return;
+    const target = _sessionsCache[idx];
+    target.unreadCount = (target.unreadCount || 0) + 1;
+    dbPutSessions([target]);
+    emitUnreadUpdated(sessionId);
+}
+
+/** 聊天页可见时调用：清掉该会话的未读数 */
+export function markChatSessionRead(sessionId: string): void {
+    const idx = _sessionsCache.findIndex(s => s.id === sessionId);
+    if (idx === -1 || !(_sessionsCache[idx].unreadCount > 0)) return;
+    _sessionsCache[idx].unreadCount = 0;
+    dbPutSessions([_sessionsCache[idx]]);
+    emitUnreadUpdated(sessionId);
+}
+
+export function getTotalChatUnread(): number {
+    return _sessionsCache.reduce((sum, s) => sum + (s.isMuted ? 0 : (s.unreadCount || 0)), 0);
+}
+
 export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "status"> & {
     status?: ChatMessageStatus;
     createdAt?: string;
@@ -1192,6 +1227,8 @@ export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "sta
         }
     }
 
+    if (isUnreadCandidate(newMsg)) bumpSessionUnread(newMsg.sessionId);
+
     if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(CHAT_MESSAGE_PUSHED_EVENT, { detail: { message: newMsg } }));
     }
@@ -1226,6 +1263,7 @@ export function upsertImportedChatMessage(msg: ChatMessage): { message: ChatMess
             saveChatSessions(sessions);
         }
     }
+    if (isUnreadCandidate(newMsg)) bumpSessionUnread(newMsg.sessionId);
 
     return { message: newMsg, inserted: true };
 }
