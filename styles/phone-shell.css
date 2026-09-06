@@ -678,7 +678,9 @@
   transition: transform 0.4s cubic-bezier(0.25, 1.25, 0.3, 1), opacity 0.3s ease;
 }
 
-.icon-grid .widget-glass:active {
+/* Use the actual pointer lifetime instead of touch browsers' sticky :active.
+   Editing keeps its own jiggle/drag transforms. */
+.phone-workspace:not(.edit-mode) .icon-grid .widget-glass[data-widget-pressed="true"] {
   transform: scale(0.95);
   opacity: 0.85;
   transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.1s ease;

@@ -31,7 +31,42 @@ export function WidgetRenderer({ widget, preview, onConfigChange }: WidgetRender
   const catalogEntry = WIDGET_CATALOG.find((e) => e.type === widget.type);
   const isFreestyle = catalogEntry?.track === "freestyle" || widget.type.startsWith("diy-");
 
-  const widgetName = catalogEntry?.name || "";
+  const glassRef = useRef<HTMLDivElement>(null);
+  const pressRef = useRef<{ id: number; x: number; y: number } | null>(null);
+
+  // Explicit pointer lifetime avoids sticky :active on touch browsers.
+  // Do not capture the pointer: desktop swiping/long-press dragging owns it.
+  useEffect(() => {
+    if (preview) return;
+    const clearPress = () => {
+      pressRef.current = null;
+      glassRef.current?.removeAttribute("data-widget-pressed");
+    };
+    const endPress = (event: PointerEvent) => {
+      if (pressRef.current?.id === event.pointerId) clearPress();
+    };
+    const movePress = (event: PointerEvent) => {
+      const press = pressRef.current;
+      if (!press || press.id !== event.pointerId) return;
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) clearPress();
+    };
+    const handleVisibility = () => {
+      if (document.hidden) clearPress();
+    };
+    window.addEventListener("pointerup", endPress, true);
+    window.addEventListener("pointercancel", endPress, true);
+    window.addEventListener("pointermove", movePress, true);
+    window.addEventListener("blur", clearPress);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      clearPress();
+      window.removeEventListener("pointerup", endPress, true);
+      window.removeEventListener("pointercancel", endPress, true);
+      window.removeEventListener("pointermove", movePress, true);
+      window.removeEventListener("blur", clearPress);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [preview]);
 
   return (
     <div
@@ -49,6 +84,16 @@ export function WidgetRenderer({ widget, preview, onConfigChange }: WidgetRender
       <div
         className={`widget-glass ${sizeClass}${preview ? " widget-preview-mode" : ""}${isKawaii ? " widget-kawaii" : ""}${isFullBleed ? " widget-full-bleed" : ""}${isFreestyle ? " widget-freestyle" : ""}`}
         data-widget-type={widget.type}
+        ref={glassRef}
+        onPointerDownCapture={(event) => {
+          if (preview || !event.isPrimary || event.button !== 0 || event.currentTarget.closest(".edit-mode")) return;
+          pressRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+          event.currentTarget.setAttribute("data-widget-pressed", "true");
+        }}
+        onPointerLeave={() => {
+          pressRef.current = null;
+          glassRef.current?.removeAttribute("data-widget-pressed");
+        }}
       >
         <WidgetContent
           widget={widget}
@@ -59,7 +104,6 @@ export function WidgetRenderer({ widget, preview, onConfigChange }: WidgetRender
           onConfigChange={onConfigChange}
         />
       </div>
-      {!preview && <span className="widget-label">widgets</span>}
     </div>
   );
 }
