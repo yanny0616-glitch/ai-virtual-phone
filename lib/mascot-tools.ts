@@ -14,7 +14,7 @@ import type { LlmToolDefinition } from "./llm-provider-adapter";
 import type { ToolCall, ToolResult } from "./tool-executor";
 import type { MascotPageContext } from "./mascot-context";
 import type { Prompt } from "./settings-types";
-import { CHARACTER_CARD_PROMPT, CHARACTER_WORLD_PROMPT, WORLDBOOK_PROMPT, PRESET_PROMPT, GENERAL_PRESET_PROMPT, REGEX_PROMPT, CSS_PROMPT, WIDGET_PROMPT, MIXOLOGY_PROMPT } from "./mascot-prompts";
+import { CHARACTER_CARD_PROMPT, CHARACTER_WORLD_PROMPT, WORLDBOOK_PROMPT, PRESET_PROMPT, GENERAL_PRESET_PROMPT, REGEX_PROMPT, CSS_PROMPT, WIDGET_PROMPT, MIXOLOGY_PROMPT, CHAT_PLUGIN_PROMPT } from "./mascot-prompts";
 import {
     buildCssAssetNineSliceCss,
     calibrateCssAssetNineSlice,
@@ -35,6 +35,44 @@ export type MascotSubTool = {
     name: string;
     description: string;
     parameterSchema: Record<string, unknown>;
+};
+
+// ── 聊天插件 ──────────────────────────────────
+
+const PLUGIN_EMPTY_SCHEMA = { type: "object", properties: {} };
+
+const PLUGIN_READ_SCHEMA = {
+    type: "object",
+    properties: {
+        id: { type: "string", description: "插件 id（列出插件可查）" },
+    },
+    required: ["id"],
+};
+
+const PLUGIN_INSTALL_SCHEMA = {
+    type: "object",
+    properties: {
+        code: { type: "string", description: "插件 ES Module 源码全文：export default { manifest: { id, name, apiVersion: 1, ... }, setup(ctx) { ... } }。规格见 读取插件规格。" },
+    },
+    required: ["code"],
+};
+
+const PLUGIN_UPDATE_SCHEMA = {
+    type: "object",
+    properties: {
+        id: { type: "string", description: "要更新的插件 id，源码里的 manifest.id 必须与之一致" },
+        code: { type: "string", description: "完整的新源码（整份替换，不是补丁）" },
+    },
+    required: ["id", "code"],
+};
+
+const PLUGIN_SET_ENABLED_SCHEMA = {
+    type: "object",
+    properties: {
+        id: { type: "string", description: "插件 id" },
+        enabled: { type: "boolean", description: "true 启用 / false 禁用" },
+    },
+    required: ["id", "enabled"],
 };
 
 export type MascotToolPackage = {
@@ -1056,6 +1094,20 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
         ],
         usageGuide: MIXOLOGY_PROMPT,
     },
+    {
+        id: "chat_plugin_pack",
+        label: "聊天插件套件",
+        description: "写和管理聊天插件：在线上聊天管线的固定钩子（改提示词/改回复/拦截用户消息/押后朋友圈/监听消息落库等）上挂规则的 JS 模块。只能用宿主已开出的钩子，需求超出钩子范围时要如实告知并给出加钩子建议。写之前必须先 读取插件规格。",
+        subTools: [
+            { name: "读取插件规格", description: "获取聊天插件开发文档全文（manifest 字段、全部钩子与 payload、ctx 各接口）。写或改插件前必读。", parameterSchema: PLUGIN_EMPTY_SCHEMA },
+            { name: "列出插件", description: "列出已安装插件（id/名称/版本/启停/是否官方）。", parameterSchema: PLUGIN_EMPTY_SCHEMA },
+            { name: "读取插件", description: "读取一个插件的 manifest、设置值、源码全文与最近 10 条运行日志。", parameterSchema: PLUGIN_READ_SCHEMA },
+            { name: "安装插件", description: "用完整源码新装一个插件，装入即校验即生效。id 已存在或撞官方 id 会拒绝。", parameterSchema: PLUGIN_INSTALL_SCHEMA },
+            { name: "更新插件", description: "用完整新源码整份替换一个已装插件，热更新，设置与数据保留。官方插件不可改。", parameterSchema: PLUGIN_UPDATE_SCHEMA },
+            { name: "启停插件", description: "启用或禁用一个插件。", parameterSchema: PLUGIN_SET_ENABLED_SCHEMA },
+        ],
+        usageGuide: CHAT_PLUGIN_PROMPT,
+    },
 ];
 
 // 导航是独立工具（不在套件里），直接暴露
@@ -1182,6 +1234,12 @@ const MASCOT_NATIVE_TOOL_NAMES: Record<string, string> = {
     "列出连接器": "mascot_mix_list_connectors",
     "创建连接器": "mascot_mix_save_connector",
     "删除连接器": "mascot_mix_delete_connector",
+    "读取插件规格": "mascot_plugin_read_spec",
+    "列出插件": "mascot_plugin_list",
+    "读取插件": "mascot_plugin_read",
+    "安装插件": "mascot_plugin_install",
+    "更新插件": "mascot_plugin_update",
+    "启停插件": "mascot_plugin_set_enabled",
     "生成九宫格CSS": "mascot_build_nine_slice_css",
     "读取角色": "mascot_read_character",
     "创建角色": "mascot_create_character",
@@ -1233,6 +1291,7 @@ const MASCOT_NATIVE_LOADER_NAMES: Record<string, string> = {
     status_bar_pack: "mascot_load_status_bar_pack",
     widget_pack: "mascot_load_widget_pack",
     mixology_pack: "mascot_load_mixology_pack",
+    chat_plugin_pack: "mascot_load_chat_plugin_pack",
 };
 
 export function getMascotNativeToolName(displayName: string): string {
@@ -1399,6 +1458,19 @@ export async function executeMascotToolCall(call: ToolCall, ctx: MascotToolConte
                     case "创建连接器": return mix.mixToolSaveConnector(call.args);
                     case "删除连接器": return mix.mixToolDeleteConnector(call.args);
                     default: return mix.mixToolSaveRecipe(call.args);
+                }
+            }
+
+            // ─── 聊天插件 ───
+            case "读取插件规格": case "列出插件": case "读取插件": case "安装插件": case "更新插件": case "启停插件": {
+                const pl = await import("./chat-plugin-mascot-tools");
+                switch (call.name) {
+                    case "读取插件规格": return pl.pluginToolReadSpec();
+                    case "列出插件": return await pl.pluginToolList();
+                    case "读取插件": return await pl.pluginToolRead(call.args);
+                    case "安装插件": return await pl.pluginToolInstall(call.args);
+                    case "更新插件": return await pl.pluginToolUpdate(call.args);
+                    default: return pl.pluginToolSetEnabled(call.args);
                 }
             }
 

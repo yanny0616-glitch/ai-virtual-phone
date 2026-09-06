@@ -640,3 +640,10 @@
 - 动态里点头像或名字进入那个人的主页（`components/chat/moment-profile-page.tsx`）：封面（按角色各存一张，点封面换；没设就用头像放大糊一层）、头像、名字、动态数、签名，下面只列TA自己的动态，评论/回复/删除照走动态页那套。你自己的主页复用动态页原来的封面和签名。
 - 签名不取角色卡描述，由官方插件 `chat-plugins/profile-signature.js` 让TA自己写：回消息时小概率在末尾附 `[签名]xxx`，截下来存变量池 `profile`（scope character），主页监听变量变化实时刷新。主页上点签名可以替TA改。提示词走插件 `prompt.system` 的 hint 通道，不需要改预设。
 - 另：GPT 的 `1c2e75e` 修了聊天镜像队列按 id 压缩、延后回复重试和世界书导入导出。
+
+
+### 小卷「聊天插件套件」（2026-09-06）
+
+- 小卷新增第 11 套工具 `chat_plugin_pack`：读取插件规格 / 列出插件 / 读取插件 / 安装插件 / 更新插件 / 启停插件（执行器 `lib/chat-plugin-mascot-tools.ts`，规范 `CHAT_PLUGIN_PROMPT`）。照独家特调套件的样子做：先读规格再写，没有卸载工具。
+- 规范里写死能力边界：只能用宿主已开的钩子，落不进去时如实说"要宿主加钩子"并给具体的点名/时机/payload 建议，不许编钩子名。官方插件（index.json 里的 id）拒绝安装/更新，防止被自动升级覆盖；想改就换 id 装副本。
+- 上游同日合入（`96492ab`）：机括 rawReply / lastReply 钩子、核对材料、旧轮次懒加载、线下摘要自动补提开关。`docs/mixology-supabase.sql` 的 kind 约束补了 preface，已建过表的 Supabase 要手动 ALTER。
