@@ -2678,6 +2678,12 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     page: DragPageKey,
     element: HTMLElement
   ) {
+    // 普通模式长按拖起时，同一根手指已经让桌面层进入滑动跟踪（关掉了翻页动画）；
+    // 编辑拖拽接管后要把它收回，否则边缘翻页会瞬移、直到松手才恢复动画
+    swipeRef.current.pointerId = null;
+    swipeRef.current.deltaX = 0;
+    swipeLayerRef.current?.classList.remove("phone-swipe-dragging");
+    swipeLayerRef.current?.style.setProperty("--swipe-drag", "0px");
     const rect = element.getBoundingClientRect();
     // For widgets: compute grab offset in grid cells
     let grabCellRow = 0;
