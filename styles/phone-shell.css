@@ -1493,3 +1493,14 @@
 .folder-dots .dot.active {
   background: color-mix(in srgb, var(--c-home-label, #ffffff) 85%, transparent);
 }
+
+/* 拖拽翻页那一刻，当前页圆点放大回弹一下，替代震动反馈 */
+.page-controls[data-flip] .dot.active {
+  animation: page-flip-dot 0.32s ease-out;
+}
+
+@keyframes page-flip-dot {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.9); }
+  100% { transform: scale(1); }
+}

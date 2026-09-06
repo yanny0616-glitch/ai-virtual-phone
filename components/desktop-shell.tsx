@@ -1046,6 +1046,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   }, []);
   useAndroidCaretKeyboardLift();
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [pageFlipTick, setPageFlipTick] = useState(0);
   const [layout, setLayout] = useState<DesktopLayout>(DEFAULT_LAYOUT);
   // Dock is an ordered icon-id list (max DOCK_MAX), kept disjoint from `layout`.
   const [dock, setDock] = useState<DesktopIconId[]>(DOCK_DEFAULT);
@@ -1327,8 +1328,13 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     mergeTargetIconId: DesktopIconId | null;
     mergeTargetPage: DesktopPageKey | null;
     // 拖拽期间网格几何按页缓存、工作区矩形缓存一次：每帧读 rect/computedStyle 会强制布局
-    geomCache?: Partial<Record<string, GridGeometry>>;
+    // 所有页停稳后占的视口矩形一致，量一次全程复用；按页量会在翻页动画中途缓存到滑动中的矩形
+    geom?: GridGeometry;
     wsRect?: DOMRect;
+    // 边缘翻页次数：首次慢、连翻快
+    edgeFlips: number;
+    // 翻页动画结束前不做落点判定，避免图标还在滑时预览错位
+    settling: boolean;
   } | null>(null);
   const editTapRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   // Refs to latest state for use in stable callbacks
@@ -2702,6 +2708,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       offsetX: clientX - rect.left,
       offsetY: clientY - rect.top,
       edgeTimer: null,
+      edgeFlips: 0,
+      settling: false,
       lastTargetKey: "",
       targetPage: null,
       targetRow: 0,
@@ -2882,8 +2890,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
 
     const pageNum = getDesktopPageNumber(pageKey) || 1;
     const ws = widgetsRef.current;
-    drag.geomCache ??= {};
-    const geom = (drag.geomCache[pageKey] ??= getGridGeometry(gridEl));
+    const geom = (drag.geom ??= getGridGeometry(gridEl));
 
     if (drag.itemType === "icon") {
       // ── 矩形碰撞裁决（iOS 手感）──
@@ -3180,21 +3187,39 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     const ws = workspaceRef.current;
     if (!drag || !ws) return;
     const rect = (drag.wsRect ??= ws.getBoundingClientRect());
-    const EDGE = 36;
+    const EDGE = 48;
     const pageIdx = currentPageIndexRef.current;
     const activePageKeys = getDesktopPageKeysForState(layoutRef.current, widgetsRef.current);
     const lastPageIndex = Math.max(0, activePageKeys.length - 1);
     const nearLeft = x - rect.left < EDGE;
     const nearRight = rect.right - x < EDGE;
     const canSwitchLeft = nearLeft && pageIdx > 0;
-    const canSwitchRight = nearRight;
+    // 最后一页已经是空页时不再往后新开，否则压着边缘会连开一串空页
+    const lastPageKey = activePageKeys[lastPageIndex] ?? "page1";
+    const lastPageNum = getDesktopPageNumber(lastPageKey) || 1;
+    const lastPageHasContent =
+      (layoutRef.current[lastPageKey] ?? []).some((ic) => ic.id !== drag.itemId)
+      || widgetsRef.current.some((w) => w.page === lastPageNum && w.id !== drag.itemId);
+    const canSwitchRight = nearRight && (pageIdx < lastPageIndex || lastPageHasContent);
+    const delay = drag.edgeFlips === 0 ? 350 : 200;
+
+    const afterFlip = () => {
+      drag.edgeTimer = null;
+      drag.edgeFlips += 1;
+      drag.lastTargetKey = "";
+      drag.settling = true;
+      setTimeout(() => { if (editDragRef.current === drag) drag.settling = false; }, 320);
+      if (drag.targetPage !== null) resetDragPreview(drag);
+      drag.targetPage = null;
+      setDropTarget(null);
+      setPageFlipTick((t) => t + 1);
+    };
 
     if (canSwitchLeft && !drag.edgeTimer) {
       drag.edgeTimer = setTimeout(() => {
         setCurrentPageIndex(Math.max(0, pageIdx - 1));
-        drag.edgeTimer = null;
-        drag.lastTargetKey = "";
-      }, 350);
+        afterFlip();
+      }, delay);
     } else if (canSwitchRight && !drag.edgeTimer) {
       drag.edgeTimer = setTimeout(() => {
         if (pageIdx >= lastPageIndex) {
@@ -3206,9 +3231,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
           });
         }
         setCurrentPageIndex(pageIdx + 1);
-        drag.edgeTimer = null;
-        drag.lastTargetKey = "";
-      }, 350);
+        afterFlip();
+      }, delay);
     } else if (!canSwitchLeft && !canSwitchRight && drag.edgeTimer) {
       clearTimeout(drag.edgeTimer);
       drag.edgeTimer = null;
@@ -3814,7 +3838,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       }
       if (drag.active) {
         updateGhostPos(e.clientX, e.clientY);
-        updateDropTargetFromPointer(e.clientX, e.clientY);
+        if (!drag.settling) updateDropTargetFromPointer(e.clientX, e.clientY);
         checkEdgeSwitch(e.clientX);
         return;
       }
@@ -4737,7 +4761,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                       })}
                     </div>
 
-                    <div className="page-controls">
+                    <div className="page-controls" key={pageFlipTick} data-flip={pageFlipTick > 0 ? "" : undefined}>
                       {pageKeys.map((pageKey, pageIndex) => (
                         <button
                           key={pageKey}
