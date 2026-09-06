@@ -701,4 +701,6 @@ await test('Moments generation publishes one tagged post, returns its ID, and ne
 
 await import('./check-push-outbox-plugins.mjs');
 await import('./check-shiguang.mjs');
+await import('./check-persistence-and-proxy.mjs');
+await import('./check-usage-logs.mjs');
 console.log(`Passed ${results.length} fork regression checks, push outbox plugin checks and Shiguang checks.`);

@@ -59,6 +59,7 @@ function harness({ enabled = true, ready = Promise.resolve(), initial = {} } = {
         },
         MacroEngine: class {}, getActiveAppTags: () => [],
         loadChatSessions: () => [session], loadChatMessages: () => saved,
+        persistChatMessages: async () => {},
         personalPushFetch: async (action, options) => {
             assert.equal(action, "outbox");
             return new Response(JSON.stringify(options ? { ok: state.ackStatus === 200 } : { ok: true, entries: state.entries }),

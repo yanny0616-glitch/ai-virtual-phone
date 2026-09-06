@@ -9,6 +9,7 @@ import {
     loadChatSessions,
     loadChatMessages,
     pushChatMessage,
+    createChatMessageBatch,
     loadAllFollowUpSchedules,
     saveFollowUpSchedule,
     clearFollowUpSchedule,
@@ -768,6 +769,12 @@ export function handleFollowUpMediaAction(
     actionType: string,
     sessionId: string,
     contextMessages: ChatMessage[],
+    durable?: {
+        saveMessage: typeof pushChatMessage;
+        responseBatchId: string;
+        updateMedia: typeof updateMessageMediaData;
+        afterCommit: (run: () => void) => void;
+    },
 ) {
     const targetMediaType = actionType.includes("payment_request")
         ? "payment_request"
@@ -779,7 +786,11 @@ export function handleFollowUpMediaAction(
 
     const charName = resolveFollowUpSenderName(sessionId);
     const userName = "你";
-    const responseBatchId = createResponseBatchId();
+    const responseBatchId = durable?.responseBatchId || createResponseBatchId();
+    const settlePayment = (input: Parameters<typeof settleShoppingPaymentRequest>[0]) => {
+        if (durable) durable.afterCommit(() => { settleShoppingPaymentRequest(input); });
+        else settleShoppingPaymentRequest(input);
+    };
 
     let newStatus: "opened" | "received" | "declined" | "paid";
     let sysText: string;
@@ -800,7 +811,7 @@ export function handleFollowUpMediaAction(
         newStatus = "paid";
         sysText = `${charName}接受了${userName}的代付请求`;
         rawResponseText = `[${charName}接受了${userName}的代付]`;
-        settleShoppingPaymentRequest({
+        settlePayment({
             orderId: targetMsg.mediaData?.shoppingOrderId,
             requestId: targetMsg.mediaData?.paymentRequestId,
             accepted: true,
@@ -810,7 +821,7 @@ export function handleFollowUpMediaAction(
         newStatus = "declined";
         sysText = `${charName}拒绝了${userName}的代付请求`;
         rawResponseText = `[${charName}拒绝了${userName}的代付]`;
-        settleShoppingPaymentRequest({
+        settlePayment({
             orderId: targetMsg.mediaData?.shoppingOrderId,
             requestId: targetMsg.mediaData?.paymentRequestId,
             accepted: false,
@@ -823,16 +834,18 @@ export function handleFollowUpMediaAction(
     }
 
     if (targetMediaType === "payment_request") {
-        updateMessageMediaData(targetMsg.id, {
+        (durable?.updateMedia || updateMessageMediaData)(targetMsg.id, {
             ...targetMsg.mediaData,
             status: newStatus,
             paymentResolvedAt: new Date().toISOString(),
             paymentPayerName: charName,
         });
+    } else if (durable) {
+        durable.updateMedia(targetMsg.id, { ...targetMsg.mediaData, status: newStatus });
     } else {
         updateMessageMediaStatus(targetMsg.id, newStatus as "opened" | "received" | "declined");
     }
-    pushChatMessage({
+    (durable?.saveMessage || pushChatMessage)({
         sessionId,
         role: "system",
         content: sysText,
@@ -882,6 +895,8 @@ export async function parseAndSaveResponse(
         senderCharacterId?: string;
         senderName?: string;
         silent?: boolean;
+        /** 离线回端整批落盘成功后才发布，失败交给消费器重试。 */
+        durable?: boolean;
         responseBatchId?: string;
         /** 离线回端时沿用云端生成时间，避免多轮补账被“当前时间”打乱因果顺序。 */
         createdAt?: string;
@@ -894,6 +909,9 @@ export async function parseAndSaveResponse(
     },
 ): Promise<{ hasVisible: boolean; newCount: number; stateValues: StateValue[] }> {
     const responseBatchId = options?.responseBatchId || createResponseBatchId();
+    const batch = options?.durable ? createChatMessageBatch(`${sessionId}:${responseBatchId}`) : null;
+    const saveMessage = batch ? batch.push : pushChatMessage;
+    const afterCommit: Array<() => void> = [];
     const rawResponseText = options?.rawResponseText ?? rawText;
     const reasoningText = options?.reasoningText;
     void contextMessages;
@@ -933,6 +951,7 @@ export async function parseAndSaveResponse(
     };
 
     const filteredParts: ParsedMessagePart[] = [];
+    let actionContext = contextMessages;
     for (const p of parts) {
         if (p.mediaType === "voice_call") { triggerCall = "voice"; continue; }
         if (p.mediaType === "video_call") { triggerCall = "video"; continue; }
@@ -944,7 +963,16 @@ export async function parseAndSaveResponse(
         if (p.mediaType === "accept_red_packet" || p.mediaType === "decline_red_packet"
             || p.mediaType === "accept_transfer" || p.mediaType === "decline_transfer"
             || p.mediaType === "accept_payment_request" || p.mediaType === "decline_payment_request") {
-            handleFollowUpMediaAction(p.mediaType, sessionId, contextMessages);
+            if (batch && actionContext === contextMessages) actionContext = contextMessages.map(message => ({ ...message }));
+            handleFollowUpMediaAction(p.mediaType, sessionId, actionContext, batch ? {
+                saveMessage, responseBatchId,
+                updateMedia: (id, data) => {
+                    batch.updateMedia(id, data);
+                    const target = actionContext.find(message => message.id === id);
+                    if (target) target.mediaData = data;
+                },
+                afterCommit: run => { afterCommit.push(run); },
+            } : undefined);
             continue;
         }
         if (p.mediaType === "poke") {
@@ -963,19 +991,19 @@ export async function parseAndSaveResponse(
     // Save call trigger as system message (persists even when user is not in chat room)
     if (triggerCall) {
         const callLabel = triggerCall === "voice" ? "语音通话" : "视频通话";
-        pushChatMessage({
+        saveMessage({
             sessionId,
             role: "system",
             content: `[我发起了${callLabel}]`,
             createdAt: options?.createdAt,
-            responseBatchId: createResponseBatchId(),
+            responseBatchId: options?.durable ? responseBatchId : createResponseBatchId(),
             rawResponseText: `[我发起了${callLabel}]`,
         });
     }
 
     if (filteredParts.length === 0) {
         if (statusPanel || innerMonologue || reasoningText) {
-            pushChatMessage({
+            saveMessage({
                 sessionId,
                 role: "assistant",
                 content: "",
@@ -993,7 +1021,7 @@ export async function parseAndSaveResponse(
         }
         if (shortcutMarker) {
             const baseMs = options?.createdAt ? Date.parse(options.createdAt) : NaN;
-            pushChatMessage({
+            saveMessage({
                 sessionId,
                 role: "assistant",
                 content: shortcutMarker.text,
@@ -1003,14 +1031,17 @@ export async function parseAndSaveResponse(
                 senderCharacterId: options?.senderCharacterId,
                 senderName: options?.senderName,
             });
-            pushChatMessage({
+            saveMessage({
                 sessionId,
                 role: "system",
                 content: `发出快捷动作「${shortcutMarker.name}」`,
                 createdAt: Number.isFinite(baseMs) ? new Date(baseMs + 2).toISOString() : undefined,
                 mediaType: "tool_notice",
+                ...(options?.durable ? { responseBatchId } : {}),
             });
         }
+        if (batch) await batch.commit();
+        afterCommit.forEach(run => run());
         // Emit call trigger event for chat-room to pick up
         if (triggerCall && typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId, type: triggerCall } }));
@@ -1020,6 +1051,7 @@ export async function parseAndSaveResponse(
 
     const savedMessages: ChatMessage[] = [];
     const imageReplacementTasks: Promise<unknown>[] = [];
+    const deferredImageTasks: Array<() => Promise<unknown>> = [];
     let metaIdx = filteredParts.findIndex(canCarryFollowUpPanel);
     if (metaIdx === -1 && (statusPanel || innerMonologue || reasoningText || stateValues.length > 0)) {
         filteredParts.push({ content: "" });
@@ -1035,7 +1067,7 @@ export async function parseAndSaveResponse(
     };
     const saveShortcutMarkerPair = () => {
         if (!shortcutMarker) return;
-        savedMessages.push(pushChatMessage({
+        savedMessages.push(saveMessage({
             sessionId,
             role: "assistant",
             content: shortcutMarker.text,
@@ -1045,19 +1077,20 @@ export async function parseAndSaveResponse(
             senderCharacterId: options?.senderCharacterId,
             senderName: options?.senderName,
         }));
-        savedMessages.push(pushChatMessage({
+        savedMessages.push(saveMessage({
             sessionId,
             role: "system",
             content: `发出快捷动作「${shortcutMarker.name}」`,
             createdAt: nextCreatedAt(),
             mediaType: "tool_notice",
+            ...(options?.durable ? { responseBatchId } : {}),
         }));
     };
     for (let i = 0; i < filteredParts.length; i++) {
         if (i === markerPartIdx) saveShortcutMarkerPair();
         const generatedPart = buildGeneratedFollowUpImageMessage(filteredParts[i]);
         const createdAt = nextCreatedAt();
-        const saved = pushChatMessage({
+        const saved = saveMessage({
             sessionId,
             role: "assistant",
             content: generatedPart.content,
@@ -1078,18 +1111,23 @@ export async function parseAndSaveResponse(
             ...(followUpIndex ? { followUpIndex } : {}),
         });
         if (isPendingChatGeneratedImageMessage(saved)) {
-            imageReplacementTasks.push(
-                generateAndApplyChatGeneratedImage(saved, sess?.contactId)
-                    .catch(error => {
-                        console.warn("[FollowUp] Image generation failed:", error);
-                        return null;
-                    }),
-            );
+            const run = () => generateAndApplyChatGeneratedImage(saved, sess?.contactId)
+                .catch(error => {
+                    console.warn("[FollowUp] Image generation failed:", error);
+                    return null;
+                });
+            if (batch) deferredImageTasks.push(run);
+            else imageReplacementTasks.push(run());
         }
         savedMessages.push(saved);
     }
     if (markerPartIdx >= filteredParts.length) saveShortcutMarkerPair();
 
+    if (batch) {
+        await batch.commit();
+        afterCommit.forEach(run => run());
+        imageReplacementTasks.push(...deferredImageTasks.map(run => run()));
+    }
     await dispatchBackgroundMessagesOneByOne(sessionId, savedMessages, options?.silent === true);
     if (imageReplacementTasks.length > 0) {
         await Promise.allSettled(imageReplacementTasks);

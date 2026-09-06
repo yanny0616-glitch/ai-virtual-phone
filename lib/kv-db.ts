@@ -43,11 +43,13 @@ function migrateLegacyKey(lsKey: string): void {
     if (typeof window === "undefined") return;
     const raw = localStorage.getItem(lsKey);
     if (raw === null) return;
-    if (_cache.get(lsKey) !== raw) {
-        _cache.set(lsKey, raw);
-        kvDb.entries.put({ key: lsKey, value: raw }).catch(() => {});
-    }
-    localStorage.removeItem(lsKey);
+    _cache.set(lsKey, raw);
+    // 缓存相等不代表曾经写盘成功。晚注册也必须确认提交后才删除来源。
+    kvDb.entries.put({ key: lsKey, value: raw }).then(() => {
+        removeLegacyLocalStorageKeyIfValue(lsKey, raw);
+    }).catch(err => {
+        console.warn("[KvDB] legacy migration failed; source retained:", lsKey, err);
+    });
 }
 
 function migrateLegacyPrefix(prefix: string): void {
@@ -127,17 +129,15 @@ export function hydrateKvDb(): Promise<void> {
 
         // Migrate from localStorage
         const batch: { key: string; value: string }[] = [];
-        const removeKeys = new Set<string>();
+        const migrated = new Map<string, string>();
 
         // Fixed keys
         for (const lsKey of _fixedKeys) {
             const raw = localStorage.getItem(lsKey);
             if (raw === null) continue;
-            if (_cache.get(lsKey) !== raw) {
-                batch.push({ key: lsKey, value: raw });
-                _cache.set(lsKey, raw);
-            }
-            removeKeys.add(lsKey);
+            batch.push({ key: lsKey, value: raw });
+            _cache.set(lsKey, raw);
+            migrated.set(lsKey, raw);
         }
 
         // Dynamic prefix keys
@@ -146,16 +146,15 @@ export function hydrateKvDb(): Promise<void> {
             if (!k || !matchesDynamicPrefix(k)) continue;
             const raw = localStorage.getItem(k);
             if (raw !== null) {
-                if (_cache.get(k) !== raw) {
-                    batch.push({ key: k, value: raw });
-                    _cache.set(k, raw);
-                }
-                removeKeys.add(k);
+                if (!migrated.has(k)) batch.push({ key: k, value: raw });
+                _cache.set(k, raw);
+                migrated.set(k, raw);
             }
         }
 
         if (batch.length > 0) await kvDb.entries.bulkPut(batch);
-        for (const k of removeKeys) localStorage.removeItem(k);
+        // 失败后重试仍写整个迁移批次；提交期间产生的新值不能被旧提交清掉。
+        for (const [key, value] of migrated) removeLegacyLocalStorageKeyIfValue(key, value);
     })().then(() => {
         _hydrated = true;
         _hydrateError = null;

@@ -7,7 +7,7 @@ import type { RegexConfig } from "./settings-types";
 import { stripHallucinatedTimestamps } from "./llm-provider-adapter";
 import { MacroEngine } from "./macro-engine";
 import { getActiveAppTags } from "./content-tag-utils";
-import { loadChatMessages, loadChatSessions, reindexSessionMessageOrdersByTime } from "./chat-storage";
+import { loadChatMessages, loadChatSessions, persistChatMessages, reindexSessionMessageOrdersByTime } from "./chat-storage";
 import { hasAccountPushSubscription } from "./push-client";
 import { isPersonalPushCloudActive, loadPersonalPushCloudState, personalPushFetch } from "./personal-push-cloud";
 import { removeTimedWakeSchedule } from "./timed-wake-storage";
@@ -58,9 +58,16 @@ function clearTimedWakeIfHandled(triggerKey: string | null): void {
     if (timedWakeId) removeTimedWakeSchedule(timedWakeId);
 }
 
-async function transformOutboxResponse(rawText: string, sessionId: string, appId = "chat"): Promise<string> {
+// 写盘/回执失败的同页重试复用 llm.response 结果，避免重复结算好感等插件状态。
+const transformedOutboxResponses = new Map<string, { raw: string; text: string; entryId: string }>();
+async function transformOutboxResponse(rawText: string, sessionId: string, appId = "chat", entryId = ""): Promise<string> {
+    const key = `${sessionId}:${entryId}`;
+    const cached = transformedOutboxResponses.get(key);
+    if (cached?.raw === rawText) return cached.text;
     const result = await runChatPluginTransform("llm.response", { text: rawText.trim(), sessionId, purpose: appId });
-    return stripHallucinatedTimestamps(typeof result.text === "string" ? result.text : rawText.trim());
+    const text = stripHallucinatedTimestamps(typeof result.text === "string" ? result.text : rawText.trim());
+    transformedOutboxResponses.set(key, { raw: rawText, text, entryId });
+    return text;
 }
 
 export async function consumeServerOutbox(options?: { silent?: boolean; force?: boolean }): Promise<void> {
@@ -123,8 +130,11 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                             const alreadyImported = Boolean(
                                 responseBatchId && existing.some(message => message.responseBatchId === responseBatchId),
                             );
+                            if (alreadyImported) {
+                                await persistChatMessages(existing.filter(message => message.responseBatchId === responseBatchId));
+                            }
                             if (!alreadyImported) {
-                                let text = await transformOutboxResponse(entry.raw_text, replySessionId, replyMeta?.appId);
+                                let text = await transformOutboxResponse(entry.raw_text, replySessionId, replyMeta?.appId, entry.id);
                                 const regexes = Array.isArray(replyMeta?.regexes) ? replyMeta.regexes : [];
                                 if (regexes.length > 0) {
                                     const macroEngine = new MacroEngine(replyMeta?.characterName ?? "", replyMeta?.userName ?? "用户");
@@ -138,6 +148,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                                     undefined,
                                     existing,
                                     {
+                                        durable: true,
                                         silent: options?.silent !== false,
                                         responseBatchId,
                                         createdAt: bridgeMeta.screenChatAssistantAt,
@@ -202,12 +213,14 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                     // 回执确认失败时可能再次拉到同一条；先查持久批次，避免插件重复结算好感。
                     const responseBatchId = `push-outbox:${entry.id}`;
                     if (existingMessages.some(message => message.responseBatchId === responseBatchId)) {
+                        await persistChatMessages(existingMessages.filter(message => message.responseBatchId === responseBatchId));
                         clearTimedWakeIfHandled(entry.trigger_key);
                         consumedIds.push(entry.id);
                         if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
                         continue;
                     }
                     if (followUpIndex && existingMessages.some(m => m.role === "assistant" && m.followUpIndex === followUpIndex)) {
+                        await persistChatMessages(existingMessages.filter(m => m.role === "assistant" && m.followUpIndex === followUpIndex));
                         clearTimedWakeIfHandled(entry.trigger_key);
                         consumedIds.push(entry.id);
                         if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
@@ -220,13 +233,14 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         const createdMs = Date.parse(m.createdAt);
                         return createdMs > armAtMs && createdMs < passStartMs;
                     })) {
+                        await persistChatMessages(existingMessages.filter(m => m.role === "assistant" && Date.parse(m.createdAt) > armAtMs && Date.parse(m.createdAt) < passStartMs));
                         clearTimedWakeIfHandled(entry.trigger_key);
                         consumedIds.push(entry.id);
                         if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
                         continue;
                     }
 
-                    let text = await transformOutboxResponse(entry.raw_text, sessionId, meta.appId);
+                    let text = await transformOutboxResponse(entry.raw_text, sessionId, meta.appId, entry.id);
                     const regexes = Array.isArray(meta.regexes) ? meta.regexes : [];
                     if (regexes.length > 0) {
                         const macroEngine = new MacroEngine(meta.characterName ?? "", meta.userName ?? "用户");
@@ -253,7 +267,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         meta.prevCount ?? 0,
                         followUpIndex,
                         existingMessages,
-                        { silent: options?.silent !== false, responseBatchId, ...(shortcutMarker ? { shortcutMarker } : {}) },
+                        { durable: true, silent: options?.silent !== false, responseBatchId, ...(shortcutMarker ? { shortcutMarker } : {}) },
                     );
                     if (hasVisible && newCount < 10) scheduleFollowUp(sessionId, newCount, stateValues);
                     clearTimedWakeIfHandled(entry.trigger_key);
@@ -277,6 +291,10 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                 : fetch("/api/push/outbox", { ...ackInit, credentials: "include" }))
                 .catch(() => null);
             if (!ackResponse || !ackResponse.ok) break;
+            const acknowledged = new Set(consumedIds);
+            for (const [key, cached] of transformedOutboxResponses) {
+                if (acknowledged.has(cached.entryId)) transformedOutboxResponses.delete(key);
+            }
             if (entries.length < OUTBOX_BATCH_SIZE) break;
           }
         }

@@ -3,7 +3,7 @@
 import {
     chatDb,
     initChatDb,
-    dbPutMessage, dbDeleteMessage, dbDeleteMessagesBySession, dbDeleteMessagesByIds,
+    dbPutMessage, dbPutMessageBatch, dbDeleteMessage, dbDeleteMessagesBySession, dbDeleteMessagesByIds,
     dbPutMessages, dbPutSessions, dbPutContacts, dbDeleteSession,
     dbReplaceContacts, dbReplaceSessions,
 } from "./chat-db";
@@ -1183,10 +1183,12 @@ export function getTotalChatUnread(): number {
     return _sessionsCache.reduce((sum, s) => sum + (s.isMuted ? 0 : (s.unreadCount || 0)), 0);
 }
 
-export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "status"> & {
+type NewChatMessage = Omit<ChatMessage, "id" | "createdAt" | "status"> & {
     status?: ChatMessageStatus;
     createdAt?: string;
-}): ChatMessage {
+};
+
+function prepareChatMessage(msg: NewChatMessage): ChatMessage {
     let newMsg: ChatMessage = {
         ...msg,
         id: createMessageId(),
@@ -1201,14 +1203,23 @@ export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "sta
         newMsg = pluginResult.message;
     }
 
+    return newMsg;
+}
+
+export function pushChatMessage(msg: NewChatMessage): ChatMessage {
+    return publishChatMessage(prepareChatMessage(msg));
+}
+
+/** 已提交的气泡再进入内存与事件管线，复用普通聊天的预览/未读更新。 */
+function publishChatMessage(newMsg: ChatMessage, persisted = false): ChatMessage {
     _messagesCache.push(newMsg);
-    dbPutMessage(newMsg);
+    if (!persisted) dbPutMessage(newMsg);
 
     // Auto update session last message only for records that can produce a list preview.
     // 优化：直接增量更新内存会话缓存并异步写单条，避免每次发送都走 loadChatSessions +
     // saveChatSessions 触发全量会话预览重算（会话/消息多了以后会明显卡顿）。
     const preview = getChatMessagePreview(newMsg);
-    const sessIdx = _sessionsCache.findIndex(s => s.id === msg.sessionId);
+    const sessIdx = _sessionsCache.findIndex(s => s.id === newMsg.sessionId);
     if (sessIdx !== -1 && isSessionPreviewCandidate(newMsg)) {
         const target = _sessionsCache[sessIdx];
         target.lastMessageId = newMsg.id;
@@ -1218,7 +1229,7 @@ export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "sta
     } else if (sessIdx === -1) {
         // 缓存未命中（极端情况）：回退全量路径，保证列表预览仍会刷新
         const sessions = loadChatSessions();
-        const idx2 = sessions.findIndex(s => s.id === msg.sessionId);
+        const idx2 = sessions.findIndex(s => s.id === newMsg.sessionId);
         if (idx2 !== -1 && isSessionPreviewCandidate(newMsg)) {
             sessions[idx2].lastMessageId = newMsg.id;
             if (preview) sessions[idx2].lastMessagePreview = preview;
@@ -1235,6 +1246,74 @@ export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "sta
     emitChatPluginEvent("message.persisted", { message: newMsg });
 
     return newMsg;
+}
+
+/** 确认消费前的持久化屏障，也用于校验旧内存去重命中的消息。 */
+export async function persistChatMessages(messages: ChatMessage[]): Promise<void> {
+    if (!_hydrated) throw new Error("聊天数据尚未加载完成，保留云端消息等待重试。");
+    const sessionIds = new Set(messages.map(message => message.sessionId));
+    const sessions = _sessionsCache.filter(session => sessionIds.has(session.id));
+    if (sessions.length !== sessionIds.size) throw new Error("消息所属会话不可用，保留云端消息等待重试。");
+    await dbPutMessageBatch(messages, sessions);
+}
+
+// 同页写盘失败后保留准备好的 ID/插件结果，重试不会再执行 beforePersist。
+type PreparedBatchMessage = { draftKey: string; message: ChatMessage };
+const pendingMessageBatches = new Map<string, PreparedBatchMessage[]>();
+
+/** 只暂存新气泡；整批提交成功后才发布，失败不会污染缓存里的去重依据。 */
+export function createChatMessageBatch(retryKey?: string): {
+    push: (msg: NewChatMessage) => ChatMessage;
+    updateMedia: (id: string, data: ChatMessage["mediaData"]) => void;
+    commit: () => Promise<void>;
+} {
+    const reusable = [...((retryKey && pendingMessageBatches.get(retryKey)) || [])];
+    const prepared: PreparedBatchMessage[] = [];
+    const messages: ChatMessage[] = [];
+    const mediaUpdates = new Map<string, ChatMessage["mediaData"]>();
+    let committed = false;
+    return {
+        push(msg) {
+            if (committed) throw new Error("消息批次已提交。");
+            // 重试期间原消息状态可能改变（例如用户已领取转账），不能按序号
+            // 把旧动作提示错配成新的正文。只复用同一草稿，每条最多复用一次。
+            const draftKey = JSON.stringify([msg.sessionId, msg.role, msg.content, msg.mediaType, msg.responseBatchId, msg.senderCharacterId, msg.senderName]);
+            const index = reusable.findIndex(item => item.draftKey === draftKey);
+            const item = index >= 0 ? reusable.splice(index, 1)[0] : { draftKey, message: prepareChatMessage(msg) };
+            prepared.push(item);
+            messages.push(item.message);
+            return item.message;
+        },
+        updateMedia(id, data) { mediaUpdates.set(id, data); },
+        async commit() {
+            if (committed) return;
+            const orders = new Map<string, number>();
+            for (const message of messages) {
+                const order = orders.get(message.sessionId) ?? getNextMessageOrder(message.sessionId);
+                message.order = order;
+                orders.set(message.sessionId, order + 1);
+            }
+            const updates = _messagesCache.filter(message => mediaUpdates.has(message.id))
+                .map(message => ({ ...message, mediaData: mediaUpdates.get(message.id) }));
+            try {
+                await persistChatMessages([...updates, ...messages]);
+            } catch (error) {
+                if (retryKey) pendingMessageBatches.set(retryKey, prepared);
+                throw error;
+            }
+            if (retryKey) pendingMessageBatches.delete(retryKey);
+            committed = true;
+            for (const message of updates) updateMessageMediaData(message.id, message.mediaData);
+            for (const message of messages) publishChatMessage(message, true);
+        },
+    };
+}
+
+/** 桥输入有固定 ID；缓存命中也要确认落盘，避免失败写入被当成已导入。 */
+export async function upsertImportedChatMessageAsync(msg: ChatMessage): Promise<void> {
+    const existing = _messagesCache.find(item => item.id === msg.id);
+    await persistChatMessages([existing ?? msg]);
+    if (!existing) upsertImportedChatMessage(msg);
 }
 
 export function upsertImportedChatMessage(msg: ChatMessage): { message: ChatMessage; inserted: boolean } {

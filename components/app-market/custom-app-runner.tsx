@@ -17,7 +17,7 @@ import { updateInstalledCustomAppFromMarket } from "@/lib/custom-app-market-upda
 import { loadCharacters } from "@/lib/character-storage";
 import { getApiUsageDays, USAGE_MAX_DAYS } from "@/lib/api-usage-stats";
 import { resolveUsageSourceNames } from "@/lib/usage-source-names";
-import { getApiLogs, getApiLogCapacity, setApiLogCapacity, getApiLogStorageChars, API_LOG_CAPACITY_OPTIONS } from "@/lib/api-log-store";
+import { getUsageApiLogs, getUsageApiLog, getApiLogCapacity, setApiLogCapacity, API_LOG_CAPACITY_OPTIONS } from "@/lib/api-log-store";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { ensureSettingsStorageHydrated } from "@/lib/settings-storage";
 import { getPwaHostedSafeArea, PWA_DISPLAY_MODE_CHANGED_EVENT } from "@/lib/pwa-display-mode";
@@ -1681,7 +1681,7 @@ export function CustomAppRunner({
       const wantCharacterName = record.characterName ? String(record.characterName) : "";
       const wantSource = record.source ? String(record.source) : "";
       const wantFailedOnly = record.failedOnly === true;
-      const logs = [...getApiLogs()].reverse().filter(log => {
+      const logs = getUsageApiLogs().reverse().filter(log => {
         if (wantCharacterId) {
           const matchesCurrentId = log.characterId === wantCharacterId;
           const matchesLegacyName = !log.characterId && Boolean(wantCharacterName) && log.characterName === wantCharacterName;
@@ -1715,23 +1715,25 @@ export function CustomAppRunner({
     }
     if (action === "usage.getSettings") {
       requirePermission("usage.read");
+      const logs = getUsageApiLogs();
       return {
         logCapacity: getApiLogCapacity(),
         logCapacityOptions: [...API_LOG_CAPACITY_OPTIONS],
-        logCount: getApiLogs().length,
-        logChars: getApiLogStorageChars(),
+        logCount: logs.length,
+        // 与用量列表采用同一视图，估算可查看日志的体积。
+        logChars: JSON.stringify(logs).length,
         maxDays: USAGE_MAX_DAYS,
       };
     }
     if (action === "usage.setSettings") {
       requirePermission("usage.settings");
       const next = setApiLogCapacity(Number(record.logCapacity));
-      return { logCapacity: next, logCount: getApiLogs().length };
+      return { logCapacity: next, logCount: getUsageApiLogs().length };
     }
     if (action === "usage.readLogDetail") {
       requirePermission("usage.logs");
       const id = String(record.id ?? "");
-      const log = getApiLogs().find(item => item.id === id);
+      const log = getUsageApiLog(id);
       if (!log) return null;
       return log;
     }

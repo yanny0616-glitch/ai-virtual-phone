@@ -179,6 +179,20 @@ export function setApiLogCapacity(value: number): number {
 export function getQaApiLogs(): DebugInfo[] { return _loadLogs(QA_LOGS_KEY); }
 export function clearQaApiLogs(): void { try { kvRemove(QA_LOGS_KEY); } catch { } }
 
+/** 用量 APP 的统一只读视图；两个原始日志环仍独立保存、独立清空。
+ * 合并后保留最近 capacity 条，兼容现有 APP 的容量提示和最多 500 条的读取方式。
+ */
+export function getUsageApiLogs(): DebugInfo[] {
+    return [...getApiLogs(), ...getQaApiLogs()]
+        .sort((a, b) => (Date.parse(a.timestamp) || 0) - (Date.parse(b.timestamp) || 0))
+        .slice(-getApiLogCapacity());
+}
+
+/** 列表打开后可能又有新调用，详情仍可读取任一原始环中尚未清理的记录。 */
+export function getUsageApiLog(id: string): DebugInfo | undefined {
+    return getApiLogs().find(log => log.id === id) ?? getQaApiLogs().find(log => log.id === id);
+}
+
 export function pushApiLog(entry: Omit<DebugInfo, "id" | "timestamp">): void {
     // 分流只认显式 channel 字段，不看角色名——避免角色恰好叫「工坊」时被误分类。
     const isQa = entry.channel === "qa";

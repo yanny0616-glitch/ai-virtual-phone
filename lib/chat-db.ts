@@ -140,6 +140,14 @@ function safeParse<T>(raw: string | null): T[] {
     try { return raw ? JSON.parse(raw) : []; } catch { return []; }
 }
 
+/** 离线回传：气泡和所属会话一起提交，失败向上传播，绝不确认半批数据。 */
+export async function dbPutMessageBatch(messages: ChatMessage[], sessions: ChatSession[]): Promise<void> {
+    await chatDb.transaction("rw", chatDb.messages, chatDb.sessions, async () => {
+        await chatDb.messages.bulkPut(messages);
+        await chatDb.sessions.bulkPut(sessions);
+    });
+}
+
 // ── Async persistence helpers (fire-and-forget) ──
 
 export function dbPutMessage(msg: ChatMessage): void {

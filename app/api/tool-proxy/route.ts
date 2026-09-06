@@ -29,6 +29,15 @@ type ProxyErrorPayload = {
 export async function POST(req: NextRequest) {
     let requestUrlForDebug = "";
     let fetchUrlForDebug = "";
+    let proxyTimeoutMs = 120_000;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    let dispatcher: Dispatcher | undefined;
+    let sseReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    const controller = new AbortController();
+    const onClientAbort = () => controller.abort();
+    req.signal.addEventListener("abort", onClientAbort, { once: true });
+    if (req.signal.aborted) controller.abort();
     try {
         const { url, method, headers, body, timeoutMs } = await req.json();
         requestUrlForDebug = typeof url === "string" ? url : "";
@@ -70,18 +79,19 @@ export async function POST(req: NextRequest) {
         fetchUrlForDebug = fetchUrl;
 
         const requestedTimeoutMs = Number(timeoutMs);
-        const proxyTimeoutMs = Number.isFinite(requestedTimeoutMs) && requestedTimeoutMs > 0
+        proxyTimeoutMs = Number.isFinite(requestedTimeoutMs) && requestedTimeoutMs > 0
             ? Math.max(1000, Math.min(requestedTimeoutMs, 120_000))
             : 120_000;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), proxyTimeoutMs);
-        const dispatcher = getProxyDispatcher();
+        timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, proxyTimeoutMs);
+        dispatcher = getProxyDispatcher();
 
         const res = await safeOutboundFetch(fetchUrl, {
             ...fetchOptions,
             signal: controller.signal,
         }, dispatcher);
-        clearTimeout(timeout);
 
         // Forward response headers we care about
         const responseHeaders: Record<string, string> = {};
@@ -93,7 +103,7 @@ export async function POST(req: NextRequest) {
         // SSE_DISCOVER: just get the endpoint path
         if (method === "SSE_DISCOVER") {
             if (!res.ok) {
-                const errText = await res.text().catch(() => "");
+                const errText = await res.text();
                 return NextResponse.json({ endpointPath: "", debug: `HTTP ${res.status}: ${errText.slice(0, 300)}` }, { status: 200 });
             }
             const { endpointPath, buffer } = await readSseEndpoint(res);
@@ -104,11 +114,12 @@ export async function POST(req: NextRequest) {
         if (method === "SSE_REQUEST") {
             try {
                 if (!res.ok) {
-                    const errText = await res.text().catch(() => "");
+                    const errText = await res.text();
                     return NextResponse.json({ error: `SSE connect: HTTP ${res.status} ${errText.slice(0, 200)}` }, { status: 502 });
                 }
 
                 const { endpointPath, reader, decoder, buffer: initialBuffer } = await readSseEndpointKeepOpen(res);
+                sseReader = reader;
                 if (!endpointPath || !reader) {
                     return NextResponse.json({ error: `SSE 未返回 endpoint。收到: ${initialBuffer?.slice(0, 200) || "(空)"}` }, { status: 502 });
                 }
@@ -125,14 +136,17 @@ export async function POST(req: NextRequest) {
                     method: "POST",
                     headers: postHeaders,
                     body: typeof body === "string" ? body : JSON.stringify(body),
+                    signal: controller.signal,
                 }, dispatcher);
 
                 if (!postRes.ok && postRes.status !== 202) {
                     reader.cancel().catch(() => {});
-                    const errText = await postRes.text().catch(() => "");
+                    const errText = await postRes.text();
                     return NextResponse.json({ error: `POST ${msgUrl.pathname}: HTTP ${postRes.status} ${errText.slice(0, 200)}` }, { status: 502 });
                 }
 
+                // 202 响应正文无需使用，主动释放连接。
+                void postRes.body?.cancel().catch(() => {});
                 // Read SSE stream for the "message" event containing the JSON-RPC response
                 let sseBuffer = initialBuffer;
                 const sseTimeout = setTimeout(() => reader.cancel().catch(() => {}), 15_000);
@@ -160,6 +174,7 @@ export async function POST(req: NextRequest) {
 
                 return NextResponse.json({ error: `SSE 流未返回响应。缓冲: ${sseBuffer.slice(0, 300)}` }, { status: 504 });
             } catch (sseErr) {
+                if (controller.signal.aborted) throw sseErr;
                 const msg = sseErr instanceof Error ? sseErr.message : String(sseErr);
                 return NextResponse.json(
                     { error: `SSE 请求异常: ${msg}` },
@@ -193,8 +208,16 @@ export async function POST(req: NextRequest) {
         });
     } catch (err) {
         const payload = buildProxyErrorPayload(err, fetchUrlForDebug || requestUrlForDebug);
+        if (timedOut) payload.error = `工具代理请求超时（${proxyTimeoutMs / 1000}秒）`;
         const status = err instanceof UnsafeOutboundUrlError ? 400 : payload.error.includes("超时") ? 504 : 502;
         return NextResponse.json(payload, { status });
+    } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        req.signal.removeEventListener("abort", onClientAbort);
+        controller.abort();
+        void sseReader?.cancel().catch(() => {});
+        // 每次请求创建的代理 Agent 不能在成功/失败后遗留连接。
+        void dispatcher?.destroy().catch(() => {});
     }
 }
 
@@ -297,11 +320,19 @@ async function readSseEndpointKeepOpen(res: Response): Promise<{ endpointPath: s
     const decoder = new TextDecoder();
     if (!reader) return { endpointPath: "", reader: null, decoder, buffer: "" };
     let buffer = "";
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) return { endpointPath: "", reader: null, decoder, buffer };
-        buffer += decoder.decode(value, { stream: true });
-        const ep = parseSseEndpoint(buffer);
-        if (ep) return { endpointPath: ep, reader, decoder, buffer };
+    let handedOff = false;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) return { endpointPath: "", reader: null, decoder, buffer };
+            buffer += decoder.decode(value, { stream: true });
+            const ep = parseSseEndpoint(buffer);
+            if (ep) {
+                handedOff = true;
+                return { endpointPath: ep, reader, decoder, buffer };
+            }
+        }
+    } finally {
+        if (!handedOff) void reader.cancel().catch(() => {});
     }
 }

@@ -12,7 +12,7 @@ import {
   pushChatMessage,
   reindexSessionMessageOrdersByTime,
   type ChatMessage,
-  upsertImportedChatMessage,
+  upsertImportedChatMessageAsync,
 } from "../chat-storage";
 import { cancelFollowUp, requestBackgroundChatReply } from "../follow-up-service";
 import { saveMemoryEntry } from "../memory-storage";
@@ -304,7 +304,7 @@ export async function applyServerBridgeEntry(meta: {
     const fallbackId = `bridge_${String(meta.ruleId || "rule")}_${item.id}`
       .replace(/[^a-zA-Z0-9_-]/g, "_")
       .slice(0, 240);
-    upsertImportedChatMessage({
+    await upsertImportedChatMessageAsync({
       id: String(meta.chatMessageId || fallbackId),
       sessionId: session.id,
       role: meta.chat.role,
