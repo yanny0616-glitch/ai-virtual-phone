@@ -32,15 +32,30 @@ export function WidgetRenderer({ widget, preview, onConfigChange }: WidgetRender
   const isFreestyle = catalogEntry?.track === "freestyle" || widget.type.startsWith("diy-");
 
   const glassRef = useRef<HTMLDivElement>(null);
-  const pressRef = useRef<{ id: number; x: number; y: number } | null>(null);
+  // id 为 null 表示按压来自代码组件的 iframe（宿主收不到指针，靠 postMessage 代报）
+  const pressRef = useRef<{ id: number | null; x: number; y: number; at: number } | null>(null);
+  const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Explicit pointer lifetime avoids sticky :active on touch browsers.
   // Do not capture the pointer: desktop swiping/long-press dragging owns it.
   useEffect(() => {
     if (preview) return;
+    const glass = glassRef.current;
+    // 快速一点只有几十毫秒，缩小动画还没走完就复原了等于没反馈；标记至少保留这么久
+    const MIN_PRESS_MS = 120;
     const clearPress = () => {
+      const press = pressRef.current;
       pressRef.current = null;
-      glassRef.current?.removeAttribute("data-widget-pressed");
+      if (releaseTimerRef.current) { clearTimeout(releaseTimerRef.current); releaseTimerRef.current = null; }
+      const remain = press ? MIN_PRESS_MS - (performance.now() - press.at) : 0;
+      if (remain > 0) {
+        releaseTimerRef.current = setTimeout(() => {
+          releaseTimerRef.current = null;
+          if (!pressRef.current) glass?.removeAttribute("data-widget-pressed");
+        }, remain);
+      } else {
+        glass?.removeAttribute("data-widget-pressed");
+      }
     };
     const endPress = (event: PointerEvent) => {
       if (pressRef.current?.id === event.pointerId) clearPress();
@@ -53,20 +68,35 @@ export function WidgetRenderer({ widget, preview, onConfigChange }: WidgetRender
     const handleVisibility = () => {
       if (document.hidden) clearPress();
     };
+    const handleFrameMessage = (event: MessageEvent) => {
+      const data = event.data as { source?: unknown; type?: unknown; widgetId?: unknown } | null;
+      if (!data || typeof data !== "object" || data.source !== "ai-phone-diy-widget" || data.widgetId !== widget.id) return;
+      if (data.type === "pressStart") {
+        if (glass?.closest(".edit-mode")) return;
+        pressRef.current = { id: null, x: 0, y: 0, at: performance.now() };
+        glass?.setAttribute("data-widget-pressed", "true");
+      } else if (data.type === "pressEnd") {
+        if (pressRef.current?.id === null) clearPress();
+      }
+    };
     window.addEventListener("pointerup", endPress, true);
     window.addEventListener("pointercancel", endPress, true);
     window.addEventListener("pointermove", movePress, true);
     window.addEventListener("blur", clearPress);
+    window.addEventListener("message", handleFrameMessage);
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
-      clearPress();
+      pressRef.current = null;
+      if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
+      glass?.removeAttribute("data-widget-pressed");
       window.removeEventListener("pointerup", endPress, true);
       window.removeEventListener("pointercancel", endPress, true);
       window.removeEventListener("pointermove", movePress, true);
       window.removeEventListener("blur", clearPress);
+      window.removeEventListener("message", handleFrameMessage);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [preview]);
+  }, [preview, widget.id]);
 
   return (
     <div
@@ -87,12 +117,9 @@ export function WidgetRenderer({ widget, preview, onConfigChange }: WidgetRender
         ref={glassRef}
         onPointerDownCapture={(event) => {
           if (preview || !event.isPrimary || event.button !== 0 || event.currentTarget.closest(".edit-mode")) return;
-          pressRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+          if (releaseTimerRef.current) { clearTimeout(releaseTimerRef.current); releaseTimerRef.current = null; }
+          pressRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now() };
           event.currentTarget.setAttribute("data-widget-pressed", "true");
-        }}
-        onPointerLeave={() => {
-          pressRef.current = null;
-          glassRef.current?.removeAttribute("data-widget-pressed");
         }}
       >
         <WidgetContent

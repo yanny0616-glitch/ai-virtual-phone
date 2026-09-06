@@ -300,23 +300,35 @@ function injectCodeWidgetBridge(html: string, widgetId: string, config: Record<s
   function cancelLongPress() {
     if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
   }
+  // 按压反馈同理：宿主看不到 iframe 里的指针，按下/抬起/滑开都要代为上报
+  var pressing = false;
+  function endPress() {
+    if (!pressing) return;
+    pressing = false;
+    parent.postMessage({ source: SOURCE, type: "pressEnd", widgetId: widgetId }, "*");
+  }
   document.addEventListener("pointerdown", function(event) {
     var target = event.target;
     if (target && target.closest && target.closest("input, textarea, [contenteditable], [data-selectable], [data-no-longpress]")) return;
     lpX = event.clientX;
     lpY = event.clientY;
     cancelLongPress();
+    if (event.isPrimary && event.button === 0) {
+      pressing = true;
+      parent.postMessage({ source: SOURCE, type: "pressStart", widgetId: widgetId }, "*");
+    }
     lpTimer = setTimeout(function() {
       lpTimer = null;
+      endPress();
       parent.postMessage({ source: SOURCE, type: "longPress", widgetId: widgetId }, "*");
     }, 500);
   }, true);
   document.addEventListener("pointermove", function(event) {
-    if (!lpTimer) return;
-    if (Math.abs(event.clientX - lpX) > 10 || Math.abs(event.clientY - lpY) > 10) cancelLongPress();
+    if (!lpTimer && !pressing) return;
+    if (Math.abs(event.clientX - lpX) > 10 || Math.abs(event.clientY - lpY) > 10) { cancelLongPress(); endPress(); }
   }, true);
-  document.addEventListener("pointerup", cancelLongPress, true);
-  document.addEventListener("pointercancel", cancelLongPress, true);
+  document.addEventListener("pointerup", function() { cancelLongPress(); endPress(); }, true);
+  document.addEventListener("pointercancel", function() { cancelLongPress(); endPress(); }, true);
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start);
