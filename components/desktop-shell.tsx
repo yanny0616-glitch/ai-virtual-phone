@@ -1931,6 +1931,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     };
   }, []);
 
+  const [chatInitSessionId, setChatInitSessionId] = useState<string | null>(null);
   // ── 离线来电（AI 在离线消息里输出【拨打电话】）──
   // 三个入口汇到同一处：SW 转发的来电推送、通知点击冷启动的 ?ring= 参数、
   // 安卓壳全屏来电接听后的 #incoming-call=（answered=1 直接进通话）。
@@ -2387,7 +2388,6 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
   handleInstallCustomAppToDesktopRef.current = handleInstallCustomAppToDesktop;
 
   // Allow other components to switch apps via custom event
-  const [chatInitSessionId, setChatInitSessionId] = useState<string | null>(null);
   const [activeChatSession, setActiveChatSession] = useState<ChatSession | null>(null);
   const [customAppLaunchContext, setCustomAppLaunchContext] = useState<CustomAppLaunchState | null>(null);
   const [appMarketLaunchContext, setAppMarketLaunchContext] = useState<Record<string, unknown> | null>(null);
