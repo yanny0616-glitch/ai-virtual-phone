@@ -645,7 +645,7 @@
 }
 .edit-mode .icon-item.dragging,
 .edit-mode .widget-drag-wrap.dragging .widget-glass {
-  opacity: 0.25;
+  opacity: 0;
   animation: none;
 }
 /* 编辑态下 DIY code 组件的 iframe 放弃指针事件：否则按在 iframe 上的
@@ -665,7 +665,7 @@
   animation-duration: 0.26s;
 }
 .dock.edit-mode .dock-item.dragging {
-  opacity: 0.25;
+  opacity: 0;
   animation: none;
 }
 .widget-drag-wrap {
