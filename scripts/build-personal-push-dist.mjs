@@ -16,6 +16,12 @@ writeFileSync(workerPath, readFileSync(workerPath, "utf8").replace(
   `// BEGIN DEFERRED REPLY TIMING\n${timing}\n// END DEFERRED REPLY TIMING`,
 ));
 
+const silence = readFileSync(resolve(root, "lib/chat-silence-protocol.ts"), "utf8").replace(/^export /gm, "").trim();
+writeFileSync(workerPath, readFileSync(workerPath, "utf8").replace(
+  /\/\/ BEGIN CHAT SILENCE PROTOCOL[\s\S]*?\/\/ END CHAT SILENCE PROTOCOL/,
+  () => `// BEGIN CHAT SILENCE PROTOCOL\n${silence}\n// END CHAT SILENCE PROTOCOL`,
+));
+
 copyFileSync(resolve(root, "supabase/functions/ai-phone-push/index.ts"), resolve(output, "gateway.mjs"));
 copyFileSync(resolve(root, "supabase/functions/push-generate/index.ts"), resolve(output, "push-generate.mjs"));
 copyFileSync(resolve(root, "supabase/functions/push-shortcut-result/index.ts"), resolve(output, "push-shortcut-result.mjs"));

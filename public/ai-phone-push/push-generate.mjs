@@ -366,7 +366,49 @@ function advanceCloudReplyTiming(input: CloudReplyTiming, now: number, random: (
 }
 // END DEFERRED REPLY TIMING
 
+// BEGIN CHAT SILENCE PROTOCOL
+// Shared by the browser and personal-cloud worker; no storage or clock access.
+const CHAT_SILENCE_TOKEN = "[本轮不回复]";
+
+function silenceThinkingTags(thinkingTag?: string): string {
+    return ["think", "thinking", ...(thinkingTag && /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(thinkingTag) ? [thinkingTag] : [])].join("|");
+}
+
+function stripSilenceThinking(text: string, thinkingTag?: string): string {
+    return text.replace(new RegExp(`<(${silenceThinkingTags(thinkingTag)})>[\\s\\S]*?<\\/\\1>`, "gi"), "");
+}
+
+/** Only a whole response is a decision. Quoting the token in prose is ordinary text. */
+function isChatSilenceResponse(text: string, thinkingTag?: string): boolean {
+    return stripSilenceThinking(text, thinkingTag).trim() === CHAT_SILENCE_TOKEN;
+}
+
+/** Hold only the possible protocol prefix; normal prose continues streaming immediately. */
+function createChatSilenceStreamFilter(emit: (text: string) => void | Promise<void>, thinkingTag?: string) {
+    let pending = "";
+    let released = false;
+    return {
+        async push(delta: string) {
+            if (released) { await emit(delta); return; }
+            pending += delta;
+            const candidate = stripSilenceThinking(pending, thinkingTag).trimStart();
+            if (!candidate || CHAT_SILENCE_TOKEN.startsWith(candidate.trimEnd())
+                || new RegExp(`^(?:<(?:${silenceThinkingTags(thinkingTag)})>[\\s\\S]*|<\\/?[a-zA-Z0-9_-]*)$`, "i").test(candidate)) return;
+            released = true;
+            await emit(pending);
+            pending = "";
+        },
+        async flush() {
+            if (pending && !isChatSilenceResponse(pending, thinkingTag)) await emit(pending);
+            pending = "";
+        },
+    };
+}
+// END CHAT SILENCE PROTOCOL
+
 type JobPayload = {
+  allowSilence?: boolean;
+  silenceThinkingTag?: string;
   deferredReply?: { revision: number; timing: CloudReplyTiming };
   request: { url: string; headers: Record<string, string>; body: Record<string, unknown>; providerKind: ProviderKind };
   shortcut?: {
@@ -798,7 +840,7 @@ Deno.serve(async (req: Request) => {
     return new Response("forbidden", { status: 403 });
   }
 
-  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2"] });
+  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2", "chat-silence-v1"] });
   if (!jobId) return new Response("bad request", { status: 400 });
 
   const claim = await rest(`push_jobs?id=eq.${encodeURIComponent(jobId)}&status=eq.pending&kind=neq.bridge_scan&execute_at=lte.${encodeURIComponent(new Date().toISOString())}`, {
@@ -1291,6 +1333,11 @@ Deno.serve(async (req: Request) => {
     let rawText = extractResponseText(payload.request.providerKind, data).trim();
     if (!rawText) {
       await finish("failed", "empty response");
+      return;
+    }
+
+    if (payload.allowSilence === true && isChatSilenceResponse(rawText, payload.silenceThinkingTag)) {
+      await finish("done", "reply silenced");
       return;
     }
 

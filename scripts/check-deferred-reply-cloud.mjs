@@ -50,7 +50,7 @@ export function fixture() {
   let worker;
   const w = vm.createContext({ ...common, Deno: { env: { get: name => name === 'SUPABASE_URL' ? 'https://cloud.test' : 'test-service' }, serve: handler => { worker = handler; } }, fetch: async (url, init) => {
     if (url.includes('/rest/v1/')) return rest(url.split('/rest/v1/')[1], init);
-    if (url === 'https://model.test/chat') { h.calls.push(JSON.parse(init.body)); return json({ choices: [{ message: { content: '嗯，我看到了。' } }] }); }
+    if (url === 'https://model.test/chat') { h.calls.push(JSON.parse(init.body)); return json({ choices: [{ message: { content: h.modelReply ?? '嗯，我看到了。' } }] }); }
     if (url.includes('/realtime/')) return json({});
     throw Error('Unexpected worker fetch ' + url);
   } });
@@ -63,7 +63,7 @@ export function fixture() {
     OWNER_ID: 'owner', supabaseUrl: 'https://cloud.test', serviceKey: 'test-service', MAX_PAYLOAD_BYTES: 900_000,
     loadConfig: async () => ({ cron_secret: 'test-cron', payload_key: 'test-encryption-key' }),
     encryptPayload: w.cryptoApi.encryptPayload, decryptPayload: w.cryptoApi.decryptPayload,
-    fetch: async (url, init) => h.supported ? worker(new Request(url, init)) : json({ capabilities: [] }),
+    fetch: async (url, init) => h.supported ? h.legacySilenceWorker ? json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2"] }) : worker(new Request(url, init)) : json({ capabilities: [] }),
   });
   vm.runInContext(js(`async function gateway(request) { const url = new URL(request.url); const action = "deferred-reply"; ${block} }`) + '\nglobalThis.gateway=gateway;', g);
   const gateway = (method, key, payload) => g.gateway(new Request('https://cloud.test?'+new URLSearchParams(key ? { key } : {}), { method, ...(payload ? { body: JSON.stringify({ payload }) } : {}) }));
@@ -84,7 +84,7 @@ export function fixture() {
       return response;
     },
     CHAT_MESSAGE_PUSHED_EVENT: 'chat-message-pushed', loadChatMessages: () => clone(history), loadChatSessions: () => [{ id: 's', contactId: 'c', isGroup: false }],
-    buildChatPromptMessages: async (session, messages) => ({ llmMessages: messages.map(m => ({ role: m.role, content: m.content })), character: { id: 'c', name: '角色' }, config: h.config, preset: null, regexes: [], userIdentity: { name: '用户' } }),
+    buildChatPromptMessages: async (session, messages) => ({ llmMessages: messages.map(m => ({ role: m.role, content: m.content })), character: { id: 'c', name: '角色' }, config: h.config, preset: null, regexes: [], userIdentity: { name: '用户' }, allowSilence: h.allowSilence === true }),
     maybeAppendShortcutCapability() {}, toLlmRequestMessages: v => v,
     buildProviderRequest: (config, preset, messages) => ({ url: 'https://model.test/chat', headers: { Authorization: 'test-' + config }, body: { model: config, messages }, providerKind: 'openai-compatible' }),
   });
@@ -183,3 +183,40 @@ console.log('PASS old-worker fallback and personal-cloud project isolation');
   h.now = at('09:00');
 }
 console.log(`Passed deferred cloud integration (${Intl.DateTimeFormat().resolvedOptions().timeZone}).`);
+
+// Silence is a completed generation, with no message, push or repeated timer execution.
+{
+  const { h, a, history, drain, run, decrypt } = fixture();
+  h.allowSilence = true; h.modelReply = '<think>先独处</think>[本轮不回复]';
+  a.queueDeferredReplyCloud('s'); await drain();
+  assert.equal((await decrypt(h.rows[0])).allowSilence, true);
+  h.now = Date.parse(h.rows[0].execute_at); h.random = 0;
+  await run();
+  assert.equal(h.calls.length, 1); assert.equal(h.rows[0].status, 'done');
+  assert.equal(h.rows[0].result_note, 'reply silenced'); assert.equal(h.outbox.length, 0);
+  assert.deepEqual(h.rows[0].payload, {});
+  await a.sync('s');
+  assert.ok(a.readDeferredReply('s').firedAt);
+  assert.equal(a.takeDueDeferredReplies(h.now + 3600_000).length, 0);
+  await run(); assert.equal(h.calls.length, 1);
+  // A new user message owns a new decision, not a permanent mute.
+  history.push({ id: 'new-user', sessionId: 's', role: 'user', content: '我想和你谈谈', createdAt: new Date(h.now).toISOString() });
+  a.writeDeferredReply('s', { until: h.now, note: '', characterId: 'c', reason: 'busy' });
+  a.queueDeferredReplyCloud('s'); await drain(); assert.equal(h.rows.length, 2);
+}
+console.log('PASS cloud silence completes without outbox/push/retry; new user input gets a new task');
+{
+  const { h, a, drain } = fixture();
+  h.allowSilence = true; h.legacySilenceWorker = true;
+  a.queueDeferredReplyCloud('s'); await drain();
+  assert.equal(h.rows.length, 0); assert.equal(a.readDeferredReply('s').cloud, undefined);
+}
+console.log('PASS an old worker never receives a silence-enabled deferred request');
+{
+  const { h, a, drain, run } = fixture();
+  h.allowSilence = false; h.modelReply = '你说的 [本轮不回复] 是什么？';
+  a.queueDeferredReplyCloud('s'); await drain();
+  h.now = Date.parse(h.rows[0].execute_at); h.random = 0;
+  await run(); assert.equal(h.rows[0].status, 'done'); assert.equal(h.outbox.length, 1);
+}
+console.log('PASS ordinary quoted markers still deliver a message');

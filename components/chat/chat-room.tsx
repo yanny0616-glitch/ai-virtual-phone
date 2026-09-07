@@ -3355,6 +3355,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     },
                 );
                 if (!isCurrentGeneration()) return;
+                if (cr.silenced) { cancelFollowUp(session.id); setStreamPreview(null); return; }
                 const result = await splitAndSaveAIMessages(flattenCompletionResult(cr), { ...generationGuard, reasoningText: capturedReasoning, instantReveal: isSessionStreamingEnabled(session, true) });
                 if (!isCurrentGeneration()) return;
                 scheduleFollowUp(session.id, 0, result.stateValues);
@@ -3607,6 +3608,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     };
 
     const triggerAIResponse = async () => {
+        let silencedUserId: string | undefined;
         if (isGeneratingRef.current) {
             if (activeGenerationRuns.has(session.id)) return;
             // 上一轮被外部取消/顶替后收尾提前返回过，标记已是陈旧状态：复位后继续本次请求
@@ -3896,6 +3898,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 });
                 if (!isCurrentGeneration()) return;
 
+                if (result.silenced) {
+                    silencedUserId = [...latestMessages].reverse().find(message => message.role === "user")?.id;
+                    cancelFollowUp(session.id);
+                    streamAccumRef.current = "";
+                    setStreamPreview(null);
+                }
                 if (lastSendResult) {
                     scheduleFollowUp(session.id, 0, lastSendResult.stateValues);
                     const isHidden = !mountedRef.current || !isChatRoomElementVisible(wrapperRef.current);
@@ -3928,7 +3936,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 // If user sent more messages while AI was generating, show the generate button again
                 const latestMsgs = loadChatMessages(session.id);
                 const last = latestMsgs[latestMsgs.length - 1];
-                if (last && last.role === "user") {
+                if (last && last.role === "user" && last.id !== silencedUserId) {
                     setPendingGenerate(true);
                 }
             } else if (!activeGenerationRuns.has(session.id)) {

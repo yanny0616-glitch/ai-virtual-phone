@@ -633,6 +633,8 @@ export function parseRegexFromJson(text: string, fallbackName: string = "导入�
                 trimStrings,
                 markdownOnly: r.markdownOnly === true ? true : undefined,
                 promptOnly: r.promptOnly === true ? true : undefined,
+                historyOnly: r.historyOnly === true ? true : undefined,
+                historyRole: r.historyRole === "user" || r.historyRole === "assistant" ? r.historyRole : undefined,
                 runOnEdit: r.runOnEdit === true ? true : undefined,
                 substituteRegex: typeof r.substituteRegex === "number" ? r.substituteRegex : undefined,
                 minDepth: typeof r.minDepth === "number" && !isNaN(r.minDepth) ? r.minDepth : undefined,

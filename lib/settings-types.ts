@@ -133,6 +133,8 @@ export type RegexRule = {
     promptOnly?: boolean;         // true → only apply during prompt assembly (non-destructive)
     runOnEdit?: boolean;          // true → also apply when user edits an existing message
     historyOnly?: boolean;        // true → only apply to chat history message blocks, never to system prompts/preset/world book
+    /** Optional sender filter for history; omitted preserves legacy all-senders behavior. */
+    historyRole?: "user" | "assistant";
     substituteRegex?: number;     // 0=NONE, 1=RAW macro substitution in findRegex, 2=ESCAPED
     minDepth?: number;            // Minimum message depth (-1 = unlimited)
     maxDepth?: number;            // Maximum message depth

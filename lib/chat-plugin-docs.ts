@@ -83,6 +83,7 @@ export default {
 
 ## ctx.hooks —— 管线拦截
 
+官方「忙碌回复」1.1.0 还使用 prompt.system：宿主只在普通单聊文字回复提供 replyText（整段待回应用户消息），插件可设 allowSilence=true 并在 hint 中写情境规则；宿主注入并消费 [本轮不回复] 协议，前台、后台与个人云成功结束本轮，无气泡或补回。data.replyGate.silenceVersion=1 表示支持该协议。
 官方「忙碌回复」使用 chat.replyGate：挂念 0.9.21 只上传 availabilityOnly 作息（bed/wake、忙碌时段、breaks）；插件定义 peekMin、adaptive、focusedPeekProb、sleep.mode/wakeProb/bufferMin 和 urgentBypass。首次从 legacyReplySettings 导入旧设置，之后 APP 更新不覆盖插件设置。手动忙碌可读变量池 presenceOverride 的 state/at/label，以 startsAt/expiresAt 限定一次性有效期；跨午夜的云端快照使用绝对时间。没有作息和手动状态就返回 null。
 
 

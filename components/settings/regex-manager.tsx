@@ -446,6 +446,7 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
         if (typeof obj.promptOnly === "boolean") rule.promptOnly = obj.promptOnly;
         if (typeof obj.runOnEdit === "boolean") rule.runOnEdit = obj.runOnEdit;
         if (typeof obj.historyOnly === "boolean") rule.historyOnly = obj.historyOnly;
+        if (obj.historyRole === "user" || obj.historyRole === "assistant") rule.historyRole = obj.historyRole;
         if (typeof obj.substituteRegex === "number") rule.substituteRegex = obj.substituteRegex;
         if (typeof obj.minDepth === "number") rule.minDepth = obj.minDepth;
         if (typeof obj.maxDepth === "number") rule.maxDepth = obj.maxDepth;
@@ -948,11 +949,26 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
                                                                         onChange={(e) => updateRule(rule.id, e.target.checked
                                                                             // 勾上即锁定为「用户输入」：这是它唯一能生效的环节
                                                                             ? { historyOnly: true, placement: [1] }
-                                                                            : { historyOnly: undefined })} />
+                                                                            : { historyOnly: undefined, historyRole: undefined })} />
                                                                     仅历史消息
                                                                 </label>
                                                                 <span className="menu-desc !mt-0">只作用于聊天历史消息，不碰系统提示词/预设/世界书</span>
                                                             </div>
+                                                            <label className="flex flex-col gap-1 mt-2">
+                                                                <span className="menu-desc">匹配历史消息的发送者</span>
+                                                                <select className="ui-input ts-13" value={rule.historyRole || "all"}
+                                                                    onChange={(e) => {
+                                                                        const role = e.target.value;
+                                                                        updateRule(rule.id, role === "user" || role === "assistant"
+                                                                            ? { historyRole: role, historyOnly: true, placement: [1], promptOnly: true, markdownOnly: undefined }
+                                                                            : { historyRole: undefined });
+                                                                    }}>
+                                                                    <option value="all">全部（原有行为）</option>
+                                                                    <option value="user">仅用户消息</option>
+                                                                    <option value="assistant">仅角色回复</option>
+                                                                </select>
+                                                                <span className="menu-desc">按实际发送者匹配，不需要标签。替换留空会从请求中移除空的纯文本消息，聊天记录仍保留；深度沿用原有计数。</span>
+                                                            </label>
                                                         </div>
 
                                                         <div className="flex flex-col gap-1">

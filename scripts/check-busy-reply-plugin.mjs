@@ -18,7 +18,7 @@ function pluginFixture(source) {
   const set = (key, value) => { settings[key] = value; change({ ...settings }); };
   const context = {
     hooks: { transform: (point, fn) => { hooks.set(point, fn); return () => hooks.delete(point); } },
-    data: { characters: { list: () => [{ id: 'c' }] }, replyGate: { policyVersion: 1, get: a.readReplyGate }, variables: { get: (name, scope, id) => variables.get(`${name}:${id}`) } },
+    data: { characters: { list: () => [{ id: 'c' }] }, replyGate: { policyVersion: 1, silenceVersion: 1, get: a.readReplyGate }, variables: { get: (name, scope, id) => variables.get(`${name}:${id}`) } },
     system: {
       settings: { get: k => settings[k], all: () => ({ ...settings }), set, onChange: fn => { change = fn; } },
       storage: { get: k => data.get(k), set: (k, v) => data.set(k, v) },

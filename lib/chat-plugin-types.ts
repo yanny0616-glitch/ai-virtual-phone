@@ -98,6 +98,10 @@ export type PromptSystemPayload = {
     characterId?: string;
     /** 扩展提示词区：初值为各插件持久片段（ctx.prompts）聚合，可继续追加/改写 */
     hint: string;
+    /** Host supplies pending user content; absent outside ordinary one-to-one text replies. */
+    replyText?: string;
+    /** Plugin opts this turn into the host's explicit silence protocol. */
+    allowSilence?: boolean;
 };
 
 export type LlmRequestPayload = {
@@ -331,6 +335,7 @@ export type ChatPluginContext = {
         replyGate: {
             /** 1 means chat.replyGate policy hooks and source-only availability are supported. */
             readonly policyVersion: 1;
+            readonly silenceVersion?: 1;
             get(characterId: string): ReplyGate | null;
         };
     };

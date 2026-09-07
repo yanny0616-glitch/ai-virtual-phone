@@ -256,6 +256,21 @@ function stripVisionParts(messages: LlmRequestMessage[]): LlmRequestMessage[] {
     });
 }
 
+/** Drop text-only messages emptied by prompt regexes/plugins before provider conversion.
+ * Native calls/results and image parts are protocol data, even when their text is empty.
+ */
+function removeEmptyRequestMessages(messages: LlmRequestMessage[]): LlmRequestMessage[] {
+    return messages.flatMap((message): LlmRequestMessage[] => {
+        if (message.role === "tool") return [message];
+        if (message.role === "assistant" && message.toolCalls?.length) {
+            return [message.content.trim() ? message : { ...message, content: "" }];
+        }
+        if (typeof message.content === "string") return message.content.trim() ? [message] : [];
+        const content = message.content.filter(part => part.type !== "text" || part.text.trim());
+        return content.length ? [{ ...message, content } as LlmRequestMessage] : [];
+    });
+}
+
 export function buildProviderRequest(
     config: ApiConfig,
     preset: PresetConfig | null,
@@ -276,7 +291,7 @@ export function buildProviderRequest(
     // 图像识别关闭时的总闸：无论哪条路径塞入了 image_url part，一律降级为
     // "[图片]" 文本，避免不支持视觉的模型（如 DeepSeek）收到 multipart 返回 400。
     const guardedMessages = config.enableImageRecognition === true ? messages : stripVisionParts(messages);
-    const providerMessages = ensureProviderHasUserMessage(normalizeNativeToolMessageAdjacency(guardedMessages));
+    const providerMessages = ensureProviderHasUserMessage(normalizeNativeToolMessageAdjacency(removeEmptyRequestMessages(guardedMessages)));
 
     const resolved: ProviderRequestOptions = {
         ...options,

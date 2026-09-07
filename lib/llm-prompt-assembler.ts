@@ -144,6 +144,7 @@ type PromptBlock = {
     order: number;
     marker: string;
     fromHistory?: boolean;
+    historyRole?: ChatMessage["role"];
     imageUrl?: string;      // vision: image URL/data URL attached to this prompt block
     reasoning?: string;
     openRouterReasoningDetails?: unknown[];
@@ -256,6 +257,7 @@ function pushNativeToolHistoryBlock(params: {
             order,
             marker,
             fromHistory: true,
+            historyRole: msg.role,
             toolCallId: msg.nativeToolResult.toolCallId,
             toolName: msg.nativeToolResult.name,
         });
@@ -272,6 +274,7 @@ function pushNativeToolHistoryBlock(params: {
         order,
         marker,
         fromHistory: true,
+        historyRole: msg.role,
         reasoning: msg.nativeToolReasoning,
         openRouterReasoningDetails: msg.nativeToolOpenRouterReasoningDetails,
         toolCalls,
@@ -560,6 +563,7 @@ function pushChronologicalShortTermBlocks(params: {
             order: 999,
             marker: `History [${item.historyIndex}]`,
             fromHistory: true,
+            historyRole: msg.role,
             imageUrl,
         });
 
@@ -573,6 +577,7 @@ function pushChronologicalShortTermBlocks(params: {
                 order: 1000,
                 marker: `History [${item.historyIndex}] (retracted)`,
                 fromHistory: true,
+                historyRole: msg.role,
             });
         }
     });
@@ -1021,6 +1026,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 order: 999,
                 marker: `History [${distFromBottom}]`,
                 fromHistory: true,
+                historyRole: msg.role,
                 imageUrl,
             });
 
@@ -1035,6 +1041,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                     order: 1000,
                     marker: `History [${distFromBottom}] (retracted)`,
                     fromHistory: true,
+                    historyRole: msg.role,
                 });
             }
         });
@@ -1051,7 +1058,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
     const finalPayload: LLMMessage[] = [];
     blocks.forEach(b => {
         const inputCtx: RegexContext = b.fromHistory
-            ? { depth: b.depth, activeTags, history: true }
+            ? { depth: b.depth, activeTags, history: true, historyRole: b.historyRole }
             : { activeTags };
         const processedText = b.role === "tool" ? b.text : applyInputRegex(b.text, regexes, inputCtx);
         const carriesNativeToolData = b.role === "tool" || Boolean(b.toolCalls?.length);
@@ -1343,6 +1350,7 @@ export type RegexContext = {
     depth?: number;          // message depth (0 = latest)
     activeTags?: string[];   // current app tags used for tag-scoped rule filtering
     history?: boolean;       // true when the block is a chat history message (historyOnly rules only fire here)
+    historyRole?: ChatMessage["role"]; // original sender, before provider role conversion
     macroEngine?: MacroEngine;  // for {{char}} etc. in findRegex & replaceString
 };
 
@@ -1484,6 +1492,7 @@ function shouldRunRule(
     if (!matchesActiveTags(rule.tags, ctx.activeTags ?? [])) return false;
     // historyOnly gate: only fire on chat history message blocks
     if (rule.historyOnly === true && ctx.history !== true) return false;
+    if (rule.historyRole && (ctx.history !== true || ctx.historyRole !== rule.historyRole)) return false;
 
     // markdownOnly / promptOnly / default filtering
     const { isMarkdown = false, isPrompt = false, isEdit = false, depth } = ctx;
@@ -1724,6 +1733,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
             order: 999,
             marker: `History [${item.historyIndex}]`,
             fromHistory: true,
+            historyRole: msg.role,
             imageUrl,
         });
     });
@@ -2206,6 +2216,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 order: 999,
                 marker: `History [${distFromBottom}]`,
                 fromHistory: true,
+                historyRole: msg.role,
                 imageUrl,
             });
         });
@@ -2221,7 +2232,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
     const finalPayload: LLMMessage[] = [];
     blocks.forEach(b => {
         const inputCtx: RegexContext = b.fromHistory
-            ? { depth: b.depth, activeTags, history: true }
+            ? { depth: b.depth, activeTags, history: true, historyRole: b.historyRole }
             : { activeTags };
         const processedText = b.role === "tool" ? b.text : applyInputRegex(b.text, regexes, inputCtx);
         const carriesNativeToolData = b.role === "tool" || Boolean(b.toolCalls?.length);
@@ -2311,7 +2322,7 @@ export function applyAllOutputRegex(text: string, regexGroups: RegexConfig[], ct
         for (const rule of group.rules) {
             if (rule.disabled) continue;
             if (!rule.placement?.includes(2)) continue;
-            if (rule.promptOnly) continue;
+            if (rule.promptOnly || rule.historyRole) continue;
             if (!matchesActiveTags(rule.tags, ctx?.activeTags ?? [])) continue;
             try {
                 result = runRegexRule(rule, result, ctx?.macroEngine);
@@ -2338,7 +2349,7 @@ export function applyAllReasoningRegex(text: string, regexGroups: RegexConfig[],
         for (const rule of group.rules) {
             if (rule.disabled) continue;
             if (!rule.placement?.includes(6)) continue;
-            if (rule.promptOnly) continue;
+            if (rule.promptOnly || rule.historyRole) continue;
             if (!matchesActiveTags(rule.tags, ctx?.activeTags ?? [])) continue;
             try {
                 result = runRegexRule(rule, result, ctx?.macroEngine);

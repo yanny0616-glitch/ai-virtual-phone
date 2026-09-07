@@ -721,20 +721,20 @@ Deno.serve(async (request: Request) => {
     // a worker that already claimed the row cannot be overwritten or restarted.
     if (action === "deferred-reply") {
       const config = await loadConfig();
-      const supported = async () => {
+      const supported = async (capability = "deferred-reply-v2") => {
         const response = await fetch(`${supabaseUrl}/functions/v1/push-generate`, {
           method: "POST", headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ action: "capabilities", token: config.cron_secret }),
           signal: AbortSignal.timeout(10_000),
         });
         const data = await response.json().catch(() => null);
-        return response.ok && data?.capabilities?.includes("deferred-reply-v2") === true;
+        return response.ok && data?.capabilities?.includes(capability) === true;
       };
       const key = cleanText(url.searchParams.get("key"), 200);
       if (!key) {
         if (request.method !== "GET") return json({ ok: false }, 400);
         const ready = await supported();
-        return json({ ok: true, supported: ready, policySupported: ready });
+        return json({ ok: true, supported: ready, policySupported: ready, silenceSupported: ready && await supported("chat-silence-v1") });
       }
       if (!/^deferred:[A-Za-z0-9_-]{1,150}$/.test(key)) return json({ ok: false, error: "Invalid deferred key" }, 400);
       const filter = `push_jobs?user_id=eq.${OWNER_ID}&trigger_key=eq.${encodeURIComponent(key)}`;
@@ -767,6 +767,7 @@ Deno.serve(async (request: Request) => {
       if (!await supported()) return json({ ok: false, unsupported: true, error: "请更新 push-generate" }, 409);
       const body = await request.json().catch(() => null);
       const payload = body?.payload;
+      if (payload?.allowSilence && !await supported("chat-silence-v1")) return json({ ok: false, unsupported: true, error: "请更新支持不回复的 push-generate" }, 409);
       if (!payload?.request?.url || !payload?.deferredReply?.timing || !Number.isSafeInteger(payload.deferredReply.revision)
         || payload.deferredReply.revision < 1 || !Number.isFinite(payload.deferredReply.timing.nextAt)
         || !Array.isArray(payload.deferredReply.timing.windows) || !Array.isArray(payload.deferredReply.timing.sleeps)) {

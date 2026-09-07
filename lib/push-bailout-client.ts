@@ -8,7 +8,7 @@ import { buildChatPromptMessages } from "./chat-engine";
 import { buildProviderRequest, toLlmRequestMessages, type LlmRequestPayload } from "./llm-provider-adapter";
 import { loadChatMessages, loadChatSessions, loadFollowUpSchedule, type ChatMessage, type ChatSession } from "./chat-storage";
 import { hasAccountPushSubscription, isWithinPushQuietHours, loadPushQuietHours, peekAccountPushSubscribed } from "./push-client";
-import { isPersonalPushCloudActive, pushJobsFetch } from "./personal-push-cloud";
+import { isPersonalPushCloudActive, pushJobsFetch, personalPushFetch } from "./personal-push-cloud";
 import {
     buildOfflineShortcutContinuation,
     maybeAppendShortcutCapability,
@@ -131,11 +131,18 @@ export async function armReplyBailout(params: {
     /** 云回复必须排在这条本地输入之后；跨设备排序不能只依赖两边时钟。 */
     replyAfter?: { localMessageId: string; createdAt: string };
     signal?: AbortSignal;
+    allowSilence?: boolean;
+    silenceThinkingTag?: string;
 }): Promise<ReplyBailoutHandle | null> {
     if (!bailoutEnabled()) return null;
     if (!(await hasAccountPushSubscription())) return null;
     if (params.signal?.aborted) return null;
 
+    if (params.allowSilence) {
+        const capability = await personalPushFetch("deferred-reply", { method: "GET", signal: params.signal });
+        const data = await capability.json().catch(() => null);
+        if (!capability.ok || !data?.silenceSupported) return null;
+    }
     const triggerKey = `reply:${params.sessionId}`;
     const armAt = new Date().toISOString();
     // 通知头像用：本库 session.contactId 存的直接就是 characterId
@@ -148,6 +155,8 @@ export async function armReplyBailout(params: {
             kind: "reply_bailout",
             executeAt: new Date(Date.now() + REPLY_BAILOUT_LEASE_MS).toISOString(),
             payload: {
+                allowSilence: params.allowSilence === true,
+                silenceThinkingTag: params.silenceThinkingTag,
                 request: {
                     url: params.request.url,
                     headers: params.request.headers,

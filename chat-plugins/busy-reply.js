@@ -4,12 +4,13 @@ const busyReplyPlugin = {
     id: "busy-reply",
     name: "忙碌回复",
     apiVersion: 1,
-    version: "1.0.0",
+    version: "1.1.0",
     author: "Float",
-    description: "忙时延后、专注时按概率偷空回复。读取挂念或其他 APP 的作息，也支持「在线状态」里的手动忙碌；离线执行复用小手机个人云。首次读取时导入旧挂念设置。",
+    description: "忙时延后、专注时按概率偷空回复，也允许角色根据情境选择本轮不回。读取挂念或其他 APP 的作息，也支持「在线状态」里的手动忙碌；离线执行复用小手机个人云。首次读取时导入旧挂念设置。",
     permissions: ["chat.read", "storage"],
     settings: [
-      { key: "enabled", label: "启用忙碌和睡眠回复规则", type: "boolean", default: true },
+      { key: "enabled", label: "启用忙碌、睡眠和不回复规则", type: "boolean", default: true },
+      { key: "allowSilence", label: "允许角色选择不回复", type: "boolean", default: true, description: "结合人设、关系、情绪和上下文选择沉默；不生成气泡、不安排补回，新消息到来后重新判断。仍会调用模型。" },
       { key: "adaptive", label: "根据日程找空档", type: "boolean", default: true },
       { key: "peekMin", label: "偷空等待／检查间隔（分钟）", type: "number", default: 3, description: "0 不等待；按此间隔上下浮动四成，连续发送不会重置计时。" },
       { key: "focusedPeekProb", label: "专注中偷空回复的概率（%）", type: "number", default: 25, description: "每次检查抽一次。0 只等休息或结束，100 首次检查时回；没有细排也适用。" },
@@ -22,6 +23,7 @@ const busyReplyPlugin = {
   },
   setup(ctx) {
     if (ctx.data.replyGate.policyVersion !== 1) throw new Error("请先更新小手机宿主，再启用忙碌回复插件。");
+    if (ctx.data.replyGate.silenceVersion !== 1) throw new Error("请先更新小手机宿主，再使用支持不回复的忙碌回复插件。");
     const fields = ["enabled", "adaptive", "peekMin", "focusedPeekProb", "sleepMode", "wakeProb", "wakeBufferMin", "urgentBypass", "manualBusyMin"];
     const num = (key, fallback, lo, hi) => {
       const n = Number(ctx.system.settings.get(key));
@@ -50,6 +52,23 @@ const busyReplyPlugin = {
       const next = JSON.stringify(settings);
       if (next !== observed) ctx.system.storage.set("migrationDone", true);
       observed = next;
+    });
+    ctx.hooks.transform("prompt.system", p => {
+      if (p.isGroup || p.replyText == null || ctx.system.settings.get("enabled") === false
+          || ctx.system.settings.get("allowSilence") === false) return p;
+      const urgent = /救命|出事|紧急|急事|报警|医院|受伤|流血|不舒服|害怕|崩溃|不想活|马上回|立刻回|快回|现在就回/;
+      if (ctx.system.settings.get("urgentBypass") !== false && urgent.test(p.replyText.replace(/\s+/g, ""))) return p;
+      const states = ["presence", "presenceOverride", "affection"].map(name => {
+        const value = ctx.data.variables.get(name, "character", p.characterId);
+        return value == null ? "" : name + ": " + JSON.stringify(value).slice(0, 1500);
+      }).filter(Boolean).join("\n");
+      return { ...p, allowSilence: true, hint: p.hint + "\n" + [
+        "是否回应由你结合人设、关系、已有剧情、情绪、当前状态和整段待回应消息判断，不是每条消息都必须回复。",
+        "既可以在确认、道别、明确不用回时结束对话，也可以因生气、不知如何回答、需要独处、不愿继续话题，或错过回应时机而选择沉默；这些必须有上下文依据，不要凭空制造矛盾、机械按关键词或随机漏回。即使对方提出问题，也不代表你在任何情境下都必须回答。",
+        "新消息到来时重新判断，既不强制补答此前每条消息，也不自动结束符合当前情境的沉默。明确求助或紧急情况应优先回应。",
+        "忙碌或睡眠的时间说明只代表现在有机会看消息，不强制你回应。选择不回时不承诺稍后补回，不写沉默旁白、解释或省略号气泡。",
+        states ? "当前共享状态（结合时间判断是否仍有效）：\n" + states : "",
+      ].filter(Boolean).join("\n") };
     });
     ctx.hooks.transform("chat.replyGate", p => {
       migrate(p.source);

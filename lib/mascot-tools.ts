@@ -579,6 +579,7 @@ const REGEX_RULE_OBJ = {
         disabled: { type: "boolean" },
         markdownOnly: { type: "boolean", description: "仅显示层应用，不影响存储" },
         promptOnly: { type: "boolean", description: "仅 prompt 应用，不影响显示" },
+        historyRole: { type: "string", enum: ["user", "assistant"], description: "仅匹配历史消息的实际发送者：user=用户，assistant=角色。配合 historyOnly=true、placement=[1]、promptOnly=true；无需依赖正文标签。省略为原有全部发送者行为。" },
         historyOnly: { type: "boolean", description: "仅历史消息（true=这条规则只作用于聊天历史消息，不碰系统提示词/预设/世界书）。与「用户输入」位置 + promptOnly 组合时，可精确剥离历史消息里的自定义标签（如 <thinking>/<pixel-console>），且不会误删系统提示词里的格式约束示例" },
         substituteRegex: { type: "string", enum: ["0", "1", "2"], description: "0=不替换 1=原始替换 2=转义后替换宏（如{{user}}）" },
         minDepth: { type: "number", description: "最小消息深度（可选）。最近一条消息 depth=0，越旧数字越大；-1=不限制最小深度，即只看最新一条往前的范围下界。不传=不限" },
@@ -2590,6 +2591,7 @@ async function handleReadRegexGroup(args: Record<string, unknown>): Promise<Tool
         lines.push(`    tags: ${JSON.stringify(r.tags || ["chat", "text"])}`);
         lines.push(`    placement: ${JSON.stringify(r.placement)}`);
         lines.push(`    markdownOnly: ${r.markdownOnly ? "true" : "false"} / promptOnly: ${r.promptOnly ? "true" : "false"} / historyOnly: ${r.historyOnly ? "true" : "false"} / substituteRegex: ${r.substituteRegex ?? 0}`);
+        lines.push(`    historyRole: ${r.historyRole || "all"}`);
         lines.push(`    minDepth: ${r.minDepth != null ? r.minDepth : "不限"} / maxDepth: ${r.maxDepth != null ? r.maxDepth : "不限"}`);
     });
     return { name: "读取正则组", success: true, data: lines.join("\n") };
@@ -2621,6 +2623,7 @@ function normalizeRule(r: Record<string, unknown>): Record<string, unknown> {
         markdownOnly: r.markdownOnly ?? false,
         promptOnly: r.promptOnly ?? false,
         historyOnly: r.historyOnly ?? false,
+        historyRole: r.historyRole === "user" || r.historyRole === "assistant" ? r.historyRole : undefined,
         substituteRegex: numberOption(r.substituteRegex, 0),
         runOnEdit: r.runOnEdit ?? false,
         trimStrings: r.trimStrings || [],

@@ -46,7 +46,7 @@ export function freezeDeferredReplyTiming(rec: DeferredReply): CloudReplyTiming 
     };
 }
 
-type Receipt = { ok?: boolean; supported?: boolean; policySupported?: boolean; status?: string; executeAt?: string; resultNote?: string; error?: string };
+type Receipt = { ok?: boolean; supported?: boolean; policySupported?: boolean; silenceSupported?: boolean; status?: string; executeAt?: string; resultNote?: string; error?: string };
 async function request(method: string, key?: string, payload?: unknown): Promise<Receipt> {
     const response = await personalPushFetch("deferred-reply", {
         method, ...(payload ? { body: JSON.stringify({ payload }) } : {}), signal: AbortSignal.timeout(20_000),
@@ -111,7 +111,8 @@ async function sync(sessionId: string): Promise<void> {
             const session = loadChatSessions().find(s => s.id === sessionId && !s.isGroup);
             if (!session) throw new Error("聊天会话不存在，离线等待未同步");
             const history = loadChatMessages(sessionId);
-            const { llmMessages, character, config, preset, regexes, userIdentity } = await buildChatPromptMessages(session, history, { appTags: ["chat", "text"] });
+            const { llmMessages, character, config, preset, regexes, userIdentity, allowSilence } = await buildChatPromptMessages(session, history, { appTags: ["chat", "text"] });
+            if (allowSilence && !(await request("GET")).silenceSupported) throw new Error("请更新支持沉默结果的个人云网关和 push-generate");
             maybeAppendShortcutCapability(llmMessages, { continuationAvailable: false });
             const req = buildProviderRequest(config, preset, toLlmRequestMessages(llmMessages));
             const latest = current();
@@ -122,6 +123,8 @@ async function sync(sessionId: string): Promise<void> {
             receipt = await request("POST", key, {
                 request: { url: req.url, headers: req.headers, body: req.body, providerKind: req.providerKind },
                 deferredReply: { revision, timing: freezeDeferredReplyTiming(latest) },
+                allowSilence,
+                silenceThinkingTag: preset?.online_thinking_tag,
                 notify: { title: character.name, url: "/", characterId: character.id },
                 merge: { sessionId, prevCount: 0, regexes, characterName: character.name, userName: userIdentity?.name ?? "用户",
                     appId: "chat", appTags: ["chat", "text"], armAt: new Date().toISOString(),
@@ -138,7 +141,7 @@ async function sync(sessionId: string): Promise<void> {
         if (["done", "failed", "cancelled"].includes(receipt.status ?? "")) {
             writeDeferredReply(sessionId, { ...latest, firedAt: Date.now(), note: "", cloud: { ...latest.cloud, state: receipt.status as "done" | "failed" | "cancelled" } });
             if (receipt.status === "failed") notify(sessionId, "云端延后回复失败，可重新触发回复；详情见云端任务日志");
-            else if (updating && receipt.status === "done") notify(sessionId, "上一轮已生成，刚补充的内容未合并；可再次触发回复");
+            else if (updating && receipt.status === "done" && receipt.resultNote !== "reply silenced") notify(sessionId, "上一轮已生成，刚补充的内容未合并；可再次触发回复");
             return;
         }
         const synced = receipt.status === "pending" && updating;

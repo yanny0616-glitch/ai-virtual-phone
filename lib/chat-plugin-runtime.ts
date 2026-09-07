@@ -393,6 +393,7 @@ class ChatPluginRuntime {
                 },
                 replyGate: {
                     policyVersion: 1,
+                    silenceVersion: 1,
                     get: (characterId) => readReplyGate(characterId),
                 },
             },

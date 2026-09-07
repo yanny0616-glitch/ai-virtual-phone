@@ -19,6 +19,8 @@ const failures = [];
 const timing = readFileSync(resolve(root, "lib/deferred-reply-timing.ts"), "utf8").replace(/^export /gm, "").trim();
 const worker = readFileSync(resolve(root, "supabase/functions/push-generate/index.ts"), "utf8");
 if (!worker.includes(`// BEGIN DEFERRED REPLY TIMING\n${timing}\n// END DEFERRED REPLY TIMING`)) failures.push("云端延后回复规则与共享源码不一致");
+const silence = readFileSync(resolve(root, "lib/chat-silence-protocol.ts"), "utf8").replace(/^export /gm, "").trim();
+if (!worker.includes(`// BEGIN CHAT SILENCE PROTOCOL\n${silence}\n// END CHAT SILENCE PROTOCOL`)) failures.push("云端沉默协议与共享源码不一致");
 for (const [source, output] of pairs) {
   const sourceText = readFileSync(resolve(root, source), "utf8");
   const outputText = readFileSync(resolve(root, output), "utf8");
