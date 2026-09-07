@@ -21,7 +21,6 @@ import { loadNativeTimeline, formatTimelineForSummarization, filterTimelineByAll
 import { generateEmbedding, resolveEmbeddingModel } from "./memory-embedding";
 import { simpleLLMCall } from "./api-helpers";
 import { maybeRunCoreMemoryPipeline } from "./core-memory-builder";
-import { maybeRunShiguang } from "./shiguang-summarizer";
 
 /** Per-character lock to prevent concurrent summarization. */
 const summarizingSet = new Set<string>();
@@ -36,8 +35,7 @@ export async function maybeRunSummarization(
     characterName: string
 ): Promise<void> {
     const config = loadMemoryConfig();
-    // Independent cadence and progress: neither pipeline resets the other.
-    const tasks: Promise<unknown>[] = [maybeRunShiguang(characterId, characterName)];
+    const tasks: Promise<unknown>[] = [];
     if (config.autoSummarizeEnabled && getEventCounter(characterId) >= config.summarizationEventInterval && !summarizingSet.has(characterId)) {
         tasks.push(runSummarizationPipeline(characterId, characterName).then(result => {
             if (!result.success) console.warn("[MemorySummarizer]", result.error);

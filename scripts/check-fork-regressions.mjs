@@ -750,7 +750,7 @@ await import('./check-gua-nian-energy.mjs');
 await import('./check-reply-gate.mjs');
 await import('./check-busy-reply-plugin.mjs');
 await import('./check-push-outbox-plugins.mjs');
-await import('./check-shiguang.mjs');
+await import('./check-shiguang-app.mjs');
 await import('./check-persistence-and-proxy.mjs');
 await import('./check-usage-logs.mjs');
 console.log(`Passed ${results.length} fork regression checks, push outbox plugin checks and Shiguang checks.`);

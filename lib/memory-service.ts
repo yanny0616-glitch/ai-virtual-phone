@@ -6,7 +6,6 @@ import { loadMemoryEntriesByType } from "./memory-storage";
 import { resolveAuxiliaryApiConfig } from "./settings-storage";
 import { generateEmbedding, resolveEmbeddingModel, cosineSimilarity } from "./memory-embedding";
 import { estimateTokens } from "./token-counter";
-import { selectShiguangForPrompt } from "./shiguang-domain";
 
 /**
  * Retrieve relevant long-term memories for prompt injection.
@@ -21,14 +20,7 @@ export async function retrieveMemoriesForPrompt(
     currentContext: string,
     config: MemoryConfig
 ): Promise<MemoryEntry[]> {
-    const longTerm = await retrieveLongTermMemories(characterId, currentContext, config);
-    if (!config.shiguangEnabled) return longTerm;
-    const [entries, core] = await Promise.all([
-        loadMemoryEntriesByType(characterId, "shiguang"),
-        retrieveCoreMemoriesForPrompt(characterId, config),
-    ]);
-    const picked = selectShiguangForPrompt(entries, currentContext, config.shiguangTokenBudget, new Date(), [...longTerm, ...core].map(e => e.content).join("\n"));
-    return [...longTerm, ...picked];
+    return retrieveLongTermMemories(characterId, currentContext, config);
 }
 
 async function retrieveLongTermMemories(characterId: string, currentContext: string, config: MemoryConfig): Promise<MemoryEntry[]> {

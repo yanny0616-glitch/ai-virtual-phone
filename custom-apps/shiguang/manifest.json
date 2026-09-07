@@ -1,12 +1,33 @@
 {
   "id": "float.shiguang",
   "name": "拾光",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "sdkVersion": "1.0",
   "author": "Float",
-  "description": "按角色收藏共同经历，查看并编辑供 AI 回忆的摘要，管理优先携带、按话题回忆和不发送。直接接续原有拾光记忆与整理进度。",
+  "description": "按角色收藏共同经历：自动从聊天里整理出值得记住的小事，按话题带进下一次对话。摘要可见可编辑，发送方式随你定。",
   "icon": "icon.svg",
   "entry": "index.html",
-  "permissions": ["characters.read", "memory.readShiguang", "memory.writeShiguang", "memory.organizeShiguang"],
+  "permissions": [
+    "app.data.read",
+    "app.data.write",
+    "characters.read",
+    "chat.read",
+    "chat.read.background",
+    "chat.context",
+    "ai.chat",
+    "ui.toast",
+    "memory.readShiguang"
+  ],
+  "extensions": {
+    "events": [
+      {
+        "event": "chat.message.created",
+        "entry": "organize",
+        "background": true,
+        "timeoutMs": 600000,
+        "description": "每条私聊新消息：按最近话题刷新注入的拾光；攒够轮数就自动整理。"
+      }
+    ]
+  },
   "primaryTags": []
 }

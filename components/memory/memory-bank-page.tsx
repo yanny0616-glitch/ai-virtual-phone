@@ -175,7 +175,6 @@ type CharacterMemoryInfo = {
     character: Character;
     longTermCount: number;
     coreCount: number;
-    shiguangCount: number;
     shortTermCount: number;
 };
 
@@ -233,21 +232,19 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
             seen.add(id);
             let ltCount = 0;
             let coreCount = 0;
-            let shiguangCount = 0;
             try {
-                [ltCount, coreCount, shiguangCount] = await Promise.all([
+                [ltCount, coreCount] = await Promise.all([
                     getMemoryCountByType(id, "long_term"),
                     getMemoryCountByType(id, "core"),
-                    loadMemoryEntriesByType(id, "shiguang").then(entries => entries.filter(e => e.shiguang && !e.shiguang.deletedAt).length),
                 ]);
             } catch { /* ignore */ }
-            infos.push({ character: char, longTermCount: ltCount, coreCount, shiguangCount, shortTermCount: 0 });
+            infos.push({ character: char, longTermCount: ltCount, coreCount, shortTermCount: 0 });
         }
 
         // Remaining characters
         for (const char of allChars) {
             if (seen.has(char.id)) continue;
-            infos.push({ character: char, longTermCount: 0, coreCount: 0, shiguangCount: 0, shortTermCount: 0 });
+            infos.push({ character: char, longTermCount: 0, coreCount: 0, shortTermCount: 0 });
         }
 
         if (isCancelled?.()) return;
@@ -1217,7 +1214,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
 
                     <div className="mem-picker-footer">
                         <span>OBSERVER · 记忆观察员</span>
-                        <span>{characters.length} PROFILES · {characters.reduce((s, c) => s + c.shortTermCount + c.coreCount + c.longTermCount + c.shiguangCount, 0)} RECORDS</span>
+                        <span>{characters.length} PROFILES · {characters.reduce((s, c) => s + c.shortTermCount + c.coreCount + c.longTermCount, 0)} RECORDS</span>
                         <span>{new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" })}</span>
                     </div>
                 </div>

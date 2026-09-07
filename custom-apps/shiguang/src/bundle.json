@@ -1,0 +1,14 @@
+[
+  "core/runtime.js",
+  "data/storage.js",
+  "chat/history.js",
+  "chat/context.js",
+  "core/organize.js",
+  "data/migrate.js",
+  "core/background.js",
+  "ui/main.js",
+  "ui/editor.js",
+  "ui/sources.js",
+  "ui/settings.js",
+  "bootstrap.js"
+]

@@ -39,8 +39,6 @@ export type CustomAppPermission =
   | "world.write"
   | "world.activate"
   | "memory.readShiguang"
-  | "memory.writeShiguang"
-  | "memory.organizeShiguang"
   | "memory.readCore"
   | "memory.readLongTerm"
   | "memory.readShortTerm"

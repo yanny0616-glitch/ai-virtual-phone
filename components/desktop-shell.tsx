@@ -2389,6 +2389,16 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
   }, []);
   handleInstallCustomAppToDesktopRef.current = handleInstallCustomAppToDesktop;
 
+  // 宿主自带的 APP（拾光）在别处装好后，靠这个事件把图标摆上桌面
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const app = (event as CustomEvent<{ app?: InstalledCustomApp }>).detail?.app;
+      if (app) handleInstallCustomAppToDesktopRef.current?.(app);
+    };
+    window.addEventListener("custom-app-installed", handler);
+    return () => window.removeEventListener("custom-app-installed", handler);
+  }, []);
+
   // Allow other components to switch apps via custom event
   const [activeChatSession, setActiveChatSession] = useState<ChatSession | null>(null);
   const [customAppLaunchContext, setCustomAppLaunchContext] = useState<CustomAppLaunchState | null>(null);

@@ -258,8 +258,6 @@ function normalizePermission(value: unknown): CustomAppPermission | null {
     "world.write",
     "world.activate",
     "memory.readShiguang",
-    "memory.writeShiguang",
-    "memory.organizeShiguang",
     "memory.readCore",
     "memory.readLongTerm",
     "memory.readShortTerm",
