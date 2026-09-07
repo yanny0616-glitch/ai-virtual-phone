@@ -23,7 +23,6 @@
         if (!Number.isInteger(roundInterval) || roundInterval < 5 || roundInterval > 80) throw new Error("整理间隔须在 5–80 之间");
         if (!Number.isInteger(tokenBudget) || tokenBudget < 200 || tokenBudget > 4000) throw new Error("回忆预算须在 200–4000 之间");
         await patchSettings({ enabled: form.elements.enabled.checked, autoEnabled: form.elements.autoEnabled.checked, roundInterval, tokenBudget });
-        contextCache.clear();
         render(); $("settings-notice").textContent = "已保存，所有角色使用这组拾光设置。";
         if (S.characterId) syncContext(S.characterId).catch(() => {});
       } catch (err) { $("settings-notice").textContent = errText(err); }

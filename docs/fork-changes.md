@@ -16,6 +16,12 @@
 
 ## B. 功能与修复
 
+### 预设一键补齐功能条目（2026-09-07）
+
+- 预设详情的条目列表上方新增「一键补齐功能条目」，用户点击后只为当前预设补齐 `PATCHABLE_PROMPT_IDS` 必要入口清单中的缺项，目前为单聊、群聊 APP 实时状态。旧自创、新建、导入及内置预设均可使用；不自动批量修改其他预设。
+- 保留原有内容、排序及关闭状态；识别改名后手动写入 `{{customAppContext}}` 的同场景条目，避免重复注入。新入口追加在原有条目之后，兼容没有顺序表、条目未列入顺序表和残留关闭记录的旧预设。以后增加必要入口时维护同一份清单。
+- 专项验证：`node scripts/check-preset-feature-repair.mjs`。
+
 ### 云端消息接续、补收和历史修复（2026-09-07，本地未发布）
 
 - 云端回箱只按确切 outbox 批次去重，移除 `armAt`、follow-up 次数和同批 `trigger_key` 的误丢判断。延后回复回执保留实际处理的用户消息 ID；旧轮次完成时，尚未处理的新消息进入具有独立任务 ID 的下一轮。
@@ -38,6 +44,7 @@
 
 ### 拾光独立 APP（2026-09-07，2.0）
 
+- 2.0.3 修复同文注入不续期：`syncContext` 每次同步都写 `chat.setContext`，避免跨天或超过宿主 6 小时过期后，即使继续收到事件也因文本相同而一直漏掉记忆。专项脚本 `check-shiguang-context.mjs` 使用真实宿主状态格式化器验证过期后恢复、跨天刷新、角色隔离和关闭撤销，已接入 `check:shiguang-app`；首轮事件时序边界保持不变。
 - `custom-apps/shiguang` 是真正的独立 APP：记录存在 APP 自己的 db，整理（`ai.chat`）、回忆选取、注入（`chat.setContext`）、自动触发（`chat.message.created` 后台事件）全在 APP 内。目录结构与挂念一致（`src/domain/*.mjs` 纯函数 + 闭包模块 + `bundle.json`），`scripts/build-shiguang.mjs` 合成单文件。架构与关键决定见 `custom-apps/shiguang/ARCHITECTURE.md`。
 - 宿主删除了整个拾光管线：`lib/shiguang-summarizer.ts`、`lib/shiguang-domain.ts`、`memory-service` 的注入、`memory-summarizer` / `follow-up-service` 的触发、`memory-storage` 的编辑与水位函数、运行器里的六个专属 bridge 动作及 `memory.writeShiguang` / `memory.organizeShiguang` 权限。只保留只读的 `memory.readShiguang`（`lib/shiguang-app-api.ts`），供 APP 第一次打开时把 2.0 之前存在记忆库里的旧记录搬走。`lib/shiguang-types.ts` 与 `MemoryEntry.type = "shiguang"` 保留，旧数据仍可备份恢复。
 - 记忆库的「拾光」标签与设置区只剩打开 APP 的入口（`components/memory/shiguang-panel.tsx`），不再统计拾光条数。

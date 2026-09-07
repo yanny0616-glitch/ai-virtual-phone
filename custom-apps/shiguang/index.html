@@ -566,7 +566,6 @@ return Object.freeze(exports);
   /* ================= 注入聊天提示词 ================= */
   // 覆盖式写一段进角色的提示词，宿主排在聊天历史之后。每来一条消息就按最近几句
   // 重算一次，所以「按话题回忆」跟的是上一轮话题；关掉拾光要写空串撤销。
-  const contextCache = new Map();
   async function syncContext(cid, recent) {
     const settings = await loadSettings();
     let text = "";
@@ -576,9 +575,8 @@ return Object.freeze(exports);
       const picked = ShiguangRecall.selectForPrompt(entries, messages.map(m => m.content).join("\n"), settings.tokenBudget, new Date());
       text = ShiguangRecall.contextText(picked);
     }
-    if (contextCache.get(cid) === text) return text;
+    // 宿主按更新时间淘汰超过 6 小时或跨天的状态；文字没变也要续期。
     await S.api.chat.setContext({ characterId: cid, label: "", text });
-    contextCache.set(cid, text);
     return text;
   }
   /* ================= 整理：聊天 → 拾光 ================= */
@@ -621,7 +619,6 @@ return Object.freeze(exports);
         }
         const last = sources[sources.length - 1];
         await saveProgress(cid, { watermarkAt: String(last.createdAt), watermarkId: last.id, lastRunAt: now, lastError: "", retryAfter: "" });
-        contextCache.delete(cid);
         return { success: true, saved, hasMore: sources.length < pending.length };
       } catch (err) {
         const message = errText(err);
@@ -941,7 +938,6 @@ ${field("title", "标题", e.title, 1)}${field("summary", "记忆简述", e.summ
         if (!Number.isInteger(roundInterval) || roundInterval < 5 || roundInterval > 80) throw new Error("整理间隔须在 5–80 之间");
         if (!Number.isInteger(tokenBudget) || tokenBudget < 200 || tokenBudget > 4000) throw new Error("回忆预算须在 200–4000 之间");
         await patchSettings({ enabled: form.elements.enabled.checked, autoEnabled: form.elements.autoEnabled.checked, roundInterval, tokenBudget });
-        contextCache.clear();
         render(); $("settings-notice").textContent = "已保存，所有角色使用这组拾光设置。";
         if (S.characterId) syncContext(S.characterId).catch(() => {});
       } catch (err) { $("settings-notice").textContent = errText(err); }

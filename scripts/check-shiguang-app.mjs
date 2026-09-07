@@ -6,6 +6,7 @@ import { defaultSummary, promptText, selectForPrompt, contextText, recallMode } 
 import { selectCandidates, buildPrompt, parseResult, parseJsonObject, formatEvents } from "../custom-apps/shiguang/src/domain/extraction.mjs";
 import { checkShiguangBuild } from "./build-shiguang.mjs";
 import { readFileSync } from "node:fs";
+import "./check-shiguang-context.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };

@@ -30,6 +30,7 @@ import { SettingsContext } from "../phone-settings-app";
 import { BottomSheet, ConfirmDialog, TextExpandModal } from "@/components/ui/modal";
 import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
+import { completePresetFeatures } from "@/lib/preset-feature-repair";
 import { useTouchSort } from "@/lib/use-touch-sort";
 
 // ── Tag helpers for backward compat (tags[] > featureTag + followUpOnly) ──
@@ -294,6 +295,7 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
     const [parameterPickerOpen, setParameterPickerOpen] = useState(false);
     const [expandTarget, setExpandTarget] = useState<{ identifier: string; field: string } | null>(null);
     const [importError, setImportError] = useState<string | null>(null);
+    const [featureNotice, setFeatureNotice] = useState<{ presetId: string; text: string } | null>(null);
     const [customApps, setCustomApps] = useState<InstalledCustomApp[]>([]);
     // ── 多选模式（右滑选中 / 批量操作 / 多选拖拽） ──
     const [selectMode, setSelectMode] = useState(false);
@@ -660,6 +662,19 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
 
     const updatePreset = (id: string, updates: Partial<PresetConfig>) => {
         persist(presets.map(p => p.id === id ? { ...p, ...updates, updatedAt: Date.now() } : p));
+    };
+
+    const completeFeatures = (preset: PresetConfig) => {
+        const result = completePresetFeatures(preset);
+        if (result.added.length) {
+            updatePreset(preset.id, { prompts: result.preset.prompts, prompt_order: result.preset.prompt_order });
+        }
+        setFeatureNotice({
+            presetId: preset.id,
+            text: result.added.length
+                ? `已补齐 ${result.added.length} 个条目：${result.added.map(prompt => prompt.name).join("、")}。`
+                : "功能条目已齐全；已有条目的开关保持不变。",
+        });
     };
 
     const toggleGenerationParameter = (preset: PresetConfig, key: GenerationParameterKey) => {
@@ -1409,6 +1424,20 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
 
                                 {/* Prompts Section */}
                                 <div className="flex flex-col gap-4 mt-3">
+                                    <div className="flex flex-col gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => completeFeatures(preset)}
+                                            className="ui-btn ui-btn-secondary w-full min-h-[44px] focus-visible:outline-2 focus-visible:outline-offset-2"
+                                        >
+                                            <Plus size={16} aria-hidden="true" />
+                                            一键补齐功能条目
+                                        </button>
+                                        <p className="menu-desc ts-12">为当前预设补齐缺少的必要功能入口，保留已有内容、排序和开关。</p>
+                                        <p role="status" className="menu-desc ts-12">
+                                            {featureNotice?.presetId === preset.id ? featureNotice.text : ""}
+                                        </p>
+                                    </div>
                                     <div className="mx-2 mb-0 mt-2 flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             <h2 className="ts-20 font-bold leading-none text-black">Prompt Entries ({preset.prompts?.length || 0})</h2>

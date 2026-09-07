@@ -13,7 +13,7 @@ export const BUILTIN_PRESET_VERSION = 264; // 升版本会用出厂内容重写�
  *  所以改过内置预设的用户也能拿到新条目，不会被打回出厂。 */
 export const BUILTIN_PROMPT_PATCH_VERSION = 1;
 
-/** 允许被补丁补回来的条目。只列新加的——不然用户主动删掉的老条目会被一起塞回去。 */
+/** 必要入口清单，供内置预设补丁和用户主动「一键补齐功能条目」共用。仅列可独立补齐的接入项。 */
 export const PATCHABLE_PROMPT_IDS = ["custom_app_context", "custom_app_context_group"];
 
 export function createBuiltinPreset(): PresetConfig {

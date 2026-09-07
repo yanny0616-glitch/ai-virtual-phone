@@ -38,7 +38,6 @@
         }
         const last = sources[sources.length - 1];
         await saveProgress(cid, { watermarkAt: String(last.createdAt), watermarkId: last.id, lastRunAt: now, lastError: "", retryAfter: "" });
-        contextCache.delete(cid);
         return { success: true, saved, hasMore: sources.length < pending.length };
       } catch (err) {
         const message = errText(err);
