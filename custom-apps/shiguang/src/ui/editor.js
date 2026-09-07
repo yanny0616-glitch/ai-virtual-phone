@@ -1,22 +1,39 @@
-  /* ================= 编辑、删除 ================= */
+  /* ================= 卡片内编辑、删除 ================= */
   const LIMITS = { title: 60, summary: 200, reason: 1200, story: 1200, facts: 5500, significance: 600, followup: 1000, promptSummary: 600 };
-  function input(name, label, value, rows = 3) {
+  function field(name, label, value, rows = 2) {
     const max = LIMITS[name] || 1200;
-    return `<label>${esc(label)}<textarea name="${name}" maxlength="${max}" rows="${rows}" ${["title", "summary", "promptSummary"].includes(name) ? "required" : ""}>${esc(value)}</textarea><small>最多 ${max} 字</small></label>`;
+    return `<label>${esc(label)}<textarea name="${name}" maxlength="${max}" rows="${rows}" ${["title", "summary", "promptSummary"].includes(name) ? "required" : ""}>${esc(value)}</textarea></label>`;
   }
-  function showEditor(entry) {
-    S.editing = entry;
+  function editorHtml(entry) {
     const e = present(entry);
-    $("edit-fields").innerHTML = `<section class="edit-section"><h3>供 AI 回忆的摘要</h3><p class="muted">保留人名、具体物品或作品名、关键行为、日期与约定。进展和后续会自动附在摘要之后。</p><div class="fields">${input("promptSummary", "摘要正文", e.promptSummary || ShiguangRecall.defaultSummary(e), 6)}<label>发送方式<select name="recallMode">${Object.entries(MODES).map(([v, k]) => `<option value="${v}" ${e.recallMode === v ? "selected" : ""}>${k}</option>`).join("")}</select></label><label>回忆关键词（用顿号或逗号隔开，最多 8 个）<input name="keywords" value="${esc((e.keywords || []).join("、"))}"></label></div><button type="button" class="quiet wide" id="regenerate-summary">从下方卡片内容重新生成摘要</button><small>这会替换上方编辑框中的摘要，保存前不会改变记录。</small></section><details><summary>编辑故事与具体信息</summary><div class="fields">${input("title", "标题", e.title, 1)}${input("summary", "卡片简述", e.summary)}${input("reason", "事情的缘由", e.reason)}${input("story", "那天发生了什么", e.story)}${input("facts", "具体信息（每行：名称：内容，最多 12 行）", (e.details || []).map(f => f.label + "：" + f.value).join("\n"))}${input("significance", "值得记住的", e.significance)}<div><span>记忆类型（至少一种）</span><div class="check-group">${CATEGORIES.map(c => `<label><input type="checkbox" name="categories" value="${esc(c)}" ${(e.categories || []).includes(c) ? "checked" : ""}>${esc(c)}</label>`).join("")}</div></div></div></details><div class="fields"><label>当前进展<select name="status">${Object.entries(STATUSES).map(([v, k]) => `<option value="${v}" ${e.status === v ? "selected" : ""}>${k}</option>`).join("")}</select></label><label id="due-field">约定日期<input type="date" name="dueAt" value="${esc(e.dueAt || "")}"></label>${input("followup", "后来发生了什么", e.followup)}</div>`;
-    const form = $("edit-form");
-    const syncDate = () => { $("due-field").hidden = form.elements.status.value !== "pending"; };
-    form.elements.status.onchange = syncDate; syncDate();
-    $("regenerate-summary").onclick = () => { form.elements.promptSummary.value = ShiguangRecall.defaultSummary({ ...draftFromForm(), legacy: undefined }); };
-    $("edit-error").textContent = "";
-    $("editor").showModal(); $("editor").scrollTop = 0;
+    return `<form class="sg-update" data-editor>
+<h3>发给 AI 的摘要</h3><p class="sg-fine">保留人名、具体物品或作品名、关键行为、日期与约定；进展和后续会自动附在后面。</p>
+${field("promptSummary", "摘要", e.promptSummary || ShiguangRecall.defaultSummary(e), 4)}
+<div class="sg-inline"><button type="button" class="sg-action" data-regenerate>从卡片内容重新生成</button></div>
+<div class="sg-two"><label>发送方式<select name="recallMode">${Object.entries(MODES).map(([v, k]) => `<option value="${v}" ${e.recallMode === v ? "selected" : ""}>${k}</option>`).join("")}</select></label><label>进展<select name="status">${Object.entries(STATUSES).map(([v, k]) => `<option value="${v}" ${e.status === v ? "selected" : ""}>${k}</option>`).join("")}</select></label></div>
+<label data-due hidden>约定日期<input type="date" name="dueAt" value="${esc(e.dueAt || "")}"></label>
+<label>回忆关键词<small>顿号或逗号隔开，最多 8 个</small><input name="keywords" value="${esc((e.keywords || []).join("、"))}"></label>
+<h3>记忆类型</h3><div class="sg-chips">${CATEGORIES.map(c => `<label class="sg-chip"><input type="checkbox" name="categories" value="${esc(c)}" ${(e.categories || []).includes(c) ? "checked" : ""}><span>${esc(c)}</span></label>`).join("")}</div>
+${field("title", "标题", e.title, 1)}${field("summary", "记忆简述", e.summary)}${field("reason", "事情的缘由", e.reason)}${field("story", "那天发生了什么", e.story)}${field("facts", "具体信息（每行一项：名称：内容）", (e.details || []).map(f => f.label + "：" + f.value).join("\n"))}${field("significance", "值得记住的", e.significance)}${field("followup", "后来发生了什么", e.followup)}
+<button class="sg-submit" type="submit">保存记忆</button>
+<button class="sg-clear" type="button" data-action="delete">删除这条记忆</button>
+</form>`;
   }
-  function draftFromForm() {
-    const fd = new FormData($("edit-form")), draft = Object.fromEntries(fd);
+  function toggleEditor(record, entry, button) {
+    const slot = record.querySelector(".sg-slot");
+    const open = !!slot.querySelector("[data-editor]");
+    record.querySelectorAll("[data-action=sources]").forEach(b => b.setAttribute("aria-expanded", "false"));
+    slot.innerHTML = open ? "" : editorHtml(entry);
+    button.setAttribute("aria-expanded", String(!open));
+    if (open) return;
+    const form = slot.querySelector("form");
+    const syncDate = () => { form.querySelector("[data-due]").hidden = form.elements.status.value !== "pending"; };
+    form.elements.status.onchange = syncDate; syncDate();
+    form.querySelector("[data-regenerate]").onclick = () => { form.elements.promptSummary.value = ShiguangRecall.defaultSummary({ ...draftFromForm(form), legacy: undefined }); };
+    form.onsubmit = event => { event.preventDefault(); void saveEdit(record, entry, form); };
+  }
+  function draftFromForm(form) {
+    const fd = new FormData(form), draft = Object.fromEntries(fd);
     for (const key of Object.keys(draft)) if (typeof draft[key] === "string") draft[key] = draft[key].trim();
     draft.categories = fd.getAll("categories");
     draft.keywords = [...new Set(String(draft.keywords || "").split(/[,，、\n]+/).map(v => v.trim()).filter(Boolean))];
@@ -28,7 +45,7 @@
   }
   function validateDraft(d) {
     if (!d.title) throw new Error("标题不能为空");
-    if (!d.summary) throw new Error("卡片简述不能为空");
+    if (!d.summary) throw new Error("记忆简述不能为空");
     if (!d.promptSummary) throw new Error("摘要不能为空");
     if (!d.categories.length) throw new Error("至少选择一种记忆类型");
     if (d.keywords.length > 8) throw new Error("关键词最多 8 个");
@@ -38,20 +55,18 @@
     if (!STATUSES[d.status]) throw new Error("进展无效");
     if (d.dueAt && !ShiguangText.isValidDate(d.dueAt)) throw new Error("约定日期无效");
   }
-  async function saveEdit(event) {
-    event.preventDefault();
-    const entry = S.editing;
-    if (!entry || $("save-entry").disabled) return;
-    $("save-entry").disabled = true; $("close-editor").disabled = true; $("edit-error").textContent = "";
+  async function saveEdit(record, entry, form) {
+    const submit = form.querySelector(".sg-submit");
+    if (submit.disabled) return;
+    submit.disabled = true; submit.textContent = "保存中…"; cardNotice(entry.id, "");
     try {
-      const d = draftFromForm(); validateDraft(d);
+      const d = draftFromForm(form); validateDraft(d);
       const now = new Date(Math.max(Date.now(), Date.parse(entry.updatedAt) + 1)).toISOString();
       const next = { ...entry, ...d, dueAt: d.status === "pending" ? d.dueAt || undefined : undefined, userEdited: true, updatedAt: now, baseUpdatedAt: entry.updatedAt };
       await putEntry(entry.characterId, next);
-      $("editor").close(); render(); notice("记忆和摘要已保存。下次选中时使用卡片中显示的内容。");
+      render(); cardNotice(entry.id, "记忆已更新，手动修改的内容会优先保留。");
       syncContext(entry.characterId).catch(() => {});
-    } catch (err) { $("edit-error").textContent = errText(err); }
-    finally { $("save-entry").disabled = false; $("close-editor").disabled = false; }
+    } catch (err) { cardNotice(entry.id, errText(err), true); submit.disabled = false; submit.textContent = "保存记忆"; }
   }
   async function confirmDelete() {
     const entry = S.deleting; if (!entry || $("confirm-delete").disabled) return;
@@ -67,8 +82,5 @@
   function bindEditor() {
     $("confirm-delete").onclick = confirmDelete;
     $("cancel-delete").onclick = () => $("delete-dialog").close();
-    $("close-editor").onclick = () => $("editor").close();
-    $("editor").addEventListener("cancel", event => { if ($("save-entry").disabled) event.preventDefault(); });
     $("delete-dialog").addEventListener("cancel", event => { if ($("confirm-delete").disabled) event.preventDefault(); });
-    $("edit-form").onsubmit = saveEdit;
   }

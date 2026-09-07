@@ -1,69 +1,100 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>拾光</title><style>:root{color-scheme:light dark;--bg:#f3efe6;--paper:#fffdf8;--ink:#2f2b26;--muted:#8c8578;--line:#e6e1d5;--accent:#4c5f8a;--accent-ink:#fffdf8;--soft:#e9edf5;--chat:#f0ede4;--gold:#e9dfbf;--error:#a03832;--serif:"Songti SC","STSong","Noto Serif CJK SC","Noto Serif SC","Source Han Serif SC","SimSun",serif;font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","HarmonyOS Sans SC","MiSans","Noto Sans CJK SC","Microsoft YaHei",sans-serif;-webkit-text-size-adjust:100%}
-@media(prefers-color-scheme:dark){:root{--bg:#1b1a17;--paper:#26241f;--ink:#ebe6da;--muted:#a59f91;--line:#3d3a33;--accent:#a7b8e0;--accent-ink:#1b1a17;--soft:#2f3646;--chat:#302e28;--gold:#4d4636;--error:#ffb4ab}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);overflow-wrap:anywhere}
-button,input,textarea,select{font:inherit;color:inherit;-webkit-appearance:none;appearance:none}button{cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-button,input,select,textarea{border:1px solid var(--line);border-radius:10px;background:var(--paper);min-height:38px;padding:7px 11px;max-width:100%}
-input,select,textarea{width:100%;font-size:16px}select{background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:28px}
-textarea{resize:vertical;line-height:1.55;min-height:76px}button:active{opacity:.7}button:disabled{opacity:.5;cursor:default}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-h1,h2,h3,p{margin:0}h1,h2,h3,.wordmark{font-family:var(--serif);font-weight:600;letter-spacing:.3px}h1{font-size:19px;line-height:1.45}h2{font-size:17px;line-height:1.5}h3{font-size:16px;line-height:1.5}
-small{font-size:11px;color:var(--muted);display:block;line-height:1.5}.muted{color:var(--muted);font-size:12px}
-.app{padding:calc(var(--ai-phone-app-bar-top,16px) + var(--ai-phone-app-bar-height,32px) + 10px) max(12px,var(--ai-phone-app-safe-right,0px)) calc(var(--ai-phone-app-safe-bottom,24px) + 24px) max(12px,var(--ai-phone-app-safe-left,0px));max-width:480px;margin:auto}
-.topbar{position:absolute;top:var(--ai-phone-app-bar-top,16px);left:max(14px,var(--ai-phone-app-safe-left,0px));right:var(--ai-phone-app-bar-clear-right,100px);display:flex;gap:8px;align-items:baseline;min-height:var(--ai-phone-app-bar-height,32px)}
-.wordmark{font-size:19px;white-space:nowrap;letter-spacing:3px;line-height:var(--ai-phone-app-bar-height,32px)}.edition{font-size:11px;color:var(--muted);white-space:nowrap}
-.intro{padding:6px 4px 12px}.intro>p:last-child{margin-top:3px;color:var(--muted);font-size:12px}.eyebrow{color:var(--muted);font-size:11px;margin-bottom:5px;letter-spacing:2px}
-.toolbar{display:flex;gap:8px;align-items:end;margin-bottom:10px}.character-label{flex:1;min-width:0;font-size:11px;color:var(--muted)}.character-label select{margin-top:3px;font-size:14px;color:var(--ink);min-height:36px}
-.quiet{background:transparent}.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}.danger{border-color:var(--error);color:var(--error)}.wide{width:100%}
-.tabs{display:flex;border-bottom:1px solid var(--line);gap:18px;margin-bottom:10px}.tabs button{border:0;border-radius:0;background:none;padding:6px 2px;min-height:34px;border-bottom:2px solid transparent;color:var(--muted);font-size:13px}.tabs button[aria-current=page]{border-bottom-color:var(--accent);color:var(--ink);font-weight:600}
-.notice{color:var(--muted);font-size:12px;white-space:pre-wrap}.notice:empty{display:none}.notice:not(:empty){margin:6px 0 10px}.notice[data-error=true],#edit-error,#delete-error{color:var(--error)}
-.list-tools{display:flex;gap:8px}.search-label{flex:1;min-width:0}#search{border-radius:19px;padding-left:14px}.list-tools .primary{white-space:nowrap;font-size:12px;padding-inline:12px;border-radius:19px}
-.filter-row{display:flex;gap:8px;margin:8px 0}.filter-row label{flex:1;min-width:0}.filter-row select{font-size:12px;min-height:32px;padding:4px 26px 4px 10px;border-radius:16px}
-.cards{display:grid;gap:12px;margin:8px 0}.paper,.card{border:1px solid var(--line);border-radius:14px;background:var(--paper);padding:14px 14px 12px;box-shadow:0 2px 8px #0000000a;min-width:0}.card{position:relative}
-.card:before{content:"";position:absolute;left:18px;top:-6px;width:42px;height:11px;background:var(--gold);transform:rotate(-3deg);opacity:.95;border-radius:2px}
-.card-meta{display:flex;justify-content:space-between;gap:8px;align-items:center;margin:0 0 5px;font-size:11px;color:var(--muted);letter-spacing:.3px}
-.badge,.tag{display:inline-block;background:var(--soft);border-radius:5px;padding:3px 7px;font-size:11px;line-height:1;color:var(--accent);white-space:nowrap}
-.card .summary{margin:4px 0 8px;color:var(--muted);font-size:13px;line-height:1.65}.tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
-.prompt-block{background:var(--chat);border-radius:10px;padding:9px 10px;margin-top:8px}.prompt-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:4px;font-size:11px;font-weight:500;color:var(--accent);letter-spacing:.5px}.prompt-head small{font-size:11px;font-weight:400}
-.prompt-text{white-space:pre-wrap;line-height:1.7;font-size:12px}.budget-note{margin-top:5px;color:var(--error);font-size:11px}
-.card details{margin-top:10px;border-top:1px solid var(--line);padding-top:2px}.card summary{cursor:pointer;min-height:36px;display:flex;align-items:center;color:var(--accent);font-size:12px;font-weight:600;list-style:none}.card summary::-webkit-details-marker{display:none}.card summary:after{content:"";margin-left:auto;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform .2s}.card details[open] summary:after{transform:rotate(-135deg)}
-.facts{margin:2px 0 8px}.facts dt{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:500;letter-spacing:.5px;color:var(--accent);margin:9px 0 2px}.facts dt:before{content:"";width:4px;height:4px;background:var(--accent);border-radius:50%}.facts dd{margin:0;white-space:pre-wrap;font-size:13px;line-height:1.7}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actions button{flex:1;font-size:12px;min-height:36px;border-radius:18px;padding:6px 10px}.actions .danger{flex:0 0 auto}
-.empty{padding:22px 8px;text-align:center;color:var(--muted);font-size:13px}footer{text-align:center;color:var(--muted);font-size:12px;font-family:var(--serif);letter-spacing:1px;margin:18px 0 4px}
-.paper{margin-bottom:12px}.rule-list{margin:8px 0 0}.rule-list dt{font-weight:600;margin-top:12px;font-size:13px}.rule-list dd{margin:3px 0 0;color:var(--muted);font-size:12px;line-height:1.65}
-.hint{border-top:1px solid var(--line);margin-top:12px;padding-top:10px;font-size:12px;color:var(--muted);line-height:1.65}
-.switch{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}input[type=checkbox]{width:20px;height:20px;min-height:20px;flex-shrink:0;accent-color:var(--accent);-webkit-appearance:auto;appearance:auto;padding:0}
-.fields{display:grid;gap:12px;margin:14px 0}.fields label{display:grid;gap:4px;font-size:12px;color:var(--muted)}.fields input,.fields textarea,.fields select{color:var(--ink)}
-.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}[hidden]{display:none!important}
-dialog{color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:14px;width:min(480px,calc(100% - 20px));max-height:calc(100dvh - 40px);overflow:auto;overscroll-behavior:contain}dialog::backdrop{background:#1a19168c}
-.dialog-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.dialog-header h2{font-size:17px}.dialog-header .quiet{min-height:32px;padding:4px 10px;font-size:12px;border-radius:16px}.dialog-footer{padding:10px 0 0}
-.edit-section{margin:8px 0 14px}.edit-section h3{margin-bottom:4px;font-size:15px}.edit-section>.muted{line-height:1.6}#edit-fields details>summary{cursor:pointer;color:var(--accent);font-size:12px;font-weight:600;min-height:36px;display:flex;align-items:center}
-.check-group{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}.check-group label{display:flex;align-items:center;gap:5px;padding:0 10px;min-height:30px;border:1px solid var(--line);border-radius:15px;font-size:12px;color:var(--ink)}.check-group input{width:14px;height:14px;min-height:14px}
-.source{padding:10px 0;border-bottom:1px solid var(--line)}.source p{white-space:pre-wrap;background:var(--chat);border-radius:3px 10px 10px 10px;padding:7px 10px;font-size:12px;line-height:1.7;width:fit-content;max-width:88%}.source small{margin-bottom:4px}
-#editor textarea[name=promptSummary]{min-height:150px;background:var(--chat)}#settings>.primary{width:100%;border-radius:19px}#delete-dialog h2{margin-bottom:6px}#delete-dialog p{font-size:13px;color:var(--muted)}
-@media(max-width:350px){.edition{display:none}.app{padding-inline:8px}.card,.paper{padding:12px 12px 10px}.list-tools{flex-wrap:wrap}.list-tools>.primary{width:100%}}
-@media(prefers-reduced-motion:reduce){*{transition:none!important}}
-
-#progress{margin:14px 0 8px}#progress:empty{display:none}#restart{margin-top:4px;font-size:12px}
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>拾光</title><style>:root{color-scheme:light dark;--page:#f3efe6;--paper:#fffdf8;--ink:#2f2b26;--muted:#8c8578;--line:#e6e1d5;--accent:#4c5f8a;--tint:#e9edf5;--chat:#f0ede4;--tape:#e9dfbf;--error:#a03832;--serif:"Songti SC","STSong","Noto Serif CJK SC","Noto Serif SC","Source Han Serif SC","SimSun",serif;font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","HarmonyOS Sans SC","MiSans","Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei",sans-serif;-webkit-text-size-adjust:100%}
+@media(prefers-color-scheme:dark){:root{--page:#1b1a17;--paper:#26241f;--ink:#ebe6da;--muted:#a59f91;--line:#3d3a33;--accent:#a7b8e0;--tint:#2f3646;--chat:#302e28;--tape:#4d4636;--error:#ffb4ab}}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink);overflow-wrap:anywhere}
+button,textarea,select,input{font:inherit;color:inherit}button{cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;background:none;border:0;padding:0}button:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}[hidden]{display:none!important}h2,h3,p,dl,dd{margin:0}
+.sg{max-width:440px;margin:0 auto;padding:calc(var(--ai-phone-app-bar-top,16px) + var(--ai-phone-app-bar-height,32px) + 8px) max(10px,var(--ai-phone-app-safe-right,0px)) calc(var(--ai-phone-app-safe-bottom,24px) + 90px) max(10px,var(--ai-phone-app-safe-left,0px))}
+.sg-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:6px 6px 10px;border-bottom:1px solid var(--line)}
+.sg-brand{font-family:var(--serif);font-size:21px;letter-spacing:3px;font-weight:600;line-height:1}
+.sg-person{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:2px;min-width:0}
+.sg-person select{-webkit-appearance:none;appearance:none;border:0;border-bottom:1px dashed var(--line);border-radius:0;background:none;color:var(--ink);font-size:12px;padding:2px 14px 2px 2px;max-width:150px;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 7px) 55%,calc(100% - 3px) 55%;background-size:4px 4px;background-repeat:no-repeat}
+.sg-main{padding:10px 2px 0}
+.sg-tools{display:flex;gap:8px;margin-bottom:8px}
+.sg-search{position:relative;flex:1;min-width:0;display:flex;align-items:center;height:38px;border:1px solid var(--line);border-radius:19px;background:var(--paper);color:var(--muted);padding:0 12px 0 32px}
+.sg-search-icon{position:absolute;left:12px;top:12px;width:11px;height:11px;border:1.6px solid var(--muted);border-radius:50%}.sg-search-icon:after{content:"";position:absolute;right:-5px;bottom:-4px;width:6px;height:1.6px;background:var(--muted);transform:rotate(45deg)}
+.sg-search input{width:100%;min-width:0;height:100%;border:0;background:transparent;font-size:13px;padding:0;color:var(--ink);-webkit-appearance:none}.sg-search input::placeholder{color:var(--muted)}.sg-search input::-webkit-search-cancel-button{-webkit-appearance:none}
+.sg-filter-btn{position:relative;flex:none;width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--line);border-radius:19px;background:var(--paper);color:var(--ink)}
+.sg-filter-icon{width:14px;height:10px;background:linear-gradient(currentColor,currentColor) 0 0/100% 1.6px no-repeat,linear-gradient(currentColor,currentColor) 50% 50%/70% 1.6px no-repeat,linear-gradient(currentColor,currentColor) 50% 100%/40% 1.6px no-repeat}
+.sg-filter-btn[aria-expanded=true]{background:var(--tint);border-color:var(--accent);color:var(--accent)}.sg-dot{position:absolute;top:8px;right:9px;width:7px;height:7px;border-radius:50%;background:var(--accent);border:2px solid var(--paper)}
+.sg-filters{padding:10px 12px 8px;border:1px solid var(--line);border-radius:14px;background:var(--paper);margin-bottom:8px}
+.sg-fgroup{display:flex;gap:8px;align-items:flex-start}.sg-fgroup+.sg-fgroup{margin-top:8px}.sg-flabel{flex:none;width:28px;font-size:11px;color:var(--muted);padding-top:6px}
+.sg-chips{display:flex;flex-wrap:wrap;gap:6px;min-width:0;flex:1}.sg-chip{position:relative}.sg-chip input{position:absolute;inset:0;opacity:0;margin:0;width:100%;height:100%;cursor:pointer}
+.sg-chip span{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:14px;border:1px solid var(--line);background:var(--page);font-size:12px;color:var(--ink)}
+.sg-chip input:checked+span{background:var(--tint);border-color:var(--accent);color:var(--accent)}.sg-chip input:focus-visible+span{outline:2px solid var(--accent);outline-offset:1px}
+.sg-clear{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:12px;padding:4px 2px;text-decoration:underline;text-underline-offset:3px;min-height:28px}.sg-filters .sg-clear{display:flex;margin:6px 0 0 auto}
+.sg-list-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 4px 6px;flex-wrap:wrap}.sg-count{font-size:11px;color:var(--muted)}.sg-head-actions{display:flex;gap:10px}
+.sg-save-hint{font-size:12px;color:var(--accent);margin:0 4px 8px;white-space:pre-wrap}.sg-save-hint:empty{display:none}.sg-save-hint[data-error=true]{color:var(--error)}
+.sg-empty{padding:22px 8px;text-align:center;color:var(--muted);font-size:13px}
+.sg-record+.sg-record{margin-top:10px}
+.sg-note{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:14px 14px 12px;box-shadow:0 2px 8px #0000000a}
+.sg-note:before{content:"";position:absolute;top:-6px;left:18px;width:42px;height:11px;background:var(--tape);opacity:.95;transform:rotate(-3deg);border-radius:2px}
+.sg-static{margin-bottom:12px}.sg-static:before{display:none}.sg-static h2{font-family:var(--serif);font-size:16px;font-weight:600;margin-bottom:8px}
+.sg-summary{cursor:pointer;list-style:none;display:block}.sg-summary::-webkit-details-marker{display:none}
+.sg-meta{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);letter-spacing:.3px;margin-bottom:5px}
+.sg-note h2.sg-title{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;font-family:var(--serif);font-size:17px;font-weight:600;line-height:1.5;letter-spacing:.3px;margin:0 0 4px}
+.sg-chev{flex:none;width:8px;height:8px;margin-top:8px;border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);transform:rotate(45deg);transition:transform .2s ease}.sg-note[open] .sg-chev{transform:rotate(-135deg);margin-top:11px}
+.sg-lead{font-size:13px;line-height:1.65;color:var(--muted);margin:0 0 8px}.sg-summary .sg-lead{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.sg-note[open] .sg-summary .sg-lead{display:block;overflow:visible}
+.sg-foot-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.sg-labels{display:flex;gap:5px;flex-wrap:wrap;min-width:0}
+.sg-tag{font-size:11px;line-height:1;padding:4px 7px;border-radius:5px;color:var(--accent);background:var(--tint);white-space:nowrap}.sg-tag.sg-mode{color:var(--muted);background:var(--chat)}
+.sg-fold{flex:none;color:var(--accent);font-size:11px;font-weight:600}.sg-fold .sg-close-label{display:none}.sg-note[open] .sg-fold .sg-open-label{display:none}.sg-note[open] .sg-fold .sg-close-label{display:inline}
+.sg-detail{border-top:1px solid var(--line);margin-top:10px;padding-top:2px}
+.sg-block{margin-top:10px}.sg-block h3,.sg-prompt h3{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:500;letter-spacing:.5px;color:var(--accent);margin:0 0 3px}.sg-block h3:before,.sg-prompt h3:before{content:"";width:4px;height:4px;background:var(--accent);border-radius:50%}.sg-block h3 small,.sg-prompt h3 small{margin-left:auto;font-weight:400;color:var(--muted);font-size:11px}
+.sg-block p{margin:0;font-size:13px;line-height:1.7;white-space:pre-wrap}
+.sg-prompt{margin-top:10px;padding:8px 10px;border-radius:10px;background:var(--chat)}.sg-prompt p{font-size:12px;line-height:1.7}.sg-prompt .sg-warn{margin-top:4px;font-size:11px;color:var(--error)}
+.sg-facts{margin:2px 0 0;padding:6px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.sg-facts div{display:grid;grid-template-columns:58px 1fr;gap:6px;font-size:12px;line-height:1.6;padding:2px 0}.sg-facts dt{color:var(--muted)}
+.sg-next{margin-top:12px;padding:8px 10px;border-radius:10px;background:var(--tint)}.sg-status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--accent)}.sg-status:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}.sg-next p{font-size:12px;color:var(--ink);margin:3px 0 0;line-height:1.6;white-space:pre-wrap}
+.sg-actions{display:flex;gap:8px;margin-top:12px}
+.sg-action{display:flex;align-items:center;justify-content:center;gap:5px;min-height:36px;flex:1;border:1px solid var(--line);border-radius:18px;background:var(--paper);color:var(--ink);font-size:12px;padding:6px 10px}
+.sg-action[aria-expanded=true]{background:var(--tint);border-color:var(--accent);color:var(--accent)}.sg-danger{color:var(--error);border-color:var(--error)}.sg-more{width:100%;margin-top:12px}
+.sg-source{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}.sg-source h3{font-size:11px;font-weight:500;margin:0 0 6px;color:var(--muted)}
+.sg-msg{margin-top:8px;width:fit-content;max-width:85%;min-width:0}.sg-msg label{display:block;font-size:11px;color:var(--muted);margin:0 0 3px}.sg-msg p{margin:0;background:var(--chat);border-radius:3px 10px 10px 10px;padding:7px 10px;font-size:12px;line-height:1.7;white-space:pre-wrap;text-align:left}
+.sg-msg.sg-user{margin-left:auto}.sg-msg.sg-user label{text-align:right}.sg-msg.sg-user p{background:var(--page);border-radius:10px 3px 10px 10px}
+.sg-update{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}.sg-static.sg-update{margin-top:0;padding-top:14px;border-top:0}
+.sg-update label{display:block;font-size:11px;color:var(--muted);margin:0 0 10px}.sg-update label small{display:block;color:var(--muted);font-size:10px;margin-top:2px}
+.sg-update textarea,.sg-update select,.sg-update input:not([type=checkbox]):not([type=radio]){display:block;width:100%;margin-top:4px;border:1px solid var(--line);border-radius:8px;background:var(--page);color:var(--ink);padding:7px 9px;font-size:13px;min-height:34px;-webkit-appearance:none;appearance:none}
+@supports(-webkit-touch-callout:none){.sg-update textarea,.sg-update select,.sg-update input:not([type=checkbox]):not([type=radio]){font-size:16px}}
+.sg-update textarea{resize:vertical;line-height:1.5}.sg-update textarea[name=promptSummary]{background:var(--chat);min-height:80px}
+.sg-update select{background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:26px}
+.sg-update .sg-chips{margin-bottom:10px}.sg-update h3{font-size:11px;font-weight:500;letter-spacing:.5px;color:var(--accent);margin:0 0 6px}.sg-update h3+.sg-fine{margin-bottom:8px}
+.sg-two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sg-submit{margin-top:4px;width:100%;min-height:36px;border:0;border-radius:18px;background:var(--accent);color:var(--paper);font-size:13px}
+.sg-inline{display:flex;gap:8px;margin:2px 0 10px}.sg-inline .sg-action{flex:1}.sg-update .sg-clear{margin:8px auto 0;display:flex}
+.sg-fine{font-size:11px;color:var(--muted);line-height:1.6;margin:0}
+.sg-switch{display:flex!important;gap:12px;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px!important;color:var(--ink)!important}.sg-switch input{width:20px;height:20px;accent-color:var(--accent);flex-shrink:0;margin:0}
+.sg-rules dt{font-weight:600;font-size:13px;margin-top:8px}.sg-rules dd{color:var(--muted);font-size:12px;line-height:1.6;margin-top:2px}.sg-rules+.sg-fine{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.sg-progress{margin:10px 0 0;font-size:12px;color:var(--muted);line-height:1.6}.sg-progress:empty{display:none}.sg-progress .sg-warn{color:var(--error)}
+.sg-foot{text-align:center;font-family:var(--serif);font-size:12px;color:var(--muted);margin:16px 0 0;letter-spacing:1px}
+.sg-dialog{color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(320px,calc(100% - 32px));margin:auto}.sg-dialog::backdrop{background:#1a19168c}.sg-dialog h2{font-family:var(--serif);font-size:16px;margin-bottom:6px}.sg-dialog p{font-size:12px;color:var(--muted);line-height:1.6}.sg-dialog .sg-actions{margin-top:12px}
+@media(pointer:coarse){.sg-filter-btn,.sg-action,.sg-submit{min-height:40px}.sg-filter-btn{width:40px;height:40px}.sg-chip{padding:4px 0}}
+@media(max-width:360px){.sg-main{padding-top:8px}.sg-note{padding:12px 12px 10px}.sg-top{padding:4px 4px 8px}}
+@media(prefers-reduced-motion:reduce){.sg-chev{transition:none}}
 </style></head>
-<body><div class="app"><header class="topbar"><span class="wordmark">拾光</span><span class="edition">记住那些具体的小事</span></header>
-<main id="main"><div class="intro"><p class="eyebrow">我们的记忆本</p><h1>有些小事，值得记得。</h1><p>故事留在这里，也带进下一次对话。</p></div>
-<div class="toolbar"><label class="character-label">关于谁<select id="character" aria-label="选择角色" disabled><option>正在读取角色…</option></select></label><button id="refresh" class="quiet" type="button">刷新</button></div>
-<nav class="tabs" aria-label="拾光页面"><button data-tab="memories" aria-current="page">记忆本</button><button data-tab="rules">回忆规则</button></nav>
-<p id="notice" class="notice" role="status" aria-live="polite"></p>
-<section id="memories"><div class="list-tools"><label class="search-label"><span class="sr-only">搜索记忆与摘要</span><input id="search" type="search" placeholder="找一段故事、一个名字…"></label><button id="organize" class="primary" type="button" disabled>整理新消息</button></div>
-<div class="filter-row"><label><span class="sr-only">筛选类型</span><select id="category"><option value="">全部类型</option><option>共同经历</option><option>约定与承诺</option><option>喜好与边界</option><option>人物与关系</option><option>重要信息</option></select></label><label><span class="sr-only">筛选发送方式</span><select id="mode-filter"><option value="">全部发送方式</option><option value="priority">优先携带</option><option value="relevant">按话题回忆</option><option value="off">不发送</option></select></label></div>
-<p id="count" class="muted"></p><div id="cards" class="cards"><p class="empty">正在翻开记忆本…</p></div><button id="more" class="quiet wide" hidden>显示更多</button></section>
-<section id="rules" hidden><article class="paper"><p class="eyebrow">让回忆有迹可循</p><h2>选哪条，由这些规则决定。</h2><dl class="rule-list"><dt>优先携带</dt><dd>不需要话题命中，在预算内优先放入，最多占预算一半。适合重要关系、边界或希望经常记住的事。</dd><dt>按话题回忆</dt><dd>按标题和关键词匹配最近几句聊天；昨天至未来 7 天内仍待兑现的约定也可入选。文字匹配可能漏掉相关记忆。</dd><dt>不发送</dt><dd>只留在记忆本里，不放进聊天提示词。</dd></dl><p class="hint">选中后发送卡片里的摘要，并附上当前进展与后续。超过预算的整条跳过，重复内容去重。每来一条新消息，拾光都会按最近几句重新挑一遍，所以「按话题回忆」跟的是上一轮话题。</p></article>
-<form id="settings" class="paper"><h2>整理与回忆</h2><p class="muted">这些设置对所有角色生效。整理用的模型按「绑定配置」里给拾光绑的 API，没绑就用这位角色的聊天模型；会产生模型用量。</p>
-<label class="switch"><span>启用拾光记录与回忆<small>关闭后保留记录，暂停整理与发送。</small></span><input type="checkbox" name="enabled"></label>
-<label class="switch"><span>自动整理新消息<small>聊满设定轮数就自动整理，小手机关着也会跑。</small></span><input type="checkbox" name="autoEnabled"></label>
-<div class="fields"><label>整理间隔（私聊回复轮数）<input name="roundInterval" type="number" min="5" max="80" required><small>角色连发几条气泡算一轮，范围 5–80。</small></label><label>回忆预算（Token）<input name="tokenBudget" type="number" min="200" max="4000" required><small>范围 200–4000，预算不是固定条数。</small></label></div>
-<button class="primary" type="submit">保存设置</button><p class="notice" id="settings-notice" role="status"></p>
-<dl id="progress" class="facts"></dl><button id="restart" class="quiet wide" type="button" disabled>从头整理这位角色的聊天</button></form></section>
-<footer>每个名字、每次约定，都有来处。</footer></main></div>
-<dialog id="editor" aria-labelledby="editor-title"><form id="edit-form"><header class="dialog-header"><h2 id="editor-title">编辑这段拾光</h2><button type="button" class="quiet" id="close-editor">取消</button></header><div id="edit-fields"></div><p id="edit-error" class="notice" role="alert"></p><div class="dialog-footer"><button type="submit" class="primary wide" id="save-entry">保存记忆与摘要</button></div></form></dialog>
-<dialog id="sources" aria-labelledby="sources-title"><header class="dialog-header"><h2 id="sources-title">这段记忆的来处</h2><button type="button" class="quiet" id="close-sources">关闭</button></header><div id="source-list"></div></dialog>
-<dialog id="delete-dialog" aria-labelledby="delete-title"><h2 id="delete-title">删除这条拾光？</h2><p>删除后停止回忆这条记录。原聊天消息保留，自动整理不会重新建回这条记录。</p><div class="actions"><button class="quiet" id="cancel-delete">取消</button><button class="danger" id="confirm-delete">删除记忆</button></div><p id="delete-error" role="alert"></p></dialog>
+<body><div class="sg">
+<header class="sg-top"><span class="sg-brand">拾光</span><label class="sg-person">和<select id="character" aria-label="选择角色" disabled><option value="">…</option></select>的记忆</label></header>
+<main class="sg-main">
+<div class="sg-tools"><label class="sg-search"><span class="sg-search-icon" aria-hidden="true"></span><input id="search" type="search" placeholder="找一段记忆…" aria-label="搜索记忆"></label><button id="filter-btn" class="sg-filter-btn" type="button" aria-label="筛选" aria-expanded="false" aria-controls="filters"><span class="sg-filter-icon" aria-hidden="true"></span><span class="sg-dot" hidden></span></button></div>
+<section id="filters" class="sg-filters" hidden aria-label="记忆筛选">
+<div class="sg-fgroup"><span class="sg-flabel">类型</span><div class="sg-chips" id="category-chips" role="group" aria-label="记忆类型，可多选"></div></div>
+<div class="sg-fgroup"><span class="sg-flabel">发送</span><div class="sg-chips" id="mode-chips" role="radiogroup" aria-label="发送方式"><label class="sg-chip"><input type="radio" name="mode" value="" checked><span>全部</span></label><label class="sg-chip"><input type="radio" name="mode" value="priority"><span>优先携带</span></label><label class="sg-chip"><input type="radio" name="mode" value="relevant"><span>按话题回忆</span></label><label class="sg-chip"><input type="radio" name="mode" value="off"><span>不发送</span></label></div></div>
+<button type="button" class="sg-clear" id="clear-filters">清除筛选</button>
+</section>
+<div class="sg-list-head"><p id="count" class="sg-count" aria-live="polite"></p><span class="sg-head-actions"><button id="organize" class="sg-clear" type="button" disabled>整理新消息</button><button id="rules-btn" class="sg-clear" type="button" data-tab="rules">回忆规则</button><button id="refresh" class="sg-clear" type="button">刷新</button></span></div>
+<p id="notice" class="sg-save-hint" role="status" aria-live="polite"></p>
+<section id="memories"><div id="cards"><p class="sg-empty">正在翻找记忆…</p></div><button id="more" class="sg-action sg-more" type="button" hidden>显示更多</button></section>
+<section id="rules" hidden aria-label="回忆规则">
+<div class="sg-note sg-static"><h2>选哪条，由这些规则决定</h2><dl class="sg-rules"><dt>优先携带</dt><dd>不需要话题命中，在预算内优先放入，最多占预算一半。适合重要关系、边界或希望经常记住的事。</dd><dt>按话题回忆</dt><dd>按标题和关键词匹配最近几句聊天；昨天至未来 7 天内仍待兑现的约定也可入选。</dd><dt>不发送</dt><dd>只留在记忆本里，不放进聊天提示词。</dd></dl><p class="sg-fine">每来一条新消息都按最近几句重选一遍，所以「按话题回忆」跟的是上一轮话题。整理用的模型按「绑定配置」里给拾光绑的 API，没绑就用这位角色的聊天模型。</p></div>
+<form id="settings" class="sg-note sg-static sg-update">
+<label class="sg-switch"><span>启用拾光记录与回忆<small>关闭后保留记录，暂停整理与发送。</small></span><input type="checkbox" name="enabled"></label>
+<label class="sg-switch"><span>自动整理新消息<small>聊满设定轮数就自动整理，小手机关着也会跑。</small></span><input type="checkbox" name="autoEnabled"></label>
+<div class="sg-two"><label>整理间隔（轮）<input name="roundInterval" type="number" min="5" max="80" required></label><label>回忆预算（Token）<input name="tokenBudget" type="number" min="200" max="4000" required></label></div>
+<button class="sg-submit" type="submit">保存设置</button><p class="sg-save-hint" id="settings-notice" role="status"></p>
+<div id="progress" class="sg-progress"></div><button id="restart" class="sg-clear" type="button" disabled>从头整理这位角色的聊天</button>
+<button class="sg-action sg-more" type="button" data-tab="memories">返回记忆本</button>
+</form></section>
+<p class="sg-foot">有些小事，后来成了很重要的事。</p>
+</main></div>
+<dialog id="delete-dialog" class="sg-dialog" aria-labelledby="delete-title"><h2 id="delete-title">删除这条拾光？</h2><p>删除后不再展示或用于回忆，原聊天消息保留，自动整理不会重建。</p><div class="sg-actions"><button class="sg-action" id="cancel-delete" type="button">取消</button><button class="sg-action sg-danger" id="confirm-delete" type="button">删除记忆</button></div><p id="delete-error" class="sg-save-hint" role="alert"></p></dialog>
 <script>(() => {
   "use strict";
   const ShiguangText = (() => {
@@ -668,50 +699,72 @@ return Object.freeze(exports);
         const result = await maybeAutoOrganize(cid);
         if (result && result.success) {
           await syncContext(cid);
-          if (!S.background && S.characterId === cid) { render(); notice(`自动整理完成，保存 ${result.saved} 条。`); }
+          if (!S.background && S.characterId === cid) { render(); notice(`自动整理完成，记下 ${result.saved} 条。`); }
         }
       }
     });
   }
   /* ================= 列表 ================= */
+  const filter = { categories: new Set(), mode: "" };
+  const openCards = new Set();   // 重渲染后保持展开状态
   function notice(value, failed = false) { const el = $("notice"); el.textContent = value; el.dataset.error = String(failed); }
   function busy(value) {
     S.busy = value;
     $("character").disabled = value || !S.characters.length;
     $("refresh").disabled = value;
     $("organize").disabled = value || !S.characterId || !(S.settings && S.settings.enabled);
-    document.querySelectorAll("#cards button").forEach(button => { button.disabled = value; });
+    document.querySelectorAll("#cards button, #cards input, #cards select, #cards textarea").forEach(el => { el.disabled = value; });
   }
   function present(entry) {
     return { ...entry, promptText: ShiguangRecall.promptText(entry), promptTokens: ShiguangRecall.promptTokens(entry), recallMode: ShiguangRecall.recallMode(entry) };
   }
   function cardHtml(entry) {
     const e = present(entry);
-    const fields = [["事情的缘由", e.reason], ["那天发生了什么", e.story], ...(e.details || []).map(f => [f.label, f.value]), ["值得记住的", e.significance], ["后来发生了什么", e.followup]];
-    const over = e.promptTokens > S.settings.tokenBudget;
-    return `<article class="card" data-id="${esc(e.id)}"><div class="card-meta"><time>${esc(fmtTime(e.lastEventAt))}</time><span class="badge">${esc(MODES[e.recallMode])}</span></div><h3>${esc(e.title)}</h3><p class="summary">${esc(e.summary)}</p><div class="tags">${(e.categories || []).map(c => `<span class="tag">${esc(c)}</span>`).join("")}</div><div class="prompt-block"><div class="prompt-head"><span>选中后发给 AI 的内容</span><small>约 ${e.promptTokens} Token</small></div><p class="prompt-text">${esc(e.promptText)}</p>${e.recallMode === "off" ? '<p class="budget-note">这条已设为不发送。</p>' : over ? '<p class="budget-note">这条超过当前预算，会被整条跳过。可编辑摘要或调整预算。</p>' : ""}</div><details><summary>展开故事与具体信息</summary><dl class="facts">${fields.filter(([, v]) => v).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}<dt>当前进展</dt><dd>${esc(STATUSES[e.status] || e.status)}${e.dueAt ? " · " + esc(e.dueAt) : ""}</dd><dt>回忆关键词</dt><dd>${esc((e.keywords || []).join("、") || "未设置")}</dd></dl></details><div class="actions"><button class="primary" data-action="edit">编辑与摘要</button><button class="quiet" data-action="sources">回看原消息</button><button class="danger" data-action="delete" aria-label="删除${esc(e.title)}">删除</button></div></article>`;
+    const status = STATUSES[e.status] || e.status;
+    const facts = (e.details || []).length ? `<section class="sg-block"><h3>记下的细节</h3><dl class="sg-facts">${e.details.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(f.value)}</dd></div>`).join("")}</dl></section>` : "";
+    const next = e.status !== "remembered" || e.followup ? `<section class="sg-next"><div class="sg-status">${esc(status)}${e.dueAt ? " · " + esc(e.dueAt) : ""}</div>${e.followup ? `<p>${esc(e.followup)}</p>` : ""}</section>` : "";
+    const warn = e.recallMode === "off" ? "这条已设为不发送。" : e.promptTokens > S.settings.tokenBudget ? "超过当前预算，会被整条跳过；改短摘要或调高预算。" : "";
+    return `<article class="sg-record" data-id="${esc(e.id)}"><details class="sg-note" ${openCards.has(e.id) ? "open" : ""}>
+<summary class="sg-summary"><div class="sg-meta"><span>${esc(fmtTime(e.lastEventAt))}</span>${e.userEdited ? "<span>已补充</span>" : ""}</div><h2 class="sg-title"><span>${esc(e.title)}</span><span class="sg-chev" aria-hidden="true"></span></h2><p class="sg-lead">${esc(e.summary)}</p><div class="sg-foot-row"><div class="sg-labels">${(e.categories || []).map(c => `<span class="sg-tag">${esc(c)}</span>`).join("")}<span class="sg-tag sg-mode">${esc(MODES[e.recallMode])}</span></div><span class="sg-fold"><span class="sg-open-label">展开</span><span class="sg-close-label">收起</span></span></div></summary>
+<div class="sg-detail">
+<section class="sg-prompt"><h3>发给 AI 的内容<small>约 ${e.promptTokens} Token</small></h3><p>${esc(e.promptText)}</p>${warn ? `<p class="sg-warn">${esc(warn)}</p>` : ""}</section>
+${e.reason ? `<section class="sg-block"><h3>事情的缘由</h3><p>${esc(e.reason)}</p></section>` : ""}
+${e.story ? `<section class="sg-block"><h3>那天发生了什么</h3><p>${esc(e.story)}</p></section>` : ""}
+${facts}
+${e.significance ? `<section class="sg-block"><h3>这件事里，值得记住的</h3><p>${esc(e.significance)}</p></section>` : ""}
+${next}
+<div class="sg-actions"><button type="button" class="sg-action" data-action="sources" aria-expanded="false">回看原消息</button><button type="button" class="sg-action" data-action="edit" aria-expanded="false">编辑与摘要</button></div>
+<div class="sg-slot"></div>
+<p class="sg-save-hint" data-card-notice></p>
+</div></details></article>`;
+  }
+  function visibleEntries() {
+    const query = $("search").value.trim().toLocaleLowerCase();
+    const all = activeEntries(S.characterId).sort((a, b) => String(b.lastEventAt).localeCompare(String(a.lastEventAt)));
+    return { all, entries: all.filter(e => {
+      const p = present(e);
+      return (!filter.categories.size || (e.categories || []).some(c => filter.categories.has(c))) && (!filter.mode || filter.mode === p.recallMode)
+        && (!query || [e.title, e.summary, p.promptText, e.reason, e.story, e.followup, ...(e.keywords || []), ...(e.details || []).map(f => f.label + f.value)].join(" ").toLocaleLowerCase().includes(query));
+    }) };
   }
   function render() {
     if (S.background) return;
-    const query = $("search").value.trim().toLocaleLowerCase();
-    const category = $("category").value, mode = $("mode-filter").value;
-    const all = activeEntries(S.characterId).sort((a, b) => String(b.lastEventAt).localeCompare(String(a.lastEventAt)));
-    const entries = all.filter(e => {
-      const p = present(e);
-      return (!category || (e.categories || []).includes(category)) && (!mode || mode === p.recallMode)
-        && (!query || [e.title, e.summary, p.promptText, e.reason, e.story, e.followup, ...(e.keywords || []), ...(e.details || []).map(f => f.label + f.value)].join(" ").toLocaleLowerCase().includes(query));
-    });
-    $("count").textContent = `${entries.length} 条记忆${query || category || mode ? " · 已筛选" : ""}`;
+    const { all, entries } = visibleEntries();
+    const filtered = filter.categories.size > 0 || !!filter.mode || !!$("search").value.trim();
+    $("count").textContent = `${entries.length} 条记忆${filtered ? " · 已筛选" : ""}`;
+    $("filter-btn").querySelector(".sg-dot").hidden = !(filter.categories.size > 0 || !!filter.mode);
     $("more").hidden = entries.length <= S.limit;
     $("cards").innerHTML = entries.slice(0, S.limit).map(cardHtml).join("")
-      || `<p class="empty">${all.length ? "没有找到这段记忆，试试其他关键词或筛选。" : "这里还没有拾光。聊到设定轮数会自动整理，也可以点「整理新消息」。"}</p>`;
+      || `<p class="sg-empty">${all.length ? "没有找到这段记忆，试试其他筛选。" : "还没有拾光。聊到设定轮数会自动整理，也可以点「整理新消息」。"}</p>`;
     renderProgress();
     busy(S.busy);
   }
+  function cardOf(id) { return document.querySelector(`.sg-record[data-id="${CSS.escape(id)}"]`); }
+  function cardNotice(id, text, failed = false) { const el = cardOf(id) && cardOf(id).querySelector("[data-card-notice]"); if (el) { el.textContent = text; el.dataset.error = String(failed); } }
   async function load() {
-    if (!S.characterId) { $("cards").innerHTML = '<p class="empty">先在小手机创建一个角色，再来收藏共同经历。</p>'; return; }
+    if (!S.characterId) { $("cards").innerHTML = '<p class="sg-empty">先在小手机创建一个角色，再来收藏共同经历。</p>'; return; }
     const revision = ++S.revision, cid = S.characterId;
-    busy(true); notice(""); $("cards").innerHTML = '<p class="empty">正在翻开记忆本…</p>';
+    busy(true); notice(""); openCards.clear(); $("cards").innerHTML = '<p class="sg-empty">正在翻找记忆…</p>';
     try {
       await Promise.all([loadEntries(cid), loadProgress(cid)]);
       const imported = await migrateCharacter(cid);
@@ -720,26 +773,36 @@ return Object.freeze(exports);
       if (imported) notice(`已接续 ${imported} 条旧拾光记录。`);
       if (!S.settings.enabled) notice("拾光已关闭：记录仍保留，暂停整理和发送。可在「回忆规则」开启。");
       syncContext(cid).catch(() => {});
-    } catch (err) { notice(errText(err), true); $("cards").innerHTML = '<p class="empty">记忆未能读取，点击刷新重试。</p>'; }
+    } catch (err) { notice(errText(err), true); $("cards").innerHTML = '<p class="sg-empty">记忆未能读取，点击刷新重试。</p>'; }
     finally { if (revision === S.revision) busy(false); }
   }
+  function showTab(tab) {
+    S.tab = tab;
+    $("memories").hidden = tab !== "memories"; $("rules").hidden = tab !== "rules";
+    document.querySelector(".sg-tools").hidden = tab !== "memories"; $("filters").hidden = tab !== "memories" || $("filter-btn").getAttribute("aria-expanded") !== "true";
+    $("rules-btn").textContent = tab === "rules" ? "记忆本" : "回忆规则"; $("rules-btn").dataset.tab = tab === "rules" ? "memories" : "rules";
+    window.scrollTo(0, 0);
+  }
   function bindList() {
+    $("category-chips").innerHTML = CATEGORIES.map(c => `<label class="sg-chip"><input type="checkbox" value="${esc(c)}"><span>${esc(c)}</span></label>`).join("");
+    $("category-chips").addEventListener("change", event => { const box = event.target; if (box.checked) filter.categories.add(box.value); else filter.categories.delete(box.value); S.limit = 20; render(); });
+    $("mode-chips").addEventListener("change", event => { filter.mode = event.target.value; S.limit = 20; render(); });
+    $("clear-filters").onclick = () => { filter.categories.clear(); filter.mode = ""; $("search").value = ""; $("category-chips").querySelectorAll("input").forEach(i => { i.checked = false; }); $("mode-chips").querySelector("input[value='']").checked = true; S.limit = 20; render(); };
+    $("filter-btn").onclick = () => { const open = $("filter-btn").getAttribute("aria-expanded") !== "true"; $("filter-btn").setAttribute("aria-expanded", String(open)); $("filters").hidden = !open; };
+    $("search").addEventListener("input", () => { S.limit = 20; render(); });
+    $("cards").addEventListener("toggle", event => { const details = event.target; const id = details.closest("[data-id]").dataset.id; if (details.open) openCards.add(id); else openCards.delete(id); }, true);
     $("cards").onclick = event => {
       const button = event.target.closest("button[data-action]"); if (!button || S.busy) return;
-      const entry = (S.entries[S.characterId] || []).find(e => e.id === button.closest("[data-id]").dataset.id); if (!entry) return;
-      if (button.dataset.action === "edit") showEditor(entry);
-      if (button.dataset.action === "sources") void showSources(entry);
+      const record = button.closest("[data-id]");
+      const entry = (S.entries[S.characterId] || []).find(e => e.id === record.dataset.id); if (!entry) return;
+      if (button.dataset.action === "edit") toggleEditor(record, entry, button);
+      if (button.dataset.action === "sources") void toggleSources(record, entry, button);
       if (button.dataset.action === "delete") { S.deleting = entry; $("delete-error").textContent = ""; $("delete-dialog").showModal(); }
     };
     $("character").onchange = () => { S.characterId = $("character").value; void load(); };
     $("refresh").onclick = () => void (S.characters.length ? load() : start());
-    for (const id of ["search", "category", "mode-filter"]) $(id).addEventListener(id === "search" ? "input" : "change", () => { S.limit = 20; render(); });
     $("more").onclick = () => { S.limit += 20; render(); };
-    document.querySelectorAll("[data-tab]").forEach(button => button.onclick = () => {
-      S.tab = button.dataset.tab;
-      document.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-current", b === button ? "page" : "false"));
-      $("memories").hidden = S.tab !== "memories"; $("rules").hidden = S.tab !== "rules";
-    });
+    document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", () => showTab(button.dataset.tab)));
     $("organize").onclick = async () => {
       if (S.busy) return;
       busy(true); $("organize").textContent = "正在整理…"; notice("正在调用模型，完成前请保持页面打开。");
@@ -747,30 +810,47 @@ return Object.freeze(exports);
         const result = await organize(S.characterId);
         if (!result.success) throw new Error(result.error || "整理失败，请重试");
         render(); await syncContext(S.characterId).catch(() => {});
-        notice(`整理完成，保存 ${result.saved} 条。${result.hasMore ? "还有未整理的消息，可再点一次继续。" : ""}`);
+        notice(`整理完成，记下 ${result.saved} 条。${result.hasMore ? "还有未整理的消息，可再点一次继续。" : ""}`);
       } catch (err) { notice(errText(err), true); render(); }
       finally { busy(false); $("organize").textContent = "整理新消息"; }
     };
   }
-  /* ================= 编辑、删除 ================= */
+  /* ================= 卡片内编辑、删除 ================= */
   const LIMITS = { title: 60, summary: 200, reason: 1200, story: 1200, facts: 5500, significance: 600, followup: 1000, promptSummary: 600 };
-  function input(name, label, value, rows = 3) {
+  function field(name, label, value, rows = 2) {
     const max = LIMITS[name] || 1200;
-    return `<label>${esc(label)}<textarea name="${name}" maxlength="${max}" rows="${rows}" ${["title", "summary", "promptSummary"].includes(name) ? "required" : ""}>${esc(value)}</textarea><small>最多 ${max} 字</small></label>`;
+    return `<label>${esc(label)}<textarea name="${name}" maxlength="${max}" rows="${rows}" ${["title", "summary", "promptSummary"].includes(name) ? "required" : ""}>${esc(value)}</textarea></label>`;
   }
-  function showEditor(entry) {
-    S.editing = entry;
+  function editorHtml(entry) {
     const e = present(entry);
-    $("edit-fields").innerHTML = `<section class="edit-section"><h3>供 AI 回忆的摘要</h3><p class="muted">保留人名、具体物品或作品名、关键行为、日期与约定。进展和后续会自动附在摘要之后。</p><div class="fields">${input("promptSummary", "摘要正文", e.promptSummary || ShiguangRecall.defaultSummary(e), 6)}<label>发送方式<select name="recallMode">${Object.entries(MODES).map(([v, k]) => `<option value="${v}" ${e.recallMode === v ? "selected" : ""}>${k}</option>`).join("")}</select></label><label>回忆关键词（用顿号或逗号隔开，最多 8 个）<input name="keywords" value="${esc((e.keywords || []).join("、"))}"></label></div><button type="button" class="quiet wide" id="regenerate-summary">从下方卡片内容重新生成摘要</button><small>这会替换上方编辑框中的摘要，保存前不会改变记录。</small></section><details><summary>编辑故事与具体信息</summary><div class="fields">${input("title", "标题", e.title, 1)}${input("summary", "卡片简述", e.summary)}${input("reason", "事情的缘由", e.reason)}${input("story", "那天发生了什么", e.story)}${input("facts", "具体信息（每行：名称：内容，最多 12 行）", (e.details || []).map(f => f.label + "：" + f.value).join("\n"))}${input("significance", "值得记住的", e.significance)}<div><span>记忆类型（至少一种）</span><div class="check-group">${CATEGORIES.map(c => `<label><input type="checkbox" name="categories" value="${esc(c)}" ${(e.categories || []).includes(c) ? "checked" : ""}>${esc(c)}</label>`).join("")}</div></div></div></details><div class="fields"><label>当前进展<select name="status">${Object.entries(STATUSES).map(([v, k]) => `<option value="${v}" ${e.status === v ? "selected" : ""}>${k}</option>`).join("")}</select></label><label id="due-field">约定日期<input type="date" name="dueAt" value="${esc(e.dueAt || "")}"></label>${input("followup", "后来发生了什么", e.followup)}</div>`;
-    const form = $("edit-form");
-    const syncDate = () => { $("due-field").hidden = form.elements.status.value !== "pending"; };
-    form.elements.status.onchange = syncDate; syncDate();
-    $("regenerate-summary").onclick = () => { form.elements.promptSummary.value = ShiguangRecall.defaultSummary({ ...draftFromForm(), legacy: undefined }); };
-    $("edit-error").textContent = "";
-    $("editor").showModal(); $("editor").scrollTop = 0;
+    return `<form class="sg-update" data-editor>
+<h3>发给 AI 的摘要</h3><p class="sg-fine">保留人名、具体物品或作品名、关键行为、日期与约定；进展和后续会自动附在后面。</p>
+${field("promptSummary", "摘要", e.promptSummary || ShiguangRecall.defaultSummary(e), 4)}
+<div class="sg-inline"><button type="button" class="sg-action" data-regenerate>从卡片内容重新生成</button></div>
+<div class="sg-two"><label>发送方式<select name="recallMode">${Object.entries(MODES).map(([v, k]) => `<option value="${v}" ${e.recallMode === v ? "selected" : ""}>${k}</option>`).join("")}</select></label><label>进展<select name="status">${Object.entries(STATUSES).map(([v, k]) => `<option value="${v}" ${e.status === v ? "selected" : ""}>${k}</option>`).join("")}</select></label></div>
+<label data-due hidden>约定日期<input type="date" name="dueAt" value="${esc(e.dueAt || "")}"></label>
+<label>回忆关键词<small>顿号或逗号隔开，最多 8 个</small><input name="keywords" value="${esc((e.keywords || []).join("、"))}"></label>
+<h3>记忆类型</h3><div class="sg-chips">${CATEGORIES.map(c => `<label class="sg-chip"><input type="checkbox" name="categories" value="${esc(c)}" ${(e.categories || []).includes(c) ? "checked" : ""}><span>${esc(c)}</span></label>`).join("")}</div>
+${field("title", "标题", e.title, 1)}${field("summary", "记忆简述", e.summary)}${field("reason", "事情的缘由", e.reason)}${field("story", "那天发生了什么", e.story)}${field("facts", "具体信息（每行一项：名称：内容）", (e.details || []).map(f => f.label + "：" + f.value).join("\n"))}${field("significance", "值得记住的", e.significance)}${field("followup", "后来发生了什么", e.followup)}
+<button class="sg-submit" type="submit">保存记忆</button>
+<button class="sg-clear" type="button" data-action="delete">删除这条记忆</button>
+</form>`;
   }
-  function draftFromForm() {
-    const fd = new FormData($("edit-form")), draft = Object.fromEntries(fd);
+  function toggleEditor(record, entry, button) {
+    const slot = record.querySelector(".sg-slot");
+    const open = !!slot.querySelector("[data-editor]");
+    record.querySelectorAll("[data-action=sources]").forEach(b => b.setAttribute("aria-expanded", "false"));
+    slot.innerHTML = open ? "" : editorHtml(entry);
+    button.setAttribute("aria-expanded", String(!open));
+    if (open) return;
+    const form = slot.querySelector("form");
+    const syncDate = () => { form.querySelector("[data-due]").hidden = form.elements.status.value !== "pending"; };
+    form.elements.status.onchange = syncDate; syncDate();
+    form.querySelector("[data-regenerate]").onclick = () => { form.elements.promptSummary.value = ShiguangRecall.defaultSummary({ ...draftFromForm(form), legacy: undefined }); };
+    form.onsubmit = event => { event.preventDefault(); void saveEdit(record, entry, form); };
+  }
+  function draftFromForm(form) {
+    const fd = new FormData(form), draft = Object.fromEntries(fd);
     for (const key of Object.keys(draft)) if (typeof draft[key] === "string") draft[key] = draft[key].trim();
     draft.categories = fd.getAll("categories");
     draft.keywords = [...new Set(String(draft.keywords || "").split(/[,，、\n]+/).map(v => v.trim()).filter(Boolean))];
@@ -782,7 +862,7 @@ return Object.freeze(exports);
   }
   function validateDraft(d) {
     if (!d.title) throw new Error("标题不能为空");
-    if (!d.summary) throw new Error("卡片简述不能为空");
+    if (!d.summary) throw new Error("记忆简述不能为空");
     if (!d.promptSummary) throw new Error("摘要不能为空");
     if (!d.categories.length) throw new Error("至少选择一种记忆类型");
     if (d.keywords.length > 8) throw new Error("关键词最多 8 个");
@@ -792,20 +872,18 @@ return Object.freeze(exports);
     if (!STATUSES[d.status]) throw new Error("进展无效");
     if (d.dueAt && !ShiguangText.isValidDate(d.dueAt)) throw new Error("约定日期无效");
   }
-  async function saveEdit(event) {
-    event.preventDefault();
-    const entry = S.editing;
-    if (!entry || $("save-entry").disabled) return;
-    $("save-entry").disabled = true; $("close-editor").disabled = true; $("edit-error").textContent = "";
+  async function saveEdit(record, entry, form) {
+    const submit = form.querySelector(".sg-submit");
+    if (submit.disabled) return;
+    submit.disabled = true; submit.textContent = "保存中…"; cardNotice(entry.id, "");
     try {
-      const d = draftFromForm(); validateDraft(d);
+      const d = draftFromForm(form); validateDraft(d);
       const now = new Date(Math.max(Date.now(), Date.parse(entry.updatedAt) + 1)).toISOString();
       const next = { ...entry, ...d, dueAt: d.status === "pending" ? d.dueAt || undefined : undefined, userEdited: true, updatedAt: now, baseUpdatedAt: entry.updatedAt };
       await putEntry(entry.characterId, next);
-      $("editor").close(); render(); notice("记忆和摘要已保存。下次选中时使用卡片中显示的内容。");
+      render(); cardNotice(entry.id, "记忆已更新，手动修改的内容会优先保留。");
       syncContext(entry.characterId).catch(() => {});
-    } catch (err) { $("edit-error").textContent = errText(err); }
-    finally { $("save-entry").disabled = false; $("close-editor").disabled = false; }
+    } catch (err) { cardNotice(entry.id, errText(err), true); submit.disabled = false; submit.textContent = "保存记忆"; }
   }
   async function confirmDelete() {
     const entry = S.deleting; if (!entry || $("confirm-delete").disabled) return;
@@ -821,40 +899,43 @@ return Object.freeze(exports);
   function bindEditor() {
     $("confirm-delete").onclick = confirmDelete;
     $("cancel-delete").onclick = () => $("delete-dialog").close();
-    $("close-editor").onclick = () => $("editor").close();
-    $("editor").addEventListener("cancel", event => { if ($("save-entry").disabled) event.preventDefault(); });
     $("delete-dialog").addEventListener("cancel", event => { if ($("confirm-delete").disabled) event.preventDefault(); });
-    $("edit-form").onsubmit = saveEdit;
   }
-  /* ================= 回看原消息 ================= */
-  async function showSources(entry) {
-    $("source-list").innerHTML = '<p class="empty">正在寻找原消息…</p>'; $("sources").showModal();
+  /* ================= 回看原消息（卡片内气泡） ================= */
+  async function toggleSources(record, entry, button) {
+    const slot = record.querySelector(".sg-slot");
+    const open = !!slot.querySelector("[data-sources]");
+    record.querySelectorAll("[data-action=edit]").forEach(b => b.setAttribute("aria-expanded", "false"));
+    button.setAttribute("aria-expanded", String(!open));
+    if (open) { slot.innerHTML = ""; return; }
+    slot.innerHTML = '<section class="sg-source" data-sources><h3>聊天原消息</h3><p class="sg-fine">正在加载…</p></section>';
     try {
       const list = await findMessages(entry.characterId, entry.sourceIds || []);
-      $("source-list").innerHTML = list.map(m => `<article class="source"><small>${esc(fmtTime(m.createdAt))} · ${m.role === "user" ? "你" : "角色"}</small><p>${esc(m.content)}</p></article>`).join("")
-        || '<p class="empty">关联的原消息已不在最近两千条聊天里，记忆仍保留。</p>';
-    } catch (err) { $("source-list").textContent = errText(err); }
+      const box = slot.querySelector("[data-sources]"); if (!box) return;
+      const who = character(entry.characterId);
+      box.innerHTML = `<h3>聊天原消息 · ${list.length} 条</h3>` + (list.map(m => `<div class="sg-msg ${m.role === "user" ? "sg-user" : ""}"><label>${m.role === "user" ? "你" : esc(who ? who.name : "角色")} · ${esc(fmtTime(m.createdAt))}</label><p>${esc(m.content)}</p></div>`).join("")
+        || '<p class="sg-fine">关联的原消息已不在最近两千条聊天里，记忆仍保留。</p>');
+    } catch (err) { cardNotice(entry.id, errText(err), true); }
   }
-  $("close-sources").onclick = () => $("sources").close();
   /* ================= 回忆规则与整理设置 ================= */
   function renderSettings() {
     const form = $("settings");
     for (const [key, value] of Object.entries(S.settings || {})) {
-      const field = form.elements.namedItem(key);
-      if (!field || typeof field.type !== "string") continue;
-      if (field.type === "checkbox") field.checked = !!value; else field.value = value;
+      const el = form.elements.namedItem(key);
+      if (!el || typeof el.type !== "string") continue;
+      if (el.type === "checkbox") el.checked = !!value; else el.value = value;
     }
   }
   function renderProgress() {
     const p = S.progress[S.characterId];
     const who = character(S.characterId);
-    $("progress").innerHTML = who ? `<dt>${esc(who.name)} 的整理进度</dt><dd>${p && p.watermarkAt ? "已整理到 " + esc(fmtTime(p.watermarkAt)) : "还没开始"}${p && p.lastRunAt ? "，上次整理 " + esc(fmtTime(p.lastRunAt)) : ""}</dd>${p && p.lastError ? `<dd class="budget-note">上次失败：${esc(p.lastError)}</dd>` : ""}` : "";
+    $("progress").innerHTML = who ? `${esc(who.name)}：${p && p.watermarkAt ? "已整理到 " + esc(fmtTime(p.watermarkAt)) : "还没开始"}${p && p.lastRunAt ? "，上次整理 " + esc(fmtTime(p.lastRunAt)) : ""}${p && p.lastError ? `<br><span class="sg-warn">上次失败：${esc(p.lastError)}</span>` : ""}` : "";
     $("restart").disabled = !who;
   }
   function bindSettings() {
     $("settings").onsubmit = async event => {
       event.preventDefault();
-      const form = $("settings"), button = form.querySelector("button[type=submit]"); if (button.disabled) return;
+      const form = $("settings"), button = form.querySelector(".sg-submit"); if (button.disabled) return;
       button.disabled = true; $("settings-notice").textContent = "";
       try {
         const roundInterval = Number(form.elements.roundInterval.value), tokenBudget = Number(form.elements.tokenBudget.value);
@@ -870,8 +951,8 @@ return Object.freeze(exports);
     $("restart").onclick = async () => {
       if (!S.characterId || S.busy) return;
       const who = character(S.characterId);
-      if (!window.confirm(`把「${who.name}」的整理进度清零？之后点「整理新消息」会从最早的聊天开始，一批一批整理，已有记录会按标题合并。`)) return;
-      try { await saveProgress(S.characterId, { watermarkAt: "", watermarkId: "", lastError: "", retryAfter: "" }); renderProgress(); $("settings-notice").textContent = "已清零，回到「记忆本」点「整理新消息」开始。"; }
+      if (!window.confirm(`把「${who.name}」的整理进度清零？之后点「整理新消息」会从最早的聊天开始，一批一批整理，已有记录按标题合并。`)) return;
+      try { await saveProgress(S.characterId, { watermarkAt: "", watermarkId: "", lastError: "", retryAfter: "" }); renderProgress(); $("settings-notice").textContent = "已清零，回到记忆本点「整理新消息」开始。"; }
       catch (err) { $("settings-notice").textContent = errText(err); }
     };
   }
@@ -879,7 +960,7 @@ return Object.freeze(exports);
   async function start() {
     S.api = window.AiPhone;
     if (!S.api || !S.api.db || !S.api.chat || !S.api.chat.setContext) {
-      notice("这个版本的小手机还不支持拾光 APP，请先更新宿主。"); $("cards").innerHTML = ""; return;
+      notice("这个版本的小手机还不支持拾光 APP，请先更新宿主。", true); $("cards").innerHTML = ""; return;
     }
     S.api.on("chat.message.created", onChatMessage);
     S.launch = await S.api.app.getLaunchContext().catch(() => null);
@@ -895,7 +976,7 @@ return Object.freeze(exports);
       S.characterId = S.characters.some(c => c.id === launchId) ? launchId : (S.characters[0] && S.characters[0].id) || "";
       $("character").value = S.characterId;
       await load();
-    } catch (err) { notice(errText(err), true); $("cards").innerHTML = '<p class="empty">记忆未能读取，点击刷新重试。</p>'; }
+    } catch (err) { notice(errText(err), true); $("cards").innerHTML = '<p class="sg-empty">记忆未能读取，点击刷新重试。</p>'; }
     finally { busy(false); }
   }
   bindList(); bindEditor(); bindSettings();

@@ -1,24 +1,30 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>拾光</title><style>{{STYLES}}</style></head>
-<body><div class="app"><header class="topbar"><span class="wordmark">拾光</span><span class="edition">记住那些具体的小事</span></header>
-<main id="main"><div class="intro"><p class="eyebrow">我们的记忆本</p><h1>有些小事，值得记得。</h1><p>故事留在这里，也带进下一次对话。</p></div>
-<div class="toolbar"><label class="character-label">关于谁<select id="character" aria-label="选择角色" disabled><option>正在读取角色…</option></select></label><button id="refresh" class="quiet" type="button">刷新</button></div>
-<nav class="tabs" aria-label="拾光页面"><button data-tab="memories" aria-current="page">记忆本</button><button data-tab="rules">回忆规则</button></nav>
-<p id="notice" class="notice" role="status" aria-live="polite"></p>
-<section id="memories"><div class="list-tools"><label class="search-label"><span class="sr-only">搜索记忆与摘要</span><input id="search" type="search" placeholder="找一段故事、一个名字…"></label><button id="organize" class="primary" type="button" disabled>整理新消息</button></div>
-<div class="filter-row"><label><span class="sr-only">筛选类型</span><select id="category"><option value="">全部类型</option><option>共同经历</option><option>约定与承诺</option><option>喜好与边界</option><option>人物与关系</option><option>重要信息</option></select></label><label><span class="sr-only">筛选发送方式</span><select id="mode-filter"><option value="">全部发送方式</option><option value="priority">优先携带</option><option value="relevant">按话题回忆</option><option value="off">不发送</option></select></label></div>
-<p id="count" class="muted"></p><div id="cards" class="cards"><p class="empty">正在翻开记忆本…</p></div><button id="more" class="quiet wide" hidden>显示更多</button></section>
-<section id="rules" hidden><article class="paper"><p class="eyebrow">让回忆有迹可循</p><h2>选哪条，由这些规则决定。</h2><dl class="rule-list"><dt>优先携带</dt><dd>不需要话题命中，在预算内优先放入，最多占预算一半。适合重要关系、边界或希望经常记住的事。</dd><dt>按话题回忆</dt><dd>按标题和关键词匹配最近几句聊天；昨天至未来 7 天内仍待兑现的约定也可入选。文字匹配可能漏掉相关记忆。</dd><dt>不发送</dt><dd>只留在记忆本里，不放进聊天提示词。</dd></dl><p class="hint">选中后发送卡片里的摘要，并附上当前进展与后续。超过预算的整条跳过，重复内容去重。每来一条新消息，拾光都会按最近几句重新挑一遍，所以「按话题回忆」跟的是上一轮话题。</p></article>
-<form id="settings" class="paper"><h2>整理与回忆</h2><p class="muted">这些设置对所有角色生效。整理用的模型按「绑定配置」里给拾光绑的 API，没绑就用这位角色的聊天模型；会产生模型用量。</p>
-<label class="switch"><span>启用拾光记录与回忆<small>关闭后保留记录，暂停整理与发送。</small></span><input type="checkbox" name="enabled"></label>
-<label class="switch"><span>自动整理新消息<small>聊满设定轮数就自动整理，小手机关着也会跑。</small></span><input type="checkbox" name="autoEnabled"></label>
-<div class="fields"><label>整理间隔（私聊回复轮数）<input name="roundInterval" type="number" min="5" max="80" required><small>角色连发几条气泡算一轮，范围 5–80。</small></label><label>回忆预算（Token）<input name="tokenBudget" type="number" min="200" max="4000" required><small>范围 200–4000，预算不是固定条数。</small></label></div>
-<button class="primary" type="submit">保存设置</button><p class="notice" id="settings-notice" role="status"></p>
-<dl id="progress" class="facts"></dl><button id="restart" class="quiet wide" type="button" disabled>从头整理这位角色的聊天</button></form></section>
-<footer>每个名字、每次约定，都有来处。</footer></main></div>
-<dialog id="editor" aria-labelledby="editor-title"><form id="edit-form"><header class="dialog-header"><h2 id="editor-title">编辑这段拾光</h2><button type="button" class="quiet" id="close-editor">取消</button></header><div id="edit-fields"></div><p id="edit-error" class="notice" role="alert"></p><div class="dialog-footer"><button type="submit" class="primary wide" id="save-entry">保存记忆与摘要</button></div></form></dialog>
-<dialog id="sources" aria-labelledby="sources-title"><header class="dialog-header"><h2 id="sources-title">这段记忆的来处</h2><button type="button" class="quiet" id="close-sources">关闭</button></header><div id="source-list"></div></dialog>
-<dialog id="delete-dialog" aria-labelledby="delete-title"><h2 id="delete-title">删除这条拾光？</h2><p>删除后停止回忆这条记录。原聊天消息保留，自动整理不会重新建回这条记录。</p><div class="actions"><button class="quiet" id="cancel-delete">取消</button><button class="danger" id="confirm-delete">删除记忆</button></div><p id="delete-error" role="alert"></p></dialog>
+<body><div class="sg">
+<header class="sg-top"><span class="sg-brand">拾光</span><label class="sg-person">和<select id="character" aria-label="选择角色" disabled><option value="">…</option></select>的记忆</label></header>
+<main class="sg-main">
+<div class="sg-tools"><label class="sg-search"><span class="sg-search-icon" aria-hidden="true"></span><input id="search" type="search" placeholder="找一段记忆…" aria-label="搜索记忆"></label><button id="filter-btn" class="sg-filter-btn" type="button" aria-label="筛选" aria-expanded="false" aria-controls="filters"><span class="sg-filter-icon" aria-hidden="true"></span><span class="sg-dot" hidden></span></button></div>
+<section id="filters" class="sg-filters" hidden aria-label="记忆筛选">
+<div class="sg-fgroup"><span class="sg-flabel">类型</span><div class="sg-chips" id="category-chips" role="group" aria-label="记忆类型，可多选"></div></div>
+<div class="sg-fgroup"><span class="sg-flabel">发送</span><div class="sg-chips" id="mode-chips" role="radiogroup" aria-label="发送方式"><label class="sg-chip"><input type="radio" name="mode" value="" checked><span>全部</span></label><label class="sg-chip"><input type="radio" name="mode" value="priority"><span>优先携带</span></label><label class="sg-chip"><input type="radio" name="mode" value="relevant"><span>按话题回忆</span></label><label class="sg-chip"><input type="radio" name="mode" value="off"><span>不发送</span></label></div></div>
+<button type="button" class="sg-clear" id="clear-filters">清除筛选</button>
+</section>
+<div class="sg-list-head"><p id="count" class="sg-count" aria-live="polite"></p><span class="sg-head-actions"><button id="organize" class="sg-clear" type="button" disabled>整理新消息</button><button id="rules-btn" class="sg-clear" type="button" data-tab="rules">回忆规则</button><button id="refresh" class="sg-clear" type="button">刷新</button></span></div>
+<p id="notice" class="sg-save-hint" role="status" aria-live="polite"></p>
+<section id="memories"><div id="cards"><p class="sg-empty">正在翻找记忆…</p></div><button id="more" class="sg-action sg-more" type="button" hidden>显示更多</button></section>
+<section id="rules" hidden aria-label="回忆规则">
+<div class="sg-note sg-static"><h2>选哪条，由这些规则决定</h2><dl class="sg-rules"><dt>优先携带</dt><dd>不需要话题命中，在预算内优先放入，最多占预算一半。适合重要关系、边界或希望经常记住的事。</dd><dt>按话题回忆</dt><dd>按标题和关键词匹配最近几句聊天；昨天至未来 7 天内仍待兑现的约定也可入选。</dd><dt>不发送</dt><dd>只留在记忆本里，不放进聊天提示词。</dd></dl><p class="sg-fine">每来一条新消息都按最近几句重选一遍，所以「按话题回忆」跟的是上一轮话题。整理用的模型按「绑定配置」里给拾光绑的 API，没绑就用这位角色的聊天模型。</p></div>
+<form id="settings" class="sg-note sg-static sg-update">
+<label class="sg-switch"><span>启用拾光记录与回忆<small>关闭后保留记录，暂停整理与发送。</small></span><input type="checkbox" name="enabled"></label>
+<label class="sg-switch"><span>自动整理新消息<small>聊满设定轮数就自动整理，小手机关着也会跑。</small></span><input type="checkbox" name="autoEnabled"></label>
+<div class="sg-two"><label>整理间隔（轮）<input name="roundInterval" type="number" min="5" max="80" required></label><label>回忆预算（Token）<input name="tokenBudget" type="number" min="200" max="4000" required></label></div>
+<button class="sg-submit" type="submit">保存设置</button><p class="sg-save-hint" id="settings-notice" role="status"></p>
+<div id="progress" class="sg-progress"></div><button id="restart" class="sg-clear" type="button" disabled>从头整理这位角色的聊天</button>
+<button class="sg-action sg-more" type="button" data-tab="memories">返回记忆本</button>
+</form></section>
+<p class="sg-foot">有些小事，后来成了很重要的事。</p>
+</main></div>
+<dialog id="delete-dialog" class="sg-dialog" aria-labelledby="delete-title"><h2 id="delete-title">删除这条拾光？</h2><p>删除后不再展示或用于回忆，原聊天消息保留，自动整理不会重建。</p><div class="sg-actions"><button class="sg-action" id="cancel-delete" type="button">取消</button><button class="sg-action sg-danger" id="confirm-delete" type="button">删除记忆</button></div><p id="delete-error" class="sg-save-hint" role="alert"></p></dialog>
 <script>(() => {
   "use strict";
 {{SCRIPTS}}

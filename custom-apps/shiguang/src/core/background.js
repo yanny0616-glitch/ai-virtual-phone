@@ -12,7 +12,7 @@
         const result = await maybeAutoOrganize(cid);
         if (result && result.success) {
           await syncContext(cid);
-          if (!S.background && S.characterId === cid) { render(); notice(`自动整理完成，保存 ${result.saved} 条。`); }
+          if (!S.background && S.characterId === cid) { render(); notice(`自动整理完成，记下 ${result.saved} 条。`); }
         }
       }
     });

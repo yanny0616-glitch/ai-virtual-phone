@@ -51,54 +51,64 @@ const TEST = String.raw`
   const wait = async (test, why) => { for (let i = 0; i < 200; i++) { if (test()) return; await pause(40); } throw new Error(why); };
   let checks = 0; const check = (c, m) => { if (!c) throw new Error(m); checks++; };
   await wait(() => $("character").options.length === 2 && !$("character").disabled, "characters did not load");
-  await wait(() => document.querySelectorAll(".card").length === 1, "legacy record not imported");
-  check(document.querySelector(".card h3").textContent === "旧记录", "legacy title");
-  check(document.querySelector(".card .badge").textContent === "优先携带", "legacy stableSummary → priority");
-  check(document.querySelector(".card .prompt-text").textContent === "紧凑旧摘要", "legacy compact summary used as prompt text");
+  await wait(() => document.querySelectorAll(".sg-record").length === 1, "legacy record not imported");
+  check(document.querySelector(".sg-record .sg-title span").textContent === "旧记录", "legacy title");
+  check(document.querySelector(".sg-record .sg-mode").textContent === "优先携带", "legacy stableSummary → priority");
+  check(document.querySelector(".sg-record .sg-prompt p").textContent === "紧凑旧摘要", "legacy compact summary used as prompt text");
   await wait(() => (H.contexts.c1 || "").includes("紧凑旧摘要"), "context not injected after open");
   const progress = H.db.progress.find(r => r.characterId === "c1");
   check(progress && progress.watermarkAt, "watermark set at migration");
-  // 后台事件：先把水位拨回最早，再来一条角色消息 → 自动整理调假模型
   progress.watermarkAt = "2026-09-05T19:00:00.000Z";
   await H.api.emit("chat.message.created", { characterId: "c1", isGroup: false, message: { id: "x", role: "assistant", content: "..." } });
   await wait(() => H.calls.ai === 1, "auto organize did not call the model");
   check(H.calls.lastPrompt.includes("[s1]") && H.calls.lastPrompt.includes("旧记录"), "prompt has events and candidates");
-  await wait(() => document.querySelectorAll(".card").length === 2, "new record not rendered");
+  await wait(() => document.querySelectorAll(".sg-record").length === 2, "new record not rendered");
   check(H.db.progress.find(r => r.characterId === "c1").watermarkAt === H.history[43].createdAt, "watermark advanced to last message");
   await wait(() => (H.contexts.c1 || "").includes("9月12日一起去海边"), "context refreshed after organize");
   check((H.contexts.c1 || "").includes("尚待兑现"), "pending promise carries status");
-  // 群聊事件忽略；不到轮数不调模型
   await H.api.emit("chat.message.created", { characterId: "c1", isGroup: true, message: { role: "assistant" } });
   await H.api.emit("chat.message.created", { characterId: "c1", isGroup: false, message: { role: "assistant" } });
   await pause(200); check(H.calls.ai === 1, "no extra model call without enough rounds");
-  // 编辑 + 版本冲突
-  const card = [...document.querySelectorAll(".card")].find(c => c.querySelector("h3").textContent === "海边之约");
-  card.querySelector('[data-action="edit"]').click();
-  await wait(() => $("editor").open, "editor did not open");
-  const form = $("edit-form");
+  // 卡片内编辑 + 版本冲突
+  const card = () => [...document.querySelectorAll(".sg-record")].find(c => c.querySelector(".sg-title span").textContent === "海边之约");
+  const id = card().dataset.id;
+  card().querySelector("details").open = true;
+  card().querySelector('[data-action="edit"]').click();
+  await wait(() => card().querySelector("form[data-editor]"), "inline editor did not open");
+  let form = card().querySelector("form[data-editor]");
   form.elements.promptSummary.value = "我改过的摘要"; form.elements.recallMode.value = "priority";
   const col = Object.keys(H.db).find(k => k.startsWith("mem_"));
-  const live = H.db[col].find(r => r.id === card.dataset.id); const original = live.updatedAt; live.updatedAt = "2099-01-01T00:00:00.000Z";
-  form.requestSubmit(); await wait(() => $("edit-error").textContent.includes("已变化"), "stale edit not rejected");
-  live.updatedAt = original; form.requestSubmit();
-  await wait(() => !$("editor").open, "editor did not close after save");
-  check(H.db[col].find(r => r.id === card.dataset.id).userEdited === true && H.db[col].find(r => r.id === card.dataset.id).promptSummary === "我改过的摘要", "edit persisted");
+  const live = H.db[col].find(r => r.id === id); const original = live.updatedAt; live.updatedAt = "2099-01-01T00:00:00.000Z";
+  form.requestSubmit(); await wait(() => card().querySelector("[data-card-notice]").textContent.includes("已变化"), "stale edit not rejected");
+  live.updatedAt = original; form = card().querySelector("form[data-editor]"); form.requestSubmit();
+  await wait(() => card().querySelector("[data-card-notice]").textContent.includes("已更新"), "edit did not save");
+  check(H.db[col].find(r => r.id === id).userEdited === true && H.db[col].find(r => r.id === id).promptSummary === "我改过的摘要", "edit persisted");
+  check(card().querySelector("details").open, "card stays open after save");
   await wait(() => (H.contexts.c1 || "").includes("我改过的摘要"), "context uses edited summary");
+  // 原消息气泡
+  card().querySelector('[data-action="sources"]').click();
+  await wait(() => card().querySelectorAll(".sg-msg").length === 2, "source bubbles");
+  check(card().querySelector(".sg-msg.sg-user"), "user bubble aligned right");
   // 删除 → 墓碑，界面消失，注入撤掉
-  const fresh = document.querySelector('.card[data-id="' + card.dataset.id + '"]');
-  fresh.querySelector('[data-action="delete"]').click(); await wait(() => $("delete-dialog").open, "delete dialog");
-  $("confirm-delete").click(); await wait(() => document.querySelectorAll(".card").length === 1, "card not removed");
-  check(H.db[col].find(r => r.id === card.dataset.id).deletedAt, "tombstone kept");
+  card().querySelector('[data-action="edit"]').click();
+  await wait(() => card().querySelector("form[data-editor]"), "editor reopen");
+  card().querySelector('[data-action="delete"]').click(); await wait(() => $("delete-dialog").open, "delete dialog");
+  $("confirm-delete").click(); await wait(() => document.querySelectorAll(".sg-record").length === 1, "card not removed");
+  check(H.db[col].find(r => r.id === id).deletedAt, "tombstone kept");
   await wait(() => !(H.contexts.c1 || "").includes("我改过的摘要"), "deleted record still injected");
+  // 筛选：发送方式
+  $("filter-btn").click(); $("mode-chips").querySelector("input[value='relevant']").click();
+  await wait(() => $("count").textContent.startsWith("0 条") && $("count").textContent.includes("已筛选"), "mode filter");
+  $("clear-filters").click(); await wait(() => $("count").textContent.startsWith("1 条"), "clear filter");
   // 关掉拾光 → 注入写空串
-  document.querySelector('[data-tab="rules"]').click();
+  $("rules-btn").click();
   $("settings").elements.enabled.checked = false; $("settings").requestSubmit();
   await wait(() => H.contexts.c1 === "", "context not cleared when disabled");
+  document.querySelector('#rules [data-tab="memories"]').click();
   // 换角色：c2 没有历史、没有旧记录
-  document.querySelector('[data-tab="memories"]').click();
   $("character").value = "c2"; $("character").dispatchEvent(new Event("change"));
-  await wait(() => document.querySelector("#cards .empty"), "c2 empty state");
-  check(!document.querySelector(".card"), "c2 has no cards");
+  await wait(() => document.querySelector("#cards .sg-empty"), "c2 empty state");
+  check(!document.querySelector(".sg-record"), "c2 has no cards");
   return { passed: true, checks };
 })().then(r => { window.shiguangCheck = r; }, e => { window.shiguangCheck = { passed: false, error: (e && e.message || String(e)) + (window.__err ? " | handler: " + window.__err : "") }; });
 `;
