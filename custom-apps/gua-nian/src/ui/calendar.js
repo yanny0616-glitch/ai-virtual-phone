@@ -3,7 +3,7 @@
     const cx = cur();
     const it = ((cx.day && cx.day.schedule) || [])[i];
     if (!it) return '<div class="kvs">' + kv("这条日程", "已经不在了", "dim") + "</div>";
-    const cost = +it.cost || 0;
+    const cost = Math.max(-15, Math.min(15, Math.round(+it.cost || 0)));
     const w = cx.plan && (cx.plan.items || []).find((x) => x.time === it.time);
     return '<div class="kvs">'
       + kv("时间", esc(it.time) + (it.end ? " – " + esc(it.end) : ""))
@@ -12,7 +12,7 @@
       + (it.from === "chat" ? kv("这条哪来的", "聊天里" + esc(it.why || "说定的"), "hi") : "")
       + (it.mood ? kv("做完之后的情绪", esc(it.mood), "hi") : "")
       + kv("精力影响", cost ? (cost > 0 ? "回血 +" + cost : "消耗 " + cost) : "没什么影响", cost ? "" : "dim")
-      + kv("做完之后", esc(String(energyAt(cx.day, timeToMs(it.time) || Date.now()))) + "% 精力")
+      + kv(it.end && it.end > it.time ? "预计做完后" : "到点后", esc(String(energyAt(cx.day, timeToMs(it.end && it.end > it.time ? it.end : it.time) || Date.now()))) + "% 精力")
       + (w ? kv("挂着的心动时刻", (w.act ? "♥ " : "○ ") + esc(w.intent || w.why || ""), w.act ? "hi" : "dim") : "")
       + "</div>"
       + (it.detail ? '<div class="d-sec"><div class="d-t">细 化</div><div class="d-why">' + esc(it.detail) + "</div></div>" : "")
@@ -99,15 +99,15 @@
     const others = sched.filter((x, k) => k !== i).map((x) => ({ time: x.time, title: x.title }));
     const d = await generateJson(cx, {
       characterId: cx.character.id,
-      appTags: ["companion", "daily"],
+      appTags: ["companion", "schedule-edit"],
       instruction: [
         "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
         "以当前角色的人设、作息和职业为依据，改写TA今天日程里的这一条。",
         "当前这条：" + JSON.stringify({ time: it.time, end: it.end, busy: it.busy, title: it.title, note: it.note || "", cost: +it.cost || 0 }),
         "同一天其余日程（不要撞时间、不要写成重复的事）：" + JSON.stringify(others),
         ask ? "用户的要求：" + ask : "没有具体要求，换一个更贴合TA的写法，时间可以微调。",
-        '输出严格 JSON，第一个字符必须是 {：{"time":"HH:MM","end":"结束时间HH:MM，未修改可不填","busy":顾不上看手机为true、能看为false，未修改可不填,"title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完之后TA的情绪（8字内）","detail":"这件事的细化描写（60字内，写具体发生了什么、TA注意到了什么，第三人称）","cost":这件事做完对精力的影响-40到40的整数}',
-        "cost 负数=消耗（开会、通勤、应酬、体力活），正数=回血（午睡、吃饭、散步、发呆），平淡的事给 0。",
+        '输出严格 JSON，第一个字符必须是 {：{"time":"HH:MM","end":"结束时间HH:MM，未修改可不填","busy":顾不上看手机为true、能看为false，未修改可不填,"title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完之后TA的情绪（8字内）","detail":"这件事的细化描写（60字内，写具体发生了什么、TA注意到了什么，第三人称）","cost":这件事做完对精力的影响-15到15的整数}',
+        "cost 是整段活动总变化：普通通勤/事务扣 1 到 3，普通会议/工作扣 3 到 8，连续数小时高强度活动才扣 9 到 15；吃饭/散步恢复 2 到 5，午睡/充分休息恢复 5 到 12，平淡的事给 0。APP 会另算自然清醒消耗，不要重复扣。",
         "mood 用可感的状态词（清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空）带一点原因或身体感受，要和 cost 对得上。",
       ].filter(Boolean).join("\n"),
     });
@@ -119,7 +119,7 @@
       note: String(pickField(d, ["note", "备注", "细节", "desc"]) || ""),
       mood: String(pickField(d, ["mood", "情绪", "心情"]) || it.mood || "").slice(0, 24),
       detail: String(pickField(d, ["detail", "细化", "描写"]) || "").slice(0, 200),
-      cost: Math.max(-40, Math.min(40, Math.round(+pickField(d, ["cost", "精力影响", "消耗"]) || 0))),
+      cost: Math.max(-15, Math.min(15, Math.round(+pickField(d, ["cost", "精力影响", "消耗"]) || 0))),
     };
     if (d.end != null && String(d.end).trim()) {
       const end = normHM(d.end); if (!end) throw new Error("结束时间无效"); patch.end = end;
@@ -148,7 +148,7 @@
         sched.push({
           time: at, title: title, note: String(x.note || "").slice(0, 40),
           mood: String(x.mood || "").slice(0, 24),
-          cost: Math.max(-40, Math.min(40, Math.round(+x.cost || 0))),
+          cost: Math.max(-15, Math.min(15, Math.round(+x.cost || 0))),
           from: "chat", why: why,
         });
         touched++;
@@ -182,7 +182,7 @@
     const end = (it.end && it.end > it.time) ? it.end : (nx && nx.time > it.time) ? nx.time : addMin(it.time, 60);
     const d = await generateJson(cx, {
       characterId: cx.character.id,
-      appTags: ["companion", "daily"],
+      appTags: ["companion", "schedule-steps"],
       instruction: [
         "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
         "把当前角色今天日程里的这一条，按时间拆成这段时间里TA具体在做的几件事。",
@@ -195,10 +195,10 @@
     });
     const raw = pickField(d, ["steps", "细排", "分解"]);
     if (!Array.isArray(raw)) throw new Error("模型没给出 steps");
-    const steps = raw.slice(0, 6).map((x) => ({
-      time: normHM(pickField(x, ["time", "时间"])) || it.time,
+    const steps = raw.map((x) => ({
+      time: normHM(pickField(x, ["time", "时间"])),
       what: String(pickField(x, ["what", "事", "内容", "title"]) || "").slice(0, 30),
-    })).filter((x) => x.what).sort((a, b) => a.time.localeCompare(b.time));
+    })).filter((x) => x.what && x.time >= it.time && x.time < end).sort((a, b) => a.time.localeCompare(b.time)).slice(0, 5);
     if (!steps.length) throw new Error("模型给的 steps 是空的");
     sched[i] = Object.assign({}, it, { steps: steps });
     await saveSchedule(cx, sched, "细排了 " + it.time + "「" + it.title + "」" + steps.length + " 条", false);

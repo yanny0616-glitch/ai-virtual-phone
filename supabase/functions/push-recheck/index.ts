@@ -452,16 +452,16 @@ function guanianNow(day: GuanianDay, nowMs: number, quietStart?: string, quietEn
     const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || ""));
     return m ? Number(m[1]) + Number(m[2]) / 60 : null;
   };
-  // 与面板 energyAt 同步：cost 按进度记账、状况负向合计封顶 -25、缓降从起床时刻起算
+  // 与面板 energyAt 同步：cost 按进度记账、状况负向合计封顶 -12、缓降从起床时刻起算
   for (const it of sched) {
     if (h >= 5 && String(it.time) > hm) continue;
     const a = hmNum(it.time), b = hmNum(it.end);
     const prog = a != null && b != null && b > a ? Math.max(0, Math.min(1, (h - a) / (b - a))) : 1;
-    energy += (Number(it.cost) || 0) * prog;
+    energy += Math.max(-15, Math.min(15, Math.round(Number(it.cost) || 0))) * prog;
   }
   let cd = 0;
   for (const x of conds) cd += (Number(x.c.energyDelta) || 0) * x.w;
-  energy += Math.max(-25, cd);
+  energy += Math.max(-12, cd);
   const wakeH = hmNum(day.wake) ?? 7;
   energy -= Math.max(0, Math.min(hh, 22) - wakeH) * 1.2 + Math.max(0, hh - 22) * 8;
   energy = Math.max(0, Math.min(100, Math.round(energy)));
@@ -849,7 +849,7 @@ function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, setti
     place: String(pickField(it, ["place", "地点", "位置", "在哪"]) || "").slice(0, 16),
     note: String(pickField(it, ["note", "备注", "细节", "desc"]) || ""),
     mood: String(pickField(it, ["mood", "情绪", "心情"]) || "").slice(0, 24),
-    cost: Math.max(-40, Math.min(40, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
+    cost: Math.max(-15, Math.min(15, Math.round(+pickField(it, ["cost", "精力影响", "消耗"]) || 0))),
     busy: pickField(it, ["busy", "顾不上", "忙"]) === "" ? undefined : isTrue(pickField(it, ["busy", "顾不上", "忙"])),
   }));
   for (const it of existing) {
@@ -867,7 +867,7 @@ function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, setti
     .map((b: any) => ({
       mood: String(b.mood || b.label).trim().slice(0, 24),
       cause: String(b.label).trim().slice(0, 20),
-      energyDelta: Math.max(-20, Math.min(20, Math.round(+b.energy || 0))),
+      energyDelta: Math.max(-8, Math.min(8, Math.round(+b.energy || 0))),
       intensity: 60,
       halfLifeMin: Math.max(1, Math.min(12, Math.round(+b.hours || 4))) * 60,
       startAt: nowMs,

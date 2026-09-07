@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = resolve(root, "public/ai-phone-push");
 mkdirSync(output, { recursive: true });
+
+// The browser serializer and cloud worker share this pure timing contract.
+const workerPath = resolve(root, "supabase/functions/push-generate/index.ts");
+const timing = readFileSync(resolve(root, "lib/deferred-reply-timing.ts"), "utf8").replace(/^export /gm, "").trim();
+writeFileSync(workerPath, readFileSync(workerPath, "utf8").replace(
+  /\/\/ BEGIN DEFERRED REPLY TIMING[\s\S]*?\/\/ END DEFERRED REPLY TIMING/,
+  `// BEGIN DEFERRED REPLY TIMING\n${timing}\n// END DEFERRED REPLY TIMING`,
+));
 
 copyFileSync(resolve(root, "supabase/functions/ai-phone-push/index.ts"), resolve(output, "gateway.mjs"));
 copyFileSync(resolve(root, "supabase/functions/push-generate/index.ts"), resolve(output, "push-generate.mjs"));

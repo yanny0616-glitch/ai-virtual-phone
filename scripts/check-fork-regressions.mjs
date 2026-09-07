@@ -745,6 +745,9 @@ await test('Moments generation publishes one tagged post, returns its ID, and ne
   return {singlePublication:true,correctReceipt:true,draftsRejected:true,idempotentRetry:true,otherActionsPreserved:true};
 });
 
+await import('./check-gua-nian-energy.mjs');
+await import('./check-reply-gate.mjs');
+await import('./check-deferred-reply-cloud.mjs');
 await import('./check-push-outbox-plugins.mjs');
 await import('./check-shiguang.mjs');
 await import('./check-persistence-and-proxy.mjs');

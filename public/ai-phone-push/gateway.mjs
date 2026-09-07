@@ -717,6 +717,97 @@ Deno.serve(async (request: Request) => {
       }
     }
 
+    // Deferred replies use the existing encrypted job/outbox pipeline. Updates are CAS:
+    // a worker that already claimed the row cannot be overwritten or restarted.
+    if (action === "deferred-reply") {
+      const config = await loadConfig();
+      const supported = async () => {
+        const response = await fetch(`${supabaseUrl}/functions/v1/push-generate`, {
+          method: "POST", headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "capabilities", token: config.cron_secret }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        const data = await response.json().catch(() => null);
+        return response.ok && data?.capabilities?.includes("deferred-reply-v1") === true;
+      };
+      const key = cleanText(url.searchParams.get("key"), 200);
+      if (!key) {
+        if (request.method !== "GET") return json({ ok: false }, 400);
+        return json({ ok: true, supported: await supported() });
+      }
+      if (!/^deferred:[A-Za-z0-9_-]{1,150}$/.test(key)) return json({ ok: false, error: "Invalid deferred key" }, 400);
+      const filter = `push_jobs?user_id=eq.${OWNER_ID}&trigger_key=eq.${encodeURIComponent(key)}`;
+      type DeferredRow = { id: string; status: string; execute_at: string; updated_at: string; payload: EncryptedPayload; result_note?: string };
+      const get = async (): Promise<DeferredRow | undefined> => {
+        const r = await rest(`${filter}&select=id,status,execute_at,updated_at,payload,result_note&limit=1`);
+        if (!r.ok) throw new Error("Cannot read deferred task");
+        return (await r.json() as DeferredRow[])[0];
+      };
+      const receipt = (row?: DeferredRow) => json({ ok: true, status: row?.status ?? "missing", executeAt: row?.execute_at, resultNote: row?.result_note ?? "" });
+      if (request.method === "GET") return receipt(await get());
+      if (request.method === "DELETE") {
+        // Keep a cancellation tombstone so a delayed upload cannot recreate the job.
+        const row = await get();
+        if (!row) {
+          const insert = await rest("push_jobs?on_conflict=user_id,trigger_key", {
+            method: "POST", headers: { Prefer: "resolution=ignore-duplicates" },
+            body: JSON.stringify([{ id: `job_${crypto.randomUUID()}`, user_id: OWNER_ID, trigger_key: key,
+              kind: "reply_bailout", status: "cancelled", execute_at: new Date().toISOString(), payload: {} }]),
+          });
+          if (!insert.ok) throw new Error("Cannot cancel deferred task");
+        }
+        const cancelled = await rest(`${filter}&status=eq.pending`, {
+          method: "PATCH", body: JSON.stringify({ status: "cancelled", payload: {}, updated_at: new Date().toISOString() }),
+        });
+        if (!cancelled.ok) throw new Error("Cannot cancel deferred task");
+        return receipt(await get());
+      }
+      if (request.method !== "POST") return json({ ok: false }, 405);
+      if (!await supported()) return json({ ok: false, unsupported: true, error: "请更新 push-generate" }, 409);
+      const body = await request.json().catch(() => null);
+      const payload = body?.payload;
+      if (!payload?.request?.url || !payload?.deferredReply?.timing || !Number.isSafeInteger(payload.deferredReply.revision)
+        || payload.deferredReply.revision < 1 || !Number.isFinite(payload.deferredReply.timing.nextAt)
+        || !Array.isArray(payload.deferredReply.timing.windows) || !Array.isArray(payload.deferredReply.timing.sleeps)) {
+        return json({ ok: false, error: "Invalid deferred snapshot" }, 400);
+      }
+      if (JSON.stringify(payload).length > MAX_PAYLOAD_BYTES) return json({ ok: false, error: "快照过大，离线等待未同步" }, 413);
+      if (!config.payload_key) throw new Error("Missing payload key");
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const row = await get();
+        if (row && row.status !== "pending") return receipt(row);
+        if (row) {
+          const old = JSON.parse(await decryptPayload(row.payload, config.payload_key));
+          if (!old.deferredReply) return json({ ok: false, error: "Unexpected task" }, 409);
+          if (old.deferredReply.revision >= payload.deferredReply.revision) return receipt(row);
+          // New messages/API choices update the snapshot, never add a chance or reset the clock.
+          const timing = payload.deferredReply.timing;
+          const previous = old.deferredReply.timing;
+          payload.deferredReply.timing = { ...timing, nextAt: Date.parse(row.execute_at),
+            reason: previous.reason, windowKey: previous.windowKey, availableUntil: previous.availableUntil,
+            check: previous.check, note: previous.note };
+          const update = await rest(`${filter}&status=eq.pending&updated_at=eq.${encodeURIComponent(row.updated_at)}`, {
+            method: "PATCH", headers: { Prefer: "return=representation" },
+            body: JSON.stringify({ payload: await encryptPayload(JSON.stringify(payload), config.payload_key), updated_at: new Date(Math.max(Date.now(), Date.parse(row.updated_at) + 1)).toISOString() }),
+          });
+          if (!update.ok) throw new Error("Cannot update deferred task");
+          const rows = await update.json() as DeferredRow[];
+          if (rows.length) return receipt(rows[0]);
+        } else {
+          const insert = await rest("push_jobs?on_conflict=user_id,trigger_key", {
+            method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+            body: JSON.stringify([{ id: `job_${crypto.randomUUID()}`, user_id: OWNER_ID, trigger_key: key,
+              kind: "reply_bailout", status: "pending", execute_at: new Date(payload.deferredReply.timing.nextAt).toISOString(),
+              payload: await encryptPayload(JSON.stringify(payload), config.payload_key) }]),
+          });
+          if (!insert.ok) throw new Error("Cannot create deferred task");
+          const rows = await insert.json() as DeferredRow[];
+          if (rows.length) return receipt(rows[0]);
+        }
+      }
+      return json({ ok: false, error: "Task changed; retry sync" }, 409);
+    }
+
     if (action === "jobs" && request.method === "GET") {
       // 只读诊断（给挂念等应用的面板用）：回传预约状态与解密后的少量非敏感字段
       // （sessionId / cooldownRounds / armAt），绝不回传冻结请求本体——里面有上游凭据。

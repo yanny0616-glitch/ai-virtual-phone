@@ -73,18 +73,18 @@
     const hh = h < 5 ? h + 24 : h;
     let v = base;
     const nowHM = fmtHM(at.getTime());
-    // 一件事的 cost 随做的进度慢慢记账：刚开始只扣一点，做完才扣满；没有 end 的到点一次记满
+    // 单条变化限制在 ±15（旧日程也适用），随进度记账；没有 end 的到点一次记满
     for (const it of day.schedule) {
       if (!it || !it.time) continue;
       if (h >= 5 && String(it.time) > nowHM) continue;
       const a = timeToMs(it.time, at), b = it.end ? timeToMs(it.end, at) : null;
       const prog = a && b && b > a ? Math.max(0, Math.min(1, (at.getTime() - a) / (b - a))) : 1;
-      v += (+it.cost || 0) * prog;
+      v += Math.max(-15, Math.min(15, Math.round(+it.cost || 0))) * prog;
     }
-    // 身上的状况再多也不该把人直接压到 0：负向合计最多 -25
+    // 身上的状况再多也不该把人直接压到 0：负向合计最多 -12
     let cd = 0;
     for (const x of activeConds(day, at.getTime())) cd += (+x.c.energyDelta || 0) * x.w;
-    v += Math.max(-25, cd);
+    v += Math.max(-12, cd);
     // 醒着的缓降从 TA 自己起床的时刻算起，不是固定早上 7 点
     const wk = /^(\d{1,2}):(\d{2})$/.exec(String(day.wake || ""));
     const wakeH = wk ? +wk[1] + +wk[2] / 60 : 7;

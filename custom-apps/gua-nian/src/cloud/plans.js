@@ -15,7 +15,7 @@
       doing: String(cx.day.doing || ""),
       wake: String(cx.day.wake || ""), bed: String(cx.day.bed || ""),
       schedule: (cx.day.schedule || []).map((it) => ({
-        time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +it.cost || 0, mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined,
+        time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: Math.max(-15, Math.min(15, Math.round(+it.cost || 0))), mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined,
         steps: Array.isArray(it.steps) ? it.steps.map((x) => ({ time: x.time, what: x.what })) : undefined,
       })),
       conds: (cx.day.conds || []).filter((c) => condWeight(c, Date.now()) > 0.08).map((c) => ({

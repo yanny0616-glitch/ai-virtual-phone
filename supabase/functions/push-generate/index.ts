@@ -309,7 +309,62 @@ async function decryptPayload(payload: EncryptedPayload, serviceKey: string): Pr
 // ── 主流程 ──
 type JobRow = { id: string; user_id: string; trigger_key: string; kind: string; payload: EncryptedPayload };
 type SubscriptionRow = { endpoint: string; p256dh: string; auth: string };
+// BEGIN DEFERRED REPLY TIMING
+/** Pure, absolute-time rules. Embedded in push-generate by push:build-dist. */
+type CloudReplyTiming = {
+    nextAt: number;
+    reason?: "busy" | "sleep";
+    windowKey?: string;
+    availableUntil?: number;
+    check?: boolean;
+    note: string;
+    peekMin: number;
+    adaptive: boolean;
+    probability: number;
+    windows: { from: number; to: number; title: string; key: string; focused: boolean; breaks: { from: number; to: number }[] }[];
+    sleeps: { from: number; to: number }[];
+    sleepBufferMin: number;
+    sleepWakeProbability: number;
+};
+
+function advanceCloudReplyTiming(input: CloudReplyTiming, now: number, random: () => number = Math.random): CloudReplyTiming & { ready: boolean } {
+    const t = { ...input };
+    if (t.nextAt > now) return { ...t, ready: false };
+    const wait = (minutes: number) => minutes * (0.6 + random() * 0.8) * 60_000;
+    const sleep = t.sleeps.find(w => w.from <= now && now < w.to);
+    if (sleep && t.reason !== "sleep" && t.sleepWakeProbability > 0 && random() * 100 < t.sleepWakeProbability) {
+        return { ...t, ready: true, check: false, note: "你正睡着，被消息吵醒了，迷迷糊糊，只回一两句短的，之后还要接着睡。" };
+    }
+    if (sleep) return { ...t, ready: false, reason: "sleep", check: false, windowKey: undefined,
+        nextAt: sleep.to + wait(t.sleepBufferMin), note: "你刚起床，才看到等待期间对方发来的消息。把消息合起来自然回复。" };
+    const win = t.peekMin > 0 ? t.windows.find(w => w.from <= now && now < w.to) : undefined;
+    if (!win) return { ...t, ready: true, check: false, note: t.reason === "sleep" ? t.note : "你现在才有空看手机。把等待期间对方的消息合起来回复，不要说还在先前的活动里偷空。" };
+    const pause = win.breaks.find(w => w.from <= now && now < w.to);
+    const futurePause = win.breaks.find(w => w.from > now);
+    const nextCheck = () => Math.min(now + wait(t.peekMin), futurePause?.from ?? win.to);
+    const same = t.reason === "busy" && t.windowKey === win.key && (!t.availableUntil || now < t.availableUntil);
+    if (!same) {
+        t.reason = "busy"; t.windowKey = win.key; t.availableUntil = undefined; t.check = false;
+        if (t.adaptive && win.focused) {
+            if (pause || (t.probability <= 0 && futurePause)) {
+                const rest = pause ?? futurePause!;
+                const start = Math.max(now, rest.from);
+                t.nextAt = start + Math.min(wait(t.peekMin), (rest.to - start) / 2);
+                t.availableUntil = rest.to;
+            } else if (t.probability > 0) { t.nextAt = nextCheck(); t.check = true; }
+            else t.nextAt = win.to + Math.min(wait(t.peekMin), 300_000);
+        } else t.nextAt = Math.min(now + wait(t.peekMin), win.to + 60_000);
+        return { ...t, ready: false };
+    }
+    if (t.check && !pause && random() * 100 >= t.probability) return { ...t, ready: false, nextAt: nextCheck() };
+    return { ...t, ready: true, check: false, note: pause
+        ? `你正在${win.title}的休息间隙。把等待期间对方的消息合起来简短回复，之后还要继续忙。`
+        : `你还在${win.title || "忙事情"}，刚抽出一点空看手机。把等待期间对方的消息合起来简短回复，之后还要继续忙；不要声称活动结束，也不要虚构正式休息。` };
+}
+// END DEFERRED REPLY TIMING
+
 type JobPayload = {
+  deferredReply?: { revision: number; timing: CloudReplyTiming };
   request: { url: string; headers: Record<string, string>; body: Record<string, unknown>; providerKind: ProviderKind };
   shortcut?: {
     commandId: string;
@@ -642,16 +697,16 @@ function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, q
     const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || ""));
     return m ? Number(m[1]) + Number(m[2]) / 60 : null;
   };
-  // 与面板 energyAt 同步：cost 按进度记账、状况负向合计封顶 -25、缓降从起床时刻起算
+  // 与面板 energyAt 同步：cost 按进度记账、状况负向合计封顶 -12、缓降从起床时刻起算
   for (const it of sched) {
     if (h >= 5 && String(it.time) > nowHM) continue;
     const a = hmNum(it.time), b = hmNum(it.end);
     const prog = a != null && b != null && b > a ? Math.max(0, Math.min(1, (h - a) / (b - a))) : 1;
-    energy += (Number(it.cost) || 0) * prog;
+    energy += Math.max(-15, Math.min(15, Math.round(Number(it.cost) || 0))) * prog;
   }
   let cd = 0;
   for (const x of conds) cd += (Number(x.c.energyDelta) || 0) * x.w;
-  energy += Math.max(-25, cd);
+  energy += Math.max(-12, cd);
   const wakeH = hmNum(day.wake) ?? 7;
   energy -= Math.max(0, Math.min(hh, 22) - wakeH) * 1.2 + Math.max(0, hh - 22) * 8;
   energy = Math.max(0, Math.min(100, Math.round(energy)));
@@ -715,8 +770,8 @@ Deno.serve(async (req: Request) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
   if (!supabaseUrl || !serviceKey) return new Response("missing env", { status: 200 });
 
-  const { jobId, token } = await req.json().catch(() => ({})) as { jobId?: string; token?: string };
-  if (!jobId || !token) return new Response("bad request", { status: 400 });
+  const { jobId, token, action } = await req.json().catch(() => ({})) as { jobId?: string; token?: string; action?: string };
+  if ((!jobId && action !== "capabilities") || !token) return new Response("bad request", { status: 400 });
 
   const restHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" };
   const rest = (path: string, init?: RequestInit) => fetch(`${supabaseUrl}/rest/v1/${path}`, {
@@ -733,7 +788,10 @@ Deno.serve(async (req: Request) => {
     return new Response("forbidden", { status: 403 });
   }
 
-  const claim = await rest(`push_jobs?id=eq.${encodeURIComponent(jobId)}&status=eq.pending&kind=neq.bridge_scan`, {
+  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1"] });
+  if (!jobId) return new Response("bad request", { status: 400 });
+
+  const claim = await rest(`push_jobs?id=eq.${encodeURIComponent(jobId)}&status=eq.pending&kind=neq.bridge_scan&execute_at=lte.${encodeURIComponent(new Date().toISOString())}`, {
     method: "PATCH",
     headers: { Prefer: "return=representation" },
     body: JSON.stringify({ status: "running", updated_at: new Date().toISOString() }),
@@ -744,7 +802,8 @@ Deno.serve(async (req: Request) => {
 
   const finish = (status: "done" | "failed", note: string) => rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}`, {
     method: "PATCH",
-    body: JSON.stringify({ status, result_note: note.slice(0, 300), updated_at: new Date().toISOString() }),
+    body: JSON.stringify({ status, result_note: note.slice(0, 300), updated_at: new Date().toISOString(),
+      ...(job.trigger_key.startsWith("deferred:") ? { payload: {} } : {}) }),
   }).catch(() => undefined);
 
   // 分段进度：卡死时 result_note 会停在最后完成的一步，精确定位死点
@@ -762,6 +821,27 @@ Deno.serve(async (req: Request) => {
       return;
     }
     const payload = JSON.parse(await decryptPayload(job.payload, payloadKey)) as JobPayload;
+    if (payload.deferredReply) {
+      // A previous run may have written its reply and died before marking the job done.
+      const delivered = await rest(`push_outbox?job_id=eq.${encodeURIComponent(job.id)}&select=id&limit=1`);
+      if (!delivered.ok) { await finish("failed", "cannot confirm deferred delivery"); return; }
+      if ((await delivered.json() as unknown[]).length) { await finish("done", "deferred reply already delivered"); return; }
+      const timing = advanceCloudReplyTiming(payload.deferredReply.timing, Date.now());
+      if (!timing.ready) {
+        payload.deferredReply.timing = timing;
+        const held = await rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}&status=eq.running`, {
+          method: "PATCH", body: JSON.stringify({ status: "pending", execute_at: new Date(timing.nextAt).toISOString(),
+            payload: await encryptPayload(JSON.stringify(payload), payloadKey), result_note: "deferred: waiting for an opportunity",
+            updated_at: new Date().toISOString() }),
+        });
+        if (!held.ok) await finish("failed", "deferred reschedule failed");
+        return;
+      }
+      if (!appendUserNote(payload.request.body, payload.request.providerKind, `<reply_timing>\n${timing.note}\n不要提这段说明本身。\n</reply_timing>`)) {
+        await finish("failed", "deferred prompt unsupported");
+        return;
+      }
+    }
     let shortcutStoragePath = "";
 
     // 模板预约（push.freeze）只是给云函数借提示词用的，到点即作废，永远不生成。

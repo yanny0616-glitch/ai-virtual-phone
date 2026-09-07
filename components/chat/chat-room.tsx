@@ -49,6 +49,7 @@ import { appendChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFro
 import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating } from "@/lib/follow-up-service";
 import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismiss-auto-send";
+import { queueDeferredReplyCloud, cancelDeferredReplyCloud, DEFERRED_REPLY_CLOUD_STATUS_EVENT } from "@/lib/deferred-reply-cloud";
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
@@ -3940,16 +3941,51 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (shouldRunDeclineReply) await triggerReply();
     };
 
+    useEffect(() => {
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent<{ sessionId: string; message: string }>).detail;
+            if (detail?.sessionId === session.id) showChatToast(detail.message, 5000);
+        };
+        // Returning from API settings: show the current receipt after the chat has mounted.
+        const timer = window.setTimeout(() => {
+            const waiting = readDeferredReply(session.id);
+            if (waiting?.cloud && !waiting.firedAt) {
+                const confirmed = waiting.cloud.state === "active" && waiting.cloud.revision === waiting.cloud.syncedRevision;
+                showChatToast(confirmed ? "等待已同步云端，关闭小手机后仍会继续"
+                    : waiting.cloud.state === "running" ? "云端正在处理本轮回复"
+                    : "离线等待尚未确认最新同步，请保持小手机开启", 5000);
+            }
+        }, 0);
+        window.addEventListener(DEFERRED_REPLY_CLOUD_STATUS_EVENT, handler);
+        return () => {
+            window.clearTimeout(timer);
+            window.removeEventListener(DEFERRED_REPLY_CLOUD_STATUS_EVENT, handler);
+        };
+    }, [session.id]);
+
     // 被动回复闸门：单聊里按 app（挂念）留下的作息判——睡着押到醒来再回、忙着偷空再回。
-    // 这里只落一条押后记录；到点由桌面壳发回复请求，聊天室开着就本组件接，关了就后台生成。
+    // 已同步个人云的等待由云端执行；其余由桌面壳到点发回复请求。
     const scheduleGatedReply = (text: string) => {
         if (session.isGroup) { void triggerAIResponse(); return; }
+        if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) return;
         // 已经押后了（睡着 / 忙着），再点「触发回复」也不该把TA叫起来：到点由桌面壳派回来。
         // 紧急词例外：闸门会判成立刻回，顺手把旧等待清掉，免得到点再生成一次
         const held = readDeferredReply(session.id);
-        if (held && !held.firedAt && held.until > Date.now() && !isUrgentReplyText(text)) {
+        if (held?.cloud && !held.firedAt && isUrgentReplyText(text)) {
+            void cancelDeferredReplyCloud(session.id).then(cancelled => { if (cancelled) void triggerAIResponse(); });
+            return;
+        }
+        if (held && !held.firedAt && !isUrgentReplyText(text)) {
+            queueDeferredReplyCloud(session.id);
+            setPendingGenerate(false);
+            if (held.cloud) {
+                showChatToast("补充消息正在同步云端，请等确认后关闭小手机", 4000);
+                return;
+            }
             const at = new Date(held.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-            showChatToast(`TA这会儿顾不上，${at} 左右再回`, 3000);
+            showChatToast(held.until > Date.now()
+                ? held.busyCheck ? `TA还在专注，${at} 左右再看有没有空` : `TA这会儿顾不上，${at} 左右一起回`
+                : "消息已合并，正在等待本轮回复", 3000);
             return;
         }
         const decision = evaluateReplyGate(readReplyGate(session.contactId), text);
@@ -3958,10 +3994,21 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             void triggerAIResponse();
             return;
         }
-        writeDeferredReply(session.id, { until: decision.until, note: decision.note });
+        writeDeferredReply(session.id, {
+            until: decision.until, note: decision.note, characterId: session.contactId,
+            reason: decision.reason, busyWindowKey: decision.busyWindowKey, busyUntil: decision.busyUntil,
+            busyAvailableUntil: decision.busyAvailableUntil,
+            busyCheck: decision.busyCheck,
+        });
+        queueDeferredReplyCloud(session.id);
         setPendingGenerate(false);
+        if (readDeferredReply(session.id)?.cloud) {
+            showChatToast("正在同步离线等待，请等确认后关闭小手机", 4000);
+            return;
+        }
         const at = new Date(decision.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-        showChatToast(decision.reason === "sleep" ? `TA睡着了，${at} 醒来再回` : `TA正忙，${at} 左右再回`, 3000);
+        showChatToast(decision.reason === "sleep" ? `TA睡着了，${at} 醒来再回`
+            : decision.busyCheck ? `TA正专注，${at} 左右再看有没有空` : `TA正忙，${at} 左右再回`, 3000);
     };
     // 「触发回复」按钮和收起键盘自动触发都走这里：和按回复键发一样过闸门，
     // 否则夜里点一下TA就得醒着回，提示词里却写着「在睡觉」。判据用你最后一句（紧急词能破门）

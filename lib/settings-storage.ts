@@ -682,6 +682,7 @@ export function loadApiConfigs(): ApiConfig[] {
 export function saveApiConfigs(configs: ApiConfig[]): void {
     if (typeof window === "undefined") return;
     kvSet(API_CONFIGS_KEY, JSON.stringify(configs.map(normalizeApiConfig)));
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("settings-api-configs-updated"));
 }
 
 // --- Voice Configs ──────────────────────────────────────────

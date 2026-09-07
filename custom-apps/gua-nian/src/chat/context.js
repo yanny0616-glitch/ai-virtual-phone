@@ -107,9 +107,18 @@
       busy: { date: todayStr(), peekMin: st.busyPeekMin, windows: [] },
     } : st.replyGate && cx.day ? {
       sleep: sw ? { bed: sw.bed, wake: sw.wake, mode: st.sleepMode, wakeProb: st.sleepWakeProb, bufferMin: st.busyBufferMin } : undefined,
-      busy: { date: cx.day.date, peekMin: st.busyPeekMin, windows: (cx.day.schedule || [])
+      busy: { date: cx.day.date, peekMin: st.busyPeekMin, adaptive: st.smartBusyReply !== false, focusedPeekProb: st.focusedPeekProb ?? 25, windows: (cx.day.schedule || [])
         .filter((it) => isBusyItem(it) && it.time && it.end && it.end > it.time)
-        .map((it) => ({ from: it.time, to: it.end, title: it.title || "" })) },
+        .map((it) => {
+          const steps = (Array.isArray(it.steps) ? it.steps : []).filter(x => x && x.time >= it.time && x.time < it.end)
+            .slice().sort((a, b) => a.time.localeCompare(b.time));
+          const breaks = steps.flatMap((step, i) => {
+            const to = steps[i + 1] ? steps[i + 1].time : it.end;
+            return /休息|茶歇|课间|中场休|散会|停车休息/.test(step.what || "") && !/不休息|没休息|没有休息|无休|取消休息/.test(step.what || "") && to > step.time
+              ? [{ from: step.time, to }] : [];
+          });
+          return { from: it.time, to: it.end, title: it.title || "", ...(breaks.length ? { breaks } : {}) };
+        }) },
     } : null;
     const key = JSON.stringify(gate);
     if (key === cx._gate) return;

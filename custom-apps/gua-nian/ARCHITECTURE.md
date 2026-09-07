@@ -180,3 +180,32 @@ schema 10 增加 push_recheck_judge 原子 RPC 与独立 judge_token/judge_until
 cloud/day.js 冻结 companion + impulse 的独立 judge 模板，cloudContext 寄存模板键；worker 优先使用其完整请求，保留人设、世界书、预设及生成参数，只替换任务占位符。旧计划没有独立模板时保留原预约上下文并追加判断任务。daily 预设也不再把整天日程结构强加给单条重写/细排任务。最终朋友圈成文仍走宿主原朋友圈管线。
 
 scripts/check-gua-nian-p2.mjs 覆盖以上六项的真实 APP 和云函数入口，接入 gua-nian:test。scripts/check-gua-nian-judge-sql.mjs 使用独立安装的 PGlite 验证真实 PostgreSQL 函数、重复迁移、互斥、续租、失败重试、过期及游标，依赖路径由命令参数传入，不增加宿主运行依赖。上线需要安装新版 APP、执行 schema 10 并更新网关、push-recheck、push-generate；本地回归不等同于手机与个人云实测。
+
+
+## 细排任务与精力尺度（0.9.17）
+
+`ui/calendar.js` 的单条重写和细排分别使用 `companion + schedule-edit`、`companion + schedule-steps`，与整天生成的 `companion + daily` 隔离。三个场景各有 presets.json 条目；细排结果按当前时段左闭右开过滤，缺失时间不伪造开始时刻，保存只追加 steps。
+
+日程 cost 在本机生成、单条重写、聊天新增和云端生成入口限制为 ±15；`energyAt`、`dayForCloud`、两个云函数的状态计算也限制旧数据的单项影响。身体状况新生成每条 ±8，运行时状况负向合计最多 -12。日程仍按进度累积，没有结束时间仍在开始时刻记满；自然清醒下降与情况半衰期保持原规则。详情有结束时间时读取结束时刻的 energyAt，并标为预计值。读取不修改旧记录，起床基线的 70–90 是生成提示建议，不是强制修改或保底。
+
+`scripts/check-gua-nian-energy.mjs` 执行实际打包代码，验证任务预设选择、越界细排过滤及失败不覆盖原日程、旧高消耗数据的三端一致计算、生成和编辑入口范围、结束时刻详情与午休恢复。已加入 gua-nian:test 和 fork 回归；该脚本可独立在不同时区运行。需要安装新版 APP 并更新 push-recheck、push-generate，不新增 schema。
+
+
+## 根据日程找回复空档与概率偷空（0.9.19）
+
+`smartBusyReply` 默认 true，由现有设置迁移补齐。`chat/context.js` 将已有细排中明确的休息节点及下一节点作为 breaks 时段，随 busy.adaptive 和 busy.focusedPeekProb 寄给宿主。APP focusedPeekProb 默认 25，支持 0–100，显式 0 不被默认值覆盖；旧宿主调用方省略此字段时视为 0。只消费已有日程，不额外调用模型；SDK busy.windows 新增可选 breaks，宿主规范化时间边界，旧 APP 不传 adaptive 时保持原有规则。
+
+`lib/chat-reply-gate.ts` 根据标题关键词识别专注事项，概率大于 0 时按 peekMin 浮动间隔检查（不越过下一休息开始或活动结束），每次只抽一次。未命中更新同一等待，命中简短偷空回复；进入明确休息不抽概率，活动结束正常回复。没有细排也能按概率回复；概率 0 则选明确休息或结束后的有限缓冲。普通事务沿用原等待。延迟记录增加 characterId、reason、忙碌窗口标识、结束时间与休息有效期；到点重读角色 gate，避免错过休息后仍声称有空、活动延长后继续使用旧说明。相同窗口仅 busyCheck 检查失败后安排下一次；重复发送和重复轮询均不加抽，不补抽关闭期间的检查。命中后清除 busyCheck，生成忙碌重试保留结果，不重新抽取。旧记录仍能执行。
+
+`chat-room.tsx` 在已有未触发等待时合并消息，包括等待已到点而桌面尚未领取的间隙；生成进行中不再追加等待。测试 `check-reply-gate.mjs` 覆盖概率边界、失败重排、命中后重试、无细排、关机不补抽、旧模式、0 分钟、紧急例外、重复点击、到点重核、错过休息、睡眠接续、取消和实际 APP 到宿主字段投影。上线需要更新宿主与 APP，不改云端主动发送策略。
+
+
+## 被动等待接入个人云（0.9.20）
+
+宿主 `lib/deferred-reply-cloud.ts` 在进入等待时冻结完整聊天请求，并把本地时区中的忙碌/休息边界和未来 8 天睡眠转换为绝对时间。`lib/deferred-reply-timing.ts` 为纯时间规则源码，由 `push:build-dist` 内嵌进自包含 `push-generate/index.ts`，`check:push` 同时核对内嵌片段与公开副本。等待采用最后成功上传的作息快照；没有本地上报就不会读取手机后续变更。
+
+网关 `deferred-reply` 动作用现有 `reply_bailout` 类型保存任务，通过实际 worker 能力探测避免旧 worker 提前生成。每轮独立键、单调 revision、pending 状态与 updated_at 条件更新保护快照；生成器只认领已到期的 pending 行。新消息和 API 配置/绑定、预设、闸门更新事件刷新未认领任务，不覆盖生成中请求，不重置云端下一检查时间。所有上传按会话串行，并保留期间新增 revision。
+
+本地 `DeferredReply.cloud` 记录同步归属，存在即跳过本地计时生成。POST 前落 attempted 标记，响应丢失保留归属并幂等重试；未发生 POST 的能力探测失败可安全回退本地。取消以空 payload 的 cancelled 墓碑阻止迟到上传恢复任务，确认之前不执行紧急本地回复。完成/失败同样清空请求，保留非敏感回执；云端 outbox 已存在时不再次生成。云项目地址绑定任务，切项目不自动迁移。
+
+`check-deferred-reply-cloud.mjs` 执行真实客户端、网关 action 和 worker，使用内存 REST 与测试密钥验证加密上传、概率押后、合并、API 切换、认领竞争、丢回执重试、取消、防复活和 outbox；已加入 gua-nian:test 与 fork 回归。上线需宿主、网关、push-generate；本功能不增 schema，也不处理已暂缓的挂念设备锁覆盖问题。
