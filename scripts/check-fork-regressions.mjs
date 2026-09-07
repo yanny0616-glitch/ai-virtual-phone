@@ -208,6 +208,52 @@ await test('Cached unsupported capability expires automatically',async()=>{
   now+=300001;await a.flushQueue();assert.equal(health,2);assert.equal(posts,1);
   return {automaticRecovery:true};
 });
+await test('Anthropic prompt viewer retains presets with caching, streaming and native tools',async()=>{
+  const a=moduleVM('lib/llm-provider-adapter.ts',{
+    resolveEnabledGenerationParameters:()=>new Set(),
+    shouldOmitDeprecatedSamplingParameters:()=>false,
+    buildRequestHeaders:()=>({}),
+  },'globalThis.api={buildAnthropicRequest,debugMessagesFromRequest};').api;
+  const input=[
+    {role:'system',content:'预设规则'},
+    {role:'system',content:'角色人设'},
+    {role:'user',content:'<shortTermMemory>最近对话</shortTermMemory>'},
+    {role:'assistant',content:'上一轮回复'},
+    {role:'user',content:'当前问题'},
+  ];
+  const expected=[
+    {role:'system',content:'预设规则\n\n角色人设'},
+    ...input.slice(2),
+  ];
+  let cases=0;
+  for(const promptCache of [false,true]){
+    for(const mode of ['completion','native-tools','native-tools-stream']){
+      const request=a.buildAnthropicRequest({defaultModel:'test-model'},null,'https://example.invalid',input,{
+        promptCache,stream:mode==='native-tools-stream',
+        tools:mode==='completion'?undefined:[{name:'test_tool',description:'Test',parameters:{type:'object'}}],
+      });
+      assert.equal(Array.isArray(request.body.system),promptCache);
+      const before=JSON.stringify(request);
+      assert.deepEqual(JSON.parse(JSON.stringify(a.debugMessagesFromRequest(request))),expected);
+      assert.equal(JSON.stringify(request),before,'Preview must not modify the outgoing request');
+      cases++;
+    }
+  }
+  return {cases,presetsBeforeMemory:true,requestUnchanged:true};
+});
+await test('Anthropic prompt viewer handles multiple system blocks and absent system content',async()=>{
+  const a=moduleVM('lib/llm-provider-adapter.ts',{},'globalThis.api={debugMessagesFromRequest};').api;
+  const history=[{role:'user',content:'当前问题'}];
+  const preview=system=>JSON.parse(JSON.stringify(a.debugMessagesFromRequest({
+    providerKind:'anthropic',body:{system,messages:history},messagesForLog:[],
+  })));
+  assert.deepEqual(preview([
+    {type:'text',text:'第一条预设'},
+    {type:'text',text:'第二条预设',cache_control:{type:'ephemeral'}},
+  ]),[{role:'system',content:'第一条预设\n第二条预设'},...history]);
+  for(const system of [undefined,null,'','  ',[]]) assert.deepEqual(preview(system),history);
+  return {multipleBlocks:true,emptyCases:5};
+});
 await test('Gemini streaming preserves official totals including thought tokens',async()=>{
   const a=moduleVM('lib/llm-provider-adapter.ts',{},'globalThis.api={parseProviderStreamDelta,mergeLlmUsage};').api;
   let usage;

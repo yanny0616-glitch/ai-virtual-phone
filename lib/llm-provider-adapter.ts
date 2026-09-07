@@ -423,8 +423,10 @@ export function debugMessagesFromRequest(request: LlmRequestPayload): LlmDebugMe
     const body = request.body;
     if (request.providerKind === "anthropic") {
         const messages: LlmDebugMessage[] = [];
-        if (typeof body.system === "string" && body.system.trim()) {
-            messages.push({ role: "system", content: body.system });
+        // 开启提示缓存后 system 是带 cache_control 的内容块数组。
+        const systemText = debugTextFromUnknownContent(body.system);
+        if (systemText.trim()) {
+            messages.push({ role: "system", content: systemText });
         }
         const bodyMessages = Array.isArray(body.messages) ? body.messages : [];
         for (const message of bodyMessages) {
