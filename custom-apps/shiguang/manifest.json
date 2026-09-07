@@ -1,0 +1,12 @@
+{
+  "id": "float.shiguang",
+  "name": "拾光",
+  "version": "1.0.0",
+  "sdkVersion": "1.0",
+  "author": "Float",
+  "description": "按角色收藏共同经历，查看并编辑供 AI 回忆的摘要，管理优先携带、按话题回忆和不发送。直接接续原有拾光记忆与整理进度。",
+  "icon": "icon.svg",
+  "entry": "index.html",
+  "permissions": ["characters.read", "memory.readShiguang", "memory.writeShiguang", "memory.organizeShiguang"],
+  "primaryTags": []
+}

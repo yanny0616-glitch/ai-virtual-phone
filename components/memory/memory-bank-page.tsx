@@ -1015,21 +1015,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                 </div>
 
                 {/* Token budget sliders */}
-                <p className="menu-group-desc mx-2">拾光 · 重要记忆</p>
-                <div className="menu-group">
-                    <div className="menu-item">
-                        <MemorySettingsIcon icon={FileText} color={BINDING_ACCENTS.memory}/>
-                        <div className="menu-label-group"><span className="menu-label">记录与回忆拾光</span><span className="menu-desc">从原聊天消息独立提取重要内容；关闭后保留记录，但不再提取或带入对话。</span></div>
-                        <div className="menu-right"><Toggle checked={config.shiguangEnabled} onChange={value => { const next = { ...config, shiguangEnabled: value }; setConfig(next); saveMemoryConfig(next); }}/></div>
-                    </div>
-                    <div className="menu-item">
-                        <MemorySettingsIcon icon={Clock} color={BINDING_ACCENTS.memory}/>
-                        <div className="menu-label-group"><span className="menu-label">自动整理拾光</span><span className="menu-desc">独立请求，使用已绑定的记忆总结模型。关闭自动整理后仍可手动整理。</span></div>
-                        <div className="menu-right"><Toggle checked={config.shiguangAutoEnabled} onChange={value => { const next = { ...config, shiguangAutoEnabled: value }; setConfig(next); saveMemoryConfig(next); }}/></div>
-                    </div>
-                    <MemorySettingsSliderItem icon={Clock} color={BINDING_ACCENTS.memory} label="拾光请求间隔（轮）" desc="拾光每隔这些私聊回复轮次单独请求一次；同批气泡算一轮，与长期记忆频率及进度互不影响。" value={config.shiguangRoundInterval} min={5} max={80} step={5} onChange={value => { const next = { ...config, shiguangRoundInterval: value }; setConfig(next); saveMemoryConfig(next); }}/>
-                    <MemorySettingsSliderItem icon={Brain} color={BINDING_ACCENTS.embedding} label="拾光回忆预算（Token）" desc="优先保留重要相处信息，再按话题和日期选取完整记忆；只在后台处理，不在卡片中显示。" value={config.shiguangTokenBudget} min={200} max={4000} step={200} onChange={value => { const next = { ...config, shiguangTokenBudget: value }; setConfig(next); saveMemoryConfig(next); }}/>
-                </div>
+                <ShiguangPanel />
                 <p className="menu-group-desc mx-2">控制截断量</p>
                 <div className="menu-group">
                     <MemorySettingsSliderItem

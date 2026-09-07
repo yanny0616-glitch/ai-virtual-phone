@@ -69,7 +69,7 @@ check("recall includes stable boundaries and timely promises within budget", () 
     const e = parse([item])[0];
     const picked = domain.selectShiguangForPrompt([e], "今天看什么电影", 800, new Date(now));
     assert.match(picked[0].content, /提前商量/);
-    assert.match(picked[0].content, /9月11日/);
+    assert.match(picked[0].content, /2026-09-11/);
     assert.ok(picked.reduce((n,e) => n + tokens.estimateTokens(e.content) + 4, 0) <= 800);
     assert.equal(domain.selectShiguangForPrompt([e], "海边", 0, new Date(now)).length, 0);
 });
@@ -81,7 +81,7 @@ check("irrelevant experiences are omitted, relevant experiences recalled, delete
 });
 check("oversized records do not block shorter relevant records", () => {
     const large = parse([{ ...item, stableSummary: "" }])[0];
-    large.shiguang.recallSummary = "出行".repeat(5000);
+    large.shiguang.promptSummary = "出行".repeat(5000);
     const small = { ...parse([{ ...item, title: "另一次出行", stableSummary: "" }])[0], id: "small" };
     const picked = domain.selectShiguangForPrompt([large, small], "出行", 150, new Date(now));
     assert.equal(picked.length, 1); assert.equal(picked[0].id, "small");

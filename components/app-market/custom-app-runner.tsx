@@ -556,6 +556,13 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       report: function(payload){ return request('cloud.report', payload || {}); }
     },
     memory: {
+      readShiguang: function(payload){ return request('memory.readShiguang', payload || {}); },
+      saveShiguang: function(payload){ return request('memory.saveShiguang', payload || {}); },
+      deleteShiguang: function(payload){ return request('memory.deleteShiguang', payload || {}); },
+      shiguangSources: function(payload){ return request('memory.shiguangSources', payload || {}); },
+      shiguangSettings: function(payload){ return request('memory.shiguangSettings', payload || {}); },
+      configureShiguang: function(payload){ return request('memory.configureShiguang', payload || {}); },
+      organizeShiguang: function(payload){ return request('memory.organizeShiguang', payload || {}); },
       readCore: function(payload){ return request('memory.readCore', payload || {}); },
       readLongTerm: function(payload){ return request('memory.readLongTerm', payload || {}); },
       readShortTerm: function(payload){ return request('memory.readShortTerm', payload || {}); },
@@ -1137,7 +1144,7 @@ export function CustomAppRunner({
           moments: ["post"],
           usage: ["readDaily", "readLogs", "readLogDetail", "getSettings", "setSettings"],
           chat: ["getCurrentSession", "readHistory", "sendMessage", "sendCard", "updateCard", "writeHistory", "requestReply", "openConversation", "setContactState", "setContext", "clearContext", "setReplyGate"],
-          memory: ["readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
+          memory: ["readShiguang", "saveShiguang", "deleteShiguang", "shiguangSources", "shiguangSettings", "configureShiguang", "organizeShiguang", "readCore", "readLongTerm", "readShortTerm", "search", "add", "addTimeline", "deleteTimeline", "removeTimeline", "suggest"],
           notifications: ["create", "list", "markRead", "markAllRead", "getBadge", "setBadge", "incrementBadge", "clearBadge"],
           tasks: ["schedule", "list", "cancel"],
           push: ["wake", "listWakes", "cancelWake"],
@@ -1901,6 +1908,41 @@ export function CustomAppRunner({
       return window.confirm(message);
     }
 
+    if (action === "memory.readShiguang") {
+      requirePermission("memory.readShiguang");
+      const { readShiguangApp } = await import("@/lib/shiguang-app-api");
+      return readShiguangApp(record);
+    }
+    if (action === "memory.saveShiguang") {
+      requirePermission("memory.writeShiguang");
+      const { saveShiguangApp } = await import("@/lib/shiguang-app-api");
+      return saveShiguangApp(record);
+    }
+    if (action === "memory.deleteShiguang") {
+      requirePermission("memory.writeShiguang");
+      const { deleteShiguangApp } = await import("@/lib/shiguang-app-api");
+      return deleteShiguangApp(record);
+    }
+    if (action === "memory.shiguangSources") {
+      requirePermission("memory.readShiguang");
+      const { shiguangAppSources } = await import("@/lib/shiguang-app-api");
+      return shiguangAppSources(record);
+    }
+    if (action === "memory.shiguangSettings") {
+      requirePermission("memory.readShiguang");
+      const { readShiguangSettings } = await import("@/lib/shiguang-app-api");
+      return readShiguangSettings();
+    }
+    if (action === "memory.configureShiguang") {
+      requirePermission("memory.writeShiguang");
+      const { configureShiguangApp } = await import("@/lib/shiguang-app-api");
+      return configureShiguangApp(record);
+    }
+    if (action === "memory.organizeShiguang") {
+      requirePermission("memory.organizeShiguang");
+      const { organizeShiguangApp } = await import("@/lib/shiguang-app-api");
+      return organizeShiguangApp(record);
+    }
     if (action === "memory.readCore") {
       requirePermission("memory.readCore");
       return readCustomAppCoreMemory(record);

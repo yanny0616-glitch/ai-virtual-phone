@@ -54,8 +54,8 @@ export function selectShiguangCandidates(entries: MemoryEntry[], context: string
 
 function candidateText(entry: MemoryEntry): string {
     const d = entry.shiguang!;
-    return JSON.stringify({ id: entry.id, title: d.title, stableSummary: d.stableSummary,
-        recallSummary: d.recallSummary, followup: d.followup, status: d.status,
+    return JSON.stringify({ id: entry.id, title: d.title, promptSummary: (d.promptSummary?.trim() || defaultShiguangSummary(entry)).slice(0, 1200),
+        recallMode: shiguangRecallMode(entry), followup: d.followup, status: d.status,
         locked: !!d.userEdited, deleted: !!d.deletedAt });
 }
 
@@ -68,6 +68,7 @@ export function buildShiguangExtractionPrompt(summaryPrompt: string, candidates:
 同一件事的补充或变化用 existingId 更新，返回更新后的完整记录，保留原缘由、有效细节和新进展；跨日期的不同事件不要误合并。
 已有记录 deleted=true 时不要重建。locked=true 时保留用户编辑的正文，只允许用 existingId 补充新进展 followup/status/dueAt。只记录本次新消息明确支持的内容，不把旧记录当作新的证据。
 每条必须引用支持它的原消息 sourceIds（如 ["s1","s3"]），不得编造引用。多个类型可同时使用。
+卡片 summary/story/details 必须保留有依据的人名、具体物品或作品名、关键行为、约定日期和完成情况，不把具体事实概括成泛泛习惯。后续发给 AI 的摘要会从这些可见字段生成。
 stableSummary 仅放明确、持续重要的边界/关系/相处习惯，最多150字；普通经历留空。recallSummary 保留事实、缘由、日期、承诺和当前进展，最多300字。两者不重复。
 dueAt 仅在原文日期能确定时填 YYYY-MM-DD（提醒/确认的日期优先），不确定留空。完成或取消后清空 dueAt。keywords 给2到6个具体检索词，不用「聊天」「用户」等泛词。
 details/缘由/意义没有依据就留空，不硬凑。status=remembered 普通记忆，pending 未兑现约定，completed 已兑现，changed 已变化，不归档。
@@ -120,6 +121,7 @@ export function parseShiguangResult(raw: string, sources: NativeTimelineEntry[],
         if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date)) throw new Error("拾光日期无效");
         const timestamps = sourceEntries.map(e => e.timestamp).sort();
         const data: ShiguangData = {
+            promptSummary: old?.shiguang?.promptSummary, recallMode: old?.shiguang?.recallMode,
             title, categories, reason: text(item.reason, 1200) || old?.shiguang?.reason || "", story: text(item.story, 1200) || old?.shiguang?.story || "",
             details: item.details.map((fact: { label?: unknown; value?: unknown }) => ({ label: text(fact?.label, 40, true), value: text(fact?.value, 400, true) })),
             significance: text(item.significance, 600) || old?.shiguang?.significance || "", stableSummary: text(item.stableSummary, 250) || old?.shiguang?.stableSummary || "",
@@ -142,44 +144,53 @@ export function parseShiguangResult(raw: string, sources: NativeTimelineEntry[],
     return { entries };
 }
 
-/** Local recall: no extra model or embedding request; select complete facts within the budget. */
+/** Build a factual default without another model call or rewriting saved records. */
+export function defaultShiguangSummary(entry: MemoryEntry): string {
+    const d = entry.shiguang!;
+    const parts = [d.title, entry.content, d.reason, d.story, ...d.details.map(f => `${f.label}：${f.value}`), d.significance]
+        .map(v => (v || "").trim()).filter(Boolean);
+    const unique = parts.filter((part, i) => !parts.some((other, j) => j !== i && other.includes(part) && (other.length > part.length || j < i)));
+    return unique.join("；") || d.recallSummary || d.stableSummary;
+}
+
+export function shiguangRecallMode(entry: MemoryEntry): "priority" | "relevant" | "off" {
+    return entry.shiguang!.recallMode ?? (entry.shiguang!.stableSummary ? "priority" : "relevant");
+}
+
+/** The app and prompt assembler expose exactly the same text, including progress. */
+export function shiguangPromptText(entry: MemoryEntry): string {
+    const d = entry.shiguang!;
+    const summary = d.promptSummary?.trim() || defaultShiguangSummary(entry);
+    const status = { remembered: "", pending: "尚待兑现", completed: "已经完成", changed: "安排已变化" }[d.status];
+    return `【拾光】${summary}${status ? ` 当前进展：${status}。` : ""}${d.followup ? ` 最新进展：${d.followup}` : ""}`;
+}
+
+/** Local recall; full visible summaries fit atomically within the budget. */
 export function selectShiguangForPrompt(entries: MemoryEntry[], context: string, tokenBudget: number, now: Date, existingText = ""): MemoryEntry[] {
     const budget = Math.max(0, Math.min(4000, Number.isFinite(tokenBudget) ? tokenBudget : 800));
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const active = entries.filter(isShiguang);
-    const selected = new Map<string, MemoryEntry>();
-    let used = 0;
-    const seen = [clean(existingText)];
-    const add = (entry: MemoryEntry, content: string) => {
-        if (!content || seen.some(v => v.includes(clean(content)))) return;
-        const line = `【拾光】${content}`;
-        const tokens = estimateTokens(line) + 4;
-        if (used + tokens > budget) return;
-        const old = selected.get(entry.id);
-        selected.set(entry.id, { ...entry, content: old ? old.content + "\n" + line : line });
-        seen.push(clean(content)); used += tokens;
-    };
-    active.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    // Give ongoing information priority, while reserving room for this conversation's facts.
-    const stable = active.filter(e => e.shiguang!.stableSummary);
-    for (const entry of stable) {
-        const cost = estimateTokens(entry.shiguang!.stableSummary) + 12;
-        if (used + cost <= budget * .5) add(entry, entry.shiguang!.stableSummary);
-    }
-    const ranked = active.map(entry => {
+    const ranked = entries.filter(isShiguang).map(entry => {
         const d = entry.shiguang!;
+        const mode = shiguangRecallMode(entry);
         const due = d.dueAt ? new Date(d.dueAt + "T00:00:00").getTime() : NaN;
         const days = (due - today) / 86400000;
         const relevance = overlap(d.title + " " + d.keywords.join(" "), context);
         const keywordHit = d.keywords.some(k => clean(k).length >= 2 && clean(context).includes(clean(k)));
         const timely = d.status === "pending" && days >= -1 && days <= 7;
-        return { entry, score: (keywordHit ? 20 : 0) + relevance + (timely ? 15 : 0), relevant: keywordHit || relevance >= 3 || timely };
-    }).filter(v => v.relevant).sort((a,b) => b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt));
+        return { entry, mode, score: (keywordHit ? 20 : 0) + relevance + (timely ? 15 : 0), relevant: keywordHit || relevance >= 3 || timely };
+    }).filter(v => v.mode !== "off" && (v.mode === "priority" || v.relevant))
+        .sort((a, b) => Number(b.mode === "priority") - Number(a.mode === "priority") || b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt));
+    const result: MemoryEntry[] = [];
+    const seen = [clean(existingText)];
+    let used = 0;
     for (const { entry } of ranked) {
-        const d = entry.shiguang!;
-        const status = { remembered: "", pending: "尚待兑现", completed: "已经完成", changed: "安排已变化" }[d.status];
-        add(entry, d.recallSummary + (status ? ` 当前进展：${status}。` : "") + (d.followup ? ` 最新进展：${d.followup}` : ""));
+        const content = shiguangPromptText(entry);
+        const normalized = clean(content.replace(/^【拾光】/, ""));
+        if (!normalized || seen.some(v => v.includes(normalized))) continue;
+        const cost = estimateTokens(content) + 4;
+        if (used + cost > budget) continue;
+        result.push({ ...entry, content });
+        used += cost; seen.push(normalized);
     }
-    for (const entry of stable) add(entry, entry.shiguang!.stableSummary);
-    return [...selected.values()];
+    return result;
 }

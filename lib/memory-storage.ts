@@ -73,6 +73,35 @@ export async function saveMemoryEntry(entry: MemoryEntry): Promise<void> {
     }
 }
 
+/** User edit/delete must not overwrite a newer extraction or another open editor. */
+export async function saveShiguangEdit(entry: MemoryEntry, expectedUpdatedAt: string): Promise<void> {
+    if (entry.type !== "shiguang" || !entry.shiguang) throw new Error("不是拾光记录");
+    const db = await openDb();
+    if (!db) throw new Error("拾光数据库不可用，未保存修改");
+    try {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        let failure: Error | undefined;
+        const done = new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(failure || tx.error);
+            tx.onabort = () => reject(failure || tx.error || new Error("保存已取消"));
+        });
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.get(entry.id);
+        req.onsuccess = () => {
+            const current = req.result as MemoryEntry | undefined;
+            if (!current || current.type !== "shiguang" || current.characterId !== entry.characterId
+                || current.updatedAt !== expectedUpdatedAt || current.shiguang?.deletedAt) {
+                failure = new Error("这条记忆已变化，请刷新后重新编辑；本次没有覆盖它");
+                tx.abort(); return;
+            }
+            store.put(entry);
+        };
+        await done;
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("shiguang-updated"));
+    } finally { db.close(); }
+}
+
 /** Commit a batch atomically before advancing its pipeline's progress. */
 export async function saveMemoryBatch(entries: MemoryEntry[]): Promise<void> {
     const db = await openDb();

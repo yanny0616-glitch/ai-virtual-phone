@@ -7,7 +7,10 @@ export type ShiguangData = {
     story: string;
     details: Array<{ label: string; value: string }>;
     significance: string;
-    /** Compact prompt text, never rendered in the memory card. */
+    /** Visible, editable summary. Legacy records derive it from their card facts. */
+    promptSummary?: string;
+    recallMode?: "priority" | "relevant" | "off";
+    /** Legacy model summaries retained for compatibility and fallback. */
     stableSummary: string;
     recallSummary: string;
     keywords: string[];
