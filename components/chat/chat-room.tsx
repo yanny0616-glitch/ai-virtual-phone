@@ -64,7 +64,7 @@ import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
-import { evaluateReplyGate, isUrgentReplyText, readDeferredReply, readReplyGate, writeDeferredReply } from "@/lib/chat-reply-gate";
+import { evaluateReplyGate, isUrgentReplyText, readDeferredReply, readEffectiveReplyGate, writeDeferredReply } from "@/lib/chat-reply-gate";
 import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
 import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/shopping-gift-utils";
 import { settleShoppingPaymentRequest } from "@/lib/shopping-payment-request";
@@ -3965,17 +3965,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     // 被动回复闸门：单聊里按 app（挂念）留下的作息判——睡着押到醒来再回、忙着偷空再回。
     // 已同步个人云的等待由云端执行；其余由桌面壳到点发回复请求。
-    const scheduleGatedReply = (text: string) => {
+    const scheduleGatedReply = async (text: string) => {
+        await getChatPluginRuntime().ensureReady();
+        const replyGate = readEffectiveReplyGate(session.contactId);
         if (session.isGroup) { void triggerAIResponse(); return; }
         if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) return;
         // 已经押后了（睡着 / 忙着），再点「触发回复」也不该把TA叫起来：到点由桌面壳派回来。
         // 紧急词例外：闸门会判成立刻回，顺手把旧等待清掉，免得到点再生成一次
         const held = readDeferredReply(session.id);
-        if (held?.cloud && !held.firedAt && isUrgentReplyText(text)) {
+        if (held?.cloud && !held.firedAt && isUrgentReplyText(text, replyGate)) {
             void cancelDeferredReplyCloud(session.id).then(cancelled => { if (cancelled) void triggerAIResponse(); });
             return;
         }
-        if (held && !held.firedAt && !isUrgentReplyText(text)) {
+        if (held && !held.firedAt && !isUrgentReplyText(text, replyGate)) {
             queueDeferredReplyCloud(session.id);
             setPendingGenerate(false);
             if (held.cloud) {
@@ -3988,7 +3990,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 : "消息已合并，正在等待本轮回复", 3000);
             return;
         }
-        const decision = evaluateReplyGate(readReplyGate(session.contactId), text);
+        const decision = evaluateReplyGate(replyGate, text);
         if (decision.kind === "now") {
             writeDeferredReply(session.id, decision.note ? { until: Date.now(), note: decision.note, firedAt: Date.now() } : null);
             void triggerAIResponse();

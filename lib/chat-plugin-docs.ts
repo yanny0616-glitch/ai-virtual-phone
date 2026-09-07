@@ -83,6 +83,9 @@ export default {
 
 ## ctx.hooks —— 管线拦截
 
+官方「忙碌回复」使用 chat.replyGate：挂念 0.9.21 只上传 availabilityOnly 作息（bed/wake、忙碌时段、breaks）；插件定义 peekMin、adaptive、focusedPeekProb、sleep.mode/wakeProb/bufferMin 和 urgentBypass。首次从 legacyReplySettings 导入旧设置，之后 APP 更新不覆盖插件设置。手动忙碌可读变量池 presenceOverride 的 state/at/label，以 startsAt/expiresAt 限定一次性有效期；跨午夜的云端快照使用绝对时间。没有作息和手动状态就返回 null。
+
+
 ### transform（可修改数据，按 priority 升序串行，返回修改后的 payload；也可原地改后 return payload）
 
 \`ctx.hooks.transform(点名, async (payload) => payload, { priority: 100, timeoutMs: 8000 })\`
@@ -98,6 +101,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 | message.beforePersist | 任何消息写入存储前（**同步**，处理函数不能是 async） | { message } —— 可修改 message 的字段 |
 | message.beforeReveal | 角色一轮回复切成多条气泡后，每条气泡展示并落库前（异步，可等待；等待期间「对方正在输入」一直显示） | { sessionId, isGroup, characterId?, responseBatchId, index, total, content, mediaType?, streamed, delayMs, cancelled } —— 改 delayMs 即改这条气泡放出前的等待毫秒数（宿主默认：第一条 0、其余 800、streamed 时全 0；上限 120000）；cancelled=true 这条不展示不落库。要做"一句句慢慢发"的节奏就挂这里，宿主在 transform 返回后才开始等，处理函数本身不要 sleep |
 | moments.beforePost | 朋友圈定时发帖到点、真正生成前（手动「立即发帖」不经过） | { characterId, lastPostTime, cancelled, retryAfterMs?, hint } —— cancelled=true 这次不发、retryAfterMs 后再问（默认 1 小时）；hint 追加到「请发一条朋友圈。」后面当由头 |
+| chat.replyGate | 回复等待判定前（**同步**），插件输出纯数据规则供本机和个人云执行 | { characterId, nowMs, source, gate } —— source 是 APP 作息只读快照；改 gate 设置等待，null 不延后。停用已接管的插件后不恢复旧 APP 规则 |
 | moments.schedule | 朋友圈算下次到点时间时（**同步**）；reason: init 首次建档 / afterPost 发完一条 / postponed 被插件押后 | { characterId, reason, lastPostTime, nextPostAfter } —— 改 nextPostAfter 即改时机 |
 
 ### on（只读事件广播，处理函数可 async）

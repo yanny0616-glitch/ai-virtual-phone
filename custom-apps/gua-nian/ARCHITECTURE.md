@@ -209,3 +209,14 @@ scripts/check-gua-nian-p2.mjs 覆盖以上六项的真实 APP 和云函数入口
 本地 `DeferredReply.cloud` 记录同步归属，存在即跳过本地计时生成。POST 前落 attempted 标记，响应丢失保留归属并幂等重试；未发生 POST 的能力探测失败可安全回退本地。取消以空 payload 的 cancelled 墓碑阻止迟到上传恢复任务，确认之前不执行紧急本地回复。完成/失败同样清空请求，保留非敏感回执；云端 outbox 已存在时不再次生成。云项目地址绑定任务，切项目不自动迁移。
 
 `check-deferred-reply-cloud.mjs` 执行真实客户端、网关 action 和 worker，使用内存 REST 与测试密钥验证加密上传、概率押后、合并、API 切换、认领竞争、丢回执重试、取消、防复活和 outbox；已加入 gua-nian:test 与 fork 回归。上线需宿主、网关、push-generate；本功能不增 schema，也不处理已暂缓的挂念设备锁覆盖问题。
+
+
+## 忙碌回复插件化（0.9.21）
+
+`src/chat/context.js` 将所有角色作息以 `availabilityOnly: true` 同步，包括旧版关闭被动回复的角色；sleep 只携带时间，busy 只携带时段/休息。旧参数只作为 `legacyReplySettings` 迁移种子。`src/ui/settings.js` 移除四个被动回复控制项，主动发送的忙与睡仍由挂念独立控制。
+
+官方 `chat-plugins/busy-reply.js` 通过同步 `chat.replyGate` hook 生成被动回复策略。`readReplyGate` 继续给在线状态等消费者原始作息，`readEffectiveReplyGate` 给执行器插件合成后的规则。首次安装从旧 gate 或迁移种子导入配置；插件设置被编辑后不再导入。启用过策略插件以 KV 标记接管，卸载插件后也不会因旧 APP 上传而重新启用等待。旧 APP 且从未接管的角色保留原行为。
+
+聊天入口等待插件运行时完成启动/重载；本地到点扫描启动前不执行，云端快照也在插件就绪后读取。运行时完成变更发 reply-policy-updated；同步器重建未生成的云端请求，策略关闭时将下一检查提前到现在。手动 presenceOverride 使用一次性的 startsAt/expiresAt，序列化为绝对时间，跨午夜不续期。API 凭据及计时/通知仍由通用宿主与个人云处理，插件不执行 API 调用。
+
+回归 `check-busy-reply-plugin.mjs` 执行实际插件及宿主/云端入口，覆盖一次性迁移、false/0、旧源不复活、独立设置、手动状态、紧急开关、跨午夜和关闭云端等待。安装需要宿主、忙碌回复插件和新版挂念；云端支持需更新网关/生成器，不新增 schema。

@@ -312,6 +312,8 @@ type SubscriptionRow = { endpoint: string; p256dh: string; auth: string };
 // BEGIN DEFERRED REPLY TIMING
 /** Pure, absolute-time rules. Embedded in push-generate by push:build-dist. */
 type CloudReplyTiming = {
+    disabled?: boolean;
+    expiresAt?: number;
     nextAt: number;
     reason?: "busy" | "sleep";
     windowKey?: string;
@@ -329,6 +331,7 @@ type CloudReplyTiming = {
 
 function advanceCloudReplyTiming(input: CloudReplyTiming, now: number, random: () => number = Math.random): CloudReplyTiming & { ready: boolean } {
     const t = { ...input };
+    if (t.disabled || (t.expiresAt != null && now >= t.expiresAt)) return { ...t, ready: true, check: false, note: "现在可以回复对方，把等待期间的消息合起来自然回复。" };
     if (t.nextAt > now) return { ...t, ready: false };
     const wait = (minutes: number) => minutes * (0.6 + random() * 0.8) * 60_000;
     const sleep = t.sleeps.find(w => w.from <= now && now < w.to);
@@ -788,7 +791,7 @@ Deno.serve(async (req: Request) => {
     return new Response("forbidden", { status: 403 });
   }
 
-  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1"] });
+  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2"] });
   if (!jobId) return new Response("bad request", { status: 400 });
 
   const claim = await rest(`push_jobs?id=eq.${encodeURIComponent(jobId)}&status=eq.pending&kind=neq.bridge_scan&execute_at=lte.${encodeURIComponent(new Date().toISOString())}`, {

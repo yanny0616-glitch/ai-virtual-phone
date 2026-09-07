@@ -102,12 +102,21 @@
     const st = S.settings || {};
     const nb = nightBridge(cx);
     const sw = cx.day ? sleepWindow(cx.day) : (nb ? { bed: nb.bed, wake: nb.wake } : null);
-    const gate = st.replyGate && nb ? {
-      sleep: { bed: sw.bed, wake: sw.wake, mode: st.sleepMode, wakeProb: st.sleepWakeProb, bufferMin: st.busyBufferMin },
-      busy: { date: todayStr(), peekMin: st.busyPeekMin, windows: [] },
-    } : st.replyGate && cx.day ? {
-      sleep: sw ? { bed: sw.bed, wake: sw.wake, mode: st.sleepMode, wakeProb: st.sleepWakeProb, bufferMin: st.busyBufferMin } : undefined,
-      busy: { date: cx.day.date, peekMin: st.busyPeekMin, adaptive: st.smartBusyReply !== false, focusedPeekProb: st.focusedPeekProb ?? 25, windows: (cx.day.schedule || [])
+    // Old settings travel only as a one-time migration seed. The chat plugin owns policy.
+    const legacyReplySettings = {
+      enabled: st.replyGate !== false, adaptive: st.smartBusyReply !== false, peekMin: st.busyPeekMin ?? 3,
+      focusedPeekProb: st.focusedPeekProb ?? 25, sleepMode: st.sleepMode === 2 ? "chance" : "wait",
+      wakeProb: st.sleepWakeProb ?? 18, wakeBufferMin: st.busyBufferMin ?? 10,
+    };
+    const source = { availabilityOnly: true, legacyReplySettings };
+    const gate = nb ? {
+      ...source,
+      sleep: { bed: sw.bed, wake: sw.wake },
+      busy: { date: todayStr(), windows: [] },
+    } : cx.day ? {
+      ...source,
+      sleep: sw ? { bed: sw.bed, wake: sw.wake } : undefined,
+      busy: { date: cx.day.date, windows: (cx.day.schedule || [])
         .filter((it) => isBusyItem(it) && it.time && it.end && it.end > it.time)
         .map((it) => {
           const steps = (Array.isArray(it.steps) ? it.steps : []).filter(x => x && x.time >= it.time && x.time < it.end)

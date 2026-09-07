@@ -126,6 +126,7 @@ import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
 import { DebugPromptPanel } from "@/components/debug-prompt-panel";
 import { QuickActionFloat } from "@/components/quick-action-float";
+import { getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
 import { retryBusyDeferredReply, takeDueDeferredReplies } from "@/lib/chat-reply-gate";
 import { CHAT_MESSAGE_PUSHED_EVENT, CHAT_REQUEST_REPLY_EVENT, hydrateChatStorage, loadChatSessions, loadChatMessages, pushChatMessage, type ChatMessage, type ChatSession } from "@/lib/chat-storage";
 import { ensureGlobalBindingDefaults, resolveUserIdentity } from "@/lib/settings-storage";
@@ -2505,6 +2506,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
   // 押后的被动回复到点了就发一次回复请求：聊天室开着由它接，没开走上面的后台生成
   useEffect(() => {
     const tick = () => {
+      if (!getChatPluginRuntime().isReady()) return;
       const nowMs = Date.now();
       for (const sessionId of takeDueDeferredReplies(nowMs)) {
         const detail = { source: "reply_gate", sessionId, deferredAt: nowMs, handled: false, busy: false };

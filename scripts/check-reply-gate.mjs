@@ -15,6 +15,7 @@ const math = Object.create(Math);
 math.random = () => 0.5;
 const ctx = vm.createContext({
   Date: Clock, Math: math,
+  getChatPluginHookBus: () => ({ hasHandlers: () => false }), runChatPluginTransformSync: (point, p) => p,
   registerKvMigration() {},
   kvGet: key => kv.get(key), kvSet: (key, value) => kv.set(key, value), kvRemove: key => kv.delete(key),
   kvKeysWithPrefix: prefix => [...kv.keys()].filter(key => key.startsWith(prefix)),
@@ -142,24 +143,25 @@ const end = room.indexOf('    // 「触发回复」按钮', start);
 let generated = 0, pending;
 Object.assign(ctx, {
   session: { id: 's', contactId: 'c', isGroup: false },
+  getChatPluginRuntime: () => ({ ensureReady: async () => {} }),
   queueDeferredReplyCloud() {}, cancelDeferredReplyCloud: async () => true,
   activeGenerationRuns: new Map(), isGeneratingRef: { current: false },
   triggerAIResponse: () => generated++, showChatToast() {}, setPendingGenerate: value => { pending = value; },
 });
 vm.runInContext(stripTypeScriptTypes(room.slice(start, end)) + '\nglobalThis.send=scheduleGatedReply;', ctx);
 kv.clear(); install(make('整理资料'));
-for (let i = 0; i < 5; i++) { ctx.send('普通消息' + i); now += 1000; }
+for (let i = 0; i < 5; i++) { await ctx.send('普通消息' + i); now += 1000; }
 assert.equal(a.readDeferredReply('s').until, at('09:03'));
 assert.equal(generated, 0);
 assert.equal(pending, false);
-now = at('09:03') + 1; ctx.send('最后补一句');
+now = at('09:03') + 1; await ctx.send('最后补一句');
 assert.equal(a.readDeferredReply('s').until, at('09:03'));
 assert.deepEqual([...a.takeDueDeferredReplies(now)], ['s']);
 ctx.isGeneratingRef.current = true; ctx.activeGenerationRuns.set('s', {});
-ctx.send('再点一次');
+await ctx.send('再点一次');
 assert.ok(a.readDeferredReply('s').firedAt);
 ctx.isGeneratingRef.current = false; ctx.activeGenerationRuns.clear();
-now = at('09:00'); schedule(meeting); ctx.send('请马上回');
+now = at('09:00'); schedule(meeting); await ctx.send('请马上回');
 assert.equal(generated, 1);
 assert.equal(a.readDeferredReply('s'), null);
 assert.deepEqual([...a.takeDueDeferredReplies(at('10:03'))], []);
@@ -167,15 +169,15 @@ assert.deepEqual([...a.takeDueDeferredReplies(at('10:03'))], []);
 now = at('09:00'); kv.clear(); install(probabilistic);
 draws = 0;
 math.random = () => { draws++; return 0.5; };
-for (let i = 0; i < 5; i++) ctx.send('补充消息' + i);
+for (let i = 0; i < 5; i++) await ctx.send('补充消息' + i);
 assert.equal(draws, 1); // Only the first send samples the initial interval.
 assert.equal(a.readDeferredReply('s').until, at('09:03'));
 assert.equal(a.readDeferredReply('s').busyCheck, true);
-now = at('09:03'); ctx.send('到点补充');
+now = at('09:03'); await ctx.send('到点补充');
 assert.equal(draws, 1);
 assert.deepEqual([...a.takeDueDeferredReplies(now)], []);
 assert.equal(draws, 3);
-ctx.send('继续补充');
+await ctx.send('继续补充');
 assert.equal(draws, 3);
 assert.equal(a.readDeferredReply('s').until, at('09:06'));
 now = at('09:00'); math.random = () => 0.5;
@@ -193,13 +195,15 @@ const character = { character: { id: 'c' }, day: { date: '2026-09-07', wake: '07
   ],
 }] } };
 await appCtx.api.syncReplyGate(character);
-assert.equal(gatePayload.gate.busy.adaptive, true);
-assert.equal(gatePayload.gate.busy.focusedPeekProb, 25);
+assert.equal(gatePayload.gate.availabilityOnly, true);
+assert.equal(gatePayload.gate.busy.adaptive, undefined);
+assert.equal(gatePayload.gate.legacyReplySettings.focusedPeekProb, 25);
 assert.deepEqual(JSON.parse(JSON.stringify(gatePayload.gate.busy.windows[0].breaks)), [{ from: '10:00', to: '10:10' }]);
 appCtx.api.S.settings.focusedPeekProb = 0;
 await appCtx.api.syncReplyGate(character);
-assert.equal(gatePayload.gate.busy.focusedPeekProb, 0);
+assert.equal(gatePayload.gate.legacyReplySettings.focusedPeekProb, 0);
 appCtx.api.S.settings.smartBusyReply = false;
 await appCtx.api.syncReplyGate(character);
-assert.equal(gatePayload.gate.busy.adaptive, false);
+assert.equal(gatePayload.gate.legacyReplySettings.adaptive, false);
+assert.equal(gatePayload.gate.busy.adaptive, undefined);
 console.log(`Passed adaptive reply timing, task merging and app gate integration (${Intl.DateTimeFormat().resolvedOptions().timeZone}).`);

@@ -1,5 +1,7 @@
 /** Pure, absolute-time rules. Embedded in push-generate by push:build-dist. */
 export type CloudReplyTiming = {
+    disabled?: boolean;
+    expiresAt?: number;
     nextAt: number;
     reason?: "busy" | "sleep";
     windowKey?: string;
@@ -17,6 +19,7 @@ export type CloudReplyTiming = {
 
 export function advanceCloudReplyTiming(input: CloudReplyTiming, now: number, random: () => number = Math.random): CloudReplyTiming & { ready: boolean } {
     const t = { ...input };
+    if (t.disabled || (t.expiresAt != null && now >= t.expiresAt)) return { ...t, ready: true, check: false, note: "现在可以回复对方，把等待期间的消息合起来自然回复。" };
     if (t.nextAt > now) return { ...t, ready: false };
     const wait = (minutes: number) => minutes * (0.6 + random() * 0.8) * 60_000;
     const sleep = t.sleeps.find(w => w.from <= now && now < w.to);

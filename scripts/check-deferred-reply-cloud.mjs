@@ -10,7 +10,7 @@ const json = (v, status = 200) => Response.json(v, { status });
 const at = hm => new Date(`2026-09-07T${hm}:00`).getTime();
 const clone = structuredClone;
 
-function fixture() {
+export function fixture() {
   const h = { now: at('09:00'), random: 0.5, rows: [], outbox: [], calls: [], notifications: [], lost: false, supported: true, claimOnUpdate: false, project: 'https://cloud.test', config: 'A' };
   class Clock extends Date { constructor(...args) { super(...(args.length ? args : [h.now])); } static now() { return h.now; } }
   const math = Object.create(Math); math.random = () => h.random;
@@ -72,10 +72,13 @@ function fixture() {
   window.addEventListener('deferred-reply-cloud-status', e => h.notifications.push(e.detail.message));
   const history = [{ id: 'u1', sessionId: 's', role: 'user', content: '在忙吗', createdAt: new Clock().toISOString() }];
   const c = vm.createContext({ ...common, window, document: new EventTarget(), Event, CustomEvent,
+    getChatPluginRuntime: () => ({ ensureReady: async () => {} }),
+    getChatPluginHookBus: () => ({ hasHandlers: () => false }), runChatPluginTransformSync: (point, p) => p,
     registerKvMigration() {}, kvGet: k => kv.get(k), kvSet: (k, v) => kv.set(k, v), kvRemove: k => kv.delete(k), kvKeysWithPrefix: prefix => [...kv.keys()].filter(k => k.startsWith(prefix)),
     loadInstalledCustomApps: () => [{ id: 'gua.nian', permissions: ['chat.context'] }],
     isPersonalPushCloudActive: () => true, loadPersonalPushCloudState: () => ({ url: h.project }), hasAccountPushSubscription: async () => true,
     personalPushFetch: async (action, init, params) => {
+      if (h.legacyGateway && init.method === "GET" && !params?.key) return json({ ok: true, supported: true });
       const response = await gateway(init.method, params?.key, init.body ? JSON.parse(init.body).payload : undefined);
       if (h.lost && init.method === 'POST') { h.lost = false; throw Error('response lost'); }
       return response;
@@ -85,14 +88,14 @@ function fixture() {
     maybeAppendShortcutCapability() {}, toLlmRequestMessages: v => v,
     buildProviderRequest: (config, preset, messages) => ({ url: 'https://model.test/chat', headers: { Authorization: 'test-' + config }, body: { model: config, messages }, providerKind: 'openai-compatible' }),
   });
-  vm.runInContext(js(read('lib/chat-reply-gate.ts')) + js(read('lib/deferred-reply-cloud.ts')) + '\nglobalThis.api={normalizeReplyGate,setCustomAppReplyGate,evaluateReplyGate,readDeferredReply,writeDeferredReply,takeDueDeferredReplies,queueDeferredReplyCloud,cancelDeferredReplyCloud,installDeferredReplyCloudSync,freezeDeferredReplyTiming,sync,locks};', c);
+  vm.runInContext(js(read('lib/chat-reply-gate.ts')) + js(read('lib/deferred-reply-cloud.ts')) + '\nglobalThis.api={markReplyGatePolicyAdopted,readReplyGate,readEffectiveReplyGate,normalizeReplyGate,setCustomAppReplyGate,evaluateReplyGate,readDeferredReply,writeDeferredReply,takeDueDeferredReplies,queueDeferredReplyCloud,cancelDeferredReplyCloud,installDeferredReplyCloudSync,freezeDeferredReplyTiming,sync,locks};', c);
   const a = c.api;
   const gate = a.normalizeReplyGate({ busy: { date: '2026-09-07', peekMin: 3, adaptive: true, focusedPeekProb: 25, windows: [{ from: '08:40', to: '11:50', title: '会议' }] } });
   a.setCustomAppReplyGate('gua.nian', 'c', gate);
   a.writeDeferredReply('s', { ...a.evaluateReplyGate(gate, '在忙吗', h.now), characterId: 'c' });
   const drain = async () => { for (let i = 0; i < 1000 && a.locks.size; i++) await pause(5); assert.equal(a.locks.size, 0); };
   const run = () => worker(new Request('https://cloud.test/functions/v1/push-generate', { method: 'POST', body: JSON.stringify({ jobId: h.rows[0].id, token: 'test-cron' }) }));
-  return { h, a, history, window, drain, run, gateway, encrypt, decrypt, w };
+  return { h, a, c, history, window, drain, run, gateway, encrypt, decrypt, w };
 }
 
 // Actual client -> authenticated gateway -> encrypted database -> actual worker -> outbox.

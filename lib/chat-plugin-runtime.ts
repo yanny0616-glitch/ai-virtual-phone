@@ -31,7 +31,7 @@ import {
     setChatPluginPromptFragment,
     updateChatPluginSettings,
 } from "./chat-plugin-storage";
-import { readReplyGate } from "./chat-reply-gate";
+import { readReplyGate, markReplyGatePolicyAdopted } from "./chat-reply-gate";
 import type {
     ChatPluginContext,
     ChatPluginMessageAction,
@@ -92,6 +92,7 @@ class ChatPluginRuntime {
     private startPromise: Promise<void> | null = null;
     private started = false;
     private reloading = Promise.resolve();
+    private pendingReloads = 0;
 
     /** 幂等启动：应用启动时由 ChatPluginBootstrap 调用一次 */
     ensureStarted(): Promise<void> {
@@ -99,6 +100,14 @@ class ChatPluginRuntime {
         if (!this.startPromise) this.startPromise = this.start();
         return this.startPromise;
     }
+
+    async ensureReady(): Promise<void> {
+        await this.ensureStarted();
+        let observed: Promise<void>;
+        do { observed = this.reloading; await observed; } while (observed !== this.reloading);
+    }
+
+    isReady(): boolean { return this.started && this.pendingReloads === 0; }
 
     isStarted(): boolean { return this.started; }
 
@@ -146,8 +155,12 @@ class ChatPluginRuntime {
 
     private finishStart(): void {
         this.started = true;
+        markReplyGatePolicyAdopted();
+        window.dispatchEvent(new Event("reply-policy-updated"));
         window.addEventListener(CHAT_PLUGINS_CHANGED_EVENT, () => {
-            this.reloading = this.reloading.then(() => this.applyPluginListChange());
+            this.pendingReloads += 1;
+            this.reloading = this.reloading.then(() => this.applyPluginListChange())
+                .finally(() => { this.pendingReloads -= 1; });
         });
     }
 
@@ -186,6 +199,8 @@ class ChatPluginRuntime {
             }
         }
         getChatPluginHookBus().emitEvent("plugins.changed", {});
+        markReplyGatePolicyAdopted();
+        window.dispatchEvent(new Event("reply-policy-updated"));
         // 全部插件（重）加载完成后再补发一次坑位变更：安装/启用是异步的，插件 setup 里
         // 注册坑位时管理页的 ChatPluginSlot 可能还没挂好监听、漏掉那次事件；这里在
         // 加载完成、UI 早已渲染就位后再发一次，确保 settings.section 等坑位稳定显示。
@@ -377,6 +392,7 @@ class ChatPluginRuntime {
                     unset: (name, scope = "global", targetId) => unsetChatPluginVar(name, scope, targetId),
                 },
                 replyGate: {
+                    policyVersion: 1,
                     get: (characterId) => readReplyGate(characterId),
                 },
             },

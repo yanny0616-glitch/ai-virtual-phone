@@ -728,12 +728,13 @@ Deno.serve(async (request: Request) => {
           signal: AbortSignal.timeout(10_000),
         });
         const data = await response.json().catch(() => null);
-        return response.ok && data?.capabilities?.includes("deferred-reply-v1") === true;
+        return response.ok && data?.capabilities?.includes("deferred-reply-v2") === true;
       };
       const key = cleanText(url.searchParams.get("key"), 200);
       if (!key) {
         if (request.method !== "GET") return json({ ok: false }, 400);
-        return json({ ok: true, supported: await supported() });
+        const ready = await supported();
+        return json({ ok: true, supported: ready, policySupported: ready });
       }
       if (!/^deferred:[A-Za-z0-9_-]{1,150}$/.test(key)) return json({ ok: false, error: "Invalid deferred key" }, 400);
       const filter = `push_jobs?user_id=eq.${OWNER_ID}&trigger_key=eq.${encodeURIComponent(key)}`;
@@ -783,12 +784,12 @@ Deno.serve(async (request: Request) => {
           // New messages/API choices update the snapshot, never add a chance or reset the clock.
           const timing = payload.deferredReply.timing;
           const previous = old.deferredReply.timing;
-          payload.deferredReply.timing = { ...timing, nextAt: Date.parse(row.execute_at),
+          payload.deferredReply.timing = { ...timing, nextAt: timing.disabled ? Date.now() : Date.parse(row.execute_at),
             reason: previous.reason, windowKey: previous.windowKey, availableUntil: previous.availableUntil,
             check: previous.check, note: previous.note };
           const update = await rest(`${filter}&status=eq.pending&updated_at=eq.${encodeURIComponent(row.updated_at)}`, {
             method: "PATCH", headers: { Prefer: "return=representation" },
-            body: JSON.stringify({ payload: await encryptPayload(JSON.stringify(payload), config.payload_key), updated_at: new Date(Math.max(Date.now(), Date.parse(row.updated_at) + 1)).toISOString() }),
+            body: JSON.stringify({ ...(timing.disabled ? { execute_at: new Date().toISOString() } : {}), payload: await encryptPayload(JSON.stringify(payload), config.payload_key), updated_at: new Date(Math.max(Date.now(), Date.parse(row.updated_at) + 1)).toISOString() }),
           });
           if (!update.ok) throw new Error("Cannot update deferred task");
           const rows = await update.json() as DeferredRow[];

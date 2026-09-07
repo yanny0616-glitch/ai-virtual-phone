@@ -1103,6 +1103,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "",
   "### 让角色按作息押后回复（`chat.setReplyGate`）",
   "",
+  "推荐 APP 只发布作息：`availabilityOnly: true`，sleep 只填 bed/wake，busy 填 date/windows（含可选 breaks）。宿主的「忙碌回复」聊天插件负责等待/偷空/睡眠/紧急消息策略；没装插件时 source-only 作息不阻塞聊天，也仍可供在线状态插件显示。可用 `legacyReplySettings` 提供 enabled/adaptive/peekMin/focusedPeekProb/sleepMode/wakeProb/wakeBufferMin 的一次性迁移种子，后续上传不得覆盖用户插件设置。",
   "可选 `busy.adaptive: true` 启用根据日程找空档：普通事务按 peekMin 等待；会议、上课、驾驶等由标题识别的专注事项支持 `busy.focusedPeekProb`（0–100，省略为 0）：大于 0 时按 peekMin 浮动间隔检查一次概率，未命中继续等，命中偷空简短回。已有 `windows[].breaks: [{from, to}]` 明确休息时段内无需抽取，活动结束正常回。概率为 0 则等明确休息或本段结束后缓冲（最多 5 分钟）；没有细排也可使用概率模式，100 在首次检查时回。breaks 必须在当前忙碌时段内；未开启 adaptive 保持原有行为，peekMin=0 始终不等待。无需额外模型调用。新等待到点时会核对日程变化，错过的休息时段不会冒充仍可回复。",
   "状态文本只影响角色**怎么说**；如果 APP 还知道角色**什么时候顾不上看手机**（睡觉、上课、开会），可以用 `chat.setReplyGate` 留一份纯数据的作息，宿主在用户发消息时自己判：睡着就押到起床之后再回，忙着就当偷空看了一眼手机、等几分钟再回。APP 关着也生效，因为判断全在宿主。",
   "",

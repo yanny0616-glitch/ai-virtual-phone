@@ -81,7 +81,8 @@ export type ChatPluginTransformPoint =
     | "message.beforePersist"
     | "message.beforeReveal"
     | "moments.beforePost"
-    | "moments.schedule";
+    | "moments.schedule"
+    | "chat.replyGate";
 
 export type UserBeforeSendPayload = {
     text: string;
@@ -167,6 +168,7 @@ export type MomentsSchedulePayload = {
 };
 
 export type ChatPluginTransformPayloadMap = {
+    "chat.replyGate": { characterId: string; nowMs: number; source: ReplyGate | null; gate: ReplyGate | null };
     "user.beforeSend": UserBeforeSendPayload;
     "prompt.system": PromptSystemPayload;
     "llm.request": LlmRequestPayload;
@@ -327,6 +329,8 @@ export type ChatPluginContext = {
         };
         /** 自定义 APP 用 chat.setReplyGate 留在宿主里的作息（睡眠窗 + 当天忙时段），只读 */
         replyGate: {
+            /** 1 means chat.replyGate policy hooks and source-only availability are supported. */
+            readonly policyVersion: 1;
             get(characterId: string): ReplyGate | null;
         };
     };

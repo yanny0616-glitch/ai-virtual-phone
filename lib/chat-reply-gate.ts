@@ -7,8 +7,11 @@
 // 概率醒来（模式 2）掷中就立刻回，其余一律押到醒来之后。
 
 import { kvGet, kvSet, kvRemove, kvKeysWithPrefix, registerKvMigration } from "./kv-db";
+import { getChatPluginHookBus, runChatPluginTransformSync } from "./chat-plugin-hooks";
 import { loadInstalledCustomApps } from "./custom-app-storage";
 
+const POLICY_ADOPTED_KEY = "chat_reply_policy_adopted_v1";
+registerKvMigration(POLICY_ADOPTED_KEY);
 const GATE_KEY = "custom_app_reply_gate_v1";
 const DEFER_PREFIX = "chat_reply_deferred_v1:";
 registerKvMigration(GATE_KEY);
@@ -20,11 +23,19 @@ export type ReplyGateBusyWindow = {
     from: string;
     to: string;
     title: string;
+    focused?: boolean;
     /** 日程细排明确给出的休息时段，不从会议时长虚构课间。 */
     breaks?: { from: string; to: string }[];
 };
 
 export type ReplyGate = {
+    /** Source-only availability never delays chat until a plugin supplies policy. */
+    availabilityOnly?: boolean;
+    urgentBypass?: boolean;
+    startsAt?: number;
+    expiresAt?: number;
+    legacyReplySettings?: Record<string, string | number | boolean>;
+
     /** 每天都生效的睡眠窗；bed > wake 视为跨夜 */
     sleep?: { bed: string; wake: string; mode: 0 | 1 | 2; wakeProb: number; bufferMin: number };
     /** 只对 date 这天生效的忙时段；peekMin=0 表示忙着也照常回 */
@@ -75,6 +86,17 @@ export function normalizeReplyGate(input: unknown): ReplyGate | null {
     if (!input || typeof input !== "object") return null;
     const raw = input as Record<string, unknown>;
     const gate: ReplyGate = { updatedAt: Date.now() };
+    if (raw.availabilityOnly === true) gate.availabilityOnly = true;
+    if (raw.urgentBypass === false) gate.urgentBypass = false;
+    if (typeof raw.startsAt === "number" && Number.isFinite(raw.startsAt) && typeof raw.expiresAt === "number"
+        && Number.isFinite(raw.expiresAt) && raw.expiresAt > raw.startsAt) {
+        gate.startsAt = raw.startsAt; gate.expiresAt = raw.expiresAt;
+    }
+    if (raw.legacyReplySettings && typeof raw.legacyReplySettings === "object") {
+        gate.legacyReplySettings = Object.fromEntries(Object.entries(raw.legacyReplySettings).filter(([k, v]) =>
+            ["enabled", "adaptive", "peekMin", "focusedPeekProb", "sleepMode", "wakeProb", "wakeBufferMin"].includes(k)
+            && ["string", "number", "boolean"].includes(typeof v))) as ReplyGate["legacyReplySettings"];
+    }
     const sleep = raw.sleep as Record<string, unknown> | undefined;
     if (sleep && typeof sleep === "object") {
         const bed = hm(sleep.bed), wake = hm(sleep.wake);
@@ -97,6 +119,7 @@ export function normalizeReplyGate(input: unknown): ReplyGate | null {
                 }).sort((a, b) => a.from.localeCompare(b.from)).slice(0, 20);
                 return {
                     from, to, title: typeof r.title === "string" ? r.title.trim().slice(0, 40) : "",
+                    ...(typeof r.focused === "boolean" ? { focused: r.focused } : {}),
                     ...(breaks.length ? { breaks } : {}),
                 };
             })
@@ -143,6 +166,27 @@ export function readReplyGate(characterId: string): ReplyGate | null {
     return best;
 }
 
+/** Plugins own policy; other consumers (presence/calendar) keep reading the raw source. */
+export function markReplyGatePolicyAdopted(): void {
+    if (getChatPluginHookBus().hasHandlers("chat.replyGate")) kvSet(POLICY_ADOPTED_KEY, JSON.stringify({ "*": true }));
+}
+
+export function readEffectiveReplyGate(characterId: string, nowMs = Date.now()): ReplyGate | null {
+    const source = readReplyGate(characterId);
+    let adopted: Record<string, boolean> = {};
+    try { const value = JSON.parse(kvGet(POLICY_ADOPTED_KEY) || "{}"); if (value && typeof value === "object" && !Array.isArray(value)) adopted = value; } catch { /* legacy empty state */ }
+    const hasPolicy = getChatPluginHookBus().hasHandlers("chat.replyGate");
+    if (hasPolicy && !adopted["*"]) {
+        adopted["*"] = true;
+        kvSet(POLICY_ADOPTED_KEY, JSON.stringify(adopted));
+    }
+    const legacy = !source?.availabilityOnly && !adopted["*"] && !adopted[characterId] ? source : null;
+    const payload = runChatPluginTransformSync("chat.replyGate", {
+        characterId, nowMs, source, gate: legacy,
+    });
+    return normalizeReplyGate(payload.gate);
+}
+
 function fmtHM(d: Date): string {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
@@ -164,22 +208,27 @@ const FOCUSED_BUSY_RE = /开会|会议|例会|晨会|周会|月会|上课|课堂
 
 function currentBusyWindow(gate: ReplyGate | null, now: Date): ReplyGateBusyWindow | undefined {
     const busy = gate?.busy;
-    if (!busy || busy.peekMin <= 0 || busy.date !== fmtDate(now)) return undefined;
+    if (!busy || busy.peekMin <= 0) return undefined;
+    if (gate?.startsAt != null && gate.expiresAt != null) {
+        return now.getTime() >= gate.startsAt && now.getTime() < gate.expiresAt ? busy.windows[0] : undefined;
+    }
+    if (busy.date !== fmtDate(now)) return undefined;
     const cur = fmtHM(now);
     return busy.windows.find(win => cur >= win.from && cur < win.to);
 }
 
 function busyWindowKey(gate: ReplyGate, win: ReplyGateBusyWindow): string {
-    return JSON.stringify([gate.busy?.date, gate.busy?.adaptive === true, gate.busy?.peekMin, gate.busy?.focusedPeekProb ?? 0, win]);
+    return JSON.stringify([gate.busy?.date, gate.busy?.adaptive === true, gate.busy?.peekMin, gate.busy?.focusedPeekProb ?? 0, win, gate.startsAt, gate.expiresAt]);
 }
 
-function nextFocusedCheckAt(win: ReplyGateBusyWindow, nowMs: number, waitMs: number): number {
+function nextFocusedCheckAt(win: ReplyGateBusyWindow, nowMs: number, waitMs: number, endAt?: number): number {
     const now = new Date(nowMs);
     const nextBreak = win.breaks?.find(pause => atHM(now, pause.from) > nowMs);
-    return Math.min(nowMs + waitMs, nextBreak ? atHM(now, nextBreak.from) : atHM(now, win.to));
+    return Math.min(nowMs + waitMs, nextBreak ? atHM(now, nextBreak.from) : (endAt ?? atHM(now, win.to)));
 }
 
 function isGateAsleep(gate: ReplyGate, now: Date): boolean {
+    if (gate.expiresAt != null && now.getTime() >= gate.expiresAt) return false;
     const sleep = gate.sleep, cur = fmtHM(now);
     return !!sleep && (sleep.bed > sleep.wake
         ? cur >= sleep.bed || cur < sleep.wake
@@ -187,13 +236,13 @@ function isGateAsleep(gate: ReplyGate, now: Date): boolean {
 }
 
 /** 明确要求马上回的话（救命、医院、快回…）：越过押后，也越过已有的等待 */
-export function isUrgentReplyText(text: string): boolean {
-    return URGENT_RE.test(String(text || "").replace(/\s+/g, ""));
+export function isUrgentReplyText(text: string, gate?: ReplyGate | null): boolean {
+    return gate?.urgentBypass !== false && URGENT_RE.test(String(text || "").replace(/\s+/g, ""));
 }
 
 export function evaluateReplyGate(gate: ReplyGate | null, text: string, nowMs = Date.now()): ReplyGateDecision {
-    if (!gate) return { kind: "now" };
-    if (URGENT_RE.test(text.replace(/\s+/g, ""))) return { kind: "now" };
+    if (!gate || (gate.expiresAt != null && nowMs >= gate.expiresAt) || (gate.startsAt != null && nowMs < gate.startsAt)) return { kind: "now" };
+    if (isUrgentReplyText(text, gate)) return { kind: "now" };
     const now = new Date(nowMs);
     const cur = fmtHM(now);
 
@@ -213,18 +262,18 @@ export function evaluateReplyGate(gate: ReplyGate | null, text: string, nowMs = 
 
     const busy = gate.busy, win = currentBusyWindow(gate, now);
     if (busy && win) {
-        const end = atHM(now, win.to);
+        const end = gate.expiresAt ?? atHM(now, win.to);
         const waitMs = jitterMin(busy.peekMin) * 60_000;
         let until = Math.min(nowMs + waitMs, end + 60_000);
         let busyAvailableUntil: number | undefined;
         let busyCheck: boolean | undefined;
         const what = win.title ? `正在${win.title}` : "正忙着";
         let note = `你${what}，是偷空看了一眼手机才回的：回得简短，可能提一句现在不方便多聊。`;
-        if (busy.adaptive && FOCUSED_BUSY_RE.test(win.title)) {
+        if (busy.adaptive && (win.focused ?? FOCUSED_BUSY_RE.test(win.title))) {
             const pause = win.breaks?.find(item => atHM(now, item.to) > nowMs);
             const inBreak = pause && atHM(now, pause.from) <= nowMs;
             if (!inBreak && (busy.focusedPeekProb ?? 0) > 0) {
-                until = nextFocusedCheckAt(win, nowMs, waitMs);
+                until = nextFocusedCheckAt(win, nowMs, waitMs, end);
                 busyCheck = true;
                 note = `你还在${win.title}，刚抽出一点空看手机。把等待期间对方的消息合起来简短回复，之后还要继续忙；不要声称活动已经结束，也不要虚构正式休息。`;
             } else if (pause) {
@@ -272,7 +321,7 @@ export function takeDueDeferredReplies(nowMs = Date.now()): string[] {
         if (!rec || rec.firedAt || rec.cloud || rec.until > nowMs) continue;
         // 新版等待记录到点重读日程：活动延长/换场/转为睡眠时改约；相同活动不重复掷等待时间。
         if (rec.characterId && rec.reason) {
-            const gate = readReplyGate(rec.characterId);
+            const gate = readEffectiveReplyGate(rec.characterId, nowMs);
             const win = currentBusyWindow(gate, new Date(nowMs));
             const sameWindow = gate && win && !isGateAsleep(gate, new Date(nowMs))
                 && rec.busyWindowKey === busyWindowKey(gate, win)
@@ -299,7 +348,7 @@ export function takeDueDeferredReplies(nowMs = Date.now()): string[] {
                 // 一次到点检查只抽一次；不中就更新同一条等待，不按新消息或点击次数加抽。
                 if (!pause && Math.random() * 100 >= (gate.busy.focusedPeekProb ?? 0)) {
                     writeDeferredReply(sessionId, {
-                        ...rec, until: nextFocusedCheckAt(win, nowMs, jitterMin(gate.busy.peekMin) * 60_000),
+                        ...rec, until: nextFocusedCheckAt(win, nowMs, jitterMin(gate.busy.peekMin) * 60_000, gate.expiresAt),
                     });
                     continue;
                 }

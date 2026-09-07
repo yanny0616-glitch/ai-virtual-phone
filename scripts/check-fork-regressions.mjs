@@ -108,17 +108,18 @@ function gates(){
     'globalThis.api={writeDeferredReply,takeDueDeferredReplies,readDeferredReply,retryBusyDeferredReply};').api;
 }
 await test('Desktop requeues a busy reply and dispatches once when available',async()=>{
-  const g=gates();let now=Date.now(),busy=true,sent=0;
+  const g=gates();let now=Date.now(),busy=true,sent=0,ready=false;
   class Clock extends Date {static now(){return now;}}
   const desktop=fs.readFileSync(path.join(root,'components/desktop-shell.tsx'),'utf8');
   const start=desktop.indexOf('    const tick =',desktop.indexOf('// 押后的被动回复到点了'));
   const end=desktop.indexOf('\n    tick();',start);
-  const ctx=vm.createContext({...common,Date:Clock,CustomEvent:class {constructor(type,init){this.detail=init.detail;}},CHAT_REQUEST_REPLY_EVENT:'reply',
+  const ctx=vm.createContext({...common,Date:Clock,getChatPluginRuntime:()=>({isReady:()=>ready}),CustomEvent:class {constructor(type,init){this.detail=init.detail;}},CHAT_REQUEST_REPLY_EVENT:'reply',
     takeDueDeferredReplies:g.takeDueDeferredReplies,retryBusyDeferredReply:(id,at)=>g.retryBusyDeferredReply(id,at,now),
     window:{dispatchEvent:event=>{event.detail.handled=true;event.detail.busy=busy;if(!busy)sent++;}}
   });
   vm.runInContext(stripTypeScriptTypes(desktop.slice(start,end))+'\nglobalThis.tick=tick;',ctx);
   g.writeDeferredReply('s',{until:now-1,note:'busy ended'});ctx.tick();
+  assert.equal(g.readDeferredReply('s').firedAt,undefined);ready=true;ctx.tick();
   assert.equal(sent,0);assert.equal(g.readDeferredReply('s').firedAt,undefined);
   busy=false;now+=20001;ctx.tick();ctx.tick();assert.equal(sent,1);
   return {retried:true,successfulDispatches:sent};
@@ -747,7 +748,7 @@ await test('Moments generation publishes one tagged post, returns its ID, and ne
 
 await import('./check-gua-nian-energy.mjs');
 await import('./check-reply-gate.mjs');
-await import('./check-deferred-reply-cloud.mjs');
+await import('./check-busy-reply-plugin.mjs');
 await import('./check-push-outbox-plugins.mjs');
 await import('./check-shiguang.mjs');
 await import('./check-persistence-and-proxy.mjs');

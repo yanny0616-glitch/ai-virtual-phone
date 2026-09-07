@@ -79,17 +79,13 @@
         { type: "stepper", key: "presendTalkingMin", min: 0, max: 120, step: 5, label: "你最后一句在多久内算正聊着", unit: "分钟" },
         { type: "stepper", key: "presendGapMin", min: 0, max: 240, step: 15, label: "离TA上一条主动多近算太密", unit: "分钟" },
       ], hint: "到点真发之前再算一次「不合时宜度」：你一直没回、你正聊着、TA刚主动过，都会加分。超过阈值这条就悄悄作废。<br>不调模型。点开那条时刻能看到它几分过的、或被什么拦下。需要开着聊天镜像。" },
-      { title: "忙与睡", sub: "到点了TA顾不上呢", fields: [
+      { title: "主动消息的忙与睡", sub: "到点了TA顾不上呢", fields: [
         { type: "toggles", items: [{ key: "busyHold", label: "忙着就押后再发" }] },
         { type: "stepper", key: "busyBufferMin", min: 0, max: 60, step: 5, label: "忙完 / 醒来再等", unit: "分钟" },
         { type: "stepper", key: "busyMaxHoldMin", min: 30, max: 480, step: 30, label: "最多押后", unit: "分钟 · 超过就作罢" },
         { type: "seg", key: "sleepMode", options: [[0, "睡着就不发"], [1, "押到起床后"], [2, "概率醒来"]] },
         { type: "stepper", key: "sleepWakeProb", min: 5, max: 60, step: 5, label: "醒来的概率", unit: "%" },
-        { type: "toggles", items: [{ key: "replyGate", label: "你发消息时也照此办" }] },
-        { type: "toggles", items: [{ key: "smartBusyReply", label: "根据日程找空档" }] },
-        { type: "stepper", key: "focusedPeekProb", min: 0, max: 100, step: 5, label: "专注中偷空回复的概率", unit: "% · 每次检查，0 只等休息或结束" },
-        { type: "stepper", key: "busyPeekMin", min: 0, max: 30, step: 1, label: "偷空等待／检查间隔", unit: "分钟 · 0 不等" },
-      ], hint: "到点时TA正忙（上课、开会、开车这类，生成日程时标的），主动消息就押到忙完再加几分钟（按这个数上下浮动四成）；押得超过上限就作罢。睡着了按选的办：不发、押到起床后、或按概率迷迷糊糊醒来说一两句。只管云端预约。<br>「你发消息时也照此办」管的是TA回你：睡着押到起床后再回（选了「概率醒来」就按同一概率被吵醒）；开启「根据日程找空档」后，普通事务仍按下面的分钟数偷空回；会议、上课、开车等专注事项按这个间隔检查，每次按「专注中偷空回复的概率」判断，默认 25%；没抽中就继续等，不调用模型，没有细排也适用。进入细排明确的休息时段就可以回；一直没抽中，忙完后正常回。概率设为 0 就只等休息或结束后的缓冲（最多 5 分钟），100 就在首次检查时回。关闭后所有忙碌都按原来的分钟数等待；设为 0 都不等待。等待期间再发会合并进同一轮，不反复计时、也不增加抽取次数；到点若日程变了会重新核对。带「救命、医院、快回」的消息不押。<br>启用个人离线推送且更新网关和 push-generate 后，聊天显示「等待已同步云端」就可以关闭小手机；云端按同一规则判断，约每分钟扫描，可能稍晚触发。连续补发或切换 API 后要等新的同步确认。没有云端支持时仍需小手机开着；尚未上传就关闭，只能下次打开再继续。同步失败会提示重试，不会另起本地回复。" },
+      ], hint: "到点时TA正忙（上课、开会、开车这类，生成日程时标的），主动消息就押到忙完再加几分钟（按这个数上下浮动四成）；押得超过上限就作罢。睡着了按选的办：不发、押到起床后、或按概率迷迷糊糊醒来说一两句。这里只管主动消息预约。<br>聊天里的延后回复已迁到小手机「设置 → 聊天插件 → 忙碌回复」：在那里设置偷空概率、等待间隔、睡眠和紧急消息规则。挂念只提供作息和忙闲，首次安装插件时会导入原设置，之后两边互不覆盖。启用个人离线推送后，聊天显示「等待已同步云端」才可关闭小手机。" },
     ] },
   ];
   const SET_SCHEMA = SET_SECTIONS.reduce((acc, sec) => acc.concat(sec.groups), []);
@@ -278,7 +274,6 @@
   function settingsSaveEffects(before, after) {
     const changed = (keys) => keys.some((key) => before[key] !== after[key]);
     const notes = [];
-    if (changed(["smartBusyReply", "focusedPeekProb", "busyPeekMin", "replyGate"])) notes.push("回复等待规则已保存，将同步给宿主用于新等待；已经在等的消息会在原定时间核对最新日程和开关。需要新版宿主支持根据日程找空档和概率偷空。");
     if (changed(["userSleepOn", "userSleepStart", "userSleepEnd"])) notes.push(after.userSleepOn
       ? "你的睡眠时段已保存；计划同步成功后，尚未结算的回音会跳过这段时间，已结算记录不重算。"
       : "睡眠时段已关闭；计划同步成功后，尚未结算的回音恢复按发送后 3 小时统计。未回复仍保持中性。");
