@@ -19,7 +19,7 @@ begin
         'push_server_config', 'push_subscriptions', 'push_jobs', 'push_outbox',
         'push_shortcut_commands', 'push_bridge_config', 'push_bridge_snapshots',
         'push_screen_sessions', 'push_screen_threads', 'push_chat_mirror',
-        'push_recheck_plans', 'push_api_usage', 'push_api_limits'
+        'push_recheck_plans', 'push_api_usage', 'push_api_limits', 'push_generation_locks'
       ])
   ) into has_unknown_public_table;
 
@@ -35,7 +35,7 @@ create table if not exists public.ai_phone_cloud_meta (
   updated_at timestamptz not null default now()
 );
 insert into public.ai_phone_cloud_meta (id, schema_version, updated_at)
-values ('personal-cloud', 10, now())
+values ('personal-cloud', 12, now())
 on conflict (id) do update set schema_version = excluded.schema_version, updated_at = excluded.updated_at;
 
 create table if not exists public.push_server_config (
@@ -253,6 +253,95 @@ create table if not exists public.push_recheck_plans (
   constraint push_recheck_plans_items_array check (jsonb_typeof(items) = 'array'),
   constraint push_recheck_plans_decisions_array check (jsonb_typeof(decisions) = 'array')
 );
+-- BEGIN SCHEDULER STATE SCHEMA 12
+alter table public.push_recheck_plans add column if not exists state_version bigint not null default 1;
+alter table public.push_recheck_plans add column if not exists retry_count integer not null default 0;
+alter table public.push_recheck_plans add column if not exists next_retry_at timestamptz;
+alter table public.push_recheck_plans add column if not exists retry_error text;
+alter table public.push_recheck_plans add column if not exists retry_stopped boolean not null default false;
+create or replace function public.push_plan_version() returns trigger language plpgsql as $$
+begin
+ if tg_op='INSERT' then new.state_version:=1;
+ elsif new.context is distinct from old.context or new.items is distinct from old.items
+  or (new.decisions is distinct from old.decisions and coalesce(current_setting('float.ack_decisions',true),'')<>'1') then
+  new.state_version:=old.state_version+1;
+ else new.state_version:=old.state_version;
+ end if;
+ return new;
+end $$;
+drop trigger if exists zz_push_plan_version on public.push_recheck_plans;
+create trigger zz_push_plan_version before insert or update on public.push_recheck_plans
+for each row execute function public.push_plan_version();
+
+-- Full uploads require the version the app actually imported. Insert races are safe too.
+create or replace function public.push_save_recheck_plan(p_row jsonb, p_version bigint)
+returns jsonb language plpgsql security invoker set search_path=public as $$
+declare r public.push_recheck_plans; saved public.push_recheck_plans;
+begin
+ perform pg_advisory_xact_lock(hashtextextended((p_row->>'user_id')||':'||(p_row->>'character_id')||':'||(p_row->>'plan_date'),0));
+ select * into r from push_recheck_plans where user_id=p_row->>'user_id' and character_id=p_row->>'character_id' and plan_date=p_row->>'plan_date' for update;
+ if (found and (p_version is null or p_version<>r.state_version)) or (not found and coalesce(p_version,0)<>0) then
+  return jsonb_build_object('ok',false,'conflict',true);
+ end if;
+ insert into push_recheck_plans(user_id,character_id,plan_date,session_id,context,items,decisions,recheck_count,updated_at)
+ values(p_row->>'user_id',p_row->>'character_id',p_row->>'plan_date',coalesce(p_row->>'session_id',''),p_row->'context',p_row->'items',coalesce(p_row->'decisions',r.decisions,'[]'),coalesce((p_row->>'recheck_count')::integer,r.recheck_count,0),now())
+ on conflict(user_id,character_id,plan_date) do update set session_id=excluded.session_id,context=excluded.context,items=excluded.items,
+ decisions=excluded.decisions,recheck_count=excluded.recheck_count,updated_at=excluded.updated_at,
+ retry_count=0,next_retry_at=null,retry_error=null,retry_stopped=false,
+ last_recheck_at=case when push_recheck_plans.last_recheck_at>now() then null else push_recheck_plans.last_recheck_at end
+ returning * into saved;
+ return jsonb_build_object('ok',true,'stateVersion',saved.state_version);
+end $$;
+revoke all on function public.push_save_recheck_plan(jsonb,bigint) from public,anon,authenticated;
+grant execute on function public.push_save_recheck_plan(jsonb,bigint) to service_role;
+
+create or replace function public.push_retry_scheduler(p_user_id text, p_character_id text, p_date text)
+returns integer language plpgsql security invoker set search_path=public as $$
+declare n integer;
+begin
+ update push_jobs set status='pending',execute_at=now(),result_note='retry resumed',updated_at=now()
+ where user_id=p_user_id and status='failed' and result_note like '[retry:%] stopped:%'
+ and trigger_key in (select 'timedwake:'||(w->>'wakeId') from push_recheck_plans p,
+ jsonb_array_elements(p.items) w where p.user_id=p_user_id and p.character_id=p_character_id and p.plan_date=p_date);
+ get diagnostics n=row_count;
+ update push_recheck_plans set retry_count=0,next_retry_at=null,retry_error=null,retry_stopped=false,last_recheck_at=null
+ where user_id=p_user_id and character_id=p_character_id and plan_date=p_date;
+ return n;
+end $$;
+revoke all on function public.push_retry_scheduler(text,text,text) from public,anon,authenticated;
+grant execute on function public.push_retry_scheduler(text,text,text) to service_role;
+-- Cancel superseded ordinary wakes only after the version-checked plan write succeeds.
+create or replace function public.push_cancel_changed_slots() returns trigger language plpgsql set search_path=public as $$
+begin
+ update push_jobs j set status='cancelled',result_note='plan slot replaced',updated_at=now()
+ where j.user_id=new.user_id and j.status='pending' and exists (
+  select 1 from jsonb_array_elements(old.items) w where coalesce(w->>'kind','')<>'promise' and w->>'act'='true'
+  and j.trigger_key='timedwake:'||(w->>'wakeId') and not exists (
+   select 1 from jsonb_array_elements(new.items) n where n->>'wakeId'=w->>'wakeId' and n->>'act'='true'));
+ return new;
+end $$;
+drop trigger if exists push_cancel_changed_slots on public.push_recheck_plans;
+create trigger push_cancel_changed_slots after update of items on public.push_recheck_plans
+for each row execute function public.push_cancel_changed_slots();
+create or replace function public.push_append_recheck_decision(p_user_id text,p_character_id text,p_date text,p_entry jsonb)
+returns void language sql security invoker set search_path=public as $$
+ update push_recheck_plans set decisions=(select coalesce(jsonb_agg(e order by ord),'[]') from
+  (select e,ord from jsonb_array_elements(decisions||jsonb_build_array(p_entry)) with ordinality a(e,ord) order by ord desc limit 60) a)
+ where user_id=p_user_id and character_id=p_character_id and plan_date=p_date;
+$$;
+revoke all on function public.push_append_recheck_decision(text,text,text,jsonb) from public,anon,authenticated;
+grant execute on function public.push_append_recheck_decision(text,text,text,jsonb) to service_role;
+create or replace function public.push_scheduler_storage_ready() returns boolean language sql security invoker set search_path=public as $$
+ select exists(select 1 from pg_trigger where tgrelid='public.push_recheck_plans'::regclass and tgname='zz_push_plan_version' and tgenabled<>'D')
+ and exists(select 1 from pg_trigger where tgrelid='public.push_recheck_plans'::regclass and tgname='push_cancel_changed_slots' and tgenabled<>'D')
+ and to_regprocedure('public.push_save_recheck_plan(jsonb,bigint)') is not null
+ and to_regprocedure('public.push_retry_scheduler(text,text,text)') is not null
+ and to_regprocedure('public.push_append_recheck_decision(text,text,text,jsonb)') is not null;
+$$;
+revoke all on function public.push_scheduler_storage_ready() from public,anon,authenticated;
+grant execute on function public.push_scheduler_storage_ready() to service_role;
+-- END SCHEDULER STATE SCHEMA 12
+
 -- cron 每轮的取数就是「按 last_recheck_at 最旧的几条、且 App 近期传过」，索引照这个顺序建。
 create index if not exists push_recheck_plans_due_idx
   on public.push_recheck_plans (last_recheck_at nulls first, updated_at);
@@ -419,18 +508,15 @@ grant execute on function public.ai_phone_screen_chat_abort(text, text, text) to
 -- App 回执云端裁决：只清 at <= p_before 的那批，在数据库里原子过滤，GET 之后新到的裁决留着下次取
 create or replace function public.push_recheck_ack_decisions(
   p_user_id text, p_character_id text, p_plan_date text, p_before numeric
-) returns void
-language sql
-security invoker
-as $$
-  update public.push_recheck_plans
-    set decisions = coalesce((
-      select jsonb_agg(d) from jsonb_array_elements(decisions) d
-      where coalesce((d->>'at')::numeric, 0) > p_before
-    ), '[]'::jsonb)
-  where user_id = p_user_id and character_id = p_character_id
-    and (p_plan_date = '' or plan_date = p_plan_date);
-$$;
+) returns void language plpgsql security invoker as $$
+begin
+ -- Acknowledgement only removes imported diagnostics; it does not change plan meaning.
+ perform set_config('float.ack_decisions','1',true);
+ update public.push_recheck_plans set decisions=coalesce((select jsonb_agg(d) from jsonb_array_elements(decisions) d
+  where coalesce((d->>'at')::numeric,0)>p_before),'[]'::jsonb)
+ where user_id=p_user_id and character_id=p_character_id and (p_plan_date='' or plan_date=p_plan_date);
+ perform set_config('float.ack_decisions','0',true);
+end $$;
 grant execute on function public.push_recheck_ack_decisions(text, text, text, numeric) to service_role;
 
 create extension if not exists pg_cron;
@@ -509,7 +595,8 @@ select cron.schedule('ai-phone-personal-push-recheck-scan', '*/5 * * * *', $CRON
     select user_id, character_id, plan_date
       from public.push_recheck_plans
      where updated_at > now() - interval '36 hours'
-       and (last_recheck_at is null or last_recheck_at < now() - interval '25 minutes')
+       and not retry_stopped and (next_retry_at is null or next_retry_at <= now())
+       and (last_recheck_at is null or last_recheck_at < now() - interval '4 minutes')
      order by last_recheck_at asc nulls first
      limit 5
   ) p;
@@ -523,7 +610,10 @@ select cron.unschedule(jobid)
 select cron.schedule('ai-phone-personal-push-cron-cleanup', '0 3 * * *', $CRON$
   delete from cron.job_run_details where end_time < now() - interval '3 days';
   delete from public.push_chat_mirror where message_at < now() - interval '60 days';
-  delete from public.push_recheck_plans where updated_at < now() - interval '7 days';
+  delete from public.push_recheck_plans p where updated_at < now() - interval '7 days'
+    and not exists (select 1 from jsonb_array_elements(coalesce(p.items,'[]')) w join public.push_jobs j
+      on j.user_id=p.user_id and j.trigger_key='timedwake:'||(w->>'wakeId')
+      where w->>'kind'='promise' and j.status in ('pending','running'));
   delete from public.push_api_usage where updated_at < now() - interval '90 days';
 $CRON$);
 
@@ -587,6 +677,193 @@ end;
 $$;
 revoke all on function public.push_recheck_stop_generation(text, text, text, text) from public, anon, authenticated;
 grant execute on function public.push_recheck_stop_generation(text, text, text, text) to service_role;
+
+-- BEGIN GUANIAN EVENTS SCHEMA 11
+alter table public.push_chat_mirror add column if not exists response_batch_id text;
+create index if not exists push_chat_mirror_session_idx on public.push_chat_mirror(user_id, session_id, message_at desc);
+create index if not exists push_outbox_session_idx on public.push_outbox(user_id, session_id, created_at desc);
+
+-- Independent of the app's device owner: serialize generation for one chat session.
+create table if not exists public.push_generation_locks (
+  user_id text not null, session_id text not null, token text not null,
+  expires_at timestamptz not null, primary key(user_id, session_id)
+);
+alter table public.push_generation_locks enable row level security;
+revoke all on public.push_generation_locks from anon, authenticated;
+create or replace function public.push_generation_lease(p_user_id text, p_session_id text, p_token text, p_action text)
+returns boolean language plpgsql security definer set search_path=public as $$
+declare n integer;
+begin
+  if coalesce(p_session_id,'')='' or coalesce(p_token,'')='' then return false; end if;
+  if p_action='release' then
+    delete from push_generation_locks where user_id=p_user_id and session_id=p_session_id and token=p_token;
+    return true;
+  end if;
+  if p_action='renew' then
+    update push_generation_locks set expires_at=now()+interval '10 minutes'
+      where user_id=p_user_id and session_id=p_session_id and token=p_token and expires_at>now();
+    get diagnostics n=row_count;
+    return n>0;
+  end if;
+  if p_action<>'claim' then return false; end if;
+  insert into push_generation_locks values(p_user_id,p_session_id,p_token,now()+interval '10 minutes')
+  on conflict(user_id,session_id) do update set token=excluded.token, expires_at=excluded.expires_at
+  where push_generation_locks.token=p_token or (p_action='claim' and push_generation_locks.expires_at<now());
+  get diagnostics n=row_count;
+  return n>0;
+end $$;
+revoke all on function public.push_generation_lease(text,text,text,text) from public,anon,authenticated;
+grant execute on function public.push_generation_lease(text,text,text,text) to service_role;
+
+-- Ledger revision, job insertion and timeline attachment succeed in one transaction.
+create or replace function public.push_arm_promise(
+  p_user_id text,p_character_id text,p_date text,p_thread_id text,p_revision integer,p_item jsonb,p_payload jsonb
+) returns boolean language plpgsql security definer set search_path=public as $$
+declare r public.push_recheck_plans; t jsonb; w jsonb; next_items jsonb:='[]'; key text; actual_at timestamptz;
+begin
+  select * into r from push_recheck_plans where user_id=p_user_id and character_id=p_character_id and plan_date=p_date for update;
+  if not found or r.context->>'recheckEnabled'='0' then return false; end if;
+  select value into t from jsonb_array_elements(coalesce(r.context->'threads','[]')) where value->>'id'=p_thread_id;
+  if t is null or t->>'kind'<>'promise' or t->>'done'='true' or t->>'status' in ('completed','cancelled')
+    or coalesce((t->>'revision')::integer,1)<>p_revision then return false; end if;
+  for w in select value from jsonb_array_elements(coalesce(r.items,'[]')) loop
+    if w->>'from'=p_thread_id and w->>'kind'='promise' and w->>'act'='true' then
+      if coalesce((w->>'promiseRevision')::integer,1)=p_revision then return true; end if;
+      update push_jobs set status='cancelled',result_note='promise rescheduled',updated_at=now()
+        where user_id=p_user_id and trigger_key='timedwake:'||(w->>'wakeId') and status='pending';
+      w:=w||'{"act":false,"why":"约定已改期"}'::jsonb;
+    end if;
+    next_items:=next_items||jsonb_build_array(w);
+  end loop;
+  -- Carry the same task across daily plans, including legacy locally-created IDs.
+  select entry.value into t from push_recheck_plans p cross join lateral jsonb_array_elements(coalesce(p.items,'[]')) entry
+    join push_jobs j on j.user_id=p.user_id and j.trigger_key='timedwake:'||(entry.value->>'wakeId')
+    where p.user_id=p_user_id and p.character_id=p_character_id and p.plan_date<>p_date
+      and entry.value->>'kind'='promise' and entry.value->>'from'=p_thread_id and entry.value->>'act'='true'
+      and coalesce((entry.value->>'promiseRevision')::integer,1)=p_revision and j.status<>'cancelled'
+    order by p.plan_date desc limit 1;
+  if t is not null then p_item:=t; end if;
+  select value into t from jsonb_array_elements(coalesce(r.context->'threads','[]')) where value->>'id'=p_thread_id;
+  key:='timedwake:'||(p_item->>'wakeId');
+  actual_at:=to_timestamp((p_item->>'fireAt')::numeric/1000);
+  insert into push_jobs(id,user_id,trigger_key,kind,execute_at,status,payload)
+    values('job_'||gen_random_uuid()::text,p_user_id,key,'timed_task',actual_at,'pending',p_payload)
+    on conflict(user_id,trigger_key) do nothing;
+  update push_recheck_plans set items=next_items||jsonb_build_array(p_item),
+    decisions=coalesce(r.decisions,'[]')||jsonb_build_array(jsonb_build_object('at',extract(epoch from now())*1000,
+      'time',p_item->>'time','wakeId',p_item->>'wakeId','kind','promise','by','cloud','note','按约定时间预约：'||(t->>'text')))
+    where user_id=p_user_id and character_id=p_character_id and plan_date=p_date;
+  return true;
+end $$;
+revoke all on function public.push_arm_promise(text,text,text,text,integer,jsonb,jsonb) from public,anon,authenticated;
+grant execute on function public.push_arm_promise(text,text,text,text,integer,jsonb,jsonb) to service_role;
+create or replace function public.push_cancel_stale_promises(p_user_id text,p_character_id text,p_threads jsonb)
+returns integer language plpgsql security definer set search_path=public as $$
+declare n integer;
+begin
+  update push_jobs j set status='cancelled',result_note='promise changed or settled',updated_at=now()
+  where j.user_id=p_user_id and j.status='pending' and exists(
+    select 1 from push_recheck_plans p,
+      lateral jsonb_array_elements(coalesce(p.items,'[]')) w,
+      lateral jsonb_array_elements(coalesce(p_threads,'[]')) t
+    where p.user_id=p_user_id and p.character_id=p_character_id
+      and w->>'kind'='promise' and t->>'kind'='promise' and w->>'from'=t->>'id'
+      and j.trigger_key='timedwake:'||(w->>'wakeId')
+      and (w->>'act'='false' or t->>'done'='true' or t->>'status' in ('completed','cancelled')
+        or coalesce((w->>'promiseRevision')::integer,1)<>coalesce((t->>'revision')::integer,1))
+  );
+  get diagnostics n=row_count;
+  return n;
+end $$;
+revoke all on function public.push_cancel_stale_promises(text,text,jsonb) from public,anon,authenticated;
+grant execute on function public.push_cancel_stale_promises(text,text,jsonb) to service_role;
+
+-- Promise state is durable across whole-plan uploads, resets and cloud PATCHes.
+-- Ordinary timeline items and non-promise ledger entries keep their existing semantics.
+create or replace function public.push_merge_promise_threads(p_existing jsonb,p_incoming jsonb)
+returns jsonb language plpgsql immutable set search_path=public as $$
+declare result jsonb:=coalesce(p_incoming,'[]'); old jsonb; fresh jsonb; winner jsonb;
+begin
+ for old in select value from jsonb_array_elements(coalesce(p_existing,'[]')) where value->>'kind'='promise' loop
+  select value into fresh from jsonb_array_elements(result) where value->>'id'=old->>'id';
+  if fresh is null then result:=result||jsonb_build_array(old); continue; end if;
+  if coalesce((old->>'revision')::integer,1)>coalesce((fresh->>'revision')::integer,1)
+   or (coalesce((old->>'revision')::integer,1)=coalesce((fresh->>'revision')::integer,1)
+    and (coalesce((old->>'at')::numeric,0)>coalesce((fresh->>'at')::numeric,0)
+      or old->>'done'='true')) then winner:=old;
+  else winner:=fresh; end if;
+  if coalesce((old->>'revision')::integer,1)=coalesce((fresh->>'revision')::integer,1) then
+   if coalesce(old->>'nudge','') like '%said:%' then winner:=winner||jsonb_build_object('nudge',old->'nudge'); end if;
+   winner:=winner||jsonb_build_object('mentionedAt',greatest(coalesce((old->>'mentionedAt')::numeric,0),coalesce((fresh->>'mentionedAt')::numeric,0)));
+  end if;
+  select coalesce(jsonb_agg(case when value->>'id'=old->>'id' then winner else value end),'[]') into result from jsonb_array_elements(result);
+ end loop;
+ return result;
+end $$;
+revoke all on function public.push_merge_promise_threads(jsonb,jsonb) from public,anon,authenticated;
+grant execute on function public.push_merge_promise_threads(jsonb,jsonb) to service_role;
+
+create or replace function public.push_preserve_promise_state()
+returns trigger language plpgsql security definer set search_path=public as $$
+declare threads jsonb:=coalesce(new.context->'threads','[]'); prior jsonb:='[]'; result jsonb:='[]';
+ p jsonb; w jsonb; incoming jsonb; t jsonb; previous jsonb;
+begin
+ -- Include other days: uploading tomorrow's old snapshot must not roll back today's revision.
+ for p in select context->'threads' from push_recheck_plans where user_id=new.user_id
+   and character_id=new.character_id and plan_date<>new.plan_date order by plan_date desc limit 32 loop
+  threads:=push_merge_promise_threads(p,threads);
+ end loop;
+ if tg_op='UPDATE' then
+  threads:=push_merge_promise_threads(old.context->'threads',threads);
+  prior:=coalesce(old.items,'[]');
+ end if;
+ new.context:=jsonb_set(coalesce(new.context,'{}'),'{threads}',threads);
+ select coalesce(jsonb_agg(value),'[]') into result from jsonb_array_elements(coalesce(new.items,'[]')) where coalesce(value->>'kind','')<>'promise';
+ -- Existing IDs win over a second scheduler. Keep inactive IDs as evidence for cancellation.
+ for w in select value from jsonb_array_elements(prior||coalesce(new.items,'[]')) where value->>'kind'='promise' loop
+  if coalesce(w->>'wakeId','')='' then continue; end if;
+  if exists(select 1 from jsonb_array_elements(result) where value->>'wakeId'=w->>'wakeId') then continue; end if;
+  select value into incoming from jsonb_array_elements(coalesce(new.items,'[]')) where value->>'wakeId'=w->>'wakeId';
+  if incoming is not null then
+   previous:=w; w:=w||incoming;
+   if previous->>'act'='false' then w:=w||'{"act":false}'::jsonb; end if;
+   if coalesce((previous->>'generatedAt')::numeric,0)>0 then w:=w||jsonb_build_object('generatedAt',previous->'generatedAt'); end if;
+  end if;
+  select value into t from jsonb_array_elements(threads) where value->>'id'=w->>'from' and value->>'kind'='promise';
+  if t is null or t->>'done'='true' or t->>'status' in ('completed','cancelled')
+    or coalesce((t->>'revision')::integer,1)<>coalesce((w->>'promiseRevision')::integer,1)
+    or exists(select 1 from jsonb_array_elements(result) x where x->>'kind'='promise' and x->>'act'='true'
+      and x->>'from'=w->>'from' and coalesce((x->>'promiseRevision')::integer,1)=coalesce((w->>'promiseRevision')::integer,1)) then
+   w:=w||'{"act":false,"why":"约定已更新或已有同版本预约"}'::jsonb;
+  end if;
+  result:=result||jsonb_build_array(w);
+ end loop;
+ new.items:=result;
+ return new;
+end $$;
+drop trigger if exists push_preserve_promise_state on public.push_recheck_plans;
+create trigger push_preserve_promise_state before insert or update of context,items on public.push_recheck_plans
+ for each row execute function public.push_preserve_promise_state();
+
+create or replace function public.push_cancel_changed_promise_state()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ perform push_cancel_stale_promises(new.user_id,new.character_id,new.context->'threads');
+ return new;
+end $$;
+drop trigger if exists push_cancel_changed_promise_state on public.push_recheck_plans;
+create trigger push_cancel_changed_promise_state after insert or update of context,items on public.push_recheck_plans
+ for each row execute function public.push_cancel_changed_promise_state();
+
+-- Read-only migration probe: a missing RPC fails before the gateway saves any plan.
+create or replace function public.push_promise_storage_ready() returns boolean language sql stable security definer set search_path=public as $$
+ select count(*)=2 from pg_trigger where tgrelid='public.push_recheck_plans'::regclass
+ and tgname in ('push_preserve_promise_state','push_cancel_changed_promise_state') and tgenabled<>'D';
+$$;
+revoke all on function public.push_promise_storage_ready() from public,anon,authenticated;
+grant execute on function public.push_promise_storage_ready() to service_role;
+
+-- END GUANIAN EVENTS SCHEMA 11
 
 -- 独立于设备所有权及整份 context 上传的判断租约/聊天游标。
 alter table public.push_recheck_plans add column if not exists judge_token text;

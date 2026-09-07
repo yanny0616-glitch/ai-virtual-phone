@@ -24,6 +24,7 @@
       status, cls: w.act ? "on" : "no", heart: w.act ? "♥" : "♡", explanation, sentAt: sentAt || 0,
       badge: '<span class="badge ' + tone + '">' + label + '</span>',
     });
+    if (w.sendConfirmed && w.generatedAt) return state("sent", "已发出", "sent", "撤销前已核实对应预约生成完成，保留发送记录；不代表你已读。", w.generatedAt);
     if (j) {
       if (j.status === "done" && /^(generated|sent)(?:\b|,)/.test(String(j.resultNote || ""))) {
         return state("sent", "已发出", "sent", "对应预约的云端回执已确认消息生成完成；这不代表手机通知已展示或你已读。", Date.parse(j.updatedAt) || 0);
@@ -44,7 +45,7 @@
   }
 
   /* ================= 时刻详情弹层 ================= */
-  const HIST_KIND = { plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对" };
+  const HIST_KIND = { promise: "约定预约", plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对" };
 
   function detailHtml(w, plan) {
     const cx = cur();

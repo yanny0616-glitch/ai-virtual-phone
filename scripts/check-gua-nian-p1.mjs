@@ -14,11 +14,11 @@ function fixture(extra='') {
   const clone=x=>structuredClone(x);
   const ctx=vm.createContext({h,Date:Clock,console,URLSearchParams,Intl,setTimeout:()=>1,clearTimeout:()=>{},AbortController,
     document:{querySelector:()=>null,querySelectorAll:()=>[{dataset:{id:"c"}}]},
-    AiPhone:{db:{list:async table=>clone(h.rows[table]||[]),update:async(table,id,patch)=>{if(h.failTable===table)throw Error('storage unavailable');const row=h.rows[table].find(x=>x.id===id);Object.assign(row,clone(patch));return clone(row);},create:async(table,data)=>{if(h.failTable===table)throw Error('storage unavailable');const row={id:table+'-'+(h.rows[table]||[]).length,...clone(data)};(h.rows[table]||=[]).push(row);return clone(row);}},push:{cancelWake:async id=>{if(h.failCancel)throw Error("cancel unavailable");h.cancelled.push(id);}},calendar:{read:async()=>({plan:{items:[]}}),write:async()=>({})}}});
+    AiPhone:{chat:{readHistory:async()=>({sessionId:"s",messages:[]})},db:{list:async table=>clone(h.rows[table]||[]),update:async(table,id,patch)=>{if(h.failTable===table)throw Error('storage unavailable');const row=h.rows[table].find(x=>x.id===id);Object.assign(row,clone(patch));return clone(row);},create:async(table,data)=>{if(h.failTable===table)throw Error('storage unavailable');const row={id:table+'-'+(h.rows[table]||[]).length,...clone(data)};(h.rows[table]||=[]).push(row);return clone(row);}},push:{cancelWake:async id=>{if(h.failCancel)throw Error("cancel unavailable");h.cancelled.push(id);}},calendar:{read:async()=>({plan:{items:[]}}),write:async()=>({})}}});
   const expose=`
     log=async(_cx,msg)=>h.logs.push(msg); render=()=>{}; renderCloudSync=()=>{}; toast=()=>{};
     syncChatContext=async()=>{};
-    cloudFetch=async(...args)=>{h.calls.push(args);const r=await h.cloud(...args);return args[0]==="judge-task"?{claimed:true,...r}:args[0]==="recheck-capabilities"?{capabilities:["judge-task-v1"],...r}:r};
+    cloudFetch=async(...args)=>{h.calls.push(args);const r=await h.cloud(...args);return args[0]==="cancel-wake"?{outcome:"cancelled",...r}:args[0]==="judge-task"?{claimed:true,...r}:args[0]==="recheck-capabilities"?{capabilities:["judge-task-v1","scheduler-state-v1","promise-tasks-v2"],...r}:r};
     generateJson=async()=>{h.modelCalls=(h.modelCalls||0)+1;return h.generated;};
     readRecentChat=async()=>[{role:'user',t:Date.now()-1000,c:'用啊'}];
     ${extra}
@@ -149,7 +149,7 @@ await test('网关确认 worker 后调用原子停用并复查，不删已有日
   assert.equal(!!rpc,mode!=='old-worker');
   if(rpc)assert.deepEqual(JSON.parse(rpc.init.body),{p_user_id:'owner',p_character_id:'c',p_from_date:'2026-09-05',p_owner:'mine'});
  }
- const sql=fs.readFileSync(root+'/docs/personal-push-supabase.sql','utf8').split('create or replace function public.push_recheck_stop_generation(')[1];
+ const sql=fs.readFileSync(root+'/docs/personal-push-supabase.sql','utf8').split('create or replace function public.push_recheck_stop_generation(')[1].split('$$;')[0];
  assert.ok(sql.includes("jsonb_typeof(context->'genKit') = 'object'"));
  assert.ok(sql.includes("coalesce(context->>'generatedBy', '') <> 'cloud'"));
  assert.ok(!/delete from|update public.push_jobs/i.test(sql));

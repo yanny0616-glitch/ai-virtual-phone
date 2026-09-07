@@ -4,8 +4,8 @@ import {
     chatDb,
     initChatDb,
     dbPutMessage, dbPutMessageBatch, dbDeleteMessage, dbDeleteMessagesBySession, dbDeleteMessagesByIds,
-    dbPutMessages, dbPutSessions, dbPutContacts, dbDeleteSession,
-    dbReplaceContacts, dbReplaceSessions,
+    dbPutMessages, dbPutSessions, dbPutContacts, dbDeleteSession, dbReadChatSession,
+    dbReplaceContacts, dbReplaceSessions, dbHasResponseBatch, dbEnsureImportedMessage,
 } from "./chat-db";
 import { resolveUserIdentity } from "./settings-storage";
 import { loadCharacters } from "./character-storage";
@@ -488,6 +488,34 @@ function getNextMessageOrder(sessionId: string): number {
         if (order !== null && order > maxOrder) maxOrder = order;
     }
     return maxOrder + 1;
+}
+
+/** Place only a newly received batch. Existing messages keep their order and
+ * bytes, even when their old order disagrees with timestamps. Ambiguous legacy
+ * order or exhausted fractional space falls back to appending the new batch. */
+function assignReceivedMessageOrders(messages: ChatMessage[]): void {
+    const groups = new Map<string, ChatMessage[]>();
+    for (const message of messages) {
+        const group = groups.get(message.sessionId) || [];
+        group.push(message); groups.set(message.sessionId, group);
+    }
+    for (const [sessionId, group] of groups) {
+        const existing = getSortedSessionMessages(sessionId);
+        const at = Date.parse(group[0].createdAt);
+        const rightIndex = Number.isFinite(at)
+            ? existing.findIndex(message => Date.parse(message.createdAt) > at) : -1;
+        let orders: number[] | null = null;
+        if (rightIndex >= 0) {
+            const right = getStableMessageOrder(existing[rightIndex]);
+            const left = rightIndex > 0 ? getStableMessageOrder(existing[rightIndex - 1]) : right === null ? null : right - 1;
+            if (left !== null && right !== null && left < right) {
+                const proposed = group.map((_, i) => left + (right - left) * ((i + 1) / (group.length + 1)));
+                if (proposed.every((value, i) => Number.isFinite(value) && value > (i ? proposed[i - 1] : left) && value < right)) orders = proposed;
+            }
+        }
+        const next = getNextMessageOrder(sessionId);
+        group.forEach((message, i) => { message.order = orders ? orders[i] : next + i; });
+    }
 }
 
 function reindexSessionMessageOrders(sessionId: string): void {
@@ -1211,29 +1239,31 @@ export function pushChatMessage(msg: NewChatMessage): ChatMessage {
 }
 
 /** 已提交的气泡再进入内存与事件管线，复用普通聊天的预览/未读更新。 */
-function publishChatMessage(newMsg: ChatMessage, persisted = false): ChatMessage {
+function publishChatMessage(newMsg: ChatMessage, persisted = false, insertedByTime = false): ChatMessage {
     _messagesCache.push(newMsg);
     if (!persisted) dbPutMessage(newMsg);
 
     // Auto update session last message only for records that can produce a list preview.
     // 优化：直接增量更新内存会话缓存并异步写单条，避免每次发送都走 loadChatSessions +
     // saveChatSessions 触发全量会话预览重算（会话/消息多了以后会明显卡顿）。
-    const preview = getChatMessagePreview(newMsg);
+    const latest = insertedByTime ? getLastVisibleSessionMessage(newMsg.sessionId) : null;
+    const previewMessage = latest || newMsg;
+    const preview = getChatMessagePreview(previewMessage);
     const sessIdx = _sessionsCache.findIndex(s => s.id === newMsg.sessionId);
     if (sessIdx !== -1 && isSessionPreviewCandidate(newMsg)) {
         const target = _sessionsCache[sessIdx];
-        target.lastMessageId = newMsg.id;
+        target.lastMessageId = previewMessage.id;
         if (preview) target.lastMessagePreview = preview;
-        target.updatedAt = newMsg.createdAt;
+        target.updatedAt = previewMessage.createdAt;
         dbPutSessions([target]);
     } else if (sessIdx === -1) {
         // 缓存未命中（极端情况）：回退全量路径，保证列表预览仍会刷新
         const sessions = loadChatSessions();
         const idx2 = sessions.findIndex(s => s.id === newMsg.sessionId);
         if (idx2 !== -1 && isSessionPreviewCandidate(newMsg)) {
-            sessions[idx2].lastMessageId = newMsg.id;
+            sessions[idx2].lastMessageId = previewMessage.id;
             if (preview) sessions[idx2].lastMessagePreview = preview;
-            sessions[idx2].updatedAt = newMsg.createdAt;
+            sessions[idx2].updatedAt = previewMessage.createdAt;
             saveChatSessions(sessions);
         }
     }
@@ -1248,13 +1278,43 @@ function publishChatMessage(newMsg: ChatMessage, persisted = false): ChatMessage
     return newMsg;
 }
 
-/** 确认消费前的持久化屏障，也用于校验旧内存去重命中的消息。 */
-export async function persistChatMessages(messages: ChatMessage[]): Promise<void> {
+/** 新消息批次的持久化屏障；已收取的批次不得拿旧缓存重新写盘。 */
+export async function persistChatMessages(messages: ChatMessage[], receipts: { sessionId: string; batchId: string }[] = []): Promise<void> {
     if (!_hydrated) throw new Error("聊天数据尚未加载完成，保留云端消息等待重试。");
     const sessionIds = new Set(messages.map(message => message.sessionId));
+    for (const receipt of receipts) sessionIds.add(receipt.sessionId);
     const sessions = _sessionsCache.filter(session => sessionIds.has(session.id));
     if (sessions.length !== sessionIds.size) throw new Error("消息所属会话不可用，保留云端消息等待重试。");
-    await dbPutMessageBatch(messages, sessions);
+    await dbPutMessageBatch(messages, sessions, receipts);
+}
+
+/** Import another page's committed bubbles without replaying plugins, unread
+ * increments or mirror events. Do not overwrite this page's existing drafts. */
+export async function refreshChatSessionFromDisk(sessionId: string): Promise<void> {
+    if (!_hydrated) throw new Error("聊天数据尚未加载完成，保留云端消息等待重试。");
+    const saved = await dbReadChatSession(sessionId);
+    if (!saved.session) return;
+    const durableBatches = new Set(saved.batchIds || []);
+    const before = JSON.stringify(_messagesCache.filter(m => m.sessionId === sessionId));
+    // Only committed response batches can be refreshed/deleted from this
+    // snapshot. Other in-memory drafts keep their existing persistence path.
+    _messagesCache = _messagesCache.filter(m => m.sessionId !== sessionId || !m.responseBatchId || !durableBatches.has(m.responseBatchId));
+    const existing = new Set(_messagesCache.map(message => message.id));
+    const added = saved.messages.filter(message => !existing.has(message.id));
+    _messagesCache.push(...added);
+    const local = _sessionsCache.find(session => session.id === sessionId);
+    if (!local) _sessionsCache.push(saved.session);
+    else {
+        local.unreadCount = saved.session.unreadCount;
+        const latest = getLastVisibleSessionMessage(sessionId);
+        if (latest) { local.lastMessageId = latest.id; local.lastMessagePreview = getChatMessagePreview(latest); local.updatedAt = latest.createdAt; }
+    }
+    if (before !== JSON.stringify(_messagesCache.filter(m => m.sessionId === sessionId)) && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("chat-storage-refreshed", { detail: { sessionId } }));
+}
+
+export async function hasPersistedResponseBatch(sessionId: string, batchId: string): Promise<boolean> {
+    if (!_hydrated) throw new Error("聊天数据尚未加载完成，保留云端消息等待重试。");
+    return dbHasResponseBatch(sessionId, batchId);
 }
 
 // 同页写盘失败后保留准备好的 ID/插件结果，重试不会再执行 beforePersist。
@@ -1262,7 +1322,7 @@ type PreparedBatchMessage = { draftKey: string; message: ChatMessage };
 const pendingMessageBatches = new Map<string, PreparedBatchMessage[]>();
 
 /** 只暂存新气泡；整批提交成功后才发布，失败不会污染缓存里的去重依据。 */
-export function createChatMessageBatch(retryKey?: string): {
+export function createChatMessageBatch(retryKey?: string, options?: { insertByCreatedAt?: boolean; receipt?: { sessionId: string; batchId: string } }): {
     push: (msg: NewChatMessage) => ChatMessage;
     updateMedia: (id: string, data: ChatMessage["mediaData"]) => void;
     commit: () => Promise<void>;
@@ -1293,30 +1353,43 @@ export function createChatMessageBatch(retryKey?: string): {
                 message.order = order;
                 orders.set(message.sessionId, order + 1);
             }
+            if (options?.insertByCreatedAt) assignReceivedMessageOrders(messages);
             const updates = _messagesCache.filter(message => mediaUpdates.has(message.id))
                 .map(message => ({ ...message, mediaData: mediaUpdates.get(message.id) }));
             try {
-                await persistChatMessages([...updates, ...messages]);
+                await persistChatMessages([...updates, ...messages], options?.receipt ? [options.receipt] : []);
             } catch (error) {
                 if (retryKey) pendingMessageBatches.set(retryKey, prepared);
                 throw error;
             }
             if (retryKey) pendingMessageBatches.delete(retryKey);
             committed = true;
+            // A legacy failed import may exist only in memory. Once its real
+            // cloud batch commits, replace that draft instead of retaining a
+            // phantom bubble beside the durable response. No database rewrite.
+            const imported = new Set(messages.filter(m => m.responseBatchId?.startsWith("push-outbox:"))
+                .map(m => JSON.stringify([m.sessionId, m.responseBatchId])));
+            if (retryKey && imported.size) _messagesCache = _messagesCache.filter(m => !imported.has(JSON.stringify([m.sessionId, m.responseBatchId])));
             for (const message of updates) updateMessageMediaData(message.id, message.mediaData);
-            for (const message of messages) publishChatMessage(message, true);
+            for (const message of messages) publishChatMessage(message, true, options?.insertByCreatedAt);
         },
     };
 }
 
 /** 桥输入有固定 ID；缓存命中也要确认落盘，避免失败写入被当成已导入。 */
-export async function upsertImportedChatMessageAsync(msg: ChatMessage): Promise<void> {
+export async function upsertImportedChatMessageAsync(msg: ChatMessage, options?: { insertByCreatedAt?: boolean }): Promise<void> {
+    if (!_hydrated) throw new Error("聊天数据尚未加载完成，保留桥消息等待重试。");
+    const session = _sessionsCache.find(s => s.id === msg.sessionId);
+    if (!session) throw new Error("消息所属会话不可用，保留桥消息等待重试。");
     const existing = _messagesCache.find(item => item.id === msg.id);
-    await persistChatMessages([existing ?? msg]);
-    if (!existing) upsertImportedChatMessage(msg);
+    const incoming = { ...msg };
+    if (!existing && options?.insertByCreatedAt) assignReceivedMessageOrders([incoming]);
+    const saved = await dbEnsureImportedMessage(incoming, session);
+    if (existing) _messagesCache = _messagesCache.map(m => m.id === saved.id ? saved : m);
+    else upsertImportedChatMessage(saved, true);
 }
 
-export function upsertImportedChatMessage(msg: ChatMessage): { message: ChatMessage; inserted: boolean } {
+export function upsertImportedChatMessage(msg: ChatMessage, persisted = false): { message: ChatMessage; inserted: boolean } {
     const existing = _messagesCache.find(item => item.id === msg.id);
     if (existing) return { message: existing, inserted: false };
 
@@ -1328,7 +1401,7 @@ export function upsertImportedChatMessage(msg: ChatMessage): { message: ChatMess
     };
 
     _messagesCache.push(newMsg);
-    dbPutMessage(newMsg);
+    if (!persisted) dbPutMessage(newMsg);
 
     const preview = getChatMessagePreview(newMsg);
     const sessions = loadChatSessions();

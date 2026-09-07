@@ -21,6 +21,13 @@ const worker = readFileSync(resolve(root, "supabase/functions/push-generate/inde
 if (!worker.includes(`// BEGIN DEFERRED REPLY TIMING\n${timing}\n// END DEFERRED REPLY TIMING`)) failures.push("云端延后回复规则与共享源码不一致");
 const silence = readFileSync(resolve(root, "lib/chat-silence-protocol.ts"), "utf8").replace(/^export /gm, "").trim();
 if (!worker.includes(`// BEGIN CHAT SILENCE PROTOCOL\n${silence}\n// END CHAT SILENCE PROTOCOL`)) failures.push("云端沉默协议与共享源码不一致");
+for (const name of ["push-recheck", "push-generate"]) {
+  const code = readFileSync(resolve(root, `supabase/functions/${name}/index.ts`), "utf8");
+  for (const [label, path] of [["GUANIAN CLOUD HISTORY", "lib/guanian-cloud-history.ts"], ["GUANIAN PROMISES", "custom-apps/gua-nian/src/domain/promises.mjs"]]) {
+    const shared = readFileSync(resolve(root, path), "utf8").replace(/^export /gm, "").trim();
+    if (!code.includes(`// BEGIN ${label}\n${shared}\n// END ${label}`)) failures.push(`${name} 的 ${label} 与共享源码不一致`);
+  }
+}
 for (const [source, output] of pairs) {
   const sourceText = readFileSync(resolve(root, source), "utf8");
   const outputText = readFileSync(resolve(root, output), "utf8");

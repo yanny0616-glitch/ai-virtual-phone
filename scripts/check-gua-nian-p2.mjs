@@ -14,11 +14,11 @@ function fixture(extra='') {
   const clone=x=>structuredClone(x);
   const ctx=vm.createContext({h,Date:Clock,console,URLSearchParams,Intl,setTimeout:()=>1,clearTimeout:()=>{},AbortController,
     document:{querySelector:()=>null,querySelectorAll:()=>[{dataset:{id:"c"}}]},
-    AiPhone:{db:{list:async table=>clone(h.rows[table]||[]),update:async(table,id,patch)=>{if(h.failTable===table)throw Error('storage unavailable');const row=h.rows[table].find(x=>x.id===id);Object.assign(row,clone(patch));return clone(row);},create:async(table,data)=>{if(h.failTable===table)throw Error('storage unavailable');const row={id:table+'-'+(h.rows[table]||[]).length,...clone(data)};(h.rows[table]||=[]).push(row);return clone(row);}},push:{cancelWake:async id=>{if(h.failCancel)throw Error("cancel unavailable");h.cancelled.push(id);}},calendar:{read:async()=>({plan:{items:[]}}),write:async()=>({})}}});
+    AiPhone:{chat:{readHistory:async()=>({sessionId:"s",messages:[]})},db:{list:async table=>clone(h.rows[table]||[]),update:async(table,id,patch)=>{if(h.failTable===table)throw Error('storage unavailable');const row=h.rows[table].find(x=>x.id===id);Object.assign(row,clone(patch));return clone(row);},create:async(table,data)=>{if(h.failTable===table)throw Error('storage unavailable');const row={id:table+'-'+(h.rows[table]||[]).length,...clone(data)};(h.rows[table]||=[]).push(row);return clone(row);}},push:{cancelWake:async id=>{if(h.failCancel)throw Error("cancel unavailable");h.cancelled.push(id);}},calendar:{read:async()=>({plan:{items:[]}}),write:async()=>({})}}});
   const expose=`
     log=async(_cx,msg)=>h.logs.push(msg); render=()=>{}; renderCloudSync=()=>{}; toast=()=>{};
     syncChatContext=async()=>{};
-    cloudFetch=async(...args)=>{h.calls.push(args);const r=await h.cloud(...args);return args[0]==="judge-task"?{claimed:true,...r}:args[0]==="recheck-capabilities"?{capabilities:["judge-task-v1"],...r}:r};
+    cloudFetch=async(...args)=>{h.calls.push(args);const r=await h.cloud(...args);return args[0]==="judge-task"?{claimed:true,...r}:args[0]==="recheck-capabilities"?{capabilities:["judge-task-v1","promise-tasks-v1","promise-tasks-v2","scheduler-state-v1"],...r}:r};
     generateJson=async()=>{h.modelCalls=(h.modelCalls||0)+1;if(h.onModel)await h.onModel();return h.generated;};
     readRecentChat=async()=>[{role:'user',t:Date.now()-1000,c:'用啊'}];
     ${extra}
@@ -163,7 +163,7 @@ await test('冻结独立起意判断模板并寄存，缓存按云地址隔离',
 await test('真实云端入口遵守本机认领，成功保存游标与结果，模板走独立判断请求',async()=>{
  for(const mode of ['app-busy','success','save-race','model-failed']){
   let handler,modelCalls=0;const writes=[],tasks=[];
-  const chatAt=now-60000,plan={session_id:'session',updated_at:'v1',context:{day:{tz:0,energy:60,schedule:[]},quota:4,gateMinMsgs:1,gateFreshMin:0,gateHorizonMin:0,judgeTemplate:'judge',sentinelWakeId:'sentinel',wakePrefix:'wake_',momentsOn:0},items:[{time:'18:00',fireAt:now+7200000,act:false,wakeId:'old'}],decisions:[],judged_chat_at:0};
+  const chatAt=now-60000,plan={state_version:1,session_id:'session',updated_at:'v1',context:{day:{tz:0,energy:60,schedule:[]},quota:4,gateMinMsgs:1,gateFreshMin:0,gateHorizonMin:0,judgeTemplate:'judge',sentinelWakeId:'sentinel',wakePrefix:'wake_',momentsOn:0},items:[{time:'18:00',fireAt:now+7200000,act:false,wakeId:'old'}],decisions:[],judged_chat_at:0};
   worker('push-recheck',{Deno:{env:{get:()=> 'test'},serve:f=>handler=f},fetch:async(url,init)=>{
     if(url==='https://judge.invalid'){
       modelCalls++;assert.ok(JSON.parse(init.body).messages[0].content.includes('专用人设'));
@@ -171,7 +171,8 @@ await test('真实云端入口遵守本机认领，成功保存游标与结果�
     }
     if(url.includes('push_server_config'))return json([{cron_secret:'secret',payload_key:'key'}]);
     if(url.includes('rpc/push_recheck_judge')){const b=JSON.parse(init.body);tasks.push(b);return json({claimed:mode!=='app-busy'});}
-    if(url.includes('push_chat_mirror'))return json([{role:'user',content:'约好的安排',message_at:new Date(chatAt).toISOString()}]);
+    if(url.includes('push_outbox'))return json([]);
+    if(url.includes('push_chat_mirror'))return json([{id:'user-message',role:'user',content:'约好的安排',message_at:new Date(chatAt).toISOString()}]);
     if(url.includes('push_jobs'))return json([{trigger_key:'timedwake:sentinel',payload:'chat',status:'pending'},{trigger_key:'judge',payload:'judge',status:'pending'}]);
     if(url.includes('push_recheck_plans')){
       if(init?.method==='PATCH'){const body=JSON.parse(init.body);writes.push({url,body});return json(mode==='save-race'&&body.judged_at?[]:[plan]);}
@@ -194,7 +195,7 @@ await test('真实云端入口遵守本机认领，成功保存游标与结果�
 await test('网关原样传递判断认领结果，保留预约及模板字段',async()=>{
  let handler;const calls=[];
  worker('ai-phone-push',{Deno:{env:{get:k=>({SUPABASE_URL:'https://cloud.invalid',SUPABASE_SERVICE_ROLE_KEY:'test'})[k]},serve:f=>handler=f},fetch:async(url,init)=>{
-  calls.push({url,init});if(url.includes('rpc/push_recheck_judge'))return json({claimed:false,reason:'busy'});
+  calls.push({url,init});if(url.includes('rpc/push_save_recheck_plan'))return json({ok:true,stateVersion:1});if(url.includes('rpc/push_recheck_judge'))return json({claimed:false,reason:'busy'});
   return json([]);
  }});
  let r=await handler(new Request('https://cloud.invalid?action=judge-task',{method:'POST',headers:{'x-ai-phone-service-key':'test'},body:JSON.stringify({characterId:'c',planDate:'2026-09-05',token:'app-token',op:'claim',chatAt:now-1000})}));
@@ -202,7 +203,7 @@ await test('网关原样传递判断认领结果，保留预约及模板字段',
  const rpc=JSON.parse(calls[0].init.body);assert.equal(rpc.p_user_id,'owner');assert.equal(rpc.p_action,'claim');assert.equal(rpc.p_chat_at,now-1000);
  r=await handler(new Request('https://cloud.invalid?action=recheck-plan',{method:'POST',headers:{'x-ai-phone-service-key':'test'},body:JSON.stringify({characterId:'c',planDate:'2026-09-05',context:{judgeTemplate:'judge:template'},items:[{time:'18:00',fireAt:now+7200000,from:'thread-1',until:now+10800000,origFireAt:now+3600000,held:true}]})}));
  assert.equal(r.status,200);
- const post=calls.find(x=>x.url.includes('push_recheck_plans')&&x.init?.method==='POST');const row=JSON.parse(post.init.body)[0];
+ const post=calls.find(x=>x.url.includes('rpc/push_save_recheck_plan')&&x.init?.method==='POST');const row=JSON.parse(post.init.body).p_row;
  assert.equal(row.context.judgeTemplate,'judge:template');assert.equal(row.items[0].held,true);assert.equal(row.items[0].from,'thread-1');assert.equal(row.items[0].until,now+10800000);assert.equal(row.items[0].origFireAt,now+3600000);
 });
 console.log(`Passed ${passed} gua-nian P2 checks.`);

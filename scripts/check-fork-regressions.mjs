@@ -30,7 +30,7 @@ function mirror(fetchImpl,extra={}){
   ctx.api.seed=entries=>kv.set("chat_mirror_queue_v1",JSON.stringify(entries));
   return ctx.api;
 }
-async function test(name,fn){const detail=await fn();results.push({name,detail});console.log(name,JSON.stringify(detail));}
+async function test(name,fn){if(process.env.FLOAT_CHECK_FILTER&&!new RegExp(process.env.FLOAT_CHECK_FILTER).test(name))return;const detail=await fn();results.push({name,detail});console.log(name,JSON.stringify(detail));}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
 await test('Auto/manual share the upload and retain failed batches',async()=>{
   const first=deferred(),started=deferred();let posts=0;
@@ -746,6 +746,7 @@ await test('Moments generation publishes one tagged post, returns its ID, and ne
   return {singlePublication:true,correctReceipt:true,draftsRejected:true,idempotentRetry:true,otherActionsPreserved:true};
 });
 
+if (!process.env.FLOAT_CHECK_FILTER) {
 await import('./check-gua-nian-energy.mjs');
 await import('./check-reply-gate.mjs');
 await import('./check-busy-reply-plugin.mjs');
@@ -753,4 +754,5 @@ await import('./check-push-outbox-plugins.mjs');
 await import('./check-shiguang-app.mjs');
 await import('./check-persistence-and-proxy.mjs');
 await import('./check-usage-logs.mjs');
-console.log(`Passed ${results.length} fork regression checks, push outbox plugin checks and Shiguang checks.`);
+}
+console.log(`Passed ${results.length} selected fork regression checks${process.env.FLOAT_CHECK_FILTER ? '' : ' and dependent suites'}.`);

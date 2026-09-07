@@ -103,7 +103,7 @@
     });
     v.querySelectorAll(".tl-item.wake").forEach((el) => {
       el.onclick = () => {
-        const w = cx.plan && (cx.plan.items || []).find((x) => x.time === el.dataset.t);
+        const w = cx.plan && (cx.plan.items || []).find((x) => el.dataset.wake ? x.wakeId === el.dataset.wake : x.time === el.dataset.t);
         if (w) openDetail(w, cx.plan, null);
       };
     });
@@ -117,24 +117,26 @@
       };
     });
     v.querySelectorAll(".th-row button").forEach((el) => {
-      el.onclick = async () => {
+      el.onclick = () => editThreadLedger(cx, async () => {
         const id = el.closest(".th-row").dataset.tid, act = el.dataset.act, list = (cx.threads || []).slice();
-        const t = list.find((x) => x.id === id); if (!t) return;
-        if (act === "drop" && !confirm("删掉「" + t.text + "」？删了就找不回来了。")) return;
-        if (act === "done") { t.done = true; t.at = Date.now(); t.by = "user"; toast("已了结，可以在「已了结」里恢复"); }
+        const t = list.find((x) => x.id === id); if (!t) return false;
+        if (act === "drop" && !confirm("删掉「" + t.text + "」？删了就找不回来了。")) return false;
+        if (act === "done") { if (t.kind === "promise") t.status = "completed"; t.done = true; t.at = Date.now(); t.by = "user"; toast("已了结，可以在「已了结」里恢复"); }
         else if (act === "undone") {
           const n = Date.now();
           t.done = false; t.at = n; t.since = n; t.by = "user";
+          if (t.kind === "promise") { t.status = "pending"; t.revision = (+t.revision || 1) + 1; t.nudge = ""; t.mentionedAt = 0; }
           // 约定/日子的存活按 due 判：过了点的放回去会立刻被判死、当场又消失。降成话头再放回。
           if (!threadAlive(t, n, S.settings.threadDays)) { t.kind = "topic"; t.due = 0; t.yearly = false; toast("这件事的时间已经过了，放回去当话头挂着"); }
           else toast("放回去了，TA会重新惦记着");
           S._thDone = false;
         }
+        else if (t.kind === "promise") { t.done = true; t.status = "cancelled"; t.at = Date.now(); }
         else list.splice(list.indexOf(t), 1);
         if (act !== "undone") await dropThreadSlots(cx, id, act === "done" ? "你把这件事了结了" : "你删掉了这条惦记");
         S._thOpen = "";
-        await saveThreads(cx, list); await uploadPlanCloud(cx, false); cx._ctx = null; syncChatContext(cx, true).catch(() => {}); render();
-      };
+        await saveThreads(cx, list);
+      });
     });
     const thDone = $("#th-done");
     if (thDone) thDone.onclick = () => { S._thDone = !S._thDone; S._thOpen = ""; render(); };
@@ -147,9 +149,16 @@
       const when = thAdd.when.value.trim(), now = Date.now(), due = parseWhen(when, now);
       if (when && !due) { toast("时间没看懂：写 9/10、2026-09-10 或 15:00"); return; }
       const kind = !due ? "topic" : (/\d{1,2}:\d{2}/.test(when) ? "promise" : "date");
-      await saveThreads(cx, (cx.threads || []).concat([newThread(kind, text, due, now, "user", "你手动记的")]));
-      S._thAdd = false;
-      await uploadPlanCloud(cx, false); cx._ctx = null; syncChatContext(cx, true).catch(() => {}); render();
+      await editThreadLedger(cx, async () => {
+        const t = newThread(kind, text, due, now, "user", "你手动记的");
+        if (kind === "promise") Object.assign(t, { subject: thAdd.subject.value, revision: 1, status: "pending" });
+        await saveThreads(cx, (cx.threads || []).concat([t]));
+        if (cx.plan && Array.isArray(cx.plan.items)) {
+          const items = cx.plan.items.map(w => ({ ...w })); await syncPromiseTasks(cx, items, now);
+          cx.plan = await upsert("plans", x => x.date === todayStr() && x.characterId === cx.character.id, { items });
+        }
+        S._thAdd = false;
+      });
     };
     const gear = $("#btn-panel-set");
     if (gear) gear.onclick = openSheet;
@@ -257,7 +266,7 @@
         : '<div class="quote dim">今天还没想起过你</div>') +
       '<div class="stats four" style="margin:12px 0 2px">' +
       stat(fired.length, "已发出") + stat(wait.length, "待处理", 60) +
-      stat(skipped.length, "作 罢", 120) + stat(armed.length + "/" + quota, "配 额", 180) + "</div>" +
+      stat(skipped.length, "作 罢", 120) + stat(GuaNianPromises.ordinaryQuota(items) + "/" + quota, "普通配额", 180) + "</div>" +
       '<div class="strip">' +
       tag(wait.length ? (reach.length === wait.length ? "待发的都离线可达" : "离线可达 " + reach.length + " / " + wait.length) : "没有待发", wait.length && reach.length === wait.length ? "ok" : (wait.length ? "warn" : "")) +
       tag(cloudRecheckOn() ? "云端复核 · 每 5 分钟" : (cloudCfg() ? "云端复核关着" : "没配云"), cloudRecheckOn() ? "ok" : "") +
@@ -289,7 +298,7 @@
         + '<button class="mini drop-btn" data-act="drop">删掉</button></div></div>';
     };
     const row = (t) => '<div class="th-row' + (S._thOpen === t.id ? " open" : "") + (t.done ? " is-done" : "") + '" data-tid="' + esc(t.id) + '">'
-      + '<div class="th-head"><span class="badge ' + (t.kind === "promise" ? "cool" : t.kind === "date" ? "warn" : "") + '">' + THREAD_KIND[t.kind] + "</span>"
+      + '<div class="th-head"><span class="badge ' + (t.kind === "promise" ? "cool" : t.kind === "date" ? "warn" : "") + '">' + THREAD_KIND[t.kind] + (t.kind === "promise" ? "·" + GuaNianPromises.promiseSubjectLabel(t.subject) : "") + "</span>"
       + '<span class="th-text">' + esc(t.text) + (threadWhen(t, now) ? ' <span class="dim">' + esc(threadWhen(t, now)) + "</span>" : "") + "</span>"
       + '<span class="th-arrow">' + (S._thOpen === t.id ? "▾" : "›") + "</span></div>"
       + (S._thOpen === t.id ? detail(t) : "") + "</div>";
@@ -297,7 +306,7 @@
     return '<div class="card"><div class="sec-head"><span class="t">惦 记</span>' + (shown.length ? '<span class="badge">' + shown.length + " 件</span>" : "")
       + (done.length || S._thDone ? '<button class="act" id="th-done">' + (S._thDone ? "看还挂着的" : "已了结 " + done.length) + "</button>" : "")
       + '<button class="act" id="th-plus" title="手动记一件">' + (S._thAdd ? "收起" : "＋ 记一件") + "</button></div>"
-      + (S._thAdd ? '<form class="th-add" id="th-add"><input name="text" placeholder="如「我生日」「周五面试」" maxlength="40"><input name="when" placeholder="9/10 或 15:00"><button type="submit" class="mini">记</button></form>' : "")
+      + (S._thAdd ? '<form class="th-add" id="th-add"><input name="text" placeholder="如「我生日」「周五面试」" maxlength="40"><select name="subject" aria-label="约定归属"><option value="user">你的事</option><option value="character">角色的承诺</option><option value="both">双方约定</option></select><input name="when" placeholder="9/10 或 15:00"><button type="submit" class="mini">记</button></form>' : "")
       + (shown.length ? shown.map(row).join("")
         : S._thDone ? '<div class="archive-note">这一周还没有了结的。</div>'
         : '<div class="archive-note">聊天里说定的事、没聊完的话头、重要的日子，TA会记在这里跨天惦记着；快到点、到日子了会自己想起来找你。</div>')
@@ -406,6 +415,6 @@
       badge = '<span class="badge off">作罢</span>';
       intent = '<div class="intent">' + esc(w.why || "TA这会儿不想") + "</div>";
     }
-    return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + (sub ? " sub" : "") + '" data-t="' + esc(w.time) + '" ' + delay + '><span class="dot"></span>' +
+    return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + (sub ? " sub" : "") + '" data-t="' + esc(w.time) + '" data-wake="' + esc(w.wakeId || "") + '" ' + delay + '><span class="dot"></span>' +
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
   }

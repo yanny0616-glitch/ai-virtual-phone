@@ -167,7 +167,7 @@
     { const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur()); }
     // 云端回音账只给有限正反馈，不把用户忙碌、睡眠或未读造成的沉默当负面偏好。
     {
-      const KIND_LABEL = { plan: "早上定的", extra: "临时起念", thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久" };
+      const KIND_LABEL = { promise: "约定", plan: "早上定的", extra: "临时起念", thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久" };
       const fb = (S.settings.fbState || {})[cx.character ? cx.character.id : ""] || {};
       const rows = Object.keys(fb).filter((k) => Array.isArray(fb[k]) && +fb[k][0] > 0)
         .sort((a, b) => (+fb[b][0] || 0) - (+fb[a][0] || 0));

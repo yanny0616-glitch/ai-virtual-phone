@@ -68,6 +68,7 @@
     if (!cloudGenOn() || !cx.character || !S.settings || !owns(cx)) return;
     if (!force && Date.now() - (cx._kitAt || 0) < 20 * 60000) return;
     if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
+    await requireRecheckFeatures(["scheduler-state-v1"]);
     cx._kitAt = Date.now();
     const tpl = await freezeGenTemplates(cx, false);
     if (!tpl.daily || !tpl.impulse || !cloudGenOn()) return;
@@ -77,6 +78,9 @@
     if (!cx.day && fmtHM(Date.now()) < at) dates.unshift(todayStr());
     for (const date of dates) {
       try {
+        const remote = await cloudFetchBounded("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: date });
+        if (remote.plan && remote.plan.context && remote.plan.context.generatedBy === "cloud") continue;
+        const expectedVersion = remote.plan ? remote.plan.state_version : 0;
         const existing = await readCalendarOn(cx, date);
         const cal = calendarReality(dateOf(date));
         const past = await recentDaysBrief(cx, 7, date);
@@ -93,7 +97,7 @@
         if (!cloudGenOn()) return;
         const r = await cloudFetchBounded("recheck-plan", {
           method: "POST",
-          body: JSON.stringify({ characterId: cx.character.id, planDate: date, sessionId: "", resetDecisions: true, context: ctx, items: [] }),
+          body: JSON.stringify({ characterId: cx.character.id, planDate: date, stateVersion: expectedVersion, sessionId: await cloudSessionId(cx), resetDecisions: true, context: ctx, items: [] }),
         });
         if (ctx.userSleepOn && !acceptsUserSleep(r, ctx)) {
           cx._kitAt = 0;
@@ -131,7 +135,7 @@
         why: w.why || "", intent: w.intent || "", wakeId: w.wakeId || "",
         delivery: w.act && w.wakeId ? "push" : "", reason: w.act && !w.wakeId ? (w.reason || "云端没有可借的聊天模板") : "",
         from: String(w.from || ""), until: +w.until || 0, origFireAt: +w.origFireAt || 0, held: !!w.held,
-        sem: w.sem || "", topic: w.topic || "", score: w.score || calcScore(+w.fireAt || 0, 0, 0, 0), kind: w.kind || "plan",
+        sem: w.sem || "", topic: w.topic || "", score: w.score || calcScore(+w.fireAt || 0, 0, 0, 0), kind: w.kind || "plan", promiseRevision: +w.promiseRevision || 1,
         hist: Array.isArray(w.hist) && w.hist.length ? w.hist : [{ at: genAt, kind: w.act ? "plan" : "skip", note: w.act ? (w.intent || "") : (w.why || "TA这会儿不想"), by: "cloud" }],
       })).sort((a, b) => a.fireAt - b.fireAt);
       cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,

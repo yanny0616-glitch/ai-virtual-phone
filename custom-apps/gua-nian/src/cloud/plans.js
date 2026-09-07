@@ -2,6 +2,12 @@
   function cloudRecheckOn() {
     return !!(cloudCfg() && S.settings && S.settings.cloudRecheck);
   }
+  async function cloudSessionId(cx) {
+    const r = await AiPhone.chat.readHistory({ characterId: cx.character.id, limit: 1 });
+    if (!r || !r.sessionId) throw new Error("尚未取得角色会话，请打开该角色聊天后重试同步");
+    cx._session = r.sessionId;
+    return r.sessionId;
+  }
   // 到点生成时云端要知道TA「此刻」怎么样，而预约里冻着的是编排那会儿的状态。
   // 日程 cost 和 conds 的衰减都是确定性的，把原料寄上去让 push-generate 自己按到点时刻算，
   // 不多调一次模型。tz 一并带上：云端只有绝对毫秒，日程里的 HH:MM 得靠它换算。
@@ -40,10 +46,14 @@
     // wakePrefix：云端点亮时要自己造预约 id，宿主只认 timed_wake_capp_<appId>_ 开头的，
     // 这里从任意一个已有 wakeId（或哨兵）上把前缀切下来给它，免得云函数写死本 APP 的 id。
     const any = (cx.plan && Array.isArray(cx.plan.items) ? cx.plan.items : []).find((w) => w.wakeId);
-    const anyId = any ? any.wakeId : (sentinelOf(cx) && sentinelOf(cx).wakeId) || "";
-    const wakePrefix = anyId ? String(anyId).replace(/\d+_[a-z0-9]+$/i, "") : "";
+    const anyId = (sentinelOf(cx) && sentinelOf(cx).wakeId) || (any && any.wakeId) || "";
+    const template = ((S.settings.judgeTemplates || {})[cx.character.id] || {}).id || "";
+    const appId = /^capptpl:([^:]+):/.exec(template);
+    const wakePrefix = /\d+_[a-z0-9]+$/i.test(anyId) ? String(anyId).replace(/\d+_[a-z0-9]+$/i, "")
+      : appId ? "timed_wake_capp_" + appId[1] + "_" : "";
     return {
             ...userSleepContext(),
+            tzOffsetMin: -new Date().getTimezoneOffset(),
             recheckEnabled: S.settings.cloudRecheck ? 1 : 0,
             mood: String((cx.day && cx.day.mood) || ""),
             energy: String(cx.day ? energyAt(cx.day, Date.now()) : ""),
@@ -90,7 +100,7 @@
             momentsWeekStart: moState(cx).weekStart,
             momentsWeekN: moState(cx).weekN,
             outbox: (cx.plan && Array.isArray(cx.plan.outbox)) ? cx.plan.outbox : [],
-            threads: S.settings.threadsOn ? liveThreads(cx).slice(0, 20).map((t) => ({ id: t.id, kind: t.kind, text: t.text, due: +t.due || 0, yearly: !!t.yearly, since: +t.since || 0, at: +t.at || 0, done: false, nudge: t.nudge || "", why: t.why || "" })) : [],
+            threads: S.settings.threadsOn ? (cx.threads || []).filter(t => threadAlive(t, Date.now(), S.settings.threadDays)).slice(-30).map(t => ({ ...t })) : [],
             owner: myDev(), ownerName: myDevName(),
             ownerSeq: (cx.owner && cx.owner.id === myDev() && +cx.owner.seq) || 0,
             day: dayForCloud(cx),
@@ -130,6 +140,9 @@
     await finish("syncing", "正在同步今天的计划…", reset);
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
+      await requireRecheckFeatures(["scheduler-state-v1"]);
+      if (cx.plan.cloudStateUrl !== cloudCfg().url || !Number.isFinite(cx.plan.cloudStateVersion)) await pullCloudDecisionsBody(cx, true);
+      if (S.settings.threadsOn) await requireRecheckFeatures(["promise-tasks-v2"]);
       if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
       await freezeJudgeTemplate(cx);
       const expectedSleep = userSleepContext();
@@ -138,17 +151,20 @@
         body: JSON.stringify({
           characterId: cx.character.id,
           planDate: todayStr(),
-          sessionId: "",
+          sessionId: await cloudSessionId(cx),
+          stateVersion: cx.plan.cloudStateVersion,
           resetDecisions: reset,
           context: cloudContext(cx),
           items: cx.plan.items.map((w) => ({
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
             wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0, from: w.from || "",
-            kind: w.kind || "", held: !!w.held,
+            kind: w.kind || "", held: !!w.held, promiseRevision: +w.promiseRevision || 1,
           })),
         }),
       });
+      if (Number.isFinite(r && r.stateVersion)) cx.plan = await upsert("plans", x => x.date === todayStr() && x.characterId === cx.character.id,
+        { cloudStateVersion: r.stateVersion, cloudStateUrl: cloudCfg().url, cloudSlotKeys: cx.plan.items.filter(w => w.kind !== "promise" && w.wakeId).map(w => w.wakeId) });
       if (S.settings.userSleepOn && !acceptsUserSleep(r, expectedSleep)) {
         return finish("partial", "云端未确认保存睡眠设置，请更新网关和 push-recheck 后重试。", false);
       }
@@ -171,7 +187,7 @@
     try { result = await cloudFetchBounded("recheck-capabilities", { method: "GET" }); }
     catch (e) { throw new Error("无法核对云端能力，请检查连接并重新部署网关和 push-recheck 后重试"); }
     if (!Array.isArray(result?.capabilities) || features.some(feature => !result.capabilities.includes(feature))) {
-      throw new Error("云端版本尚不支持此设置，请重新部署网关和 push-recheck 后重试");
+      throw new Error("云端版本尚不支持此设置，请执行 schema 12 并更新网关、push-recheck 和 push-generate 后重试");
     }
   }
   function acceptsUserSleep(result, expected) {
@@ -201,6 +217,7 @@
     if (!owns(cx)) return { status: "readonly" };
     cx._planLock = true;
     try {
+      await cloudFetchBounded("scheduler-retry", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr() }) });
       await pullCloudDecisionsBody(cx, true);
       const result = await uploadPlanCloud(cx, false);
       if (changeControl && ["synced", "no-plan"].includes(result.status)) return controlCloudRecheck(cx, true);
@@ -228,6 +245,7 @@
     renderCloudSync();
     try {
       // 必须先成功读取并合并云端的新裁决，避免重试把云端新增预约覆盖掉。
+      await cloudFetchBounded("scheduler-retry", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr() }) });
       await pullCloudDecisionsBody(cx, true);
       const result = await uploadPlanCloud(cx, false);
       toast(result.status === "synced" ? "今天的计划已同步云端" : "云端同步未完成，请查看页面提示");

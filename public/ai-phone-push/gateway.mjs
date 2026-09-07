@@ -105,6 +105,11 @@ function cleanThreads(value: unknown): Record<string, unknown>[] {
       kind: ["topic", "promise", "date"].includes(String(t.kind)) ? String(t.kind) : "topic",
       text: cleanText(t.text, 80),
       due: Number(t.due) || 0,
+      subject: ["user", "character", "both"].includes(String(t.subject)) ? String(t.subject) : "user",
+      status: ["pending", "completed", "cancelled"].includes(String(t.status)) ? String(t.status) : "pending",
+      revision: Math.max(1, Number(t.revision) || 1),
+      sourceMessageId: cleanText(t.sourceMessageId, 100),
+      mentionedAt: Number(t.mentionedAt) || 0,
       yearly: t.yearly === true,
       since: Number(t.since) || 0,
       at: Number(t.at) || 0,
@@ -663,6 +668,7 @@ Deno.serve(async (request: Request) => {
         capabilities: [
           ...(schemaVersion >= 3 ? ["screen-chat-continuous"] : []),
           ...(schemaVersion >= 4 ? ["chat-mirror"] : []),
+          ...(schemaVersion >= 11 ? ["chat-mirror-batches"] : []),
           ...(schemaVersion >= 5 ? ["recheck-plan"] : []),
           ...(schemaVersion >= 6 ? ["usage"] : []),
           // 部署了本版网关即支持（纯代码能力，不依赖 schema）
@@ -744,7 +750,23 @@ Deno.serve(async (request: Request) => {
         if (!r.ok) throw new Error("Cannot read deferred task");
         return (await r.json() as DeferredRow[])[0];
       };
-      const receipt = (row?: DeferredRow) => json({ ok: true, status: row?.status ?? "missing", executeAt: row?.execute_at, resultNote: row?.result_note ?? "" });
+      const receipt = async (row?: DeferredRow) => {
+        let accepted: { revision?: number; acceptedMessageId?: string } = {};
+        let hasGeneratedReply = false;
+        if (row) {
+          const stored = row.payload as EncryptedPayload & { receipt?: typeof accepted };
+          if (stored?.receipt) accepted = stored.receipt;
+          else if (stored?.ct) {
+            const p = JSON.parse(await decryptPayload(stored, config.payload_key));
+            hasGeneratedReply = !!p.generatedResponse;
+            accepted = { revision: p.deferredReply?.revision, acceptedMessageId: p.merge?.replyAfterLocalMessageId };
+          } else {
+            const outputs = await rest(`push_outbox?user_id=eq.${OWNER_ID}&job_id=eq.${encodeURIComponent(row.id)}&select=meta&limit=1`);
+            if (outputs.ok) accepted.acceptedMessageId = (await outputs.json())[0]?.meta?.replyAfterLocalMessageId;
+          }
+        }
+        return json({ ok: true, status: row?.status === "pending" && hasGeneratedReply ? "running" : row?.status ?? "missing", executeAt: row?.execute_at, resultNote: row?.result_note ?? "", ...accepted });
+      };
       if (request.method === "GET") return receipt(await get());
       if (request.method === "DELETE") {
         // Keep a cancellation tombstone so a delayed upload cannot recreate the job.
@@ -781,6 +803,7 @@ Deno.serve(async (request: Request) => {
         if (row) {
           const old = JSON.parse(await decryptPayload(row.payload, config.payload_key));
           if (!old.deferredReply) return json({ ok: false, error: "Unexpected task" }, 409);
+          if (old.generatedResponse) return receipt(row);
           if (old.deferredReply.revision >= payload.deferredReply.revision) return receipt(row);
           // New messages/API choices update the snapshot, never add a chance or reset the clock.
           const timing = payload.deferredReply.timing;
@@ -808,6 +831,42 @@ Deno.serve(async (request: Request) => {
         }
       }
       return json({ ok: false, error: "Task changed; retry sync" }, 409);
+    }
+
+    // Exact cancellation with a durable outcome, used before changing a sent
+    // plan item into a cancelled one. Never delete the evidence of execution.
+    if (action === "cancel-wake" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const triggerKey = cleanText(body.triggerKey, 200);
+      if (!/^timedwake:[A-Za-z0-9:._-]+$/.test(triggerKey)) return json({ ok: false, error: "缺少有效预约键。" }, 400);
+      const filter = `push_jobs?user_id=eq.${OWNER_ID}&kind=eq.timed_task&trigger_key=eq.${encodeURIComponent(triggerKey)}`;
+      const read = await rest(filter + "&select=id,status,result_note,updated_at,payload&limit=1");
+      if (!read.ok) return json({ ok: false, error: "读取预约状态失败，请重试。" }, 503);
+      const row = (await read.json())[0];
+      if (!row) return json({ ok: true, outcome: "missing" });
+      const output = await rest(`push_outbox?user_id=eq.${OWNER_ID}&job_id=eq.${encodeURIComponent(row.id)}&select=created_at&limit=1`);
+      if (!output.ok) return json({ ok: false, error: "发送凭据读取失败，未撤销预约。" }, 503);
+      const sent = (await output.json())[0];
+      if (sent || row.status === "done" && /^(generated|sent)(?:\b|,)/.test(String(row.result_note || ""))) {
+        return json({ ok: true, outcome: "generated", generatedAt: sent?.created_at || row.updated_at });
+      }
+      if (row.status === "cancelled") return json({ ok: true, outcome: "cancelled" });
+      if (row.status === "done" || row.status === "failed") return json({ ok: true, outcome: "finished", note: row.result_note || row.status });
+      if (row.status !== "pending") return json({ ok: false, error: "预约正在执行，保留原状态；请等执行结束后重试。" }, 409);
+      try {
+        const config = await loadConfig();
+        const payload = JSON.parse(await decryptPayload(row.payload, config.payload_key));
+        if (payload.generatedResponse) return json({ ok: false, error: "正文已生成、投递尚未结束，保留原状态；请稍后重试。" }, 409);
+      } catch {
+        return json({ ok: false, error: "无法确认预约是否已有成文，未撤销；请检查云端后重试。" }, 409);
+      }
+      const cancelled = await rest(filter + `&id=eq.${encodeURIComponent(row.id)}&status=eq.pending&updated_at=eq.${encodeURIComponent(row.updated_at)}`, {
+        method: "PATCH", headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status: "cancelled", result_note: "thread settled before generation", updated_at: new Date().toISOString() }),
+      });
+      if (!cancelled.ok) return json({ ok: false, error: "撤销预约失败，请重试。" }, 503);
+      if (!(await cancelled.json()).length) return json({ ok: false, error: "预约状态已变化，保留原状态；请重试。" }, 409);
+      return json({ ok: true, outcome: "cancelled" });
     }
 
     if (action === "jobs" && request.method === "GET") {
@@ -964,7 +1023,7 @@ Deno.serve(async (request: Request) => {
       // 批量写入（按 id 覆盖，本地编辑/重生成也跟着变）、按 id 删除（本地删了云端也删）、
       // 按角色/时间查询、一键清空。
       if (request.method === "POST") {
-        const body = await request.json().catch(() => ({})) as { entries?: unknown };
+        const body = await request.json().catch(() => ({})) as { entries?: unknown; snapshots?: unknown };
         const list = Array.isArray(body.entries) ? body.entries.slice(0, 50) : [];
         if (list.length === 0) return json({ ok: false, error: "缺少 entries。" }, 400);
         const rows: Record<string, unknown>[] = [];
@@ -992,15 +1051,54 @@ Deno.serve(async (request: Request) => {
             content: cleanText(entry.content, 4000),
             media_type: cleanText(entry.mediaType, 40) || null,
             message_at: messageAt.toISOString(),
+            response_batch_id: cleanText(entry.responseBatchId, 120) || null,
           });
+        }
+        // One atomic row is authoritative for an entire imported response.
+        // It also represents an empty batch after the user deletes it. Keeping
+        // this in the existing table avoids a second schema migration/dual write.
+        const snapshots = Array.isArray(body.snapshots) ? body.snapshots : [];
+        if (snapshots.length > 50) return json({ ok: false, error: "整轮镜像批次过多。" }, 413);
+        for (const value of snapshots) {
+          const s = value as { batchId?: unknown; sessionId?: unknown; characterId?: unknown; createdAt?: unknown; messages?: unknown };
+          if (!s || typeof s !== "object" || typeof s.batchId !== "string" || !/^push-outbox:[A-Za-z0-9_-]{1,100}$/.test(s.batchId)
+            || !Array.isArray(s.messages) || s.messages.length > 500) return json({ ok: false, error: "整轮镜像格式无效。" }, 400);
+          const at = new Date(cleanText(s.createdAt, 60));
+          const sessionId = cleanText(s.sessionId, 80);
+          if (!sessionId || Number.isNaN(at.getTime())) return json({ ok: false, error: "整轮镜像缺少会话或时间。" }, 400);
+          const messages = [];
+          for (const value of s.messages) {
+            const m = value as { id?: unknown; content?: unknown; message_at?: unknown };
+            if (!m || typeof m.id !== "string" || !m.id || typeof m.content !== "string" || m.content.length > 4000
+              || typeof m.message_at !== "string" || !Number.isFinite(Date.parse(m.message_at))) return json({ ok: false, error: "整轮镜像消息无效。" }, 400);
+            messages.push({ id: m.id, content: m.content, message_at: m.message_at });
+          }
+          const content = JSON.stringify({ v: 1, messages });
+          if (content.length > 128_000) return json({ ok: false, error: "整轮镜像过大，未截断或确认。" }, 413);
+          rows.push({ id: "batch:" + s.batchId, user_id: OWNER_ID, session_id: sessionId,
+            character_id: cleanText(s.characterId, 80), role: "assistant", media_type: "response_batch",
+            response_batch_id: s.batchId, message_at: at.toISOString(), content });
         }
         if (rows.length === 0 && deleteIds.length === 0) return json({ ok: false, error: "没有有效条目。" }, 400);
         if (rows.length > 0) {
-          const insert = await rest("push_chat_mirror?on_conflict=id", {
+          let insert = await rest("push_chat_mirror?on_conflict=id", {
             method: "POST",
             headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
             body: JSON.stringify(rows),
           });
+          // schema 4–10 has the mirror table but not batch IDs. Retry only this
+          // specific missing-column error; connectivity/permission errors must
+          // remain failures so the client retains its upload queue.
+          if (!insert.ok) {
+            const failure = await insert.clone().json().catch(() => null) as { code?: string; message?: string } | null;
+            if ((failure?.code === "PGRST204" || failure?.code === "42703")
+              && /\bresponse_batch_id\b/.test(failure.message || "")) {
+              insert = await rest("push_chat_mirror?on_conflict=id", {
+                method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+                body: JSON.stringify(rows.map(({ response_batch_id: _batch, ...legacy }) => legacy)),
+              });
+            }
+          }
           if (!insert.ok) {
             const detail = await insert.text().catch(() => "");
             return json({ ok: false, error: detail.slice(0, 300) || `数据库返回 HTTP ${insert.status}` }, 500);
@@ -1025,6 +1123,7 @@ Deno.serve(async (request: Request) => {
         const sinceRaw = cleanText(url.searchParams.get("since"), 60);
         const since = sinceRaw ? new Date(sinceRaw) : null;
         let query = `push_chat_mirror?user_id=eq.${OWNER_ID}`
+          + "&or=(media_type.is.null,media_type.neq.response_batch)"
           + "&select=id,session_id,character_id,role,content,media_type,message_at"
           + `&order=message_at.desc&limit=${limit}`;
         if (characterId) query += `&character_id=eq.${encodeURIComponent(characterId)}`;
@@ -1126,7 +1225,27 @@ Deno.serve(async (request: Request) => {
         });
         if (probe.ok) worker = await probe.json().catch(() => null);
       } catch { /* 旧 worker 或网络失败，不执行写入，也不报告支持 */ }
-      const capabilities = worker?.ok && Array.isArray(worker.capabilities) ? worker.capabilities : [];
+      let capabilities = worker?.ok && Array.isArray(worker.capabilities) ? worker.capabilities : [];
+      let promiseGeneratorReady = false, schedulerGeneratorReady = false;
+      if (capabilities.includes("promise-tasks-v1")) {
+        const meta = await rest("ai_phone_cloud_meta?id=eq.personal-cloud&select=schema_version&limit=1");
+        const version = meta.ok ? Number((await meta.json())[0]?.schema_version) : 0;
+        const generator = await fetch(`${supabaseUrl}/functions/v1/push-generate`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "capabilities", token: configs[0]?.cron_secret }), signal: AbortSignal.timeout(10000) }).catch(() => null);
+        const features = generator?.ok ? await generator.json().catch(() => null) : null;
+        promiseGeneratorReady = features?.capabilities?.includes("promise-tasks-v2") === true;
+        schedulerGeneratorReady = features?.capabilities?.includes("scheduler-state-v1") === true;
+        if (version < 11 || !features?.capabilities?.includes("guanian-history-v1")) capabilities = capabilities.filter(c => c !== "promise-tasks-v1");
+      }
+      if (capabilities.includes("promise-tasks-v2")) {
+        const storage = await rest("rpc/push_promise_storage_ready", { method: "POST", body: "{}" });
+        if (!capabilities.includes("promise-tasks-v1") || !promiseGeneratorReady || !storage.ok || await storage.json() !== true) capabilities = capabilities.filter(c => c !== "promise-tasks-v2");
+      }
+      if (capabilities.includes("scheduler-state-v1")) {
+        const meta = await rest("ai_phone_cloud_meta?id=eq.personal-cloud&select=schema_version&limit=1");
+        const ready = await rest("rpc/push_scheduler_storage_ready", { method: "POST", body: "{}" });
+        if (!schedulerGeneratorReady || !ready.ok || await ready.json() !== true || !meta.ok || Number((await meta.json())[0]?.schema_version) < 12) capabilities = capabilities.filter(c => c !== "scheduler-state-v1");
+      }
       if (action === "recheck-capabilities" && request.method === "GET") return json({ ok: true, capabilities });
       if (action === "generation-stop" && request.method === "POST") {
         if (!capabilities.includes("generation-stop-v1")) return json({ ok: false, error: "请更新网关和 push-recheck，再重试停用自动生成。" }, 409);
@@ -1169,6 +1288,14 @@ Deno.serve(async (request: Request) => {
       return json({ ok: true, recheckEnabled: body.enabled, capabilities, plans: verified.length });
     }
 
+    if (action === "scheduler-retry" && request.method === "POST") {
+      const body = await request.json();
+      const characterId = cleanText(body.characterId, 80), planDate = cleanText(body.planDate, 10);
+      if (!characterId || !/^\d{4}-\d{2}-\d{2}$/.test(planDate)) return json({ ok: false, error: "缺少角色或日期" }, 400);
+      const result = await rest("rpc/push_retry_scheduler", { method: "POST", body: JSON.stringify({ p_user_id: OWNER_ID, p_character_id: characterId, p_date: planDate }) });
+      if (!result.ok) return json({ ok: false, error: "重试失败，请先更新 schema 12" }, 409);
+      return json({ ok: true, resumed: await result.json() });
+    }
     if (action === "recheck-plan") {
       // 云端动态复核的计划底本：App 编排完把当天时刻表和判断上下文传上来，
       // push-recheck 浏览器关着时照它重判。decisions 是云端已经做出、App 还没
@@ -1232,7 +1359,7 @@ Deno.serve(async (request: Request) => {
             wakeId: cleanText(it.wakeId, 80).replace(/[^A-Za-z0-9._-]/g, ""),
             // 念头的保质期和改约前的原时刻：云端改约、到点押后都拿它们封顶
             until: Number(it.until) || 0,
-            origFireAt: Number(it.origFireAt) || 0, held: it.held === true,
+            origFireAt: Number(it.origFireAt) || 0, held: it.held === true, promiseRevision: Math.max(1, Number(it.promiseRevision) || 1),
             from: cleanText(it.from, 16).replace(/[^A-Za-z0-9_-]/g, ""),
             kind: cleanText(it.kind, 12).replace(/[^a-z]/g, ""),
           };
@@ -1260,6 +1387,8 @@ Deno.serve(async (request: Request) => {
           userSleepEnd: cleanText(rawContext.userSleepEnd, 5),
           userSleepTimeZone: cleanText(rawContext.userSleepTimeZone, 100),
           userSleepTz: Number.isFinite(Number(rawContext.userSleepTz)) ? Math.max(-840, Math.min(840, Math.trunc(Number(rawContext.userSleepTz)))) : 0,
+          tzOffsetMin: (typeof rawContext.tzOffsetMin === "number" || typeof rawContext.tzOffsetMin === "string" && rawContext.tzOffsetMin.trim() !== "")
+            && Number.isInteger(Number(rawContext.tzOffsetMin)) && Math.abs(Number(rawContext.tzOffsetMin)) <= 840 ? Number(rawContext.tzOffsetMin) : null,
           minGapMin: Number(rawContext.minGapMin) || 0,
           maxUnanswered: Number(rawContext.maxUnanswered) || 0,
           chatCandidates: cleanText(rawContext.chatCandidates, 2000),
@@ -1326,16 +1455,25 @@ Deno.serve(async (request: Request) => {
         // 重新编排 = 换了一份计划：旧裁决作废，当天 6 次的复核预算也跟着还回去，
         // 否则用户中午手动重排一次，下午就只剩残额可用了。
         if (body.resetDecisions === true) { row.decisions = []; row.recheck_count = 0; }
-        const save = await rest("push_recheck_plans?on_conflict=user_id,character_id,plan_date", {
-          method: "POST",
-          headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-          body: JSON.stringify([row]),
+        const hasPromises = [...(context.threads as { kind?: string }[] || []), ...(Array.isArray(curCtx.threads) ? curCtx.threads : [])].some(t => t.kind === "promise")
+          || items.some(w => w.kind === "promise");
+        if (hasPromises) {
+          const ready = await rest("rpc/push_promise_storage_ready", { method: "POST", body: "{}" });
+          if (!ready.ok || await ready.json() !== true) return json({ ok: false, error: "约定尚未保存：请重新执行最新 schema 11，安装约定版本保护后重试。" }, 409);
+        }
+        const save = await rest("rpc/push_save_recheck_plan", {
+          method: "POST", headers: { Prefer: "return=representation" },
+          body: JSON.stringify({ p_row: row, p_version: Number.isInteger(body.stateVersion) ? body.stateVersion : null }),
         });
         if (!save.ok) {
           const detail = await save.text().catch(() => "");
-          return json({ ok: false, error: detail.slice(0, 300) || `数据库返回 HTTP ${save.status}` }, 500);
+          return json({ ok: false, error: save.status === 404 ? "请先执行 schema 12 后重试同步" : detail.slice(0, 300) || `数据库返回 HTTP ${save.status}` }, 500);
         }
-        return json({ ok: true, items: items.length, acceptedUserSleep: {
+        const savedPlan = await save.json();
+        if (!savedPlan?.ok) return json({ ok: false, conflict: true, error: "云端计划已更新，请点同步重试，先合并最新计划；旧上传未覆盖云端。" }, 409);
+        // Schema triggers merge promise revisions and cancel old tasks in the same
+        // transaction as the save; never cancel using the client's stale snapshot.
+        return json({ ok: true, stateVersion: savedPlan.stateVersion, items: items.length, acceptedUserSleep: {
           enabled: context.userSleepOn, start: context.userSleepStart, end: context.userSleepEnd,
           timeZone: context.userSleepTimeZone, tz: context.userSleepTz,
         }, ...(dropped.length > 0 ? { dropped } : {}) });
@@ -1346,7 +1484,7 @@ Deno.serve(async (request: Request) => {
         if (!characterId) return json({ ok: false, error: "缺少 characterId。" }, 400);
         let query = `push_recheck_plans?user_id=eq.${OWNER_ID}`
           + `&character_id=eq.${encodeURIComponent(characterId)}`
-          + "&select=plan_date,session_id,context,items,decisions,last_recheck_at,recheck_count,judged_chat_at,judged_at"
+          + "&select=*"
           + "&order=plan_date.desc&limit=1";
         if (planDate) query += `&plan_date=eq.${encodeURIComponent(planDate)}`;
         const rows = await readJson<Record<string, unknown>[]>(await rest(query));
@@ -1441,7 +1579,7 @@ Deno.serve(async (request: Request) => {
      limit 5
   ) j;
 $CRON$)`);
-          await sql.unsafe(`select cron.schedule('ai-phone-personal-push-recheck-scan', '*/30 * * * *', $CRON$
+          await sql.unsafe(`select cron.schedule('ai-phone-personal-push-recheck-scan', '*/5 * * * *', $CRON$
   select net.http_post(
     url     := '${supabaseUrl}/functions/v1/push-recheck',
     headers := jsonb_build_object('Content-Type', 'application/json'),
@@ -1457,7 +1595,7 @@ $CRON$)`);
     select user_id, character_id, plan_date
       from public.push_recheck_plans
      where updated_at > now() - interval '36 hours'
-       and (last_recheck_at is null or last_recheck_at < now() - interval '25 minutes')
+       and (last_recheck_at is null or last_recheck_at < now() - interval '4 minutes')
      order by last_recheck_at asc nulls first
      limit 5
   ) p;

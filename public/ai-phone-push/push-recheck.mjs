@@ -18,7 +18,7 @@ type JobPayload = {
   [key: string]: unknown;
 };
 
-type PlanItem = {
+type PlanItem = { promiseRevision?: number; generatedAt?: number;
   time: string;
   fireAt: number;
   source: string;
@@ -37,6 +37,7 @@ type PlanItem = {
   kind?: string;
 };
 type PlanContext = {
+  tzOffsetMin?: number | null;
   mood?: string;
   energy?: string;
   quota?: number;
@@ -323,7 +324,7 @@ function threadLines(context: PlanContext, nowMs: number, tz: number): string[] 
     return `[${t.id}] ${THREAD_KIND[t.kind] || "话头"}·${t.text}${notes.length ? "（" + notes.join("，") + "）" : ""}`;
   });
 }
-const THREAD_TASK = "惦记账本：上面带 [id] 的是你心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id：用户说某件事做完了、办好了、不做了、不用管了，对应那条必须写进 settle，别让它继续挂着。都没有就给空数组。";
+const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。";
 // 用户一句话把约定 / 话头了结：只认稳的词，宁可漏（漏的下一轮模型 settle 兜底）也不误伤。
 // 约定认「做完」和「作废」，话头只认「作废」，日子不碰（到日子自己过期）
 const DONE_WORDS = ["好了", "搞定", "解决了", "完成了", "弄完了", "做完了", "办好了", "交了", "买到了", "看完了", "结束了"];
@@ -379,13 +380,17 @@ function parseWhen(when: unknown, nowMs: number, tz: number): number {
 }
 // 复核回来的 keep / settle 并进账本；返回 null 表示没动
 function applyThreads(context: PlanContext, keep: Keep[], settle: string[], nowMs: number, tz: number, log: (s: string) => void): Thread[] | null {
-  const list: Thread[] = (Array.isArray(context.threads) ? context.threads : []).map(t => ({ ...t }));
-  const notes: string[] = [];
+  let list: Thread[] = (Array.isArray(context.threads) ? context.threads : []).map(t => ({ ...t }));
+  const promises = keep.filter(k => k && (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
+  const before = JSON.stringify(list);
+  list = updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs, tz) })), nowMs, "cloud");
+  const notes: string[] = before === JSON.stringify(list) ? [] : ["更新约定"];
   for (const id of settle.slice(0, 6)) {
     const t = list.find(x => x.id === String(id).replace(/[\[\]]/g, "").trim());
     if (t && !t.done) { t.done = true; t.at = nowMs; t.by = "cloud"; notes.push(`了结「${t.text}」`); }
   }
   for (const k of keep.slice(0, 2)) {
+    if (promises.includes(k)) continue;
     const text = String(k?.text || "").trim().slice(0, 60);
     if (!text) continue;
     const kind = THREAD_KIND[String(k?.kind)] ? String(k?.kind) : "topic";
@@ -407,10 +412,8 @@ function threadNudge(context: PlanContext, nowMs: number, tz: number): { id: str
     if (!due) continue;
     const d = due - nowMs, marks = String(t.nudge || "");
     const mark = (phase: string) => `${phase}:${due}`;
-    if (t.kind === "promise") {
-      if (d > 30 * 60_000 && d <= 90 * 60_000 && !marks.includes(mark("pre"))) return { id: t.id, mark: mark("pre"), reason: `用户 ${hhmm(due, tz)} 要${t.text}，快到了` };
-      if (d < -60 * 60_000 && d >= -180 * 60_000 && !marks.includes(mark("post"))) return { id: t.id, mark: mark("post"), reason: `用户 ${hhmm(due, tz)} 的「${t.text}」该有结果了` };
-    } else if (t.kind === "date" && Math.abs(d) <= 12 * 3_600_000 && !marks.includes(mark("day"))) {
+    if (t.kind === "promise") continue; // 明确约定由独立任务负责，不再随机前后起念
+    if (t.kind === "date" && Math.abs(d) <= 12 * 3_600_000 && !marks.includes(mark("day"))) {
       return { id: t.id, mark: mark("day"), reason: `今天是${t.text}` };
     }
   }
@@ -481,6 +484,7 @@ function guanianNow(day: GuanianDay, nowMs: number, quietStart?: string, quietEn
   };
 }
 type PlanRow = {
+  state_version?: number; retry_count?: number; next_retry_at?: string; retry_error?: string; retry_stopped?: boolean;
   session_id: string;
   context: PlanContext;
   items: PlanItem[];
@@ -547,8 +551,8 @@ function lifeRoll(context: PlanContext, nowMs: number): { patch: Record<string, 
 
 type Decision = { time?: string; act?: boolean; sem?: string; topic?: string; why?: string; intent?: string; defer?: string };
 type Extra = { time?: string; until?: string; about?: string; intent?: string; why?: string; from?: string };
-type Thread = { id: string; kind: string; text: string; due?: number; yearly?: boolean; since?: number; at?: number; by?: string; done?: boolean; nudge?: string; why?: string };
-type Keep = { kind?: string; text?: string; when?: string; why?: string };
+type Thread = { subject?: string; status?: string; revision?: number; sourceMessageId?: string; mentionedAt?: number; id: string; kind: string; text: string; due?: number; yearly?: boolean; since?: number; at?: number; by?: string; done?: boolean; nudge?: string; why?: string };
+type Keep = { id?: string; subject?: string; status?: string; sourceMessageId?: string; kind?: string; text?: string; when?: string; why?: string };
 type Outbox = { id: string; at: number; hint: string; by?: string };
 
 // 门禁默认值，可被 App 上传的 context 里的同名字段覆盖（改设置不用重新部署云函数）。
@@ -1129,7 +1133,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
       const mirrorResponse = await rest(
         `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
         + `&character_id=eq.${encodeURIComponent(characterId)}`
-        + `&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context.judgeLines) + 20}`,
+        + `&or=(media_type.is.null,media_type.neq.response_batch)&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context.judgeLines) + 20}`,
       );
       const mirrorRows = mirrorResponse.ok ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse() : [];
       const chat = mirrorRows
@@ -1153,6 +1157,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
         if (!wakePrefix) return { id: "", reason: "没有预约 id 前缀" };
         const wakeId = `${wakePrefix}${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const clone = JSON.parse(JSON.stringify(tplChat)) as JobPayload;
+        delete clone.generatedResponse; // A new wake must generate its own reply.
         const note = `[系统备忘：这不是对方发来的消息。到点了，你现在想主动跟对方说的是——${intent}。`
           + "顺着你们刚才聊的往下说，别重复已经说过的话，也别提起这条备忘。]";
         if (!appendIntentNote(clone.request.body, clone.request.providerKind, note)) return { id: "", reason: "聊天模板结构不认识" };
@@ -1238,6 +1243,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
         generatedBy: "cloud", genAt: nowMs, genLog, genChatUsed: chatUsed, genTries: tries, genError: "", selfUsed: 0,
       },
     }, true);
+    if (!saved?.ok && saved?.status !== 409) throw new Error("复核结果保存失败");
     const rows = saved?.ok ? await saved.json().catch(() => []) as unknown[] : [];
     if (Array.isArray(rows) && rows.length > 0) return;
     // 生成期间 App 自己生成并上传了计划：以 App 为准，刚挂的预约撤掉，别成孤儿
@@ -1269,10 +1275,31 @@ Deno.serve(async (req: Request) => {
   if (!token || (action !== "capabilities" && (!userId || !characterId || !planDate))) return new Response("bad request", { status: 400 });
 
   const restHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" };
-  const rest = (path: string, init?: RequestInit) => fetch(`${supabaseUrl}/rest/v1/${path}`, {
-    ...init,
-    headers: { ...restHeaders, ...(init?.headers ?? {}) },
-  });
+  let currentPlan: PlanRow | null = null;
+  let planConflict = false;
+  let planWriteFailed = false;
+  const rest = async (path: string, init?: RequestInit): Promise<Response> => {
+    const patch = init?.method === "PATCH" && init.body ? JSON.parse(String(init.body)) : null;
+    const ownsPath = path.startsWith("push_recheck_plans?") && path.includes(`&character_id=eq.${encodeURIComponent(characterId || "")}`)
+      && path.includes(`&plan_date=eq.${encodeURIComponent(planDate || "")}`);
+    const guarded = currentPlan && ownsPath && patch && ["context","items","decisions"].some(k => k in patch);
+    if (guarded) {
+      if (planConflict) return new Response("plan changed", { status: 409 });
+      if (!Number.isFinite(currentPlan!.state_version)) return new Response("schema 12 required", { status: 409 });
+      path += `&state_version=eq.${currentPlan!.state_version}`;
+    }
+    const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, { ...init,
+      headers: { ...restHeaders, ...(init?.headers ?? {}), ...(guarded ? { Prefer: "return=representation" } : {}) },
+    });
+    if (guarded && !response.ok) planWriteFailed = true;
+    if (guarded && response.ok) {
+      const rows = await response.clone().json();
+      if (!Array.isArray(rows) || !rows.length) { planConflict = true; return new Response("plan changed", { status: 409 }); }
+      currentPlan!.state_version = rows[0].state_version;
+      if (rows[0].updated_at) currentPlan!.updated_at = rows[0].updated_at;
+    }
+    return response;
+  };
 
   const secretResponse = await rest("push_server_config?id=eq.main&select=cron_secret,payload_key&limit=1");
   const secretRows = secretResponse.ok
@@ -1281,7 +1308,7 @@ Deno.serve(async (req: Request) => {
   const cronSecret = secretRows[0]?.cron_secret || "";
   const payloadKey = secretRows[0]?.payload_key || "";
   if (!cronSecret || String(token) !== cronSecret) return new Response("forbidden", { status: 403 });
-  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1"] });
+  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1", "promise-tasks-v1", "promise-tasks-v2", "scheduler-state-v1"] });
   if (!userId || !characterId || !planDate) return new Response("bad request", { status: 400 });
   if (!payloadKey) return new Response("payload_key missing", { status: 200 });
 
@@ -1290,15 +1317,62 @@ Deno.serve(async (req: Request) => {
     + `&plan_date=eq.${encodeURIComponent(planDate)}`;
 
   const planResponse = await rest(
-    `${planFilter}&select=session_id,context,items,decisions,last_recheck_at,recheck_count,updated_at,judged_chat_at,judged_at&limit=1`,
+    `${planFilter}&select=*&limit=1`,
   );
+  if (!planResponse.ok) return new Response("plan read unavailable", { status: 503 });
   const planRows = planResponse.ok ? await planResponse.json() as PlanRow[] : [];
   const plan = planRows[0];
   if (!plan) return new Response("no plan", { status: 200 });
 
+  currentPlan = plan;
   const nowMs = Date.now();
+  if (plan.context?.genKit && plan.context.genEnabled === 0) return new Response("gen: disabled", { status: 200 });
+  if (!plan.context?.genKit && plan.context?.recheckEnabled === 0) {
+    await rest(planFilter, { method: "PATCH", body: JSON.stringify({ last_recheck_at: new Date(nowMs).toISOString() }) }).catch(() => undefined);
+    return new Response("recheck disabled", { status: 200 });
+  }
+  const failPlan = async (note: string): Promise<Response> => {
+    const freshRead = await rest(`${planFilter}&select=state_version,updated_at,retry_count&limit=1`).catch(() => null);
+    const fresh = freshRead?.ok ? (await freshRead.json())[0] : null;
+    if (fresh && fresh.updated_at !== plan.updated_at) return new Response("plan replaced; old failure ignored", { status: 200 });
+    if (fresh && Number.isFinite(fresh.state_version)) plan.state_version = fresh.state_version;
+    const count = (Number(fresh?.retry_count ?? plan.retry_count) || 0) + 1;
+    const stopped = count >= 6 || !Number.isFinite(plan.state_version);
+    const next = new Date(nowMs + Math.min(120, 5 * 2 ** (count - 1)) * 60000).toISOString();
+    const modern = Number.isFinite(plan.state_version);
+    // Metadata writes never replace a plan snapshot; a new upload also resets errors.
+    const filter = planFilter + (plan.updated_at ? `&updated_at=eq.${encodeURIComponent(plan.updated_at)}` : "")
+      + (modern ? `&state_version=eq.${plan.state_version}` : "");
+    await rest(filter, { method: "PATCH", body: JSON.stringify(modern ? {
+      retry_count: count, next_retry_at: stopped ? null : next, retry_stopped: stopped,
+      retry_error: note.slice(0,300), last_recheck_at: new Date(nowMs).toISOString(),
+    } : { last_recheck_at: "9999-01-01T00:00:00.000Z" }) }).catch(() => undefined);
+    return new Response(`${stopped ? "stopped" : "retry scheduled"}: ${note}`, { status: 503 });
+  };
+  if (!Number.isFinite(plan.state_version)) return failPlan("需要 schema 12：请更新数据库后重新同步计划");
+  if (plan.retry_stopped) return new Response("stopped: " + plan.retry_error, { status: 200 });
+  if (Date.parse(plan.next_retry_at || "") > nowMs) return new Response("retry backoff", { status: 200 });
   const lastRecheckMs = Math.max(plan.last_recheck_at ? Date.parse(plan.last_recheck_at) || 0 : 0, +plan.judged_at || 0) || NaN;
   const context = plan.context || {};
+  let rowTz = guanianContextTimezone(context as Record<string, unknown>, nowMs);
+  if (rowTz === null) {
+    // A frozen request can recover the timezone of a legacy empty-day plan.
+    const keys = [context.judgeTemplate, context.sentinelWakeId ? "timedwake:" + context.sentinelWakeId : "", ...(plan.items || []).slice(0, 3).map(w => "timedwake:" + w.wakeId)].filter(Boolean);
+    for (const key of keys) {
+      try {
+        const r = await rest(`push_jobs?user_id=eq.${encodeURIComponent(userId)}&trigger_key=eq.${encodeURIComponent(String(key))}&select=payload&limit=1`);
+        if (!r.ok) continue;
+        const row = (await r.json())[0];
+        if (!row) continue;
+        const frozen = JSON.parse(await decryptPayload(row.payload, payloadKey));
+        rowTz = guanianTimezone(frozen.merge?.tzOffsetMin, frozen.merge?.quietWin?.tzOffsetMin);
+        if (rowTz !== null) break;
+      } catch { /* Try the next template; otherwise stop explicitly below. */ }
+    }
+  }
+  if (rowTz === null) return failPlan("时区资料缺失：请打开挂念重新同步计划，不能按 UTC 猜约定时间");
+  context.tzOffsetMin = rowTz;
+  if (context.day) context.day = { ...context.day, tz: rowTz };
 
   // 云端生成：这一行还只是 App 寄来的生成原料（没有 day，也没有时刻），到点才动，
   // 生成之前不走下面的复核——没有生活面的复核和自发起念都无从判起。
@@ -1306,7 +1380,8 @@ Deno.serve(async (req: Request) => {
   if (kit && context.generatedBy !== "cloud") {
     if (context.genEnabled === 0) return new Response("gen: disabled", { status: 200 });
     planFilter += "&or=(context->>genEnabled.is.null,context->>genEnabled.neq.0)";
-    const tz = Number(kit.tz) || 0;
+    const tz = rowTz;
+    kit.tz = rowTz;
     const local = new Date(nowMs + tz * 60_000);
     const localDate = `${local.getUTCFullYear()}-${pad2(local.getUTCMonth() + 1)}-${pad2(local.getUTCDate())}`;
     // 还没到点的原料行也记一下 last_recheck_at，别让它一直排在 cron 派发队列最前面挤掉别的计划
@@ -1341,8 +1416,6 @@ Deno.serve(async (req: Request) => {
   planFilter += "&or=(context->>recheckEnabled.is.null,context->>recheckEnabled.neq.0)";
   // 过了日子的行还会在 cron 的 36 小时窗口里待一天：没有待发时刻，但起念门可能还开着，
   // 每轮都可能白调一次模型，产出又全因为不是今天而被丢掉。
-  const dayTz = context.day && typeof context.day === "object" ? Number((context.day as { tz?: number }).tz) : NaN;
-  const rowTz = Number.isFinite(dayTz) ? dayTz : (kit ? Number(kit.tz) || 0 : NaN);
   if (Number.isFinite(rowTz) && usageLocalDay(nowMs, rowTz) > planDate) {
     await rest(planFilter, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_recheck_at: new Date().toISOString() }) }).catch(() => undefined);
     return new Response("plan date passed", { status: 200 });
@@ -1353,27 +1426,51 @@ Deno.serve(async (req: Request) => {
     return Number.isFinite(value) && value >= 0 ? value : GATE_DEF[key];
   };
 
+  let cloudHistory: GuanianCloudHistory;
+  try {
+    // Legacy apps uploaded an empty session. Recover only from this character's
+    // own encrypted templates; never substitute another session's history.
+    let sessionId = String(plan.session_id || "");
+    if (!sessionId) {
+      const keys = [context.judgeTemplate, context.sentinelWakeId ? "timedwake:" + context.sentinelWakeId : "",
+        ...(plan.items || []).map(w => w.wakeId ? "timedwake:" + w.wakeId : "")]
+        .filter(Boolean).slice(0, 30).map(k => `"${String(k).replace(/[^A-Za-z0-9._:-]/g, "")}"`);
+      if (keys.length) {
+        const response = await rest(`push_jobs?user_id=eq.${encodeURIComponent(userId)}&trigger_key=in.(${encodeURIComponent(keys.join(","))})&select=payload&limit=30`);
+        if (!response.ok) throw new Error("session template unavailable");
+        for (const row of await response.json()) {
+          try {
+            const p = JSON.parse(await decryptPayload(row.payload, payloadKey));
+            if (p.notify?.characterId && p.notify.characterId !== characterId) continue;
+            if (typeof p.merge?.sessionId === "string" && p.merge.sessionId) { sessionId = p.merge.sessionId; break; }
+          } catch { /* try another template */ }
+        }
+      }
+    }
+    cloudHistory = await readGuanianCloudHistory(rest, userId, sessionId);
+  }
+  catch { return failPlan("云端历史或会话模板读取失败，请检查数据库和模板"); }
   const items = Array.isArray(plan.items) ? plan.items : [];
-  const pending = items.filter(item => Number(item.fireAt) > nowMs + LEAD_MS);
+  let sentChanged = false;
+  for (const o of cloudHistory.outputs) {
+    const w = items.find(w => o.trigger_key === "timedwake:" + w.wakeId);
+    const at = Date.parse(o.created_at);
+    if (!w || !Number.isFinite(at) || w.generatedAt === at) continue;
+    w.generatedAt = at; sentChanged = true;
+    const t = (context.threads || []).find(t => t.id === w.from);
+    if (t && !t.done && (t.kind !== "promise" || Number(t.revision || 1) === Number(w.promiseRevision || 1))) {
+      t.mentionedAt = at; t.at = at;
+      if (t.kind === "topic") t.done = true;
+      else t.nudge = (String(t.nudge || "") + " said:" + w.time).trim().slice(-200);
+    }
+  }
   const allDecisions = Array.isArray(plan.decisions) ? plan.decisions : [];
   const priorDecisions = allDecisions.filter(d => (d as { kind?: string }).kind !== "gate");
-
-  // 门禁：全部过了才轮到下面那一次裁决调用。每一道都只读已有数据，不调模型，
-  // 所以可以放心让 cron 派得勤，甚至将来由客户端逐条消息触发。
-  //
-  // 分两组：判决是重判已排好的时刻，没有待发时刻就无从判起；起念是新开一个时刻，
-  // 跟有没有待发时刻无关——日程走完的晚上恰恰最该起念，两者共用一道闸时它永远轮不上。
-  // 频率仍然共享（间隔、每日上限）：两组共用同一次裁决调用，分开算等于放开调用次数。
-  const litCount = items.filter(item => item.act).length;
-  const horizon = gate("gateHorizonMin") * 60_000;
-  const nearest = pending.length > 0 ? Math.min(...pending.map(item => Number(item.fireAt))) - nowMs : Infinity;
-  const canJudge = pending.length > 0 && (horizon <= 0 || nearest <= horizon);
-  const canImpulse = litCount < Number(context.quota ?? 3);
   // 自发起念：没有新聊天也可以起念，由头是TA自己这一天里的事——刚做完一件有分量的日程，
   // 或者双方安静太久。每一次都是一次裁决调用，所以另有每日上限（selfImpulseCap），
   // 用掉的次数记在 context.selfUsed，App 上传计划时会原样带回来，重新编排才清零。
-  const day = context.day && typeof context.day === "object" ? context.day : null;
-  const selfUsed = Number(context.selfUsed) || 0;
+  let day = context.day && typeof context.day === "object" ? context.day : null;
+  let selfUsed = Number(context.selfUsed) || 0;
   let selfReason = "";
   let threadNudged: { id: string; mark: string; reason: string } | null = null;
   let selfKind = "";
@@ -1388,48 +1485,116 @@ Deno.serve(async (req: Request) => {
   // 回音账同样在门禁之前记，也不调模型
   const fbRoll = await feedbackWithPreviousDay(rest, userId, characterId, planDate, items, context, nowMs).catch(() => null);
   if (fbRoll) { context.fb = fbRoll.fb; context.fbSeen = fbRoll.fbSeen; }
-  if (life || fbRoll) {
+  if (life || fbRoll || sentChanged) {
     if (life?.post) priorDecisions.push({ at: nowMs, kind: "post", note: `想发条朋友圈——${life.post.hint}`, by: "cloud" });
     for (const note of fbRoll?.settled || []) priorDecisions.push({ at: nowMs, kind: "settle", note, by: "cloud" });
     const noteful = !!life?.post || !!fbRoll?.settled.length;
-    await rest(planFilter, {
+    const savedEarly = await rest(planFilter, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ context, ...(noteful ? { decisions: priorDecisions.slice(-60) } : {}) }),
+      body: JSON.stringify({ context, ...(sentChanged ? { items } : {}), ...(noteful ? { decisions: priorDecisions.slice(-60) } : {}) }),
     }).catch(() => undefined);
+    if (!savedEarly?.ok) return savedEarly?.status === 409 ? new Response("plan changed", { status: 200 }) : failPlan("计划进度保存失败，等待恢复");
     if (life?.post) console.log("[push-recheck] 生活轮起意发圈：" + life.post.hint);
   }
   // 由头的分量曲线，门禁里各由头选定后算，额度紧时拿它卡槛
   let selfCurve = 1;
   // 用户一句「好了 / 算了」直接了结的账本条目，拦下来也要落库
   let wordSettled: { id: string; text: string; how: string; said: string }[] = [];
+  const reconcilePromises = async (): Promise<void> => {
+    const response = await rest(`${planFilter}&select=*&limit=1`);
+    if (!response.ok) throw new Error("约定计划读取失败");
+    const current = (await response.json())[0];
+    if (!current) return;
+    const ctx = current.context || {}, list = current.items || [];
+    const threads = Array.isArray(ctx.threads) ? ctx.threads : [];
+    if (threads.some((t: Thread) => t.kind === "promise")) {
+      const cancelled = await rest("rpc/push_cancel_stale_promises", { method: "POST", body: JSON.stringify({
+        p_user_id: userId, p_character_id: characterId, p_threads: threads,
+      }) });
+      if (!cancelled.ok) throw new Error("旧约定任务撤销失败");
+    }
+    const end = nowMs + 31 * 86400000;
+    const need = threads.filter((t: Thread) => promiseNeedsTask(t, list, nowMs, end));
+    if (!need.length) return;
+    if (!ctx.wakePrefix) throw new Error("约定缺少预约模板前缀，请打开挂念重新同步");
+    const keys = [ctx.sentinelWakeId, ...list.map((w: PlanItem) => w.wakeId)].filter(Boolean).map(id => `"timedwake:${id}"`);
+    if (ctx.judgeTemplate) keys.push(`"${String(ctx.judgeTemplate).replace(/[^A-Za-z0-9._:-]/g, "")}"`);
+    if (!keys.length) throw new Error("约定缺少可用模板");
+    const templates = await rest(`push_jobs?user_id=eq.${encodeURIComponent(userId)}&trigger_key=in.(${encodeURIComponent(keys.join(","))})&select=payload&limit=30`);
+    if (!templates.ok) throw new Error("约定模板读取失败");
+    let template: JobPayload | null = null;
+    for (const t of await templates.json()) {
+      try { const p = JSON.parse(await decryptPayload(t.payload, payloadKey)); if (p.request) { template = p; break; } } catch { /* try next stored template */ }
+    }
+    if (!template) throw new Error("约定缺少可用模板");
+    for (const t of need) {
+      const fireAt = Math.max(Number(t.due), nowMs + 15000);
+      const intent = promiseIntent(t, new Date(Number(t.due) + (Number(rowTz) || 0) * 60000).toISOString().slice(0, 16));
+      const wakeId = ctx.wakePrefix + "promise_" + t.id + "_" + (Number(t.revision) || 1);
+      const clone = JSON.parse(JSON.stringify(template));
+      delete clone.generatedResponse; // Never inherit a completed template reply.
+      clone.merge = { ...(clone.merge || {}), tzOffsetMin: rowTz, cooldownRounds: 0, guanianPromise: { id: t.id, revision: Number(t.revision) || 1 } };
+      if (!appendIntentNote(clone.request.body, clone.request.providerKind, `[系统约定任务，非用户消息] ${intent}`)) continue;
+      retuneWakeSnapshot(clone.request.body, clone.request.providerKind, intent, Math.max(1, Math.round((fireAt - nowMs) / 60000)));
+      const item = { time: hhmm(fireAt, Number(rowTz) || 0), fireAt, origFireAt: Number(t.due),
+        kind: "promise", from: t.id, promiseRevision: Number(t.revision) || 1, source: "约定·" + t.text,
+        intent, why: t.why || "按明确约定到点核对", act: true, sem: "约定", wakeId };
+      const result = await rest("rpc/push_arm_promise", { method: "POST", body: JSON.stringify({
+        p_user_id: userId, p_character_id: characterId, p_date: planDate, p_thread_id: t.id,
+        p_revision: Number(t.revision) || 1, p_item: item, p_payload: await encryptPayload(JSON.stringify(clone), payloadKey),
+      }) });
+      if (!result.ok) throw new Error("约定预约失败，请更新 schema 11");
+    }
+  };
+  try {
+    await reconcilePromises();
+    const refreshed = await rest(`${planFilter}&select=items,context,decisions,updated_at,state_version,recheck_count&limit=1`);
+    if (!refreshed.ok) throw new Error("plan refresh failed");
+    const latest = (await refreshed.json())[0];
+    if (latest) {
+      items.splice(0, items.length, ...(latest.items || [])); Object.assign(context, latest.context || {});
+      rowTz = guanianContextTimezone(context as Record<string, unknown>, nowMs) ?? rowTz;
+      context.tzOffsetMin = rowTz;
+      if (context.day) context.day = { ...context.day, tz: rowTz };
+      plan.state_version = latest.state_version;
+      plan.recheck_count = latest.recheck_count ?? plan.recheck_count;
+      if (latest.updated_at) plan.updated_at = latest.updated_at;
+      if (Array.isArray(latest.decisions)) priorDecisions.splice(0, priorDecisions.length, ...latest.decisions.filter(d => d.kind !== "gate"));
+    }
+  } catch (e) { return failPlan("约定同步失败：" + String(e instanceof Error ? e.message : e)); }
+  day = context.day && typeof context.day === "object" ? context.day : null;
+  selfUsed = Number(context.selfUsed) || 0;
+  if (planWriteFailed) return failPlan("计划保存失败，等待恢复");
+  if (planConflict) return new Response("plan changed; retry fresh snapshot", { status: 200 });
+  const evidence = recheckEvidence(cloudHistory.messages, context.threads || [], +plan.judged_chat_at || nowMs - 6 * 3600000);
+  const promiseUpdate = evidence.promiseUpdate;
+  const ledgerOnly = evidence.ledgerOnly;
+  const pending = items.filter(item => item.kind !== "promise" && Number(item.fireAt) > nowMs + LEAD_MS);
+  const litCount = ordinaryQuota(items);
+  const horizon = gate("gateHorizonMin") * 60_000;
+  const nearest = pending.length ? Math.min(...pending.map(item => Number(item.fireAt))) - nowMs : Infinity;
+  const canJudge = !ledgerOnly && pending.length > 0 && (horizon <= 0 || nearest <= horizon);
+  const canImpulse = !ledgerOnly && context.chatCandidates !== "不允许临时起念" && litCount < Number(context.quota ?? 3);
   let blocked = await (async (): Promise<string> => {
-    if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < gate("gateGapMin") * 60_000) return "离上次裁决还不够久";
+    if (Number.isFinite(lastRecheckMs) && nowMs - lastRecheckMs < (promiseUpdate ? Math.min(1, gate("gateGapMin")) : gate("gateGapMin")) * 60_000) return "离上次裁决还不够久";
     const budget = await usageBudget(rest, userId);
     budgetTz = budget.tz;
     const over = usageExceeded(budget);
     if (over) return over;
     if ((plan.recheck_count || 0) >= gate("gateDailyCap")) return "今天的裁决次数用完了";
-    if (!canJudge && !canImpulse) {
+    if (!canJudge && !canImpulse && !promiseUpdate) {
       if (pending.length === 0) return "今天没有还没到点的时刻，今日额度也满了";
       return `最近的时刻还在 ${Math.round(nearest / 60_000)} 分钟以外，今日额度也满了`;
     }
 
     // 没新消息就没有新信息，再判一次只是烧额度。首次复核回看 6 小时，
     // 别把开机前的对话全算成"新"。
-    const sinceMs = (+plan.judged_chat_at || nowMs - 6 * 3600_000);
-    const freshResponse = await rest(
-      `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
-      + `&character_id=eq.${encodeURIComponent(characterId)}`
-      + "&role=eq.user"
-      + `&message_at=gt.${encodeURIComponent(new Date(sinceMs).toISOString())}`
-      + "&select=content,message_at&order=message_at.desc&limit=20",
-    );
-    const freshRows = freshResponse.ok ? await freshResponse.json() as { content?: string; message_at: string }[] : [];
+    const freshRows = evidence.users;
     if (Array.isArray(context.threads) && freshRows.length) {
-      wordSettled = settleByWords(context.threads, freshRows.slice().reverse().map(r => String(r.content || "")), nowMs);
+      wordSettled = settleByWords(context.threads, freshRows.filter(r => r.role === "user").map(r => String(r.content || "")), nowMs);
     }
-    if (freshRows.length < Math.max(1, gate("gateMinMsgs"))) {
+    if (!promiseUpdate && freshRows.length < Math.max(1, gate("gateMinMsgs"))) {
       const quiet = "上次裁决之后你没说几句";
       if (!canImpulse || !day || gate("selfImpulseCap") <= 0) return quiet;
       if (selfUsed >= gate("selfImpulseCap")) return `${quiet}，今天的自发起念也用完了`;
@@ -1462,11 +1627,11 @@ Deno.serve(async (req: Request) => {
         }
       }
       // 由头三（最具体，先看）：账本里的约定快到点 / 刚过点、到日子了
-      const nudge = threadNudge(context, nowMs, Number(day.tz) || budgetTz || 0);
+      const nudge = threadNudge(context, nowMs, rowTz);
       if (nudge) {
         selfReason = nudge.reason; threadNudged = nudge; selfKind = "thread";
         const t = liveThreads(context, nowMs).find(x => x.id === nudge.id);
-        const due = t ? threadDueMs(t, nowMs, Number(day.tz) || budgetTz || 0) : 0;
+        const due = t ? threadDueMs(t, nowMs, rowTz) : 0;
         // 约定：越近越重，过点 3 小时后回落；日子：当天满分，前后减半
         selfCurve = !due ? 1 : t?.kind === "date" ? (Math.abs(due - nowMs) <= 12 * 3600_000 ? 1 : 0.5)
           : due > nowMs ? 0.6 + 0.4 * (1 - Math.min(1, (due - nowMs) / (3 * 3600_000))) : Math.max(0.3, 1 - (nowMs - due) / (3 * 3600_000) * 0.7);
@@ -1474,12 +1639,7 @@ Deno.serve(async (req: Request) => {
       }
       // 下面几个由头都先看「谁最后说的」：TA自己起的念头发出去没人回，一律不追——
       // 追一句没人回的话是催回复，不是想念。正常一问一答后停下来的不算
-      const tailResponse = await rest(
-        `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
-        + `&character_id=eq.${encodeURIComponent(characterId)}`
-        + "&select=role,message_at&order=message_at.desc&limit=40",
-      );
-      const tail = tailResponse.ok ? await tailResponse.json() as { role: string; message_at: string }[] : [];
+      const tail = [...cloudHistory.messages].reverse();
       const lastAnyMs = Date.parse(tail[0]?.message_at || "");
       const lastUserMs = Date.parse(tail.find(r => r.role === "user")?.message_at || "");
       const lastMineMs = Date.parse(tail.find(r => r.role !== "user")?.message_at || "");
@@ -1528,7 +1688,7 @@ Deno.serve(async (req: Request) => {
           + `&character_id=eq.${encodeURIComponent(characterId)}`
           + `&message_at=gte.${encodeURIComponent(new Date(dayStart - 86_400_000).toISOString())}`
           + `&message_at=lt.${encodeURIComponent(new Date(dayStart).toISOString())}`
-          + "&select=role,content,message_at&order=message_at.desc&limit=40",
+          + "&or=(media_type.is.null,media_type.neq.response_batch)&select=role,content,message_at&order=message_at.desc&limit=40",
         );
         const rows = echoResponse.ok ? (await echoResponse.json() as typeof echoRows).reverse() : [];
         const userSaid = rows.filter(r => r.role === "user").map(r => String(r.content || ""));
@@ -1552,8 +1712,8 @@ Deno.serve(async (req: Request) => {
       return quiet;
     }
     const freshMs = gate("gateFreshMin") * 60_000;
-    const lastMsgMs = Date.parse(freshRows[0]?.message_at || "");
-    if (freshMs > 0 && Number.isFinite(lastMsgMs) && nowMs - lastMsgMs < freshMs) return "你才刚说完，等一下再判";
+    const lastMsgMs = Date.parse(freshRows[freshRows.length - 1]?.message_at || "");
+    if (!promiseUpdate && freshMs > 0 && Number.isFinite(lastMsgMs) && nowMs - lastMsgMs < freshMs) return "你才刚说完，等一下再判";
     return "";
   })();
 
@@ -1572,12 +1732,6 @@ Deno.serve(async (req: Request) => {
     let touched = 0;
     for (const it of items) {
       if (!it.from || !cancelIds.has(it.from) || !it.act || Number(it.fireAt) <= nowMs + LEAD_MS) continue;
-      if (it.wakeId) {
-        await rest(`push_jobs?user_id=eq.${encodeURIComponent(userId)}&trigger_key=eq.${encodeURIComponent("timedwake:" + it.wakeId)}&status=eq.pending`, {
-          method: "PATCH", headers: { Prefer: "return=minimal" },
-          body: JSON.stringify({ status: "cancelled", result_note: "thread settled by words", updated_at: new Date().toISOString() }),
-        }).catch(() => undefined);
-      }
       it.act = false; it.wakeId = ""; it.why = "这件事你说了结了"; touched += 1;
       priorDecisions.push({ at: nowMs, time: it.time, kind: "recheck", note: `取消——${it.why}`, by: "cloud" });
     }
@@ -1592,6 +1746,8 @@ Deno.serve(async (req: Request) => {
     await rest(planFilter, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ context }) }).catch(() => undefined);
   }
   if (wordSettled.length) Object.assign(context, selfMarks);
+  if (planWriteFailed) return failPlan("计划保存失败，等待恢复");
+  if (planConflict) return new Response("plan changed; retry fresh snapshot", { status: 200 });
 
   if (blocked) {
     // 拦截原因写回 decisions：不带 time，App 合并裁决时会跳过它，只当诊断用。
@@ -1628,27 +1784,18 @@ Deno.serve(async (req: Request) => {
   ).catch(() => undefined);
   let judgeTask: { token: string; chatAt: number } | null = null;
   let judgeApplied = false;
+  const armedKeys: string[] = [];
 
   const run = async (): Promise<void> => {
+    if (planConflict) return;
     // 时区：计划里的 time 是用户本地 HH:MM，fireAt 是绝对毫秒。两者一减就还原出本地偏移，
     // 后面给临时起念算时刻直接复用，不必猜数据库时区。
     // 挑第一条 time 合法的当基准；一条都没有就退回 UTC，同时不许云端起念——
-    // 临时起念的绝对时刻全靠这个基准换算，基准不可信只会把消息发到错的钟点。
-    // 用 items 而不是 pending：日程走完的晚上 pending 是空的，但今天已经过点的时刻
-    // 一样能还原出时区偏移，起念照样算得出绝对时刻。
-    // 随用随判的早上 App 只寄空计划：一条 items 都没有，就拿 App 寄来的时区自己造一个「此刻」当基准，
-    // 否则云端整天起不了念。
-    const tzAnchor = Number.isFinite(rowTz) ? { time: hhmm(nowMs, rowTz), fireAt: nowMs } as PlanItem : null;
-    const anchor = items.find(item => /^\d{1,2}:\d{2}$/.test(item.time)) || items[0] || tzAnchor;
-    if (!anchor) return;
-    const anchorTrusted = /^\d{1,2}:\d{2}$/.test(anchor.time);
-    const anchorLocal = anchorTrusted
-      ? Number(anchor.time.split(":")[0]) * 60 + Number(anchor.time.split(":")[1])
-      : new Date(anchor.fireAt).getUTCHours() * 60 + new Date(anchor.fireAt).getUTCMinutes();
-    const anchorUtc = new Date(anchor.fireAt).getUTCHours() * 60 + new Date(anchor.fireAt).getUTCMinutes();
-    let offsetMin = anchorLocal - anchorUtc;
-    if (offsetMin > 720) offsetMin -= 1440;
-    if (offsetMin < -720) offsetMin += 1440;
+    // Use the verified timezone, never infer it from an old/deferred item's HH:MM.
+    const anchor = { time: hhmm(nowMs, rowTz), fireAt: Math.floor(nowMs / 60000) * 60000 };
+    const anchorTrusted = true;
+    const anchorLocal = Number(anchor.time.split(":")[0]) * 60 + Number(anchor.time.split(":")[1]);
+    const offsetMin = rowTz;
 
     // 快照模板：优先拿今天还没发的那几条预约。它们的 payload 里冻着上游地址和密钥，
     // 裁决调用和后面的点亮都靠它——本函数自己不持有任何模型凭据。
@@ -1677,18 +1824,11 @@ Deno.serve(async (req: Request) => {
         } catch { /* 单条解不开就换下一条 */ }
       }
     }
-    if (!found) return;
+    if (!found) throw new Error("缺少聊天模板，请打开挂念重新同步");
     const template = found;
     const judgeRequest = (judgeTemplate || template).request;
 
-    const mirrorResponse = await rest(
-      `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
-      + `&character_id=eq.${encodeURIComponent(characterId)}`
-      + `&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context.judgeLines)}`,
-    );
-    const mirrorRows = mirrorResponse.ok
-      ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse()
-      : [];
+    const mirrorRows = cloudHistory.messages;
 
     // 免打扰和最小间隔在提示词里说过，但模型说了不算：和 App 本地一样再硬拦一道。
     const inQuiet = (hm: string) => {
@@ -1701,12 +1841,11 @@ Deno.serve(async (req: Request) => {
     const tooClose = (fireAt: number, list: PlanItem[], self?: PlanItem) => {
       const gap = Number(context.minGapMin || 0) * 60_000;
       if (!gap) return false;
-      return list.some(other => other.act && other !== self && Math.abs(other.fireAt - fireAt) < gap);
+      return (guanianLastProactiveAt(cloudHistory) > 0 && Math.abs(fireAt - guanianLastProactiveAt(cloudHistory)) < gap)
+        || list.some(other => other.kind !== "promise" && other.act && other !== self && Math.abs((other.generatedAt || other.fireAt) - fireAt) < gap);
     };
     const characterName = template.notify?.title || "TA";
-    const chatLines = mirrorRows
-      .map(row => `${row.role === "user" ? "用户" : characterName}（${hhmm(Date.parse(row.message_at), offsetMin)}）：${String(row.content || "").slice(0, 200)}`)
-      .join("\n");
+    const chatLines = guanianHistoryText(cloudHistory, offsetMin, judgeLinesOf(context.judgeLines));
     const planLines = pending
       .map(item => `- ${item.time}｜${item.source}｜${item.act ? "已点亮" : "未点亮"}｜意图：${item.intent || "（无）"}｜理由：${item.why || "（无）"}`)
       .join("\n");
@@ -1715,14 +1854,15 @@ Deno.serve(async (req: Request) => {
     const judge = canJudge && !selfReason;
     const threadsOn = Array.isArray(context.threads);
     // 发朋友圈不占私聊额度，但有自己的每日上限；免打扰和睡觉由门禁那层先挡（自发那轮）或由用户在聊天这件事本身证明TA醒着
-    const moBudget = momentsBudget(context, nowMs, day ? Number(day.tz) || 0 : 0);
-    const canPost = moBudget.ok;
+    const moBudget = momentsBudget(context, nowMs, rowTz);
+    const canPost = !ledgerOnly && moBudget.ok;
     const threadLinesNow = threadsOn ? threadLines(context, nowMs, offsetMin) : [];
     const now = day ? guanianNow(day, nowMs, context.quietStart, context.quietEnd) : null;
     const stateLine = now
       ? `此刻的状态：${now.asleep ? "在睡觉" : "在" + (now.doing || "没什么特别的")}${now.step ? "（" + now.step + "）" : ""}，情绪「${now.mood}」，精力 ${now.energy}%${now.next ? "，接下来 " + now.next : ""}。`
       : (context.mood || context.energy ? `今天的状态：心情「${context.mood || "普通"}」，精力「${context.energy || "普通"}」。` : "");
     const prompt = [
+      ledgerOnly ? "本轮仅核对角色的新承诺，只有 keep/settle 可非空，decisions/extra/post 必须为空。" : "",
       `你现在是「${characterName}」，在盘算今天剩下的时间要不要主动联系用户。现在是本地时间 ${hhmm(nowMs, offsetMin)}。`,
       context.bias ? `你的性格倾向：${context.bias}` : "",
       stateLine,
@@ -1758,7 +1898,7 @@ Deno.serve(async (req: Request) => {
         ? '"extra":[{"time":"HH:MM","about":"这个念头的由头（8字内）","intent":"想说的事","why":"为什么现在加","from":"出自账本里某件事就填它的 id，否则空字符串"}]'
         : '"extra":[]')
       + (threadsOn && !selfReason
-        ? ',"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"]'
+        ? ',"keep":[{"id":"已有事件的id，新事件留空","subject":"user|character|both","status":"pending|completed|cancelled","sourceMessageId":"证据消息编号","kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"]'
         : "")
       + (canPost ? ',"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null' : "")
       + "}",
@@ -1767,22 +1907,23 @@ Deno.serve(async (req: Request) => {
       judge ? `改约：act 写 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断对方），而话本身还想说，就在 defer 里填今天更晚的 HH:MM，整个念头挪过去、不占新额度；真的不想说了才把 defer 留空。到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。没有固定时间截止；等待会让发送概率逐渐降低。是否已说过或已失去意义，按最新聊天和事实判断。` : "",
       canImpulse ? "extra 最多 1 条，没有就写 []。" : "今日额度已满，extra 一律写 []。",
       canImpulse && threadsOn
-        ? "extra 和 keep 是两条路，同一件事只能进一边：今天之内说得掉的走 extra 排个时刻；今天说不掉的（要等结果、要到某个日子、隔几天再问才自然）走 keep 记进账本，以后自己会想起来。extra 出自账本里已有的某件事时 from 填那条的 id，发出去之后系统会自动把账本那条了结或标成提过了，不用再写进 settle。"
+        ? "明确约定一律进 keep，系统按约定时间预约。普通话头才按以下两条路选择：今天之内说得掉的走 extra 排个时刻；今天说不掉的（要等结果、要到某个日子、隔几天再问才自然）走 keep 记进账本，以后自己会想起来。extra 出自账本里已有的某件事时 from 填那条的 id，发出去之后系统会自动把账本那条了结或标成提过了，不用再写进 settle。"
         : "",
       canPost
         ? `post：如果此刻更想发一条朋友圈而不是私聊（晒一下刚做的事、随手记一句、发个感慨——给所有人看的，不是说给用户听的），就在 post.hint 里写想发的由头或大意（30字内），由系统按你的人设成文。这周已发 ${moBudget.weekN} 条。私聊和发圈可以只要一个，也可以都不要；不想发就写 null。`
         : "",
     ].filter(Boolean).join("\n");
 
-    const chatAt = selfReason ? 0 : mirrorRows.filter(m => m.role === "user").reduce((at, m) => Math.max(at, Date.parse(m.message_at) || 0), 0);
+    const chatAt = selfReason ? 0 : mirrorRows.reduce((at, m) => Math.max(at, Date.parse(m.message_at) || 0), 0);
     const token = "cloud-" + nowMs + "-" + Math.random().toString(36).slice(2);
     const claimResponse = await rest("rpc/push_recheck_judge", { method: "POST", body: JSON.stringify({
       p_user_id: userId, p_character_id: characterId, p_date: planDate, p_token: token, p_action: "claim", p_chat_at: chatAt,
     }) }).catch(() => undefined);
+    if (!claimResponse?.ok) throw new Error("复核租约不可用，请检查 schema 12");
     const claim = claimResponse?.ok ? await claimResponse.json().catch(() => null) : null;
     if (!claim?.claimed) return;
     judgeTask = { token, chatAt };
-    await touch();
+    await touch({ recheck_count: (plan.recheck_count || 0) + 1 });
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -1794,12 +1935,11 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify(buildJudgeBody(judgeRequest, prompt)),
         signal: controller.signal,
       });
-      if (!response.ok) return;
+      if (!response.ok) throw new Error(`复核模型 HTTP ${response.status}`);
       const judgeData = await response.json();
       await usageAdd(rest, userId, budgetTz, "cloud-recheck", judgeRequest.providerKind, judgeData);
       judgeText = extractResponseText(judgeRequest.providerKind, judgeData);
-    } catch {
-      return;
+      if (!parseModelJson(judgeText) || typeof parseModelJson(judgeText) !== "object") throw new Error("复核返回无效 JSON");
     } finally {
       clearTimeout(timeout);
     }
@@ -1834,15 +1974,18 @@ Deno.serve(async (req: Request) => {
     }
     const postDecision = post ? { at: nowMs, kind: "post", note: `想发条朋友圈——${post.hint}`, by: "cloud" } : null;
     const ctxDirty = !!selfReason || !!threadsNext || !!post;
-    if (decisions.length === 0 && extra.length === 0) {
+    if (decisions.length === 0 && extra.length === 0 && !threadsNext) {
       const saved = await touch({
+        retry_count: 0, next_retry_at: null, retry_error: null, retry_stopped: false,
         judged_chat_at: Math.max(+plan.judged_chat_at || 0, judgeTask?.chatAt || 0), judged_at: Date.now(),
         recheck_count: (plan.recheck_count || 0) + 1,
         ...(postDecision ? { decisions: [...priorDecisions, postDecision].slice(-60) } : {}),
         ...(ctxDirty ? { context: { ...context, ...ctxPatch, ...(selfReason ? { selfUsed: selfUsed + 1 } : {}) } } : {}),
       }, true);
+      if (!saved?.ok && saved?.status !== 409) throw new Error("复核结果保存失败");
       const rows = saved?.ok ? await saved.json().catch(() => []) : [];
       judgeApplied = Array.isArray(rows) && rows.length > 0;
+      if (judgeApplied) await reconcilePromises();
       return;
     }
 
@@ -1853,11 +1996,11 @@ Deno.serve(async (req: Request) => {
     // 预约 id 必须带 App 上传的前缀：宿主的 push.cancelWake 只认自家 APP 的 id，
     // 前缀对不上，用户下次打开就撤不掉云端点亮的这条。
     const wakePrefix = context.wakePrefix || "";
-    const armedKeys: string[] = [];
     const armJob = async (fireAt: number, intent: string): Promise<string> => {
       if (!wakePrefix) return "";
       const wakeId = `${wakePrefix}${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const clone = JSON.parse(JSON.stringify(template)) as JobPayload;
+      delete clone.generatedResponse; // Never inherit a completed template reply.
       const note = `[系统备忘：这不是对方发来的消息。到点了，你现在想主动跟对方说的是——${intent}。`
         + "顺着你们刚才聊的往下说，别重复已经说过的话，也别提起这条备忘。]";
       if (!appendIntentNote(clone.request.body, clone.request.providerKind, note)) return "";
@@ -1883,9 +2026,10 @@ Deno.serve(async (req: Request) => {
 
     for (const decision of decisions) {
       const time = typeof decision.time === "string" ? decision.time.trim() : "";
-      const index = nextItems.findIndex(item => item.time === time && item.fireAt > nowMs + LEAD_MS);
+      const index = nextItems.findIndex(item => item.kind !== "promise" && item.time === time && item.fireAt > nowMs + LEAD_MS);
       if (index < 0) continue;
       const item = nextItems[index];
+      if (item.kind === "promise") continue;
       const why = String(decision.why || "").slice(0, 200);
 
       if (decision.act === false && item.act) {
@@ -1900,17 +2044,9 @@ Deno.serve(async (req: Request) => {
         const deferOrig = Number(item.origFireAt) || item.fireAt;
         if (
           deferAt > nowMs + LEAD_MS && !inQuiet(deferHM)
-          && !nextItems.some(other => other !== item && other.time === deferHM)
+          && !nextItems.some(other => other.kind !== "promise" && other !== item && other.time === deferHM)
           && !tooClose(deferAt, nextItems, item)
         ) {
-          const deferJob = item.wakeId ? jobsByKey.get(`timedwake:${item.wakeId}`) : undefined;
-          if (deferJob && deferJob.status === "pending") {
-            await rest(`push_jobs?id=eq.${encodeURIComponent(deferJob.id)}&status=eq.pending`, {
-              method: "PATCH",
-              headers: { Prefer: "return=minimal" },
-              body: JSON.stringify({ status: "cancelled", result_note: "cloud recheck defer", updated_at: new Date().toISOString() }),
-            }).catch(() => undefined);
-          }
           const deferWakeId = await armJob(deferAt, item.intent || String(decision.intent || ""));
           if (deferWakeId) {
             const from = item.time;
@@ -1923,15 +2059,7 @@ Deno.serve(async (req: Request) => {
             applied.push({ at: Date.now(), time: from, to: deferHM, kind: "defer", note: `改约到 ${deferHM}——${item.why}`, by: "cloud" });
             continue;
           }
-          item.wakeId = ""; // 旧预约已撤、新的没挂上：往下当取消处理
-        }
-        const job = item.wakeId ? jobsByKey.get(`timedwake:${item.wakeId}`) : undefined;
-        if (job && job.status === "pending") {
-          await rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}&status=eq.pending`, {
-            method: "PATCH",
-            headers: { Prefer: "return=minimal" },
-            body: JSON.stringify({ status: "cancelled", result_note: "cloud recheck cancel", updated_at: new Date().toISOString() }),
-          }).catch(() => undefined);
+          // 新预约没挂上，下面取消旧时刻；提交成功后数据库才撤旧任务。
         }
         item.act = false;
         item.wakeId = "";
@@ -1959,6 +2087,7 @@ Deno.serve(async (req: Request) => {
     }
 
     for (const one of (anchorTrusted ? extra.slice(0, 1) : [])) {
+      if ((context.threads || []).some(t => t.kind === "promise" && t.id === String(one.from || "").replace(/[\[\]\s]/g, ""))) continue;
       if (lit >= (context.quota ?? 3)) break;
       const raw = typeof one.time === "string" ? one.time.trim() : "";
       if (!/^\d{1,2}:\d{2}$/.test(raw)) continue;
@@ -1969,7 +2098,7 @@ Deno.serve(async (req: Request) => {
       const localMin = Number(time.split(":")[0]) * 60 + Number(time.split(":")[1]);
       const fireAt = anchor.fireAt + (localMin - anchorLocal) * 60_000;
       if (fireAt <= nowMs + LEAD_MS) continue;
-      if (nextItems.some(item => item.time === time)) continue;
+      if (nextItems.some(item => item.kind !== "promise" && item.time === time)) continue;
       if (tooClose(fireAt, nextItems)) continue;
       const intent = String(one.intent || one.about || "").slice(0, 200);
       if (!intent) continue;
@@ -2006,27 +2135,23 @@ Deno.serve(async (req: Request) => {
     if (selfReason) applied.push({ at: Date.now(), kind: "self", note: `自发起念（${SELF_KIND[selfKind] ? SELF_KIND[selfKind] + "：" : ""}${selfReason}）——${lit > litCount ? "起了一个念头" : "想了想，没找你"}`, by: "cloud" });
     if (postDecision) applied.push(postDecision);
     const saved = await touch({
-      judged_chat_at: Math.max(+plan.judged_chat_at || 0, judgeTask?.chatAt || 0), judged_at: Date.now(),
+      retry_count: 0, next_retry_at: null, retry_error: null, retry_stopped: false,
+        judged_chat_at: Math.max(+plan.judged_chat_at || 0, judgeTask?.chatAt || 0), judged_at: Date.now(),
       items: nextItems,
       decisions: [...priorDecisions, ...applied].slice(-60),
       recheck_count: (plan.recheck_count || 0) + 1,
       ...(ctxDirty ? { context: { ...context, ...ctxPatch, ...(selfReason ? { selfUsed: selfUsed + 1 } : {}) } } : {}),
     }, true);
+    if (!saved?.ok && saved?.status !== 409) throw new Error("复核结果保存失败");
     const rows = saved?.ok ? await saved.json().catch(() => []) as unknown[] : [];
-    if (Array.isArray(rows) && rows.length > 0) { judgeApplied = true; return; }
-    // 没写进去 = App 在这轮期间换了计划，我们的裁决作废。刚挂上的预约必须一起撤掉：
-    // 新计划里没有它们的 wakeId，留着就是任何界面都查不到出处的孤儿，到点照发。
-    if (armedKeys.length) {
-      await rest(`push_jobs?user_id=eq.${encodeURIComponent(userId)}&status=eq.pending`
-        + `&trigger_key=in.(${encodeURIComponent(armedKeys.join(","))})`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ status: "cancelled" }),
-      }).catch(() => undefined);
-    }
+    if (Array.isArray(rows) && rows.length > 0) { judgeApplied = true; await reconcilePromises(); return; }
+
   };
 
-  const work = run().catch(() => undefined).finally(async () => {
+  const work = run().catch(async e => { await failPlan("复核失败：" + String(e instanceof Error ? e.message : e)); }).finally(async () => {
+    if (!judgeApplied && armedKeys.length) await rest(`push_jobs?user_id=eq.${encodeURIComponent(userId)}&status=eq.pending&trigger_key=in.(${encodeURIComponent(armedKeys.join(","))})`, {
+      method: "PATCH", body: JSON.stringify({ status: "cancelled", result_note: "plan commit not confirmed" }),
+    }).catch(() => undefined);
     if (!judgeTask) return;
     await rest("rpc/push_recheck_judge", { method: "POST", body: JSON.stringify({
       p_user_id: userId, p_character_id: characterId, p_date: planDate, p_token: judgeTask.token,
@@ -2038,3 +2163,249 @@ Deno.serve(async (req: Request) => {
   else await work;
   return new Response("accepted", { status: 200 });
 });
+
+// BEGIN GUANIAN CLOUD HISTORY
+// Shared by both self-contained cloud workers; injected by push:build-dist.
+type GuanianCloudMessage = { id: string; role: string; content: string; message_at: string; response_batch_id?: string; media_type?: string };
+type GuanianCloudOutput = { id: string; trigger_key?: string; raw_text: string; created_at: string; consumed_at?: string; meta?: Record<string, unknown> };
+type GuanianCloudHistory = { messages: GuanianCloudMessage[]; outputs: GuanianCloudOutput[]; lastGeneratedAt: number;
+  uncertainLegacy?: { message: GuanianCloudMessage; outputIds: string[]; exactText: boolean }[] };
+
+/** Absence, null, booleans and invalid offsets are not UTC. Explicit zero is. */
+function guanianTimezone(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value !== "number" && !(typeof value === "string" && value.trim())) continue;
+    const n = Number(value);
+    if (Number.isInteger(n) && n >= -840 && n <= 840) return n;
+  }
+  return null;
+}
+function guanianContextTimezone(context: Record<string, unknown>, at: number): number | null {
+  const day = context.day as { tz?: unknown } | undefined;
+  const kit = context.genKit as { tz?: unknown } | undefined;
+  const explicit = guanianTimezone(day?.tz, kit?.tz, context.tzOffsetMin);
+  if (explicit !== null) return explicit;
+  // Old gateways defaulted missing userSleepTz to zero. Only the actual IANA
+  // zone is trustworthy in such a legacy row; never use that defaulted zero.
+  if (typeof context.userSleepTimeZone === "string" && context.userSleepTimeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", { timeZone: context.userSleepTimeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at);
+      const get = (type: string) => Number(parts.find(part => part.type === type)?.value);
+      return guanianTimezone((Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute")) - Math.floor(at / 60000) * 60000) / 60000);
+    } catch { /* Invalid zone: require a new phone snapshot. */ }
+  }
+  return null;
+}
+async function readGuanianCloudHistory(
+  rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, sessionId: string,
+): Promise<GuanianCloudHistory> {
+  if (!sessionId) throw new Error("缺少聊天会话，不能核对云端消息");
+  const scope = `user_id=eq.${encodeURIComponent(userId)}&session_id=eq.${encodeURIComponent(sessionId)}`;
+  const responses = await Promise.all([
+    rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,media_type.neq.response_batch)&order=message_at.desc&limit=200`),
+    rest(`push_outbox?${scope}&meta->>pushGenerated=eq.true&select=id,trigger_key,raw_text,created_at,consumed_at,meta&order=created_at.desc&limit=200`),
+  ]);
+  if (responses.some(r => !r.ok)) throw new Error("云端聊天读取失败，请检查 schema 11 与云函数部署；稍后重试");
+  const [mirrors, outputs] = await Promise.all(responses.map(r => r.json())) as [GuanianCloudMessage[], GuanianCloudOutput[]];
+  if (!Array.isArray(mirrors) || !Array.isArray(outputs)) throw new Error("云端聊天数据格式错误");
+  const records = new Map<string, GuanianCloudMessage>();
+  const cloudIds = new Set(outputs.map(o => `push-outbox:${o.id}`));
+  const snapshots = new Map<string, GuanianCloudMessage[]>();
+  // Fetch snapshots by batch, independently of the recent 200-bubble window.
+  // Each row is an atomic full replacement; an empty list is a deletion.
+  const batchIds = [...cloudIds];
+  for (let start = 0; start < batchIds.length; start += 50) {
+    const ids = batchIds.slice(start, start + 50).map(id => JSON.stringify(id)).join(",");
+    const response = await rest(`push_chat_mirror?${scope}&media_type=eq.response_batch&response_batch_id=in.(${encodeURIComponent(ids)})&select=id,content,response_batch_id,media_type&limit=50`);
+    if (!response.ok) throw new Error("整轮聊天镜像读取失败，保留任务等待重试");
+    for (const row of await response.json() as GuanianCloudMessage[]) {
+      if (row.media_type !== "response_batch" || !row.response_batch_id || !cloudIds.has(row.response_batch_id)) continue;
+      const value = JSON.parse(row.content) as { v?: number; messages?: GuanianCloudMessage[] };
+      if (value.v !== 1 || !Array.isArray(value.messages) || value.messages.some(m =>
+        typeof m.id !== "string" || typeof m.content !== "string" || !Number.isFinite(Date.parse(m.message_at)))) {
+        throw new Error("整轮聊天镜像格式异常，请重新同步镜像");
+      }
+      snapshots.set(row.response_batch_id, value.messages);
+    }
+  }
+  for (const m of mirrors) {
+    if (!m || !["user", "assistant"].includes(m.role) || !Number.isFinite(Date.parse(m.message_at))) continue;
+    if (m.media_type === "response_batch") continue;
+    // A single mirrored bubble never proves a full response. Use the atomic
+    // batch snapshot when available, otherwise retain the original whole reply.
+    if (m.response_batch_id && cloudIds.has(m.response_batch_id)) continue;
+    records.set(`mirror:${m.id}`, m);
+  }
+  // Pre-batch hosts stamped imported bubbles with consumption time. Match only a
+  // complete, unique consecutive sequence at that receipt time; never dedupe by
+  // an isolated phrase or by the latest mirror timestamp.
+  const compact = (s: string) => s.replace(/\s+/g, "").trim();
+  const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id)
+    .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
+  const candidates = new Map<string, { groups: GuanianCloudMessage[][]; output: GuanianCloudOutput }>();
+  for (const o of outputs) {
+    const receivedAt = Date.parse(o.consumed_at || "");
+    if (!Number.isFinite(receivedAt)) continue;
+    const raw = String(o.raw_text || "");
+    const forms = new Set([compact(raw), compact(raw.split(/\[(?:内心|心声)\]/)[0])].filter(Boolean));
+    const matches: GuanianCloudMessage[][] = [];
+    for (let start = 0; start < legacy.length; start++) {
+      const group: GuanianCloudMessage[] = []; let text = "";
+      for (const m of legacy.slice(start, start + 40)) {
+        if (m.role !== "assistant" || !records.has(`mirror:${m.id}`) || Math.abs(Date.parse(m.message_at) - receivedAt) > 120_000) break;
+        group.push(m); text += compact(m.content);
+        if (forms.has(text)) matches.push([...group]);
+        if (![...forms].some(f => f.startsWith(text))) break;
+      }
+    }
+    candidates.set(o.id, { groups: matches, output: o });
+  }
+  // Resolve across ALL outputs before removing anything. Two identical outputs
+  // may otherwise both claim the same mirror sequence in iteration order.
+  const owners = new Map<string, Set<string>>();
+  for (const [id, candidate] of candidates) for (const group of candidate.groups) for (const m of group) {
+    if (!owners.has(m.id)) owners.set(m.id, new Set());
+    owners.get(m.id)!.add(id);
+  }
+  const uncertainLegacy: NonNullable<GuanianCloudHistory["uncertainLegacy"]> = [];
+  for (const candidate of candidates.values()) {
+    if (candidate.groups.length === 1 && candidate.groups[0].every(m => owners.get(m.id)?.size === 1)) {
+      for (const m of candidate.groups[0]) records.delete(`mirror:${m.id}`);
+    }
+  }
+  for (const m of legacy) {
+    if (m.role !== "assistant" || !records.has(`mirror:${m.id}`)) continue;
+    const exact = [...(owners.get(m.id) || [])];
+    // Receipt-time proximity is not identity. Unrelated old-format utterances
+    // stay in the factual history and can open the promise-update gate.
+    const possible = exact;
+    if (!possible.length) continue;
+    // Insufficient old metadata cannot establish a separate utterance. Keep
+    // the evidence in an explicitly uncertain appendix, never as a fresh turn
+    // or as evidence for automatic unanswered-round cancellation.
+    uncertainLegacy.push({ message: m, outputIds: possible, exactText: exact.length > 0 });
+    records.delete(`mirror:${m.id}`);
+  }
+  let lastGeneratedAt = 0;
+  for (const o of outputs) {
+    const at = Date.parse(o.created_at);
+    if (!Number.isFinite(at)) continue;
+    lastGeneratedAt = Math.max(lastGeneratedAt, at);
+    const id = `push-outbox:${o.id}`;
+    const snapshot = snapshots.get(id);
+    if (snapshot && !snapshot.length) continue; // Explicit whole-batch deletion.
+    records.set(id, { id, role: "assistant", content: snapshot
+      ? snapshot.map(m => m.content).join("\n") : String(o.raw_text || ""), message_at: o.created_at });
+  }
+  return { messages: [...records.values()].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id)), outputs, lastGeneratedAt, uncertainLegacy };
+}
+function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80): string {
+  const main = history.messages.slice(-limit).map(m => {
+    const local = new Date(Date.parse(m.message_at) + tz * 60_000).toISOString().slice(0, 16).replace("T", " ");
+    return `[${m.id}] ${local} ${m.role === "user" ? "用户" : "你"}：${m.content.slice(0, 4000)}`;
+  }).join("\n");
+  const uncertain = (history.uncertainLegacy || []).slice(-20);
+  if (!uncertain.length) return main;
+  return main + "\n[旧镜像待核对资料：可能是补收副本，不能当作新发言、新承诺或新增未回应轮次；不推断用户已读。原始记录未删除。]\n"
+    + uncertain.map(({ message: m, outputIds, exactText }) => `[mirror:${m.id}] 记录时间 ${m.message_at}；可能对应 ${outputIds.map(id => "push-outbox:" + id).join(",")}；`
+      + (exactText ? "正文已见对应云端输出，不重复列出。" : "待核对原文：" + m.content.slice(0, 4000))).join("\n");
+}
+function guanianHistoryRounds(history: GuanianCloudHistory, nowMs: number): number {
+  let rounds = 0, last = Infinity;
+  for (const m of [...history.messages].reverse()) {
+    if (m.role === "user") break;
+    const at = Date.parse(m.message_at);
+    if (last - at > 3 * 60_000 && nowMs - at >= 30 * 60_000) rounds++;
+    last = at;
+  }
+  return rounds;
+}
+
+/** Explicit timed wakes drive proactive spacing; passive replies never consume it. */
+function guanianLastProactiveAt(history: GuanianCloudHistory): number {
+  return history.outputs.reduce((at, o) => {
+    if (!o.trigger_key?.startsWith("timedwake:")) return at;
+    const event = o.meta?.guanianPromise as { id?: string } | undefined;
+    const context = o.meta?.guanianContext as { revision?: number | null } | undefined;
+    if (event?.id || context?.revision) return at;
+    return Math.max(at, Date.parse(o.created_at) || 0);
+  }, 0);
+}
+// END GUANIAN CLOUD HISTORY
+
+// BEGIN GUANIAN PROMISES
+// Pure event rules, shared by the app and self-contained cloud workers.
+function promiseSubject(value) {
+  return ["user", "character", "both"].includes(value) ? value : "user";
+}
+function promiseSubjectLabel(value) {
+  return { user: "用户", character: "角色", both: "双方" }[promiseSubject(value)];
+}
+// A cheap wake-up hint, not a parser: the model still checks whether a promise exists.
+function hasPromiseUpdate(messages, threads) {
+  return messages.some(m => {
+    const text = String(m.content || m.c || "");
+    return /(?:\d{1,2}[:：]\d{2}|[一二三四五六七八九十两\d]{1,3}[点时]|明天|后天|周[一二三四五六日天])/.test(text)
+      && /回|到|约|等|一起|见|答应|记得|提醒|陪|去|再说|联系|找你/.test(text)
+      || threads.some(t => t.kind === "promise" && !t.done && text.includes(String(t.text || ""))
+        && /改|不去|不回|取消|算了|完成|好了|到了|办完/.test(text));
+  });
+}
+// New assistant messages may update promises, but cannot open the ordinary impulse gate.
+function recheckEvidence(messages, threads, since) {
+  const fresh = messages.filter(m => Number(m.t ?? Date.parse(m.message_at || "")) > since);
+  const users = fresh.filter(m => m.role === "user");
+  const promiseUpdate = hasPromiseUpdate(fresh, threads);
+  return { fresh, users, promiseUpdate, ledgerOnly: users.length === 0 && promiseUpdate };
+}
+function ordinaryQuota(items) {
+  return items.filter(w => w.kind !== "promise" && w.act).length;
+}
+function updatePromiseThreads(threads, changes, nowMs, by) {
+  const list = threads.map(t => ({ ...t }));
+  for (const k of changes) {
+    const id = String(k.id || "").replace(/[\[\]\s]/g, "");
+    const text = String(k.text || "").trim().slice(0, 60);
+    const subject = promiseSubject(k.subject);
+    const old = id ? list.find(t => t.id === id && t.kind === "promise")
+      : list.find(t => !t.done && t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
+    // Explicit unknown IDs cannot silently create a second event.
+    if (id && !old) continue;
+    if (k.status === "completed" || k.status === "cancelled") {
+      if (old) Object.assign(old, { status: k.status, done: true, at: nowMs, by });
+      continue;
+    }
+    const due = Number(k.due) || Number(old?.due);
+    if (!(due > 0) || (!text && !old)) continue;
+    if (old) {
+      const changed = due !== old.due || (k.subject && subject !== promiseSubject(old.subject)) || old.done;
+      Object.assign(old, { text: text || old.text, due, subject: k.subject ? subject : promiseSubject(old.subject),
+        sourceMessageId: String(k.sourceMessageId || old.sourceMessageId || "").slice(0, 100),
+        status: changed ? "pending" : (old.status || "pending"), done: false, at: nowMs, by,
+        revision: (Number(old.revision) || 1) + (changed ? 1 : 0),
+        ...(changed ? { nudge: "", mentionedAt: 0 } : {}) });
+    } else {
+      // Stable within a judgment; no implicit clock or random state.
+      let n = list.length;
+      let newId;
+      do { newId = "p" + nowMs.toString(36) + (n++).toString(36); } while (list.some(t => t.id === newId));
+      list.push({ id: newId, kind: "promise", text, due, subject, revision: 1, status: "pending", done: false,
+        sourceMessageId: String(k.sourceMessageId || "").slice(0, 100), since: nowMs, at: nowMs, by,
+        why: String(k.why || "").slice(0, 40) });
+    }
+  }
+  return list;
+}
+function promiseNeedsTask(t, items, nowMs, endMs) {
+  return t.kind === "promise" && !t.done && t.status !== "completed" && t.status !== "cancelled"
+    && !(Number(t.mentionedAt) > 0) && !/said:/.test(String(t.nudge || ""))
+    && Number(t.due) > nowMs - 86400000 && Number(t.due) < endMs
+    && !items.some(w => w.from === t.id && w.kind === "promise" && w.act
+      && Number(w.promiseRevision || 1) === Number(t.revision || 1));
+}
+function promiseIntent(t, localDue) {
+  return `核对约定 [${t.id}]：${promiseSubjectLabel(t.subject)}约好在 ${localDue} ${t.text}。`
+    + "这是明确约定，到点核对最新时间、双方对话和当前行程。角色自己的承诺应交代进展；用户的事情只能询问，不能替用户宣称完成。"
+    + "时间到了不等于事情已完成；有事实支持才能说到了或做完了，延误就按现在的情况说明，不能照搬旧时间。已改期、取消、完成且交代过则作罢。";
+}
+// END GUANIAN PROMISES

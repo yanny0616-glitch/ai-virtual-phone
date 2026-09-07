@@ -13,6 +13,7 @@ const output = resolve(app, "index.html");
 const domainModules = [
   ["GuaNianTime", "domain/time.mjs"],
   ["GuaNianScoring", "domain/scoring.mjs"],
+  ["GuaNianPromises", "domain/promises.mjs"],
 ];
 
 function compileDomainModules() {

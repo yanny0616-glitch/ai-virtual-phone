@@ -58,12 +58,12 @@
 
   // 临时起念不是日程排出来的，是复核时顺着聊天临时起的，重排不该把它推倒。
   // 新旧计划里都靠 source 的「临时」前缀认（本地和云端起念都写这个前缀）。
-  function isImpromptu(w) { return !!w && /^临时/.test(String(w.source || "")); }
+  function isImpromptu(w) { return !!w && /^(临时|约定)/.test(String(w.source || "")); }
 
   function keptImpromptu(cx) {
     const floor = Date.now() + 3 * 60000;
     return (cx.plan && Array.isArray(cx.plan.items) ? cx.plan.items : [])
-      .filter((w) => isImpromptu(w) && w.fireAt > floor);
+      .filter((w) => isImpromptu(w) && (w.fireAt > floor || w.kind === "promise"));
   }
 
   async function cancelTodayWakes(cx, keepIds) {
@@ -190,7 +190,7 @@
 
       // 留下来的临时起念一样占今天的额度和最小间隔，否则重排会在它旁边再排一条。
       const items = kept.slice();
-      const armedAt = kept.filter((k) => k.act).map((k) => k.fireAt);
+      const armedAt = kept.filter((k) => k.kind !== "promise" && k.act).map((k) => k.fireAt);
       let armedCount = armedAt.length;
       const prevArmed = (t) => armedAt.filter((x) => x < t).sort((a, b) => b - a)[0] || 0;
       // 模型自己挑的时刻说了不算：免打扰、睡眠窗、时刻去重、最小间隔、额度，这五道照样硬拦

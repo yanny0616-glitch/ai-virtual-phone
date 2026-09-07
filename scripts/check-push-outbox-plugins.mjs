@@ -9,7 +9,7 @@ function load(file, globals, expose) {
     source = source.replace(/^import\s[\s\S]*?;\s*$/gm, "")
         .replace(/\bexport\s+(?=(?:async\s+)?function|const |class )/g, "")
         .replace('await import("./reality-bridge/engine")', "bridgeEngine");
-    const context = vm.createContext({ console, Date, Response, ...globals });
+    const context = vm.createContext({ navigator:{locks:{request:async(_name,_options,run)=>run({})}}, refreshChatSessionFromDisk:async()=>{}, console, Date, Response, AbortSignal, ...globals });
     vm.runInContext(source + "\nglobalThis.api = {" + expose + "};", context);
     return context.api;
 }
@@ -59,11 +59,11 @@ function harness({ enabled = true, ready = Promise.resolve(), initial = {} } = {
         },
         MacroEngine: class {}, getActiveAppTags: () => [],
         loadChatSessions: () => [session], loadChatMessages: () => saved,
-        persistChatMessages: async () => {},
+        hasPersistedResponseBatch: async (_s,batch) => saved.some(m=>m.responseBatchId===batch),
         personalPushFetch: async (action, options) => {
             assert.equal(action, "outbox");
-            return new Response(JSON.stringify(options ? { ok: state.ackStatus === 200 } : { ok: true, entries: state.entries }),
-                { status: options ? state.ackStatus : 200 });
+            return new Response(JSON.stringify(options?.method === "POST" ? { ok: state.ackStatus === 200 } : { ok: true, entries: state.entries }),
+                { status: options?.method === "POST" ? state.ackStatus : 200 });
         },
         parseAndSaveResponse: async (text, sessionId, count, index, history, options) => {
             const parsed = parser.parseAIResponse(text, []);
@@ -76,7 +76,7 @@ function harness({ enabled = true, ready = Promise.resolve(), initial = {} } = {
             }
             return { hasVisible: saved.length > 0, newCount: 10, stateValues: parsed.stateValues };
         },
-        removeTimedWakeSchedule() {}, reindexSessionMessageOrdersByTime() {}, saveScreenChatAck() {},
+        settleDeferredReplyDelivery() {}, removeTimedWakeSchedule() {}, reindexSessionMessageOrdersByTime() {}, saveScreenChatAck() {},
         bridgeEngine: { applyServerBridgeEntry: async () => ({ sessionId: session.id }) },
     }, "consumeServerOutbox");
     return { state, storage, variables, saved, client };

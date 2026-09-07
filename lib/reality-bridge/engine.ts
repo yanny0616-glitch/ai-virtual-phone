@@ -10,7 +10,6 @@ import {
   createOrGetSession,
   loadChatContacts,
   pushChatMessage,
-  reindexSessionMessageOrdersByTime,
   type ChatMessage,
   upsertImportedChatMessageAsync,
 } from "../chat-storage";
@@ -315,10 +314,8 @@ export async function applyServerBridgeEntry(meta: {
         ...(historyRole ? { appHistoryRole: historyRole } : {}),
         ...(meta.historyText ? { appHistoryText: expandBridgeMacros(meta.historyText, session.contactId) } : {}),
       } as ChatMessage["mediaData"]) : undefined,
-    });
-    // 服务端回端补账发生在 App 重开时，不能用“此刻”作为桥事件时间；按收件箱
-    // 原始 createdAt 重排，确保桥输入位于它触发的云端微信回复之前。
-    reindexSessionMessageOrdersByTime(session.id);
+    }, { insertByCreatedAt: true });
+    // 仅为这条桥输入分配插入顺序，保留原有历史的 order。
     notifyChatUpdated(session.id);
     if (effectiveRole === "user") cancelFollowUp(session.id);
     actionNotes.push("写入聊天（服务端触发）");

@@ -173,6 +173,7 @@ export async function armReplyBailout(params: {
                     appId: "chat",
                     appTags: ["chat", "text"],
                     armAt,
+                    tzOffsetMin: -new Date().getTimezoneOffset(),
                     ...(params.replyAfter?.localMessageId
                         ? {
                             replyAfterLocalMessageId: params.replyAfter.localMessageId,
@@ -477,6 +478,7 @@ export async function armIdleReconnectBailout(rule: IdleReconnectRule): Promise<
                 userName: userIdentity?.name ?? "用户",
                 appId: "chat",
                 appTags: ["chat", "text", "idle_wake"],
+                tzOffsetMin: -new Date().getTimezoneOffset(),
                 armAt: new Date(fireAt).toISOString(),
                 idleReconnect: { ruleId: rule.id, firedAt: fireAt },
                 ...(remaining > 0 ? { idleRepeat: { intervalMs, remaining, quietWin: buildQuietWindowMeta() } } : {}),
@@ -539,6 +541,7 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
                 userName: userIdentity?.name ?? "用户",
                 appId: "chat",
                 appTags: ["chat", "text", wakeTag],
+                tzOffsetMin: -new Date().getTimezoneOffset(),
                 armAt: new Date(schedule.fireAt).toISOString(),
                 // 未回应降速：>0 时 push-generate 到点先查聊天镜像，连续未回达阈值就取消生成
                 ...(schedule.cooldownRounds && schedule.cooldownRounds > 0 ? { cooldownRounds: schedule.cooldownRounds } : {}),
@@ -667,7 +670,8 @@ export async function armPeriodCareBailouts(): Promise<void> {
                         userName: userIdentity?.name ?? "用户",
                         appId: "chat",
                         appTags: ["chat", "text", "period_care"],
-                        armAt: new Date(executeAtMs).toISOString(),
+                        tzOffsetMin: -new Date().getTimezoneOffset(),
+                armAt: new Date(executeAtMs).toISOString(),
                         periodCare: { characterId: session.contactId, cycleKey: event.cycleKey },
                     },
                 });

@@ -22,6 +22,18 @@ writeFileSync(workerPath, readFileSync(workerPath, "utf8").replace(
   () => `// BEGIN CHAT SILENCE PROTOCOL\n${silence}\n// END CHAT SILENCE PROTOCOL`,
 ));
 
+for (const name of ["push-recheck", "push-generate"]) {
+  const path = resolve(root, `supabase/functions/${name}/index.ts`);
+  let code = readFileSync(path, "utf8");
+  for (const [label, source] of [["GUANIAN CLOUD HISTORY", "lib/guanian-cloud-history.ts"], ["GUANIAN PROMISES", "custom-apps/gua-nian/src/domain/promises.mjs"]]) {
+    const shared = readFileSync(resolve(root, source), "utf8").replace(/^export /gm, "").trim();
+    const block = `// BEGIN ${label}\n${shared}\n// END ${label}`;
+    const pattern = new RegExp(`// BEGIN ${label}[\\s\\S]*?// END ${label}`);
+    code = pattern.test(code) ? code.replace(pattern, () => block) : code + "\n" + block + "\n";
+  }
+  writeFileSync(path, code);
+}
+
 copyFileSync(resolve(root, "supabase/functions/ai-phone-push/index.ts"), resolve(output, "gateway.mjs"));
 copyFileSync(resolve(root, "supabase/functions/push-generate/index.ts"), resolve(output, "push-generate.mjs"));
 copyFileSync(resolve(root, "supabase/functions/push-shortcut-result/index.ts"), resolve(output, "push-shortcut-result.mjs"));

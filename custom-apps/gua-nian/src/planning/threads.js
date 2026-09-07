@@ -25,7 +25,7 @@
     const diff = due - nowMs, d = new Date(due), n = new Date(nowMs);
     const hm = t.kind === "date" ? "" : " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
     const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-    if (t.kind !== "date" && Math.abs(diff) < 3600000) return "就在这会儿";
+    if (t.kind === "topic" && Math.abs(diff) < 3600000) return "就在这会儿";
     if (sameDay(d, n)) return "今天" + hm;
     if (diff < 0) return diff > -86400000 * 1.5 ? "昨天" + hm : Math.round(-diff / 86400000) + " 天前";
     if (sameDay(d, new Date(nowMs + 86400000))) return "明天" + hm;
@@ -53,10 +53,10 @@
     const now = nowMs || Date.now();
     return liveThreads(cx, now).slice(0, 12).map((t) => {
       const notes = [threadWhen(t, now), threadPace(t, now)].filter(Boolean);
-      return "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + "·" + t.text + (notes.length ? "（" + notes.join("，") + "）" : "");
+      return "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + (t.kind === "promise" ? "·" + GuaNianPromises.promiseSubjectLabel(t.subject) : "") + "·" + t.text + (notes.length ? "（" + notes.join("，") + "）" : "");
     });
   }
-  const THREAD_TASK = "惦记账本：上面带 [id] 的是TA心里还挂着的事。keep 里写这次聊天里新冒出来、值得跨天记住的：没聊完的话头（topic）、约好或答应了的事（promise，when 给时间）、重要的日子（date，when 给日期）。只写用户明确说过的，随口一提的不算，账本里已有的不要重复写；一次最多 2 条。why 写为什么值得记（15字内，用户当时的原话或场景），面板上给用户看。settle 写已经了结、过时或说开了的 id：用户说某件事做完了、办好了、不做了、不用管了，对应那条必须写进 settle，别让它继续挂着。都没有就给空数组。";
+  const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。";
   // 时刻上的 from 指向账本某条：模型给的 id 可能带方括号或是编的，这里核一遍
   function threadIdOf(cx, raw) {
     const id = String(raw || "").replace(/[\[\]\s]/g, "");
@@ -124,19 +124,39 @@
   async function dropThreadSlots(cx, id, why, planItems) {
     if (!cx.plan || !Array.isArray(cx.plan.items)) return 0;
     const items = (planItems || cx.plan.items).map(w => ({ ...w, hist: (w.hist || []).slice() }));
-    const now = Date.now(); let n = 0;
-    for (const w of items) {
-      if (w.from !== id || !w.act || w.fireAt <= now) continue;
-      // 失败时保留原编号和激活状态，下一轮可按同一编号重试撤销。
-      if (w.wakeId) await AiPhone.push.cancelWake(w.wakeId);
-      w.act = false; w.wakeId = ""; w.delivery = ""; w.why = why;
-      w.hist.push({ at: now, kind: "recheck", note: why });
-      n++;
-    }
-    if (n) {
-      cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items });
-      if (planItems) planItems.splice(0, planItems.length, ...items);
-      await log(cx, "惦记账本：" + why + "，撤掉 " + n + " 个时刻");
+    const now = Date.now(); let n = 0, confirmed = 0;
+    try {
+      for (const w of items) {
+        if (w.from !== id || !w.act || (w.thDone || w.generatedAt)) continue;
+        // 本地回执可能落后。先让云端按任务状态原子撤销，不能用“取消请求
+        // 发出去了”推断“这条从未发送”；执行中、读取失败均保留原编号。
+        let outcome = "missing";
+        if (w.wakeId && cloudCfg()) {
+          const r = await cloudFetchBounded("cancel-wake", { method: "POST", body: JSON.stringify({ triggerKey: "timedwake:" + w.wakeId }) });
+          outcome = r.outcome;
+          if (outcome === "generated" || outcome === "finished") {
+            w.thDone = true;
+            if (outcome === "generated") { w.generatedAt = Date.parse(r.generatedAt) || now; w.sendConfirmed = true; }
+            w.hist.push({ at: now, kind: "recheck", note: outcome === "generated" ? "已确认生成，保留发送记录" : "预约已结束，保留执行记录" });
+            confirmed++;
+            continue;
+          }
+          if (!["missing", "cancelled"].includes(outcome)) throw new Error("云端未确认撤销，请更新个人云后重试");
+        }
+        const local = w.wakeId ? await AiPhone.push.cancelWake(w.wakeId) : null;
+        if (outcome !== "cancelled" && w.fireAt <= now && (!local || local.ok !== true)) {
+          throw new Error("这条预约已到点，暂时无法确认是否发送；已保留原记录，请刷新回执后重试");
+        }
+        w.act = false; w.wakeId = ""; w.delivery = ""; w.why = why;
+        w.hist.push({ at: now, kind: "recheck", note: why });
+        n++;
+      }
+    } finally {
+      if (n || confirmed) {
+        cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items });
+        if (planItems) planItems.splice(0, planItems.length, ...items);
+        await log(cx, "惦记账本：" + why + "，撤掉 " + n + " 个时刻，保留 " + confirmed + " 个已结束记录");
+      }
     }
     return n;
   }
@@ -144,6 +164,20 @@
   async function saveThreads(cx, list) {
     cx.threads = list;
     await upsert("threads", (x) => x.characterId === cx.character.id, { characterId: cx.character.id, items: list });
+  }
+  async function editThreadLedger(cx, edit) {
+    if (cx.busy || cx._planLock || !owns(cx)) { toast("计划正在处理或由其他设备负责，请处理完成后重试"); return; }
+    cx._planLock = true;
+    try {
+      // Read before taking the editable snapshot, so “complete” applies to the
+      // current revision and ordinary cloud-created items survive the upload.
+      await pullCloudDecisionsBody(cx, true);
+      if (await edit() === false) return;
+      const result = await uploadPlanCloud(cx, false);
+      if (result && ["failed", "partial"].includes(result.status)) toast("本地已保存，云端尚未同步，请查看同步提示");
+      cx._ctx = null; syncChatContext(cx, true).catch(() => {});
+    } catch (e) { toast("账本操作未完成：" + String(e && e.message || e)); }
+    finally { cx._planLock = false; render(); }
   }
   // 模型给的时间几种写法都收：2026-09-10 15:00 / 09-10 / 9月10日 / 15:00 / 明天 15:00
   function parseWhen(when, nowMs) {
@@ -164,3 +198,24 @@
     return { id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by, done: false, why: String(why || "").slice(0, 40) };
   }
   // 把复核回来的 keep / settle 并进账本
+
+  async function syncPromiseTasks(cx, items, nowMs) {
+    if (!S.settings.threadsOn) return;
+    // With cloud recheck enabled, only the cloud owns promise scheduling. Ordinary
+    // impulses still use their existing local/bailout paths.
+    if (cloudRecheckOn()) return;
+    const end = timeToMs("00:00") + 86400000;
+    for (const t of liveThreads(cx, nowMs)) {
+      if (!GuaNianPromises.promiseNeedsTask(t, items, nowMs, end)) continue;
+      const fireAt = Math.max(+t.due, Date.now() + 65000);
+      const intent = GuaNianPromises.promiseIntent(t, new Date(+t.due).toLocaleString());
+      let res;
+      try { res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt, intent, source: "tool", cooldownRounds: 0 }); }
+      catch (e) { await log(cx, "约定预约失败，下次复核重试：" + String(e && e.message || e)); continue; }
+      items.push({ kind: "promise", adj: "promise", time: fmtHM(fireAt), fireAt, origFireAt: +t.due,
+        from: t.id, promiseRevision: +t.revision || 1, source: "约定·" + t.text, sem: "约定", topic: t.text,
+        act: true, intent, why: t.why || "按明确约定到点核对", wakeId: res.id,
+        delivery: res.armed ? "push" : "local", hist: [{ at: nowMs, kind: "promise", note: "按约定时间预约" }] });
+    }
+    items.sort((a, b) => a.fireAt - b.fireAt);
+  }

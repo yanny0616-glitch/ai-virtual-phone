@@ -19,6 +19,7 @@ export function fixture() {
     const url = new URL('https://cloud.test/rest/v1/' + path);
     const table = url.pathname.split('/').pop(), method = init.method ?? 'GET';
     const body = init.body ? JSON.parse(init.body) : null;
+    if (table === 'push_generation_lease') return json(true);
     if (table === 'push_server_config') return json([{ cron_secret: 'test-cron', payload_key: 'test-encryption-key', site_origin: 'https://phone.test' }]);
     if (table === 'push_subscriptions') return json([{ endpoint: 'shell:test' }]);
     if (table === 'push_outbox') {
@@ -88,7 +89,7 @@ export function fixture() {
     maybeAppendShortcutCapability() {}, toLlmRequestMessages: v => v,
     buildProviderRequest: (config, preset, messages) => ({ url: 'https://model.test/chat', headers: { Authorization: 'test-' + config }, body: { model: config, messages }, providerKind: 'openai-compatible' }),
   });
-  vm.runInContext(js(read('lib/chat-reply-gate.ts')) + js(read('lib/deferred-reply-cloud.ts')) + '\nglobalThis.api={markReplyGatePolicyAdopted,readReplyGate,readEffectiveReplyGate,normalizeReplyGate,setCustomAppReplyGate,evaluateReplyGate,readDeferredReply,writeDeferredReply,takeDueDeferredReplies,queueDeferredReplyCloud,cancelDeferredReplyCloud,installDeferredReplyCloudSync,freezeDeferredReplyTiming,sync,locks};', c);
+  vm.runInContext(js(read('lib/chat-reply-gate.ts')) + js(read('lib/deferred-reply-cloud.ts')) + '\nglobalThis.api={markReplyGatePolicyAdopted,readReplyGate,readEffectiveReplyGate,normalizeReplyGate,setCustomAppReplyGate,evaluateReplyGate,readDeferredReply,writeDeferredReply,takeDueDeferredReplies,queueDeferredReplyCloud,cancelDeferredReplyCloud,installDeferredReplyCloudSync,freezeDeferredReplyTiming,settleDeferredReplyDelivery,sync,locks};', c);
   const a = c.api;
   const gate = a.normalizeReplyGate({ busy: { date: '2026-09-07', peekMin: 3, adaptive: true, focusedPeekProb: 25, windows: [{ from: '08:40', to: '11:50', title: '会议' }] } });
   a.setCustomAppReplyGate('gua.nian', 'c', gate);
@@ -122,7 +123,7 @@ export function fixture() {
   assert.equal(h.calls.length, 1); assert.equal(h.calls[0].model, 'B');
   assert.equal(h.outbox.length, 1); assert.equal(h.outbox[0].trigger_key, key);
   assert.ok(JSON.stringify(h.calls[0]).includes('不要声称活动结束'));
-  assert.equal(h.rows[0].status, 'done'); assert.deepEqual(h.rows[0].payload, {});
+  assert.equal(h.rows[0].status, 'done'); assert.equal(h.rows[0].payload.receipt.acceptedMessageId, 'u4'); assert.equal(h.rows[0].payload.request, undefined);
   await a.sync('s'); assert.ok(a.readDeferredReply('s').firedAt);
   assert.deepEqual([...a.takeDueDeferredReplies(at('12:00'))], []);
 }
@@ -194,7 +195,8 @@ console.log(`Passed deferred cloud integration (${Intl.DateTimeFormat().resolved
   await run();
   assert.equal(h.calls.length, 1); assert.equal(h.rows[0].status, 'done');
   assert.equal(h.rows[0].result_note, 'reply silenced'); assert.equal(h.outbox.length, 0);
-  assert.deepEqual(h.rows[0].payload, {});
+  assert.equal(h.rows[0].payload.receipt.acceptedMessageId, 'u1');
+  assert.equal(h.rows[0].payload.request, undefined);
   await a.sync('s');
   assert.ok(a.readDeferredReply('s').firedAt);
   assert.equal(a.takeDueDeferredReplies(h.now + 3600_000).length, 0);
@@ -220,3 +222,30 @@ console.log('PASS an old worker never receives a silence-enabled deferred reques
   await run(); assert.equal(h.rows[0].status, 'done'); assert.equal(h.outbox.length, 1);
 }
 console.log('PASS ordinary quoted markers still deliver a message');
+
+// A reply landing before the status tick settles the old turn immediately.
+{
+ const {h,a,history,drain}=fixture();a.queueDeferredReplyCloud('s');await drain();
+ const key=a.readDeferredReply('s').cloud.key;
+ a.settleDeferredReplyDelivery('s',key,'u1');assert.ok(a.readDeferredReply('s').firedAt);
+ a.settleDeferredReplyDelivery('s','deferred:other','u1');assert.ok(a.readDeferredReply('s').firedAt);
+ console.log('PASS durable outbox import settles only its own deferred turn immediately');
+}
+// New input during generation becomes one successor, never a rejected update lost in a done job.
+{
+ const {h,a,history,drain,gateway,decrypt,encrypt}=fixture();a.queueDeferredReplyCloud('s');await drain();
+ const original=h.rows[0], key=original.trigger_key;
+ const frozen=await decrypt(original); original.status='running';
+ history.push({id:'u-new',sessionId:'s',role:'user',content:'再问一件事',createdAt:new Date(h.now+1).toISOString()});
+ a.queueDeferredReplyCloud('s');await drain();assert.equal(h.rows.length,1);assert.equal(a.readDeferredReply('s').cloud.state,'running');
+ original.status='done';original.payload={receipt:{revision:frozen.deferredReply.revision,acceptedMessageId:'u1'}};
+ await a.sync('s');await drain();
+ assert.equal(h.rows.length,2);assert.notEqual(a.readDeferredReply('s').cloud.key,key);
+ assert.equal((await decrypt(h.rows[1])).merge.replyAfterLocalMessageId,'u-new');
+ a.settleDeferredReplyDelivery('s',key,'u1');assert.equal(h.rows.length,2);assert.equal(a.readDeferredReply('s').firedAt,undefined);
+ const pending=await decrypt(h.rows[1]);pending.generatedResponse={rawText:'已生成',createdAt:new Date(h.now).toISOString()};h.rows[1].payload=await encrypt(pending);
+ const changed=structuredClone(pending);changed.deferredReply.revision++;changed.generatedResponse=undefined;changed.request.body.model='changed';
+ const r=await (await gateway('POST',h.rows[1].trigger_key,changed)).json();assert.equal(r.status,'running');
+ assert.equal((await decrypt(h.rows[1])).generatedResponse.rawText,'已生成');
+ console.log('PASS claimed-turn additions create one successor; late old receipts and updates cannot overwrite cached output');
+}

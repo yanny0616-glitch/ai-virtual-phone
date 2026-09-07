@@ -307,7 +307,7 @@ async function decryptPayload(payload: EncryptedPayload, serviceKey: string): Pr
 }
 
 // ── 主流程 ──
-type JobRow = { id: string; user_id: string; trigger_key: string; kind: string; payload: EncryptedPayload };
+type JobRow = { result_note?: string | null; id: string; user_id: string; trigger_key: string; kind: string; payload: EncryptedPayload };
 type SubscriptionRow = { endpoint: string; p256dh: string; auth: string };
 // BEGIN DEFERRED REPLY TIMING
 /** Pure, absolute-time rules. Embedded in push-generate by push:build-dist. */
@@ -407,6 +407,8 @@ function createChatSilenceStreamFilter(emit: (text: string) => void | Promise<vo
 // END CHAT SILENCE PROTOCOL
 
 type JobPayload = {
+  generatedResponse?: { rawText: string; createdAt: string; processingStarted?: boolean;
+    delivery?: { rawText: string; deliverAsCall: boolean; marker: { text: string; insertAt: number; name: string } | null; [key: string]: unknown } };
   allowSilence?: boolean;
   silenceThinkingTag?: string;
   deferredReply?: { revision: number; timing: CloudReplyTiming };
@@ -602,7 +604,7 @@ type RecheckPlanRow = {
   plan_date: string;
   context?: Record<string, unknown>;
   decisions?: unknown[];
-  items?: { time?: string; wakeId?: string; act?: boolean; intent?: string; fireAt?: number; origFireAt?: number; from?: string }[];
+  items?: { kind?: string; promiseRevision?: number; time?: string; wakeId?: string; act?: boolean; intent?: string; fireAt?: number; origFireAt?: number; from?: string }[];
 };
 
 /** 挂念寄存的计划：靠 trigger_key 里的 wakeId 回查。取两天：跨零点触发时最新的那份可能已经是明天的计划。 */
@@ -616,12 +618,22 @@ async function loadRecheckPlan(
   const response = await rest(
     `push_recheck_plans?user_id=eq.${encodeURIComponent(userId)}`
     + `&character_id=eq.${encodeURIComponent(characterId)}`
-    + "&select=plan_date,context,decisions,items&order=plan_date.desc&limit=2",
+    + "&select=plan_date,context,decisions,items&order=plan_date.desc&limit=32",
   );
-  const rows = response.ok ? await response.json() as RecheckPlanRow[] : [];
+  if (!response.ok) throw new Error("约定计划读取失败");
+  const rows = await response.json() as RecheckPlanRow[];
   for (const row of rows) {
     const hit = (row.items || []).find(item => item.wakeId === wakeId);
-    if (hit) return { row, item: hit };
+    if (hit) {
+      if (hit.kind !== "promise") return { row, item: hit };
+      const threads = new Map<string, Record<string, unknown>>();
+      for (const p of rows) for (const t of Array.isArray(p.context?.threads) ? p.context.threads : []) {
+        const previous = threads.get(t.id);
+        if (!previous || Number(t.revision || 1) > Number(previous.revision || 1)
+          || Number(t.revision || 1) === Number(previous.revision || 1) && Number(t.at || 0) > Number(previous.at || 0)) threads.set(t.id, t);
+      }
+      return { row: { ...row, context: { ...row.context, ...rows[0]?.context, threads: [...threads.values()] } }, item: hit };
+    }
   }
   return { row: rows[0] || null, item: null };
 }
@@ -840,7 +852,7 @@ Deno.serve(async (req: Request) => {
     return new Response("forbidden", { status: 403 });
   }
 
-  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2", "chat-silence-v1"] });
+  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2", "chat-silence-v1", "guanian-history-v1", "promise-tasks-v2", "scheduler-state-v1"] });
   if (!jobId) return new Response("bad request", { status: 400 });
 
   const claim = await rest(`push_jobs?id=eq.${encodeURIComponent(jobId)}&status=eq.pending&kind=neq.bridge_scan&execute_at=lte.${encodeURIComponent(new Date().toISOString())}`, {
@@ -852,20 +864,32 @@ Deno.serve(async (req: Request) => {
   const job = claimed[0];
   if (!job) return new Response("already claimed", { status: 200 });
 
+  const previousRetries = Number(/^\[retry:(\d+)\]/.exec(String(job.result_note || ""))?.[1]) || 0;
+  let deferredReceipt: { revision?: number; acceptedMessageId?: string } | undefined;
+  let resultStored = false;
   const finish = (status: "done" | "failed", note: string) => rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}`, {
     method: "PATCH",
     body: JSON.stringify({ status, result_note: note.slice(0, 300), updated_at: new Date().toISOString(),
-      ...(job.trigger_key.startsWith("deferred:") ? { payload: {} } : {}) }),
+      ...(job.trigger_key.startsWith("deferred:") && status === "done" ? { payload: { receipt: deferredReceipt } } : {}) }),
   }).catch(() => undefined);
 
   // 分段进度：卡死时 result_note 会停在最后完成的一步，精确定位死点
   const startedAt = Date.now();
   const progress = (note: string) => rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}`, {
     method: "PATCH",
-    body: JSON.stringify({ result_note: `[${Math.round((Date.now() - startedAt) / 1000)}s] ${note}`.slice(0, 300), updated_at: new Date().toISOString() }),
+    body: JSON.stringify({ result_note: `[retry:${previousRetries}] [${Math.round((Date.now() - startedAt) / 1000)}s] ${note}`.slice(0, 300), updated_at: new Date().toISOString() }),
   }).catch(() => undefined);
 
   // pg_net 的请求超时只有几秒：必须立即响应，重活放进 waitUntil 后台继续。
+  let generationLease: { sessionId: string; token: string } | null = null;
+  const retry = async (note: string, waitUntil?: number, permanent = false) => {
+    const count = waitUntil ? previousRetries : previousRetries + 1;
+    if (permanent || count >= 6) return finish("failed", `[retry:${count}] stopped: ${note}；修复后重试任务，已保存正文保留`);
+    return rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}&status=eq.running`, { method: "PATCH", body: JSON.stringify({
+      status: "pending", execute_at: new Date(waitUntil || Date.now() + Math.min(30, 2 ** (count - 1)) * 60000).toISOString(),
+      result_note: `[retry:${count}] ${note}`, updated_at: new Date().toISOString(),
+    }) });
+  };
   const runJob = async (): Promise<void> => {
   try {
     if (!payloadKey) {
@@ -873,7 +897,35 @@ Deno.serve(async (req: Request) => {
       return;
     }
     const payload = JSON.parse(await decryptPayload(job.payload, payloadKey)) as JobPayload;
-    if (payload.deferredReply) {
+    deferredReceipt = payload.deferredReply ? { revision: payload.deferredReply.revision, acceptedMessageId: String(payload.merge?.replyAfterLocalMessageId || "") } : undefined;
+    resultStored = !!payload.generatedResponse;
+    // Saved tasks can later supply templates: keep transient history/state notes out.
+    const templateRequest = JSON.parse(JSON.stringify(payload.request)) as JobPayload["request"];
+    const saveGeneratedResponse = async () => {
+      const encrypted = await encryptPayload(JSON.stringify({ ...payload, request: templateRequest }), payloadKey);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const saved = await rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}&status=eq.running`, {
+          method: "PATCH", headers: { Prefer: "return=representation" },
+          body: JSON.stringify({ payload: encrypted, updated_at: new Date().toISOString() }),
+        }).catch(() => null);
+        if (saved?.ok && (await saved.json()).length) { resultStored = true; return; }
+      }
+      throw new Error("生成结果暂存未确认；暂停自动生成，请检查云端存储");
+    };
+
+    if (job.kind !== "template" && payload.merge?.sessionId) {
+      const sessionId = String(payload.merge.sessionId), token = job.id + ":" + crypto.randomUUID();
+      const lease = await rest("rpc/push_generation_lease", { method: "POST", body: JSON.stringify({
+        p_user_id: job.user_id, p_session_id: sessionId, p_token: token, p_action: "claim",
+      }) });
+      if (!lease.ok) { await retry("会话租约不可用；请执行最新 schema 12", undefined, [400,404].includes(lease.status)); return; }
+      if (await lease.json() !== true) { await retry("hold: 同一会话正在生成", Date.now() + 60000); return; }
+      generationLease = { sessionId, token };
+      const existing = await rest(`push_outbox?job_id=eq.${encodeURIComponent(job.id)}&select=id&limit=1`);
+      if (!existing.ok) { await retry("hold: 无法确认这轮是否已经生成"); return; }
+      if ((await existing.json()).length) { await finish("done", "generated previously; recovered"); return; }
+    }
+    if (payload.deferredReply && !payload.generatedResponse) {
       // A previous run may have written its reply and died before marking the job done.
       const delivered = await rest(`push_outbox?job_id=eq.${encodeURIComponent(job.id)}&select=id&limit=1`);
       if (!delivered.ok) { await finish("failed", "cannot confirm deferred delivery"); return; }
@@ -971,7 +1023,7 @@ Deno.serve(async (req: Request) => {
 
     const subsResponse = await rest(`push_subscriptions?user_id=eq.${encodeURIComponent(job.user_id)}&select=endpoint,p256dh,auth`);
     const subs = subsResponse.ok ? await subsResponse.json() as SubscriptionRow[] : [];
-    if (subs.length === 0 && payload.weixin?.force !== true) {
+    if (subs.length === 0 && payload.weixin?.force !== true && !payload.generatedResponse) {
       await finish("done", "no_subscription");
       return;
     }
@@ -983,72 +1035,24 @@ Deno.serve(async (req: Request) => {
       `push_outbox?user_id=eq.${encodeURIComponent(job.user_id)}&created_at=gte.${encodeURIComponent(dayStart)}&meta->>pushGenerated=eq.true&select=id&limit=${DAILY_GENERATION_CAP + 1}`,
     );
     const todayRows = capResponse.ok ? await capResponse.json() as unknown[] : [];
-    if (todayRows.length >= DAILY_GENERATION_CAP) {
+    if (todayRows.length >= DAILY_GENERATION_CAP && !payload.generatedResponse) {
       await finish("done", `daily cap (${DAILY_GENERATION_CAP}) reached`);
       return;
     }
 
-    // ── 到点补上下文：快照是预约时冻结的，但预约之后本服务可能已经替角色主动
-    // 发过消息（同一天多个定时唤醒 / 冷场连发）。这些消息全在 push_outbox 里——
-    // 把「你已经发过这些、对方还没回」补进冻结请求，角色才不会失忆重复自己。
-    // 只对主动类任务生效；reply_bailout 租约仅 90 秒无此问题，shortcut_resume
-    // 的续跑快照已代入首条回复，再补会双重提及。老快照没有 snapshotAt 则跳过。
-    if (job.kind === "timed_task" || job.kind === "followup") {
-      const contextSessionId = typeof payload.merge?.sessionId === "string" ? payload.merge.sessionId : "";
-      const snapshotAt = typeof payload.merge?.snapshotAt === "string" ? payload.merge.snapshotAt : "";
-      if (contextSessionId && snapshotAt && Number.isFinite(Date.parse(snapshotAt))) {
-        try {
-          const snapshotMs = Date.parse(snapshotAt);
-          // 云端自己挂的预约（挂念云端点亮 / 云端生成的时刻）不在宿主的本地登记簿里，
-          // refreshScheduledBailouts 遍历不到，快照最长能停在 48 小时前。镜像里补一段。
-          const mirrorResponse = await rest(
-            `push_chat_mirror?user_id=eq.${encodeURIComponent(job.user_id)}`
-            + `&session_id=eq.${encodeURIComponent(contextSessionId)}`
-            + `&message_at=gt.${encodeURIComponent(new Date(snapshotMs).toISOString())}`
-            + "&select=role,content,message_at&order=message_at.desc&limit=60",
-          );
-          const mirrorRows = (mirrorResponse.ok
-            ? await mirrorResponse.json() as { role: string; content: string; message_at: string }[]
-            : []).reverse().filter(row => (row.role === "user" || row.role === "assistant") && String(row.content || "").trim());
-          // 镜像里已经有的那几条角色消息就是客户端取走过的，outbox 只补它之后的，免得同一句说两遍
-          const newestMirrorMs = mirrorRows.length > 0 ? Date.parse(mirrorRows[mirrorRows.length - 1].message_at) : NaN;
-          const outboxSince = Number.isFinite(newestMirrorMs) ? Math.max(snapshotMs, newestMirrorMs) : snapshotMs;
-          const sinceResponse = await rest(
-            `push_outbox?user_id=eq.${encodeURIComponent(job.user_id)}`
-            + `&session_id=eq.${encodeURIComponent(contextSessionId)}`
-            + "&meta->>pushGenerated=eq.true"
-            + `&created_at=gt.${encodeURIComponent(new Date(outboxSince).toISOString())}`
-            + "&select=raw_text,created_at&order=created_at.asc&limit=5",
-          );
-          const sinceRows = sinceResponse.ok
-            ? await sinceResponse.json() as { raw_text: string; created_at: string }[]
-            : [];
-          const parts: string[] = [];
-          if (mirrorRows.length > 0) {
-            const who = payload.notify?.title || "你";
-            parts.push("在上面的对话之后，你们又聊了这些（从旧到新，「对方」=用户，「" + who + "」=你自己）：\n"
-              + mirrorRows.map(row => {
-                const text = String(row.content || "").replace(/\s+/g, " ").trim();
-                return (row.role === "user" ? "对方：" : who + "：") + (text.length > 200 ? text.slice(0, 200) + "…" : text);
-              }).join("\n"));
+    let cloudHistory: GuanianCloudHistory | null = null;
+    if ((job.kind === "timed_task" || job.kind === "followup" || payload.deferredReply) && payload.merge?.sessionId) {
+      try {
+        cloudHistory = await readGuanianCloudHistory(rest, job.user_id, String(payload.merge.sessionId));
+        if (payload.deferredReply && !payload.generatedResponse) {
+          const latestUser = [...cloudHistory.messages].reverse().find(m => m.role === "user");
+          if (latestUser && Date.parse(latestUser.message_at) > Date.parse(String(payload.merge.replyAfterCreatedAt || "1970-01-01"))) {
+            payload.merge.replyAfterLocalMessageId = latestUser.id;
+            payload.merge.replyAfterCreatedAt = latestUser.message_at;
+            deferredReceipt = { revision: payload.deferredReply.revision, acceptedMessageId: latestUser.id };
           }
-          if (sinceRows.length > 0) {
-            parts.push("在这之后你已经又主动发过下面这些，对方还没有回复：\n"
-              + sinceRows.map((row, index) => {
-                const minutesAgo = Math.max(1, Math.round((Date.now() - Date.parse(row.created_at)) / 60000));
-                const text = String(row.raw_text || "").replace(/\s+/g, " ").trim().slice(0, 400);
-                return `${index + 1}.（约${minutesAgo}分钟前）${text}`;
-              }).join("\n"));
-          }
-          if (parts.length > 0) {
-            const note = "[系统备忘：这不是对方发来的消息。" + parts.join("\n\n")
-              + "\n请自然衔接已经说过的话——不要重复以上内容，不要把你自己说过的当成对方说的，也不要机械追问对方为什么不回。]";
-            if (appendUserNote(payload.request.body, payload.request.providerKind, note)) {
-              await progress(`context patched: +${mirrorRows.length} mirrored, +${sinceRows.length} sent since snapshot`);
-            }
-          }
-        } catch { /* 补上下文失败不阻塞生成，按原快照重放 */ }
-      }
+        }
+      } catch { await retry("hold: 最新聊天读取失败，稍后核对"); return; }
     }
 
     // ── 发送前复核：到点了再综合判一次「这条现在发合不合适」。三个信号全部只读已有
@@ -1060,83 +1064,67 @@ Deno.serve(async (req: Request) => {
     // 最新一轮要晾满 30 分钟才计数。数据源是聊天镜像 + 离线期间本服务代发的 push_outbox。
     const guanianCharacterId = job.kind === "timed_task" ? (payload.notify?.characterId || "") : "";
     const guanianWakeId = job.kind === "timed_task" && job.trigger_key.startsWith("timedwake:") ? job.trigger_key.slice(10) : "";
-    const guanianPlan = await loadRecheckPlan(rest, job.user_id, guanianCharacterId, guanianWakeId)
-      .catch(() => ({ row: null, item: null }));
+    let guanianPlan: Awaited<ReturnType<typeof loadRecheckPlan>>;
+    try { guanianPlan = await loadRecheckPlan(rest, job.user_id, guanianCharacterId, guanianWakeId); }
+    catch { await retry("hold: 约定计划读取失败"); return; }
+    const planTz = guanianContextTimezone((guanianPlan.row?.context || {}) as Record<string, unknown>, Date.now());
+    const historyTz = guanianTimezone(planTz, payload.merge?.tzOffsetMin, (payload.merge?.quietWin as { tzOffsetMin?: number } | undefined)?.tzOffsetMin);
+    if (guanianPlan.row && historyTz === null) { await retry("时区资料缺失：请打开挂念重新同步计划", undefined, true); return; }
+    if (guanianPlan.row?.context?.day && historyTz !== null) (guanianPlan.row.context.day as GuanianDay).tz = historyTz;
+    if (cloudHistory && !payload.generatedResponse) appendUserNote(payload.request.body, payload.request.providerKind,
+      `[最新云端聊天事实，非用户消息；${historyTz === null ? "当地时区未知，下方仅以 UTC 标示，不得推断当地钟点" : `统一时区 UTC${historyTz >= 0 ? "+" : ""}${historyTz / 60}，当前当地时间 ${new Date(Date.now() + historyTz * 60000).toISOString().slice(0,16)}`}。以下时间是生成时间，不代表用户已读；与旧快照冲突时以这里为准。]\n`
+      + guanianHistoryText(cloudHistory, historyTz ?? 0));
     // decisions 是读-改-写，手里这份是任务开头读到的，push-recheck 可能同时在写。
     // 落库前重取一次，把丢记录的窗口从整个任务时长缩到一次请求。
     const appendDecision = async (entry: Record<string, unknown>): Promise<void> => {
       const row = guanianPlan.row;
       if (!row || !guanianCharacterId) return;
-      const filter = `push_recheck_plans?user_id=eq.${encodeURIComponent(job.user_id)}`
-        + `&character_id=eq.${encodeURIComponent(guanianCharacterId)}`
-        + `&plan_date=eq.${encodeURIComponent(row.plan_date)}`;
-      const fresh = await rest(`${filter}&select=decisions&limit=1`).catch(() => null);
-      const rows = fresh?.ok ? await fresh.json().catch(() => []) as { decisions?: unknown[] }[] : [];
-      const prior = Array.isArray(rows[0]?.decisions) ? rows[0].decisions : (Array.isArray(row.decisions) ? row.decisions : []);
-      await rest(filter, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ decisions: [...prior, entry].slice(-60) }),
-      }).catch(() => undefined);
+      await rest("rpc/push_append_recheck_decision", { method: "POST", body: JSON.stringify({
+        p_user_id: job.user_id, p_character_id: guanianCharacterId, p_date: row.plan_date,
+        p_entry: { ...entry, wakeId: guanianWakeId },
+      }) }).catch(() => undefined);
     };
     if (guanianPlan.item?.act === false) {
       await finish("done", "guanian skip: 这条念头已在复核中作罢");
       return;
     }
-    if (job.kind === "timed_task") {
+    const frozenPromise = payload.merge?.guanianPromise as { id?: string; revision?: number } | undefined;
+    const isPromise = guanianPlan.item?.kind === "promise" || !!frozenPromise?.id;
+    const promiseIsCurrent = (p: Awaited<ReturnType<typeof loadRecheckPlan>>) => {
+      if (!isPromise) return true;
+      if (!p.item || p.item.kind !== "promise" || p.item.act === false) return false;
+      const ts = p.row?.context?.threads;
+      const id = frozenPromise?.id || guanianPlan.item?.from;
+      const revision = Number(frozenPromise?.revision || guanianPlan.item?.promiseRevision || 1);
+      const t = Array.isArray(ts) ? ts.find(t => t.id === id) : null;
+      return !!t && !t.done && !["completed", "cancelled"].includes(t.status)
+        && Number(t.revision || 1) === revision && p.item.from === id && Number(p.item.promiseRevision || 1) === revision
+        && !(Number(t.mentionedAt) > 0) && !/said:/.test(String(t.nudge || ""))
+        && !(cloudHistory?.outputs || []).some(o => {
+          const event = o.meta?.guanianContext as { eventId?: string; revision?: number } | undefined;
+          return event?.eventId === id && Number(event.revision || 1) === revision;
+        });
+    };
+    if (!promiseIsCurrent(guanianPlan)) { await finish("done", "promise skip: 约定已改期、完成或取消"); return; }
+    if (!payload.generatedResponse && guanianPlan.item?.kind !== "promise" && cloudHistory && guanianPlan.item) {
+      const gap = Math.max(0, Number(guanianPlan.row?.context?.minGapMin) || 0) * 60000;
+      const nextAt = guanianLastProactiveAt(cloudHistory) + gap;
+      if (Date.now() < nextAt) {
+        await appendDecision({ at: Date.now(), kind: "hold", time: guanianPlan.item.time, by: "cloud", note: "主动消息间隔未到，等待至 " + new Date(nextAt).toISOString() });
+        await retry("hold: 等待主动消息间隔", nextAt); return;
+      }
+    }
+    if (!payload.generatedResponse && job.kind === "timed_task" && guanianPlan.item?.kind !== "promise") {
       const cooldownRounds = Number(payload.merge?.cooldownRounds);
       const coolTarget = Number.isFinite(cooldownRounds) && cooldownRounds > 0 ? cooldownRounds : 0;
       const mirrorSessionId = typeof payload.merge?.sessionId === "string" ? payload.merge.sessionId : "";
       if (mirrorSessionId) {
         try {
-          const mirrorResponse = await rest(
-            `push_chat_mirror?user_id=eq.${encodeURIComponent(job.user_id)}`
-            + `&session_id=eq.${encodeURIComponent(mirrorSessionId)}`
-            + "&select=role,message_at&order=message_at.desc&limit=40",
-          );
-          const mirrorRows = mirrorResponse.ok
-            ? await mirrorResponse.json() as { role: string; message_at: string }[]
-            : [];
+          const mirrorRows = [...(cloudHistory?.messages || [])].reverse();
           if (mirrorRows.length > 0) {
             const nowMs = Date.now();
-            const graceMs = 30 * 60_000;
-            let rounds = 0;
-            let prevT: number | null = null;
-            for (const row of mirrorRows) {
-              if (row.role !== "assistant") break;
-              const t = Date.parse(row.message_at);
-              if (!Number.isFinite(t)) break;
-              if (prevT === null || prevT - t > 3 * 60_000) {
-                if (nowMs - t >= graceMs) rounds += 1;
-              }
-              prevT = t;
-            }
-            // TA最后一条主动：镜像里最新的 assistant，和离线期间代发还没被取走的 outbox，取更晚的那个
-            let lastProactiveAt = 0;
-            const newestAssistant = mirrorRows.find(row => row.role === "assistant");
-            if (newestAssistant) {
-              const t = Date.parse(newestAssistant.message_at);
-              if (Number.isFinite(t)) lastProactiveAt = t;
-            }
-            const newestMirrorAt = Date.parse(mirrorRows[0].message_at);
-            if (Number.isFinite(newestMirrorAt)) {
-              const outboxResponse = await rest(
-                `push_outbox?user_id=eq.${encodeURIComponent(job.user_id)}`
-                + `&session_id=eq.${encodeURIComponent(mirrorSessionId)}`
-                + "&meta->>pushGenerated=eq.true"
-                + `&created_at=gt.${encodeURIComponent(new Date(newestMirrorAt).toISOString())}`
-                + "&select=created_at&order=created_at.desc&limit=10",
-              );
-              const outboxRows = outboxResponse.ok
-                ? await outboxResponse.json() as { created_at: string }[]
-                : [];
-              for (const row of outboxRows) {
-                const t = Date.parse(row.created_at);
-                if (!Number.isFinite(t)) continue;
-                if (nowMs - t >= graceMs) rounds += 1;
-                if (t > lastProactiveAt) lastProactiveAt = t;
-              }
-            }
+            const rounds = cloudHistory ? guanianHistoryRounds(cloudHistory, nowMs) : 0;
+            const lastProactiveAt = cloudHistory ? guanianLastProactiveAt(cloudHistory) : 0;
             const newestUser = mirrorRows.find(row => row.role === "user");
             const lastUserAt = newestUser ? Date.parse(newestUser.message_at) : NaN;
 
@@ -1194,7 +1182,7 @@ Deno.serve(async (req: Request) => {
       await finish("done", "guanian sentinel");
       return;
     }
-    if (guanianPlan.item && guanianPlan.row?.context?.day && typeof guanianPlan.row.context.day === "object") {
+    if (!payload.generatedResponse && guanianPlan.item && guanianPlan.row?.context?.day && typeof guanianPlan.row.context.day === "object") {
       // 编排时排开了睡眠窗，但聊天改日程或别的路径挂上的时刻可能落在TA睡着之后：睡着的人不发消息。
       const ctxQuiet = guanianPlan.row.context as { quietStart?: unknown; quietEnd?: unknown };
       const qs = typeof ctxQuiet.quietStart === "string" ? ctxQuiet.quietStart : undefined;
@@ -1224,7 +1212,7 @@ Deno.serve(async (req: Request) => {
       };
       let sleepy = false;
       if (guanianAsleep(day, localHM, qs, qe)) {
-        const mode = cnum("sleepMode", 0);
+        const mode = pi.kind === "promise" ? 1 : cnum("sleepMode", 0);
         if (mode === 1) {
           const wakeHM = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(qe || "");
           const untilMs = guanianLocalHMToMs(wakeHM, tzMin, nowMs) + bufferMs;
@@ -1255,7 +1243,7 @@ Deno.serve(async (req: Request) => {
           return;
         }
       }
-      const chance = guanianWaitingChance(nowMs, origFireAt, cnum("busyMaxHoldMin", 180));
+      const chance = pi.kind === "promise" ? 1 : guanianWaitingChance(nowMs, origFireAt, cnum("busyMaxHoldMin", 180));
       const roll = guanianRoll(job.id + ":waiting") / 100;
       const cooled = roll >= chance;
       await appendDecision({ at: nowMs, kind: "freshness", time: pi.time || "", by: "cloud",
@@ -1275,7 +1263,7 @@ Deno.serve(async (req: Request) => {
       } catch { /* 状态算不出来就按冻结快照发 */ }
     }
 
-    if (guanianPlan.item) {
+    if (guanianPlan.item && !payload.generatedResponse) {
       const topic = guanianPlan.item;
       const threads = guanianPlan.row?.context?.threads;
       if (topic.from && Array.isArray(threads) && threads.some(t => t && t.id === topic.from && t.done === true)) {
@@ -1285,57 +1273,56 @@ Deno.serve(async (req: Request) => {
       // 最新聊天是判断事实的依据；读取失败时稍后重试，不能拿旧快照重复问。
       const sid = payload.merge?.sessionId;
       if (sid) {
-        const recent = await rest(`push_chat_mirror?user_id=eq.${encodeURIComponent(job.user_id)}&session_id=eq.${encodeURIComponent(sid)}&select=role,content,message_at&order=message_at.desc&limit=60`);
-        if (!recent.ok) {
-          await rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}`, { method: "PATCH", body: JSON.stringify({ status: "pending", execute_at: new Date(Date.now() + 5 * 60000).toISOString(), result_note: "hold: 最新聊天读取失败，稍后核对", updated_at: new Date().toISOString() }) });
-          return;
-        }
-        const rows = await recent.json() as { role: string; content: string }[];
-        const facts = rows.reverse().filter(r => r.role === "user" || r.role === "assistant").map(r => `${r.role === "user" ? "用户" : "你"}：${String(r.content || "").slice(0, 1500)}`).join("\n");
+        const tz = historyTz;
         appendUserNote(payload.request.body, payload.request.providerKind,
-          `[挂念发送前的事实核对，不是用户消息]\n原念头：${topic.intent || "按上文预约意图"}\n最新聊天（按先后）：\n${facts || "没有新增镜像记录，请结合已有聊天，不可编造。"}\n`
+          `[挂念发送前的事实核对，不是用户消息]\n当前当地时间：${new Date(Date.now() + tz * 60000).toISOString().slice(0,16)}\n原念头：${topic.intent || "按上文预约意图"}\n最新聊天见上方唯一一份「最新云端聊天事实」，不可编造。\n`
           + "先核对这个念头是否仍有必要：如果你已经在聊天里问过、说过这件事，用户已经回答或事情已经解决，就不要再发，也不要换个话题凑消息。仅仅出现相关词不等于已经说过，按实际问答与语义判断。具体约定或事件是否过时也按事实判断，不因单纯经过多少分钟而认定失效。\n"
-          + "无需再发时，只输出 [挂念作罢：聊天已提过] 或 [挂念作罢：事情已解决或发生变化]，不要输出台词、独白或其他标签；仍有未说过且符合当前事实的内容时，按原格式自然成文。用户的最新事实优先于旧预约意图。");
+          + "无需再发时，只输出 [挂念作罢：聊天已提过] 或 [挂念作罢：事情已解决或发生变化]，不要输出台词、独白或其他标签；仍有未说过且符合当前事实的内容时，按原格式自然成文。双方最新事实优先于旧预约意图。角色说过到了就是已交代的事实，后续不能无故退回尚未到家；再次外出必须有明确依据。约定到点并不证明已完成；不能替用户宣布完成。");
       }
     }
 
     // 挂念挂的时刻受「一天最多调多少次模型」约束；聊天兜底之类不是挂念的不拦，只记账
     const usageSource = guanianPlan.item ? "cloud-wake" : "cloud-chat";
     const budget = await usageBudget(rest, job.user_id).catch(() => null);
-    if (guanianPlan.item && budget) {
+    if (!payload.generatedResponse && guanianPlan.item && budget) {
       const over = usageExceeded(budget);
       if (over) {
         await finish("done", `usage cap: ${over}`);
         return;
       }
     }
-    await progress("llm request started");
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 300_000);
-    let llmResponse: Response;
-    try {
-      llmResponse = await fetch(payload.request.url, {
-        method: "POST",
-        headers: payload.request.headers,
-        body: JSON.stringify(payload.request.body),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-    if (!llmResponse.ok) {
-      const errorText = await llmResponse.text().catch(() => "");
-      await finish("failed", `api ${llmResponse.status}: ${errorText.slice(0, 200)}`);
-      return;
-    }
-    const data = await llmResponse.json();
-    await usageAdd(rest, job.user_id, budget?.tz ?? 0, usageSource, payload.request.providerKind, data);
-    let rawText = extractResponseText(payload.request.providerKind, data).trim();
-    if (!rawText) {
-      await finish("failed", "empty response");
-      return;
-    }
+    if (!payload.generatedResponse) {
+      await progress("llm request started");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 300_000);
+      let llmResponse: Response;
+      try {
+        llmResponse = await fetch(payload.request.url, {
+          method: "POST",
+          headers: payload.request.headers,
+          body: JSON.stringify(payload.request.body),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!llmResponse.ok) {
+        const errorText = await llmResponse.text().catch(() => "");
+        await finish("failed", `api ${llmResponse.status}: ${errorText.slice(0, 200)}`);
+        return;
+      }
+      const data = await llmResponse.json();
+      const generatedText = extractResponseText(payload.request.providerKind, data).trim();
+      if (!generatedText) {
+        await finish("failed", "empty response");
+        return;
+      }
 
+      payload.generatedResponse = { rawText: generatedText, createdAt: new Date().toISOString() };
+      await saveGeneratedResponse();
+      await usageAdd(rest, job.user_id, budget?.tz ?? 0, usageSource, payload.request.providerKind, data);
+    }
+    let rawText = payload.generatedResponse.rawText;
     if (payload.allowSilence === true && isChatSilenceResponse(rawText, payload.silenceThinkingTag)) {
       await finish("done", "reply silenced");
       return;
@@ -1348,6 +1335,26 @@ Deno.serve(async (req: Request) => {
       return;
     }
 
+    await progress(`llm ok, ${rawText.length} chars`);
+    if (generationLease) {
+      const valid = await rest("rpc/push_generation_lease", { method: "POST", body: JSON.stringify({
+        p_user_id: job.user_id, p_session_id: generationLease.sessionId, p_token: generationLease.token, p_action: "renew",
+      }) });
+      if (!valid.ok || await valid.json() !== true) { await retry("hold: 会话生成租约失效，重新核对"); return; }
+    }
+    if (isPromise || guanianPlan.item) {
+      let latest: Awaited<ReturnType<typeof loadRecheckPlan>>;
+      try { latest = await loadRecheckPlan(rest, job.user_id, guanianCharacterId, guanianWakeId); }
+      catch { await retry("hold: 成文后约定计划读取失败，等待恢复"); return; }
+      if (!promiseIsCurrent(latest) || !isPromise && (!latest.item || latest.item.act === false)) { await finish("done", "plan skip: 成文期间时刻已撤销或替换"); return; }
+    }
+    if (payload.generatedResponse.processingStarted && !payload.generatedResponse.delivery) {
+      await finish("failed", "回复已保存，外部动作执行结果未确认；需核对后恢复，避免重复执行"); return;
+    }
+    if (!payload.generatedResponse.delivery && (SHORTCUT_MARKER_RE.test(rawText) || payload.weixin?.force || rawText.includes("【发到微信】"))) {
+      payload.generatedResponse.processingStarted = true;
+      await saveGeneratedResponse();
+    }
     // ── 离线来电：复用小手机既有的通话协议，并兼容已经预约的旧任务 ──
     // 仅在回复开头 200 字内识别严格的「我（向某人）发起了语音通话」标签，
     // 普通叙述中的“某人发起了通话”不会误触发。标签从正文剥离，不进聊天记录。
@@ -1522,7 +1529,7 @@ Deno.serve(async (req: Request) => {
     };
     // shortcut_resume 已经是一次动作结果后的第二轮，禁止它再次解析动作标记，
     // 避免模型不守“不要重复执行”提示时形成递归快捷动作。
-    if (!payload.shortcut) {
+    if (!payload.shortcut && !payload.generatedResponse.delivery) {
       const markerMatch = rawText.match(SHORTCUT_MARKER_RE);
       if (markerMatch) {
         const markerText = markerMatch[0];
@@ -1698,7 +1705,7 @@ Deno.serve(async (req: Request) => {
     // 的结果续跑使用 force，保证第二轮无需模型再次决定渠道也回到同一 bot。 ──
     const WEIXIN_MARKER = "【发到微信】";
     let deliveredViaWeixin = false;
-    {
+    if (!payload.generatedResponse.delivery) {
       const head = rawText.slice(0, 200);
       const markerAt = head.indexOf(WEIXIN_MARKER);
       const forceWeixin = payload.weixin?.force === true;
@@ -1767,7 +1774,32 @@ Deno.serve(async (req: Request) => {
       return;
     }
 
+    if (payload.generatedResponse.delivery) {
+      rawText = payload.generatedResponse.delivery.rawText;
+      deliverAsCall = payload.generatedResponse.delivery.deliverAsCall;
+      executedShortcutMarker = payload.generatedResponse.delivery.marker;
+      deferredShortcutCommandId = String(payload.generatedResponse.delivery.commandId || "");
+      deferredShortcutActionName = String(payload.generatedResponse.delivery.actionName || "");
+      deferredShortcutEmail = payload.generatedResponse.delivery.email as DeferredShortcutEmail | null;
+      shortcutDeliveryError = String(payload.generatedResponse.delivery.error || "");
+      shortcutStoragePath = String(payload.generatedResponse.delivery.storagePath || "");
+    } else {
+      payload.generatedResponse.delivery = { rawText, deliverAsCall, marker: executedShortcutMarker, commandId: deferredShortcutCommandId, actionName: deferredShortcutActionName, email: deferredShortcutEmail, error: shortcutDeliveryError, storagePath: shortcutStoragePath };
+      await saveGeneratedResponse();
+    }
     await progress(`llm ok, ${rawText.length} chars${deliverAsCall ? ", call" : ""}`);
+    if (generationLease) {
+      const valid = await rest("rpc/push_generation_lease", { method: "POST", body: JSON.stringify({
+        p_user_id: job.user_id, p_session_id: generationLease.sessionId, p_token: generationLease.token, p_action: "renew",
+      }) });
+      if (!valid.ok || await valid.json() !== true) { await retry("hold: 会话生成租约失效，重新核对"); return; }
+    }
+    if (isPromise || guanianPlan.item) {
+      let latest: Awaited<ReturnType<typeof loadRecheckPlan>>;
+      try { latest = await loadRecheckPlan(rest, job.user_id, guanianCharacterId, guanianWakeId); }
+      catch { await retry("hold: 成文后约定计划读取失败，等待恢复"); return; }
+      if (!promiseIsCurrent(latest) || !isPromise && (!latest.item || latest.item.act === false)) { await finish("done", "plan skip: 成文期间时刻已撤销或替换"); return; }
+    }
     const outboxResponse = await rest("push_outbox", {
       method: "POST",
       body: JSON.stringify([{
@@ -1777,16 +1809,18 @@ Deno.serve(async (req: Request) => {
         session_id: payload.merge?.sessionId ?? null,
         trigger_key: job.trigger_key,
         raw_text: rawText,
+        created_at: payload.generatedResponse.createdAt,
         meta: {
           ...(payload.merge ?? {}),
           pushGenerated: true,
+          ...(cloudHistory ? { guanianContext: { messageIds: cloudHistory.messages.slice(-80).map(m => m.id), checkedAt: new Date().toISOString(), eventId: guanianPlan.item?.from || null, revision: guanianPlan.item?.promiseRevision || null } } : {}),
           ...(executedShortcutMarker ? { shortcutMarker: executedShortcutMarker } : {}),
         },
       }]),
     });
     if (!outboxResponse.ok) {
       const detail = await outboxResponse.text().catch(() => "");
-      await finish("failed", `outbox write failed: ${detail.slice(0, 180) || outboxResponse.status}`);
+      await retry(`outbox write failed; saved reply retained: ${detail.slice(0, 180) || outboxResponse.status}`);
       return;
     }
     await progress("outbox written, pushing");
@@ -1913,7 +1947,7 @@ Deno.serve(async (req: Request) => {
           ? { ...idleRepeat, remaining: Number(idleRepeat.remaining) - 1 }
           : undefined,
       };
-      const nextPayload = { ...payload, merge: nextMerge };
+      const nextPayload = { ...payload, generatedResponse: undefined, merge: nextMerge };
       await rest("push_jobs", {
         method: "POST",
         body: JSON.stringify([{
@@ -1930,7 +1964,12 @@ Deno.serve(async (req: Request) => {
 
     await finish("done", `generated, pushed ${pushed}${shortcutActionNote ? `, ${shortcutActionNote}` : ""}${pushErrors.length ? `, errors: ${pushErrors.slice(0, 3).join(" | ")}` : ""}`);
   } catch (err) {
-    await finish("failed", err instanceof Error ? err.message : String(err));
+    if (resultStored) await retry("已保存回复，等待恢复投递：" + (err instanceof Error ? err.message : String(err)));
+    else await finish("failed", err instanceof Error ? err.message : String(err));
+  } finally {
+    if (generationLease) await rest("rpc/push_generation_lease", { method: "POST", body: JSON.stringify({
+      p_user_id: job.user_id, p_session_id: generationLease.sessionId, p_token: generationLease.token, p_action: "release",
+    }) }).catch(() => undefined);
   }
   };
 
@@ -1940,3 +1979,249 @@ Deno.serve(async (req: Request) => {
   else await work;
   return new Response("accepted", { status: 200 });
 });
+
+// BEGIN GUANIAN CLOUD HISTORY
+// Shared by both self-contained cloud workers; injected by push:build-dist.
+type GuanianCloudMessage = { id: string; role: string; content: string; message_at: string; response_batch_id?: string; media_type?: string };
+type GuanianCloudOutput = { id: string; trigger_key?: string; raw_text: string; created_at: string; consumed_at?: string; meta?: Record<string, unknown> };
+type GuanianCloudHistory = { messages: GuanianCloudMessage[]; outputs: GuanianCloudOutput[]; lastGeneratedAt: number;
+  uncertainLegacy?: { message: GuanianCloudMessage; outputIds: string[]; exactText: boolean }[] };
+
+/** Absence, null, booleans and invalid offsets are not UTC. Explicit zero is. */
+function guanianTimezone(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value !== "number" && !(typeof value === "string" && value.trim())) continue;
+    const n = Number(value);
+    if (Number.isInteger(n) && n >= -840 && n <= 840) return n;
+  }
+  return null;
+}
+function guanianContextTimezone(context: Record<string, unknown>, at: number): number | null {
+  const day = context.day as { tz?: unknown } | undefined;
+  const kit = context.genKit as { tz?: unknown } | undefined;
+  const explicit = guanianTimezone(day?.tz, kit?.tz, context.tzOffsetMin);
+  if (explicit !== null) return explicit;
+  // Old gateways defaulted missing userSleepTz to zero. Only the actual IANA
+  // zone is trustworthy in such a legacy row; never use that defaulted zero.
+  if (typeof context.userSleepTimeZone === "string" && context.userSleepTimeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", { timeZone: context.userSleepTimeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at);
+      const get = (type: string) => Number(parts.find(part => part.type === type)?.value);
+      return guanianTimezone((Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute")) - Math.floor(at / 60000) * 60000) / 60000);
+    } catch { /* Invalid zone: require a new phone snapshot. */ }
+  }
+  return null;
+}
+async function readGuanianCloudHistory(
+  rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, sessionId: string,
+): Promise<GuanianCloudHistory> {
+  if (!sessionId) throw new Error("缺少聊天会话，不能核对云端消息");
+  const scope = `user_id=eq.${encodeURIComponent(userId)}&session_id=eq.${encodeURIComponent(sessionId)}`;
+  const responses = await Promise.all([
+    rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,media_type.neq.response_batch)&order=message_at.desc&limit=200`),
+    rest(`push_outbox?${scope}&meta->>pushGenerated=eq.true&select=id,trigger_key,raw_text,created_at,consumed_at,meta&order=created_at.desc&limit=200`),
+  ]);
+  if (responses.some(r => !r.ok)) throw new Error("云端聊天读取失败，请检查 schema 11 与云函数部署；稍后重试");
+  const [mirrors, outputs] = await Promise.all(responses.map(r => r.json())) as [GuanianCloudMessage[], GuanianCloudOutput[]];
+  if (!Array.isArray(mirrors) || !Array.isArray(outputs)) throw new Error("云端聊天数据格式错误");
+  const records = new Map<string, GuanianCloudMessage>();
+  const cloudIds = new Set(outputs.map(o => `push-outbox:${o.id}`));
+  const snapshots = new Map<string, GuanianCloudMessage[]>();
+  // Fetch snapshots by batch, independently of the recent 200-bubble window.
+  // Each row is an atomic full replacement; an empty list is a deletion.
+  const batchIds = [...cloudIds];
+  for (let start = 0; start < batchIds.length; start += 50) {
+    const ids = batchIds.slice(start, start + 50).map(id => JSON.stringify(id)).join(",");
+    const response = await rest(`push_chat_mirror?${scope}&media_type=eq.response_batch&response_batch_id=in.(${encodeURIComponent(ids)})&select=id,content,response_batch_id,media_type&limit=50`);
+    if (!response.ok) throw new Error("整轮聊天镜像读取失败，保留任务等待重试");
+    for (const row of await response.json() as GuanianCloudMessage[]) {
+      if (row.media_type !== "response_batch" || !row.response_batch_id || !cloudIds.has(row.response_batch_id)) continue;
+      const value = JSON.parse(row.content) as { v?: number; messages?: GuanianCloudMessage[] };
+      if (value.v !== 1 || !Array.isArray(value.messages) || value.messages.some(m =>
+        typeof m.id !== "string" || typeof m.content !== "string" || !Number.isFinite(Date.parse(m.message_at)))) {
+        throw new Error("整轮聊天镜像格式异常，请重新同步镜像");
+      }
+      snapshots.set(row.response_batch_id, value.messages);
+    }
+  }
+  for (const m of mirrors) {
+    if (!m || !["user", "assistant"].includes(m.role) || !Number.isFinite(Date.parse(m.message_at))) continue;
+    if (m.media_type === "response_batch") continue;
+    // A single mirrored bubble never proves a full response. Use the atomic
+    // batch snapshot when available, otherwise retain the original whole reply.
+    if (m.response_batch_id && cloudIds.has(m.response_batch_id)) continue;
+    records.set(`mirror:${m.id}`, m);
+  }
+  // Pre-batch hosts stamped imported bubbles with consumption time. Match only a
+  // complete, unique consecutive sequence at that receipt time; never dedupe by
+  // an isolated phrase or by the latest mirror timestamp.
+  const compact = (s: string) => s.replace(/\s+/g, "").trim();
+  const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id)
+    .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
+  const candidates = new Map<string, { groups: GuanianCloudMessage[][]; output: GuanianCloudOutput }>();
+  for (const o of outputs) {
+    const receivedAt = Date.parse(o.consumed_at || "");
+    if (!Number.isFinite(receivedAt)) continue;
+    const raw = String(o.raw_text || "");
+    const forms = new Set([compact(raw), compact(raw.split(/\[(?:内心|心声)\]/)[0])].filter(Boolean));
+    const matches: GuanianCloudMessage[][] = [];
+    for (let start = 0; start < legacy.length; start++) {
+      const group: GuanianCloudMessage[] = []; let text = "";
+      for (const m of legacy.slice(start, start + 40)) {
+        if (m.role !== "assistant" || !records.has(`mirror:${m.id}`) || Math.abs(Date.parse(m.message_at) - receivedAt) > 120_000) break;
+        group.push(m); text += compact(m.content);
+        if (forms.has(text)) matches.push([...group]);
+        if (![...forms].some(f => f.startsWith(text))) break;
+      }
+    }
+    candidates.set(o.id, { groups: matches, output: o });
+  }
+  // Resolve across ALL outputs before removing anything. Two identical outputs
+  // may otherwise both claim the same mirror sequence in iteration order.
+  const owners = new Map<string, Set<string>>();
+  for (const [id, candidate] of candidates) for (const group of candidate.groups) for (const m of group) {
+    if (!owners.has(m.id)) owners.set(m.id, new Set());
+    owners.get(m.id)!.add(id);
+  }
+  const uncertainLegacy: NonNullable<GuanianCloudHistory["uncertainLegacy"]> = [];
+  for (const candidate of candidates.values()) {
+    if (candidate.groups.length === 1 && candidate.groups[0].every(m => owners.get(m.id)?.size === 1)) {
+      for (const m of candidate.groups[0]) records.delete(`mirror:${m.id}`);
+    }
+  }
+  for (const m of legacy) {
+    if (m.role !== "assistant" || !records.has(`mirror:${m.id}`)) continue;
+    const exact = [...(owners.get(m.id) || [])];
+    // Receipt-time proximity is not identity. Unrelated old-format utterances
+    // stay in the factual history and can open the promise-update gate.
+    const possible = exact;
+    if (!possible.length) continue;
+    // Insufficient old metadata cannot establish a separate utterance. Keep
+    // the evidence in an explicitly uncertain appendix, never as a fresh turn
+    // or as evidence for automatic unanswered-round cancellation.
+    uncertainLegacy.push({ message: m, outputIds: possible, exactText: exact.length > 0 });
+    records.delete(`mirror:${m.id}`);
+  }
+  let lastGeneratedAt = 0;
+  for (const o of outputs) {
+    const at = Date.parse(o.created_at);
+    if (!Number.isFinite(at)) continue;
+    lastGeneratedAt = Math.max(lastGeneratedAt, at);
+    const id = `push-outbox:${o.id}`;
+    const snapshot = snapshots.get(id);
+    if (snapshot && !snapshot.length) continue; // Explicit whole-batch deletion.
+    records.set(id, { id, role: "assistant", content: snapshot
+      ? snapshot.map(m => m.content).join("\n") : String(o.raw_text || ""), message_at: o.created_at });
+  }
+  return { messages: [...records.values()].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id)), outputs, lastGeneratedAt, uncertainLegacy };
+}
+function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80): string {
+  const main = history.messages.slice(-limit).map(m => {
+    const local = new Date(Date.parse(m.message_at) + tz * 60_000).toISOString().slice(0, 16).replace("T", " ");
+    return `[${m.id}] ${local} ${m.role === "user" ? "用户" : "你"}：${m.content.slice(0, 4000)}`;
+  }).join("\n");
+  const uncertain = (history.uncertainLegacy || []).slice(-20);
+  if (!uncertain.length) return main;
+  return main + "\n[旧镜像待核对资料：可能是补收副本，不能当作新发言、新承诺或新增未回应轮次；不推断用户已读。原始记录未删除。]\n"
+    + uncertain.map(({ message: m, outputIds, exactText }) => `[mirror:${m.id}] 记录时间 ${m.message_at}；可能对应 ${outputIds.map(id => "push-outbox:" + id).join(",")}；`
+      + (exactText ? "正文已见对应云端输出，不重复列出。" : "待核对原文：" + m.content.slice(0, 4000))).join("\n");
+}
+function guanianHistoryRounds(history: GuanianCloudHistory, nowMs: number): number {
+  let rounds = 0, last = Infinity;
+  for (const m of [...history.messages].reverse()) {
+    if (m.role === "user") break;
+    const at = Date.parse(m.message_at);
+    if (last - at > 3 * 60_000 && nowMs - at >= 30 * 60_000) rounds++;
+    last = at;
+  }
+  return rounds;
+}
+
+/** Explicit timed wakes drive proactive spacing; passive replies never consume it. */
+function guanianLastProactiveAt(history: GuanianCloudHistory): number {
+  return history.outputs.reduce((at, o) => {
+    if (!o.trigger_key?.startsWith("timedwake:")) return at;
+    const event = o.meta?.guanianPromise as { id?: string } | undefined;
+    const context = o.meta?.guanianContext as { revision?: number | null } | undefined;
+    if (event?.id || context?.revision) return at;
+    return Math.max(at, Date.parse(o.created_at) || 0);
+  }, 0);
+}
+// END GUANIAN CLOUD HISTORY
+
+// BEGIN GUANIAN PROMISES
+// Pure event rules, shared by the app and self-contained cloud workers.
+function promiseSubject(value) {
+  return ["user", "character", "both"].includes(value) ? value : "user";
+}
+function promiseSubjectLabel(value) {
+  return { user: "用户", character: "角色", both: "双方" }[promiseSubject(value)];
+}
+// A cheap wake-up hint, not a parser: the model still checks whether a promise exists.
+function hasPromiseUpdate(messages, threads) {
+  return messages.some(m => {
+    const text = String(m.content || m.c || "");
+    return /(?:\d{1,2}[:：]\d{2}|[一二三四五六七八九十两\d]{1,3}[点时]|明天|后天|周[一二三四五六日天])/.test(text)
+      && /回|到|约|等|一起|见|答应|记得|提醒|陪|去|再说|联系|找你/.test(text)
+      || threads.some(t => t.kind === "promise" && !t.done && text.includes(String(t.text || ""))
+        && /改|不去|不回|取消|算了|完成|好了|到了|办完/.test(text));
+  });
+}
+// New assistant messages may update promises, but cannot open the ordinary impulse gate.
+function recheckEvidence(messages, threads, since) {
+  const fresh = messages.filter(m => Number(m.t ?? Date.parse(m.message_at || "")) > since);
+  const users = fresh.filter(m => m.role === "user");
+  const promiseUpdate = hasPromiseUpdate(fresh, threads);
+  return { fresh, users, promiseUpdate, ledgerOnly: users.length === 0 && promiseUpdate };
+}
+function ordinaryQuota(items) {
+  return items.filter(w => w.kind !== "promise" && w.act).length;
+}
+function updatePromiseThreads(threads, changes, nowMs, by) {
+  const list = threads.map(t => ({ ...t }));
+  for (const k of changes) {
+    const id = String(k.id || "").replace(/[\[\]\s]/g, "");
+    const text = String(k.text || "").trim().slice(0, 60);
+    const subject = promiseSubject(k.subject);
+    const old = id ? list.find(t => t.id === id && t.kind === "promise")
+      : list.find(t => !t.done && t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
+    // Explicit unknown IDs cannot silently create a second event.
+    if (id && !old) continue;
+    if (k.status === "completed" || k.status === "cancelled") {
+      if (old) Object.assign(old, { status: k.status, done: true, at: nowMs, by });
+      continue;
+    }
+    const due = Number(k.due) || Number(old?.due);
+    if (!(due > 0) || (!text && !old)) continue;
+    if (old) {
+      const changed = due !== old.due || (k.subject && subject !== promiseSubject(old.subject)) || old.done;
+      Object.assign(old, { text: text || old.text, due, subject: k.subject ? subject : promiseSubject(old.subject),
+        sourceMessageId: String(k.sourceMessageId || old.sourceMessageId || "").slice(0, 100),
+        status: changed ? "pending" : (old.status || "pending"), done: false, at: nowMs, by,
+        revision: (Number(old.revision) || 1) + (changed ? 1 : 0),
+        ...(changed ? { nudge: "", mentionedAt: 0 } : {}) });
+    } else {
+      // Stable within a judgment; no implicit clock or random state.
+      let n = list.length;
+      let newId;
+      do { newId = "p" + nowMs.toString(36) + (n++).toString(36); } while (list.some(t => t.id === newId));
+      list.push({ id: newId, kind: "promise", text, due, subject, revision: 1, status: "pending", done: false,
+        sourceMessageId: String(k.sourceMessageId || "").slice(0, 100), since: nowMs, at: nowMs, by,
+        why: String(k.why || "").slice(0, 40) });
+    }
+  }
+  return list;
+}
+function promiseNeedsTask(t, items, nowMs, endMs) {
+  return t.kind === "promise" && !t.done && t.status !== "completed" && t.status !== "cancelled"
+    && !(Number(t.mentionedAt) > 0) && !/said:/.test(String(t.nudge || ""))
+    && Number(t.due) > nowMs - 86400000 && Number(t.due) < endMs
+    && !items.some(w => w.from === t.id && w.kind === "promise" && w.act
+      && Number(w.promiseRevision || 1) === Number(t.revision || 1));
+}
+function promiseIntent(t, localDue) {
+  return `核对约定 [${t.id}]：${promiseSubjectLabel(t.subject)}约好在 ${localDue} ${t.text}。`
+    + "这是明确约定，到点核对最新时间、双方对话和当前行程。角色自己的承诺应交代进展；用户的事情只能询问，不能替用户宣称完成。"
+    + "时间到了不等于事情已完成；有事实支持才能说到了或做完了，延误就按现在的情况说明，不能照搬旧时间。已改期、取消、完成且交代过则作罢。";
+}
+// END GUANIAN PROMISES

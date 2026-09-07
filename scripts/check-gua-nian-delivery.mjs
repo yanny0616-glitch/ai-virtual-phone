@@ -28,7 +28,7 @@ function app() {
   };
   const ctx = vm.createContext({ Date: class extends Clock { static now() { return h.now ?? now; } }, document, h, URLSearchParams, console, AbortController,
     setTimeout: (fn) => { h.timeout = fn; return 1; }, clearTimeout: () => {},
-    AiPhone: { ai: { generate: async req => h.generate(req) }, moments: { post: async input => h.momentsPost(input) }, db: {
+    AiPhone: { chat: { readHistory: async () => ({ sessionId: "s", messages: [] }) }, ai: { generate: async req => h.generate(req) }, moments: { post: async input => h.momentsPost(input) }, db: {
       list: async (table) => table === "plans" ? [h.cx.plan] : [],
       update: async (table, _id, patch) => {
         if (table === "plans") return h.cx.plan = { ...h.cx.plan, ...patch };

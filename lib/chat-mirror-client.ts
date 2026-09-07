@@ -15,6 +15,7 @@ import {
 } from "./chat-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { isPersonalPushCloudActive, personalPushFetch } from "./personal-push-cloud";
+import { dbReadChatSession } from "./chat-db";
 
 const MIRROR_ENABLED_KEY = "chat_mirror_enabled_v1";
 const MIRROR_QUEUE_KEY = "chat_mirror_queue_v1";
@@ -46,6 +47,7 @@ export type ChatMirrorEntry = {
     createdAt: string;
     /** 本地删掉了这条：云端按 id 删。内容留空 */
     deleted?: true;
+    responseBatchId?: string;
 };
 
 let installed = false;
@@ -56,6 +58,7 @@ let retryTimer: number | null = null;
 let queueNeedsRefresh = false;
 // null=未探测；旧版个人云函数没有 chat-mirror 动作，探测失败时静默停发（不丢队列）。
 let mirrorCapable: boolean | null = null;
+let batchMirrorCapable = false;
 let capabilityCheckedAt = 0;
 const CAPABILITY_TTL_MS = 5 * 60_000;
 
@@ -136,8 +139,33 @@ function toMirrorEntry(msg: ChatMessage, deleted?: true): ChatMirrorEntry | null
         content,
         mediaType: msg.mediaType || undefined,
         createdAt: msg.createdAt,
+        responseBatchId: msg.responseBatchId,
         ...(deleted ? { deleted: true as const } : {}),
     };
+}
+
+/** A single mirror row carries the whole committed response, including an
+ * empty snapshot after deletion. A 50-entry upload boundary cannot split it. */
+async function mirrorBatchSnapshots(entries: ChatMirrorEntry[]) {
+    const batches = new Map<string, ChatMirrorEntry>();
+    for (const entry of entries) if (entry.responseBatchId?.startsWith("push-outbox:")) {
+        batches.set(JSON.stringify([entry.sessionId, entry.responseBatchId]), entry);
+    }
+    const sessions = new Map<string, Awaited<ReturnType<typeof dbReadChatSession>>>();
+    const snapshots = [];
+    for (const entry of batches.values()) {
+        if (!sessions.has(entry.sessionId)) sessions.set(entry.sessionId, await dbReadChatSession(entry.sessionId));
+        const saved = sessions.get(entry.sessionId)!;
+        if (!saved.session) continue;
+        const messages = saved.messages.filter(m => m.responseBatchId === entry.responseBatchId && m.role === "assistant")
+            .sort((a, b) => (a.order ?? Date.parse(a.createdAt)) - (b.order ?? Date.parse(b.createdAt)))
+            .map(m => ({ id: m.id, content: mirrorText(m).slice(0, CONTENT_MAX), message_at: m.createdAt }));
+        // Absence is only a deletion if a durable delivery receipt exists.
+        if (!messages.length && !entry.deleted && !saved.batchIds.includes(entry.responseBatchId!)) continue;
+        snapshots.push({ sessionId: entry.sessionId, characterId: entry.characterId,
+            batchId: entry.responseBatchId, createdAt: messages[0]?.message_at || entry.createdAt, messages });
+    }
+    return snapshots;
 }
 
 /** 包含响应正文读取的超时；超时不确认队列，后续请求可重新发起。 */
@@ -175,6 +203,7 @@ async function checkMirrorCapability(): Promise<boolean> {
         // 临时 HTTP 错误、网关错误页和无效 JSON 都不是“不支持”的证据。
         if (!res.ok || data?.ok !== true || !Array.isArray(data.capabilities)) return false;
         mirrorCapable = data.capabilities.includes("chat-mirror");
+        batchMirrorCapable = data.capabilities.includes("chat-mirror-batches");
         capabilityCheckedAt = Date.now();
     } catch {
         // 网络抖动不下结论，下次再探
@@ -204,7 +233,7 @@ function uploadQueue(manual = false): Promise<{ sent: number; queued: number }> 
             if (batch.length === 0) break;
             const { response: res, data } = await mirrorRequest("chat-mirror", {
                 method: "POST",
-                body: JSON.stringify({ entries: batch }),
+                body: JSON.stringify({ entries: batch, ...(batchMirrorCapable ? { snapshots: await mirrorBatchSnapshots(batch) } : {}) }),
             });
             if (!res.ok || !data?.ok) throw new Error(data?.error || `上传失败：HTTP ${res.status}（已传 ${sent} 条）`);
             const acknowledged = new Set(batch.map(entry => entry.queueId));
@@ -213,7 +242,9 @@ function uploadQueue(manual = false): Promise<{ sent: number; queued: number }> 
         }
         return { sent, queued: getChatMirrorQueueSize() };
     };
-    flushPromise = run().finally(() => { flushPromise = null; });
+    const locked = (async () => typeof navigator !== "undefined" && navigator.locks?.request
+        ? await navigator.locks.request("ai-phone:chat-mirror-upload", run) : await run())();
+    flushPromise = locked.finally(() => { flushPromise = null; });
     return flushPromise;
 }
 

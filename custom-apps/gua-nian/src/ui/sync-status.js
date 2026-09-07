@@ -12,8 +12,8 @@
       return '<div class="card"><div class="sec-head"><span class="t">' + esc(cx.character.name) +
         '</span><span class="badge ' + (ok ? "ok" : "warn") + '">' + title + '</span></div>' +
         '<div class="d-why">' + esc(message) + (ok ? ' · ' + esc(fmtHM(state.at)) : ' 本地数据已保留。') + '</div>' +
-        (!ok && state.status !== "readonly" ? '<button class="tgl" data-sync-retry="' + esc(cx.character.id) + '"' +
-          (busy || cx.busy || cx._planLock ? ' disabled' : '') + '>重试同步</button>' : '') + '</div>';
+        (state.status !== "readonly" ? '<button class="tgl" data-sync-retry="' + esc(cx.character.id) + '"' +
+          (busy || cx.busy || cx._planLock ? ' disabled' : '') + '>' + (ok ? '重试云端任务' : '重试同步') + '</button>' : '') + '</div>';
     }).join("");
     box.innerHTML += genRows.map(({ cx, state }) => '<div class="card"><div class="d-why">' + esc(cx.character.name) + ' · ' + esc(state.message) + '</div><button class="tgl" data-gen-retry="' + esc(cx.character.id) + '"' + (cx._genStopping ? ' disabled' : '') + '>重试停用自动生成</button></div>').join("");
     box.querySelectorAll("[data-gen-retry]").forEach(button => {

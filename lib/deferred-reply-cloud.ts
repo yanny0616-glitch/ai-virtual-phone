@@ -1,4 +1,4 @@
-import { readDeferredReply, writeDeferredReply, readEffectiveReplyGate, listDeferredReplySessions, type DeferredReply } from "./chat-reply-gate";
+import { readDeferredReply, writeDeferredReply, readEffectiveReplyGate, evaluateReplyGate, listDeferredReplySessions, type DeferredReply } from "./chat-reply-gate";
 import { isPersonalPushCloudActive, personalPushFetch, loadPersonalPushCloudState } from "./personal-push-cloud";
 import { hasAccountPushSubscription } from "./push-client";
 import { buildChatPromptMessages } from "./chat-engine";
@@ -46,7 +46,31 @@ export function freezeDeferredReplyTiming(rec: DeferredReply): CloudReplyTiming 
     };
 }
 
-type Receipt = { ok?: boolean; supported?: boolean; policySupported?: boolean; silenceSupported?: boolean; status?: string; executeAt?: string; resultNote?: string; error?: string };
+type Receipt = { ok?: boolean; supported?: boolean; policySupported?: boolean; silenceSupported?: boolean; status?: string; executeAt?: string; resultNote?: string; error?: string; acceptedMessageId?: string; revision?: number };
+
+/** Settle the exact cloud turn after durable import, not after the next polling tick. */
+export function settleDeferredReplyDelivery(sessionId: string, key: string | null, acceptedMessageId?: string): void {
+    const rec = readDeferredReply(sessionId);
+    if (!key?.startsWith("deferred:") || rec?.cloud?.key !== key || rec.firedAt) return;
+    const accepted = acceptedMessageId || rec.cloud.acceptedMessageId;
+    const lastUser = [...loadChatMessages(sessionId)].reverse().find(m => m.role === "user" && !m.isRetracted);
+    if (!rec.cloud.cancelRequested && accepted && lastUser && lastUser.id !== accepted) {
+        // Messages arriving after claim belong to a successor, never to the closed
+        // job. Persist its identity before sending; a lost response can retry it.
+        const gate = rec.characterId ? readEffectiveReplyGate(rec.characterId) : null;
+        const decision = evaluateReplyGate(gate, lastUser.content);
+        writeDeferredReply(sessionId, {
+            ...(decision.kind === "delay" ? decision : { until: Date.now(), note: decision.note || "" }),
+            characterId: rec.characterId,
+            cloud: { key: `deferred:${crypto.randomUUID()}`, projectUrl: rec.cloud.projectUrl,
+                revision: Date.now(), syncedRevision: 0, attempted: false, state: "syncing" },
+        });
+        notify(sessionId, "上一轮已完成，新增消息已排入下一轮回复");
+        void Promise.resolve().then(() => sync(sessionId));
+    } else {
+        writeDeferredReply(sessionId, { ...rec, firedAt: Date.now(), note: "", cloud: { ...rec.cloud, state: "done" } });
+    }
+}
 async function request(method: string, key?: string, payload?: unknown): Promise<Receipt> {
     const response = await personalPushFetch("deferred-reply", {
         method, ...(payload ? { body: JSON.stringify({ payload }) } : {}), signal: AbortSignal.timeout(20_000),
@@ -127,7 +151,7 @@ async function sync(sessionId: string): Promise<void> {
                 silenceThinkingTag: preset?.online_thinking_tag,
                 notify: { title: character.name, url: "/", characterId: character.id },
                 merge: { sessionId, prevCount: 0, regexes, characterName: character.name, userName: userIdentity?.name ?? "用户",
-                    appId: "chat", appTags: ["chat", "text"], armAt: new Date().toISOString(),
+                    appId: "chat", appTags: ["chat", "text"], tzOffsetMin: -new Date().getTimezoneOffset(), armAt: new Date().toISOString(),
                     ...(lastUser ? { replyAfterLocalMessageId: lastUser.id, replyAfterCreatedAt: lastUser.createdAt } : {}) },
             });
         } else receipt = await request("GET", key);
@@ -139,14 +163,18 @@ async function sync(sessionId: string): Promise<void> {
             return;
         }
         if (["done", "failed", "cancelled"].includes(receipt.status ?? "")) {
+            if (receipt.status === "done") {
+                settleDeferredReplyDelivery(sessionId, key, receipt.acceptedMessageId);
+                return;
+            }
             writeDeferredReply(sessionId, { ...latest, firedAt: Date.now(), note: "", cloud: { ...latest.cloud, state: receipt.status as "done" | "failed" | "cancelled" } });
             if (receipt.status === "failed") notify(sessionId, "云端延后回复失败，可重新触发回复；详情见云端任务日志");
-            else if (updating && receipt.status === "done" && receipt.resultNote !== "reply silenced") notify(sessionId, "上一轮已生成，刚补充的内容未合并；可再次触发回复");
             return;
         }
         const synced = receipt.status === "pending" && updating;
         writeDeferredReply(sessionId, { ...latest, until: Date.parse(receipt.executeAt ?? "") || latest.until,
             cloud: { ...latest.cloud, syncedRevision: synced ? revision : latest.cloud.syncedRevision,
+                acceptedMessageId: receipt.acceptedMessageId || latest.cloud.acceptedMessageId,
                 state: receipt.status === "running" ? "running" : "active" } });
         if (synced && latest.cloud.revision === revision && !latest.cloud.cancelRequested) notify(sessionId, "等待已同步云端，关闭小手机后仍会继续；补充消息和 API 配置已更新");
     } catch {

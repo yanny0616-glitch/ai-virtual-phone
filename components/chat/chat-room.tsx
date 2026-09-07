@@ -1494,7 +1494,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             setMessages(prev => (
                 prev.some(item => item.id === detail.message!.id)
                     ? prev
-                    : [...prev, detail.message!]
+                    : [...prev, detail.message!].sort(compareChatMessages)
             ));
         };
         const onFired = (e: Event) => {
@@ -1508,6 +1508,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         };
         window.addEventListener("followup-started", onStarted);
         window.addEventListener("followup-message-saved", onMessageSaved);
+        const onStorageRefreshed = (e: Event) => {
+            if ((e as CustomEvent<{ sessionId?: string }>).detail?.sessionId === session.id) syncMessagesFromStorage();
+        };
+        window.addEventListener("chat-storage-refreshed", onStorageRefreshed);
         window.addEventListener("followup-fired", onFired);
         // 生成中途才进入聊天室会错过 followup-started 事件，
         // 挂载时主动查一次后台生成状态，把「正在输入」补回来
@@ -1517,6 +1521,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return () => {
             window.removeEventListener("followup-started", onStarted);
             window.removeEventListener("followup-message-saved", onMessageSaved);
+            window.removeEventListener("chat-storage-refreshed", onStorageRefreshed);
             window.removeEventListener("followup-fired", onFired);
         };
     }, [session.id, syncMessagesFromStorage]);

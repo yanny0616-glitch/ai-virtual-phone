@@ -15,7 +15,15 @@
       data = await (requireRead ? cloudFetchBounded : cloudFetch)("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: date });
     } catch (e) { if (requireRead) throw e; return 0; }
     const p = data && data.plan;
-    if (!p || p.plan_date !== date) return 0;
+    if (!p || p.plan_date !== date) {
+      cx.plan = await upsert("plans", x => x.date === date && x.characterId === cx.character.id, { cloudStateVersion: 0, cloudStateUrl: cloudCfg().url });
+      return 0;
+    }
+    const rememberVersion = async () => {
+      if (Number.isFinite(p.state_version)) cx.plan = await upsert("plans", x => x.date === date && x.characterId === cx.character.id,
+        { cloudStateVersion: p.state_version, cloudStateUrl: cloudCfg().url, cloudSlotKeys: (p.items || []).filter(w => w.kind !== "promise" && w.wakeId).map(w => w.wakeId) });
+    };
+    if (p.retry_error && cx._retryNoted !== p.retry_error) { await setPlanSync(cx, { date, cloudUrl: cloudCfg().url, at: Date.now(), status: "failed", resetDecisions: false, message: p.retry_error }); cx._retryNoted = p.retry_error; await log(cx, "云端" + (p.retry_stopped ? "已暂停，修复后点同步重试：" : "等待重试：") + p.retry_error); }
     if ((+p.judged_chat_at || 0) > (+cx.plan.judgedChatAt || 0) || (+p.judged_at || 0) > (+cx.plan.judgedAt || 0)) {
       cx.plan = await upsert("plans", x => x.date === date && x.characterId === cx.character.id, {
         judgedChatAt: Math.max(+p.judged_chat_at || 0, +cx.plan.judgedChatAt || 0),
@@ -64,15 +72,65 @@
       for (const c of ct) {
         if (!c || !c.id || !c.text) continue;
         const mine = list.find((x) => x.id === c.id);
-        if (!mine) { list.push({ id: String(c.id), kind: THREAD_KIND[c.kind] ? c.kind : "topic", text: String(c.text).slice(0, 60), due: +c.due || 0, yearly: !!c.yearly, since: +c.since || +c.at || Date.now(), at: +c.at || Date.now(), by: "cloud", done: !!c.done, nudge: String(c.nudge || ""), why: String(c.why || "").slice(0, 40) }); ch++; }
-        else if ((+c.at || 0) > (+mine.at || 0)) {
+        if (!mine) { list.push({ ...c, id: String(c.id), kind: THREAD_KIND[c.kind] ? c.kind : "topic", text: String(c.text).slice(0, 60), due: +c.due || 0, yearly: !!c.yearly, since: +c.since || +c.at || Date.now(), at: +c.at || Date.now(), by: "cloud", done: !!c.done, nudge: String(c.nudge || ""), why: String(c.why || "").slice(0, 40) }); ch++; }
+        else if (c.kind === "promise"
+          ? (+c.revision || 1) > (+mine.revision || 1) || ((+c.revision || 1) === (+mine.revision || 1) && (+c.at || 0) > (+mine.at || 0))
+          : (+c.at || 0) > (+mine.at || 0)) {
           if (!mine.done && c.done) await dropThreadSlots(cx, mine.id, "这件事你说了结了");
-          mine.done = !!c.done; mine.at = +c.at; mine.nudge = String(c.nudge || mine.nudge || ""); ch++;
+          Object.assign(mine, c); mine.done = !!c.done; mine.at = +c.at; mine.nudge = String(c.nudge || mine.nudge || ""); ch++;
         }
       }
       if (ch) { await saveThreads(cx, list); await log(cx, "惦记账本：并入云端改动 " + ch + " 处"); }
     }
-    if (!decs.length) return 0;
+    // Explicit promises are durable tasks: restore by wake ID even when their decision was acknowledged.
+    let promiseMerged = 0;
+    const promiseItems = (cx.plan.items || []).map(w => ({ ...w }));
+    // Run even if the ledger revision was already saved by an earlier interrupted
+    // pull. Keep the old ID until cancellation succeeds so the next pull can retry.
+    for (const w of promiseItems) {
+      if (w.kind !== "promise" || !w.act || w.thDone || w.generatedAt) continue;
+      const t = (cx.threads || []).find(t => t.id === w.from);
+      const exact = (p.items || []).find(ci => ci.wakeId === w.wakeId);
+      const canonical = (p.items || []).find(ci => ci.kind === "promise" && ci.from === w.from && ci.act
+        && Number(ci.promiseRevision || 1) === Number(t && t.revision || 1));
+      if (!t || t.done || Number(t.revision || 1) !== Number(w.promiseRevision || 1)
+        || exact && !exact.act || canonical && canonical.wakeId !== w.wakeId) {
+        if (w.wakeId) await AiPhone.push.cancelWake(w.wakeId);
+        w.act = false; w.delivery = ""; w.why = "约定已更新，旧预约已撤销"; promiseMerged++;
+      }
+    }
+    for (const ci of (p.items || []).filter(w => w.kind === "promise")) {
+      const t = (cx.threads || []).find(t => t.id === ci.from);
+      if (!t || t.done || Number(t.revision || 1) !== Number(ci.promiseRevision || 1)) continue;
+      const mine = promiseItems.find(w => w.wakeId === ci.wakeId);
+      if (!mine) { promiseItems.push({ ...ci, delivery: ci.wakeId ? "push" : "", hist: [] }); promiseMerged++; }
+      else if (JSON.stringify([mine.act,mine.fireAt,mine.promiseRevision]) !== JSON.stringify([ci.act,ci.fireAt,ci.promiseRevision])) {
+        Object.assign(mine, ci); promiseMerged++;
+      }
+    }
+    if (promiseMerged) {
+      promiseItems.sort((a,b) => a.fireAt-b.fireAt);
+      cx.plan = await upsert("plans", x => x.date === todayStr() && x.characterId === cx.character.id, { items: promiseItems });
+    }
+    // Restore ordinary cloud slots even after their diagnostic decisions were acknowledged.
+    if (Number.isFinite(p.state_version) && p.state_version !== cx.plan.cloudStateVersion) {
+      const merged = cx.plan.items.map(w => ({ ...w }));
+      for (const ci of (p.items || []).filter(w => w.kind !== "promise")) {
+        const mine = merged.find(w => w.kind !== "promise" && ((ci.wakeId && w.wakeId === ci.wakeId)
+          || String(w.source || "") === String(ci.source || "") && String(w.from || "") === String(ci.from || "")
+            && Number(w.origFireAt || w.fireAt) === Number(ci.origFireAt || ci.fireAt)));
+        if (mine && mine.wakeId && mine.wakeId !== ci.wakeId) await AiPhone.push.cancelWake(mine.wakeId);
+        if (mine) Object.assign(mine, ci);
+        else merged.push({ ...ci, hist: [], delivery: ci.act ? "cloud" : "" });
+      }
+      for (const w of merged) {
+        if (w.kind === "promise" || !w.act || !(cx.plan.cloudSlotKeys || []).includes(w.wakeId)) continue;
+        if ((p.items || []).some(ci => ci.wakeId === w.wakeId && ci.act)) continue;
+        await AiPhone.push.cancelWake(w.wakeId); w.act = false; w.delivery = ""; w.why = "云端计划已撤销这个时刻";
+      }
+      cx.plan = await upsert("plans", x => x.date === date && x.characterId === cx.character.id, { items: merged });
+    }
+    if (!decs.length) { await rememberVersion(); return promiseMerged; }
     const byTime = {};
     (Array.isArray(p.items) ? p.items : []).forEach((it) => { if (it && it.time) byTime[it.time] = it; });
     const items = cx.plan.items.slice();
@@ -82,25 +140,25 @@
     let n = 0, maxAt = 0;
     for (const d of decs) {
       if (!d || d.by !== "cloud" || !d.time) continue;
-      const ci = byTime[d.kind === "defer" ? d.to : d.time];
+      const ci = d.wakeId ? (p.items || []).find(w => w.wakeId === d.wakeId) : byTime[d.kind === "defer" ? d.to : d.time];
       if (!(d.at > since)) {
         // 以本地为准丢弃这条裁决——但云端点亮时预约是真挂上了的。只丢记录不撤预约，
         // 那条 job 就成了本地和云端计划里都查不到的孤儿，到点照发。
-        if ((d.kind === "lit" || d.kind === "extra" || d.kind === "defer") && ci && ci.wakeId
+        if ((d.kind === "lit" || ["extra", "promise"].includes(d.kind) || d.kind === "defer") && ci && ci.wakeId
             && !items.some((x) => x.wakeId === ci.wakeId)) {
           try { await AiPhone.push.cancelWake(ci.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ }
           await log(cx, "云端复核：丢弃过期裁决并撤回预约 " + d.time);
         }
         continue;
       }
-      let w = items.find((x) => x.time === d.time);
+      let w = d.wakeId ? items.find(x => x.wakeId === d.wakeId) : d.kind === "promise" && ci ? items.find(x => x.wakeId === ci.wakeId || x.from === ci.from && x.promiseRevision === ci.promiseRevision) : items.find((x) => x.time === d.time);
       if (!w) {
-        if (d.kind !== "extra" || !ci) continue;
+        if (!["extra", "promise"].includes(d.kind) || !ci) continue;
         w = {
           time: ci.time, fireAt: ci.fireAt, source: ci.source || "临时起念", act: false, kind: ci.kind || "extra",
           why: "", intent: "", delivery: "", reason: "", wakeId: "",
-          sem: ci.sem || "", topic: ci.topic || "", from: ci.from || "", hist: [],
-          score: calcScore(ci.fireAt, items.filter((x) => x.act).length, 0, 0),
+          sem: ci.sem || "", topic: ci.topic || "", from: ci.from || "", promiseRevision: +ci.promiseRevision || 1, hist: [],
+          score: calcScore(ci.fireAt, GuaNianPromises.ordinaryQuota(items), 0, 0),
         };
         items.push(w);
       }
@@ -133,7 +191,7 @@
         if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
         w.act = false; w.wakeId = ""; w.delivery = "";
         w.why = String(d.note || "").replace(/^取消——/, "") || w.why;
-      } else if (d.kind === "lit" || d.kind === "extra") {
+      } else if (d.kind === "lit" || ["extra", "promise"].includes(d.kind)) {
         w.act = true;
         w.delivery = "push"; w.reason = "";
         if (ci) {
@@ -164,5 +222,6 @@
     }
     try { await (requireRead ? cloudFetchBounded : cloudFetch)("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id, planDate: date, decisionsOnly: true, before: lastAt }) }); }
     catch (e) { /* 清不掉也没关系：上面按 at > since 去重 */ }
-    return n;
+    await rememberVersion();
+    return n + promiseMerged;
   }

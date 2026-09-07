@@ -11,6 +11,7 @@ class ChatDatabase extends Dexie {
     messages!: Dexie.Table<ChatMessage, string>;
     sessions!: Dexie.Table<ChatSession, string>;
     contacts!: Dexie.Table<ChatContact, string>;
+    responseBatches!: Dexie.Table<{ sessionId: string; batchId: string }, [string, string]>;
 
     constructor() {
         super("AiPhoneChatDB");
@@ -19,10 +20,47 @@ class ChatDatabase extends Dexie {
             sessions: "id, contactId",
             contacts: "id, characterId",
         });
+        // Receipt survives edits/deletions of bubbles; never use message text
+        // as the durable evidence that a cloud response was already imported.
+        this.version(2).stores({ responseBatches: "[sessionId+batchId], sessionId" });
     }
 }
 
 export const chatDb = new ChatDatabase();
+
+/** Fresh durable view after obtaining the cross-page outbox lock. */
+export async function dbReadChatSession(sessionId: string): Promise<{ messages: ChatMessage[]; session?: ChatSession; batchIds: string[] }> {
+    return chatDb.transaction("r", chatDb.messages, chatDb.sessions, chatDb.responseBatches, async () => ({
+        messages: await chatDb.messages.where("sessionId").equals(sessionId).toArray(),
+        session: await chatDb.sessions.get(sessionId),
+        batchIds: (await chatDb.responseBatches.where("sessionId").equals(sessionId).toArray()).map(row => row.batchId),
+    }));
+}
+
+/** Read/record delivery evidence without ever rewriting cached message bodies. */
+export async function dbHasResponseBatch(sessionId: string, batchId: string): Promise<boolean> {
+    return chatDb.transaction("rw", chatDb.messages, chatDb.responseBatches, async () => {
+        if (await chatDb.responseBatches.get([sessionId, batchId])) return true;
+        // Upgrade legacy durable batches in place. New batches write this
+        // receipt atomically with their bubbles, including before a lost ACK.
+        const found = await chatDb.messages.where("sessionId").equals(sessionId)
+            .filter(message => message.responseBatchId === batchId).first();
+        if (!found) return false;
+        await chatDb.responseBatches.put({ sessionId, batchId });
+        return true;
+    });
+}
+
+/** Fixed-ID bridge inputs may be delivered again after the user edits them. */
+export async function dbEnsureImportedMessage(message: ChatMessage, session: ChatSession): Promise<ChatMessage> {
+    return chatDb.transaction("rw", chatDb.messages, chatDb.sessions, async () => {
+        const saved = await chatDb.messages.get(message.id);
+        if (saved) return saved;
+        await chatDb.messages.bulkPut([message]);
+        await chatDb.sessions.bulkPut([session]);
+        return message;
+    });
+}
 
 // ── Initialization + Migration from localStorage ──
 
@@ -141,10 +179,15 @@ function safeParse<T>(raw: string | null): T[] {
 }
 
 /** 离线回传：气泡和所属会话一起提交，失败向上传播，绝不确认半批数据。 */
-export async function dbPutMessageBatch(messages: ChatMessage[], sessions: ChatSession[]): Promise<void> {
-    await chatDb.transaction("rw", chatDb.messages, chatDb.sessions, async () => {
+export async function dbPutMessageBatch(messages: ChatMessage[], sessions: ChatSession[], receipts: { sessionId: string; batchId: string }[] = []): Promise<void> {
+    await chatDb.transaction("rw", chatDb.messages, chatDb.sessions, chatDb.responseBatches, async () => {
         await chatDb.messages.bulkPut(messages);
         await chatDb.sessions.bulkPut(sessions);
+        const batches = new Map(messages.filter(m => m.responseBatchId).map(m => [
+            JSON.stringify([m.sessionId, m.responseBatchId]), { sessionId: m.sessionId, batchId: m.responseBatchId! },
+        ]));
+        for (const receipt of receipts) batches.set(JSON.stringify([receipt.sessionId, receipt.batchId]), receipt);
+        await chatDb.responseBatches.bulkPut([...batches.values()]);
     });
 }
 

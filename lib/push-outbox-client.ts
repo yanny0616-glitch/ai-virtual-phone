@@ -7,13 +7,13 @@ import type { RegexConfig } from "./settings-types";
 import { stripHallucinatedTimestamps } from "./llm-provider-adapter";
 import { MacroEngine } from "./macro-engine";
 import { getActiveAppTags } from "./content-tag-utils";
-import { loadChatMessages, loadChatSessions, persistChatMessages, reindexSessionMessageOrdersByTime } from "./chat-storage";
-import { hasAccountPushSubscription } from "./push-client";
+import { loadChatMessages, loadChatSessions, hasPersistedResponseBatch, refreshChatSessionFromDisk } from "./chat-storage";
+import { settleDeferredReplyDelivery } from "./deferred-reply-cloud";
 import { isPersonalPushCloudActive, loadPersonalPushCloudState, personalPushFetch } from "./personal-push-cloud";
 import { removeTimedWakeSchedule } from "./timed-wake-storage";
 import { closeChatPushNotifications } from "./notification-avatar-cache";
 import { appendBridgeFeed } from "./reality-bridge/storage";
-import { loadScreenChatSettings, saveScreenChatAck } from "./reality-bridge/storage";
+import { saveScreenChatAck } from "./reality-bridge/storage";
 import { getChatPluginRuntime } from "./chat-plugin-runtime";
 import { runChatPluginTransform } from "./chat-plugin-hooks";
 
@@ -33,6 +33,7 @@ type OutboxEntry = {
         appTags?: string[];
         followUpCount?: number;
         armAt?: string;
+        replyAfterLocalMessageId?: string;
         /** 云端触发快捷动作失败的摘要；成功时不带这个字段 */
         shortcutDeliveryError?: string;
     } | null;
@@ -43,9 +44,11 @@ let consuming = false;
 let lastConsumeAt = 0;
 let consumerInstalled = false;
 let consumeRequestTimer: number | null = null;
+let consumeRequestForce = false;
 const OUTBOX_BATCH_SIZE = 20;
 const MAX_OUTBOX_BATCHES_PER_PASS = 10;
-const OUTBOX_FOREGROUND_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const OUTBOX_FOREGROUND_CHECK_INTERVAL_MS = 20_000;
+let outboxChannel: BroadcastChannel | null = null;
 
 function getTimedWakeIdFromTriggerKey(triggerKey: string | null): string | null {
     if (!triggerKey?.startsWith("timedwake:")) return null;
@@ -76,24 +79,25 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
     if (!isPersonalPushCloudActive()) return;
     if (consuming) return;
     if (options?.force !== true && Date.now() - lastConsumeAt < OUTBOX_FOREGROUND_CHECK_INTERVAL_MS) return;
-    // 没有任何设备订阅推送时，服务端不可能产生普通离线回传；避免所有在线用户空轮询。
-    if (!loadScreenChatSettings().enabled && !(await hasAccountPushSubscription())) return;
-    // 订阅检查会让出执行权；回前台与 SW 事件同时触发时，再次确认没有另一个消费者。
-    if (consuming) return;
     consuming = true;
     lastConsumeAt = Date.now();
-    const passStartMs = Date.now();
     try {
+        // A page-local boolean cannot arbitrate a shared IndexedDB. Browser
+        // locks remain held throughout asynchronous parsing/commit/ack and are
+        // released if the owning page exits. Never use an expiring timer lease.
+        if (typeof navigator === "undefined" || !navigator.locks?.request) throw new Error("当前浏览器不支持跨页面安全收取，请更新浏览器后重试；云端消息已保留。");
+        await navigator.locks.request("ai-phone:outbox-consumer", { ifAvailable: true }, async lock => {
+        if (!lock) return;
         // 冷启动时先等启用的插件注册完，再消费回传，避免 [内心] 被原生解析器抢走。
         await getChatPluginRuntime().ensureStarted();
         // 共享回传箱已停用，只读取用户自己的 Supabase。
         const sources: Array<"personal" | "shared"> = ["personal"];
-        const handledTriggerKeys = new Set<string>();
+        const handledEntryIds = new Set<string>();
         for (const source of sources) {
           for (let batch = 0; batch < MAX_OUTBOX_BATCHES_PER_PASS; batch += 1) {
             const response = await (source === "personal"
-                ? personalPushFetch("outbox")
-                : fetch("/api/push/outbox", { credentials: "include" }))
+                ? personalPushFetch("outbox", { signal: AbortSignal.timeout(15_000) })
+                : fetch("/api/push/outbox", { credentials: "include", signal: AbortSignal.timeout(15_000) }))
                 .catch(() => null);
             if (!response || !response.ok) break;
             const data = await response.json().catch(() => ({})) as { ok?: boolean; entries?: OutboxEntry[] };
@@ -103,11 +107,13 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
             const consumedIds: string[] = [];
             for (const entry of entries) {
                 try {
-                    if (entry.trigger_key && handledTriggerKeys.has(entry.trigger_key)) {
+                    if (handledEntryIds.has(entry.id)) {
                         consumedIds.push(entry.id);
                         continue;
                     }
                     const meta = entry.meta || {};
+                    const diskSessionId = meta.sessionId || entry.session_id || (meta as { reply?: { sessionId?: string } }).reply?.sessionId;
+                    if (diskSessionId) await refreshChatSessionFromDisk(diskSessionId);
 
                     if ((meta as { kind?: string }).kind === "bridge") {
                         const bridgeMeta = meta as Record<string, unknown> & {
@@ -127,12 +133,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                                 ? bridgeMeta.screenChatResponseBatchId
                                 : `push-outbox:${entry.id}`;
                             const existing = loadChatMessages(replySessionId);
-                            const alreadyImported = Boolean(
-                                responseBatchId && existing.some(message => message.responseBatchId === responseBatchId),
-                            );
-                            if (alreadyImported) {
-                                await persistChatMessages(existing.filter(message => message.responseBatchId === responseBatchId));
-                            }
+                            const alreadyImported = await hasPersistedResponseBatch(replySessionId, responseBatchId);
                             if (!alreadyImported) {
                                 let text = await transformOutboxResponse(entry.raw_text, replySessionId, replyMeta?.appId, entry.id);
                                 const regexes = Array.isArray(replyMeta?.regexes) ? replyMeta.regexes : [];
@@ -156,7 +157,6 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                                 );
                                 if (hasVisible && newCount < 10) scheduleFollowUp(replySessionId, newCount, stateValues);
                             }
-                            if (bridgeMeta.screenChat === true) reindexSessionMessageOrdersByTime(replySessionId);
                         }
                         if (
                             bridgeMeta.screenChat === true
@@ -166,7 +166,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                             saveScreenChatAck(bridgeMeta.screenChatCharacterId, Number(bridgeMeta.screenChatSequence));
                         }
                         consumedIds.push(entry.id);
-                        if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
+                        handledEntryIds.add(entry.id);
                         continue;
                     }
                     // 云端触发快捷动作失败的诊断行，不是角色消息——写进现实桥动态后直接消费掉，
@@ -212,34 +212,13 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                     const existingMessages = loadChatMessages(sessionId);
                     // 回执确认失败时可能再次拉到同一条；先查持久批次，避免插件重复结算好感。
                     const responseBatchId = `push-outbox:${entry.id}`;
-                    if (existingMessages.some(message => message.responseBatchId === responseBatchId)) {
-                        await persistChatMessages(existingMessages.filter(message => message.responseBatchId === responseBatchId));
+                    if (await hasPersistedResponseBatch(sessionId, responseBatchId)) {
                         clearTimedWakeIfHandled(entry.trigger_key);
+                        settleDeferredReplyDelivery(sessionId, entry.trigger_key, meta.replyAfterLocalMessageId);
                         consumedIds.push(entry.id);
-                        if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
+                        handledEntryIds.add(entry.id);
                         continue;
                     }
-                    if (followUpIndex && existingMessages.some(m => m.role === "assistant" && m.followUpIndex === followUpIndex)) {
-                        await persistChatMessages(existingMessages.filter(m => m.role === "assistant" && m.followUpIndex === followUpIndex));
-                        clearTimedWakeIfHandled(entry.trigger_key);
-                        consumedIds.push(entry.id);
-                        if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
-                        continue;
-                    }
-
-                    const armAtMs = typeof meta.armAt === "string" ? Date.parse(meta.armAt) : NaN;
-                    if (Number.isFinite(armAtMs) && existingMessages.some(m => {
-                        if (m.role !== "assistant") return false;
-                        const createdMs = Date.parse(m.createdAt);
-                        return createdMs > armAtMs && createdMs < passStartMs;
-                    })) {
-                        await persistChatMessages(existingMessages.filter(m => m.role === "assistant" && Date.parse(m.createdAt) > armAtMs && Date.parse(m.createdAt) < passStartMs));
-                        clearTimedWakeIfHandled(entry.trigger_key);
-                        consumedIds.push(entry.id);
-                        if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
-                        continue;
-                    }
-
                     let text = await transformOutboxResponse(entry.raw_text, sessionId, meta.appId, entry.id);
                     const regexes = Array.isArray(meta.regexes) ? meta.regexes : [];
                     if (regexes.length > 0) {
@@ -267,12 +246,20 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         meta.prevCount ?? 0,
                         followUpIndex,
                         existingMessages,
-                        { durable: true, silent: options?.silent !== false, responseBatchId, ...(shortcutMarker ? { shortcutMarker } : {}) },
+                        {
+                            durable: true,
+                            silent: options?.silent !== false,
+                            responseBatchId,
+                            // 补收时间不是角色发送时间；无效旧数据交给解析器使用本地时间兜底。
+                            createdAt: Number.isFinite(Date.parse(entry.created_at)) ? entry.created_at : undefined,
+                            ...(shortcutMarker ? { shortcutMarker } : {}),
+                        },
                     );
                     if (hasVisible && newCount < 10) scheduleFollowUp(sessionId, newCount, stateValues);
                     clearTimedWakeIfHandled(entry.trigger_key);
+                    settleDeferredReplyDelivery(sessionId, entry.trigger_key, meta.replyAfterLocalMessageId);
                     consumedIds.push(entry.id);
-                    if (entry.trigger_key) handledTriggerKeys.add(entry.trigger_key);
+                    handledEntryIds.add(entry.id);
                 } catch (err) {
                     console.warn("[PushOutbox] merge failed for entry:", entry.id, err);
                     // 屏幕速聊各轮有严格因果顺序；前一轮未合并时不能越过它消费后一轮。
@@ -281,7 +268,12 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
             }
 
             if (consumedIds.length === 0) break;
+            for (const entry of entries.filter(entry => consumedIds.includes(entry.id))) {
+                const sessionId = entry.meta?.sessionId || entry.session_id || (entry.meta as { reply?: { sessionId?: string } } | null)?.reply?.sessionId;
+                if (sessionId) outboxChannel?.postMessage({ sessionId });
+            }
             const ackInit: RequestInit = {
+                signal: AbortSignal.timeout(15_000),
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ ids: consumedIds }),
@@ -298,26 +290,42 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
             if (entries.length < OUTBOX_BATCH_SIZE) break;
           }
         }
+        });
+    } catch (error) {
+        console.warn("[PushOutbox] safe consumption paused:", error);
     } finally {
         consuming = false;
     }
 }
 
-/** 安装自动消费钩子：启动后拉一次，之后每次回前台再拉。 */
+/** 前台每 20 秒补拉，恢复网络或回前台立即检查。 */
 export function installServerOutboxConsumer(): void {
     if (typeof window === "undefined" || consumerInstalled) return;
     consumerInstalled = true;
+    if (typeof BroadcastChannel !== "undefined") {
+        outboxChannel = new BroadcastChannel("ai-phone:outbox-committed");
+        outboxChannel.onmessage = event => {
+            if (typeof event.data?.sessionId === "string") void refreshChatSessionFromDisk(event.data.sessionId).catch(() => {});
+        };
+    }
 
-    // 启动时保留 5 分钟节流；回前台/SW 通知强制补拉——iOS 冻结后台页面，节流会让屏幕速聊消息等到下次重启才合并。
+    // 前台定期补拉；启动、联网、回前台和 SW 事件立即补拉。后台由系统冻结，恢复后继续。
     const requestConsume = (force = false) => {
+        consumeRequestForce ||= force;
         if (consumeRequestTimer !== null) window.clearTimeout(consumeRequestTimer);
         consumeRequestTimer = window.setTimeout(() => {
             consumeRequestTimer = null;
-            void consumeServerOutbox({ force });
+            const requestedForce = consumeRequestForce;
+            consumeRequestForce = false;
+            void consumeServerOutbox({ force: requestedForce });
         }, 150);
     };
 
-    requestConsume(false);
+    requestConsume(true);
+    window.setInterval(() => {
+        if (!document.hidden && navigator.onLine !== false) requestConsume();
+    }, OUTBOX_FOREGROUND_CHECK_INTERVAL_MS);
+    window.addEventListener("online", () => { if (!document.hidden) requestConsume(true); });
     if (!document.hidden) closeChatPushNotifications();
     document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {

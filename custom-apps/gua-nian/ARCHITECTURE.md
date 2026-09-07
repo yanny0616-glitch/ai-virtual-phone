@@ -2,7 +2,7 @@
 
 维护 `src/`，构建得到 `index.html`，安装包仍用单 HTML 入口。根目录的 `index.html` 是提交到仓库的生成产物，不直接编辑。
 
-当前结构包括 25 个 JS 片段（23 个原有片段及回执查询、同步状态展示两个新增片段）与 2 个独立 ES modules。片段仍共享原来的 IIFE 闭包，`S` 是应用状态，各角色的 `cx` 保存当天计划、账本和运行状态；时间计算与规则评分已抽到 `src/domain/`，有独立作用域和明确导出，不读取 `S`、宿主 SDK、存储或系统当前时间。其他片段之间仍有双向调用。
+当前结构包括 25 个 JS 片段（23 个原有片段及回执查询、同步状态展示两个新增片段）与 3 个独立 ES modules。片段仍共享原来的 IIFE 闭包，`S` 是应用状态，各角色的 `cx` 保存当天计划、账本和运行状态；时间计算与规则评分已抽到 `src/domain/`，有独立作用域和明确导出，不读取 `S`、宿主 SDK、存储或系统当前时间。其他片段之间仍有双向调用。
 
 ## 独立模块接口
 
@@ -74,7 +74,7 @@ flowchart TD
 
 图表示主要调用方向，不是无环模块图。例如云端接管完成会刷新界面，模型用量统计会调用云端，`planning/generation.js` 的模型结果会更新 `planning/threads.js` 的账本。`AiPhone`、`window`、`document` 由宿主/浏览器提供。
 
-构建脚本先使用项目已有的 TypeScript 编译器，将两个无运行时依赖的 `.mjs` 模块编译到各自独立的作用域，通过冻结的 `GuaNianTime` 和 `GuaNianScoring` 导出对象连接旧代码；然后按 `bundle.json` 顺序拼接原有 `.js` 片段，最后执行 `bootstrap.js` 中的 `init()`。发布产物仍是经典内联脚本，没有浏览器相对 import 或额外模块加载器。
+构建脚本先使用项目已有的 TypeScript 编译器，将三个无运行时依赖的 `.mjs` 模块编译到各自独立的作用域，通过冻结的 `GuaNianTime` 和 `GuaNianScoring` 导出对象连接旧代码；然后按 `bundle.json` 顺序拼接原有 `.js` 片段，最后执行 `bootstrap.js` 中的 `init()`。发布产物仍是经典内联脚本，没有浏览器相对 import 或额外模块加载器。
 
 不要把片段单独作为 `<script src>` 加载，也不要在原有 `.js` 片段里增加 `import`、`export` 或自己的外层 IIFE。`domain/*.mjs` 使用真正的 ESM 导出，当前两个模块各自自足；若将来要增加模块间 import，需要同步扩展构建的依赖处理。
 
@@ -228,3 +228,53 @@ scripts/check-gua-nian-p2.mjs 覆盖以上六项的真实 APP 和云函数入口
 生成前读取该会话最新 60 条聊天镜像，结合原意图和已补入的云端消息，在同一次成文调用中判断是否已经提过或事实已改变。严格作罢标记在任何消息入箱或通知前截获，判定记入 factcheck；概率判定记入 freshness。镜像读取失败保留原任务、5 分钟后重试。已作罢计划与已了结账本在成文前短路。UI 列表与计数统一调用 decStatus，并在心动页刷新回执；hold 合并保留 origFireAt。
 
 `check-gua-nian-fact-replies.mjs` 覆盖真实 worker 的等待、无硬截止、概率下降、已聊过作罢、镜像失败与 UI 回执一致性；`check-typing-rhythm-delivery.mjs` 覆盖宿主前后台非流式和云端回端的实际展示路径。
+
+
+## 约定任务与连续上下文（0.9.23 / schema 11）
+
+`domain/promises.mjs` 为纯事件规则，显式输入时间；构建为 `GuaNianPromises`，同时注入两份自包含 worker。约定沿用 Thread.kind=promise，增加 subject、sourceMessageId、status、revision、mentionedAt。id 更新优先于文本匹配，同名不同主体分开；改期清除已提标记并增加版本。完成或取消使用同一事件，取消记录保留为墓碑。Timeline PlanItem.kind=promise、from=事件 id、promiseRevision=版本；同一时刻的项按 wakeId 区分。
+
+本机 `syncPromiseTasks` 负责当天任务，云端 `reconcilePromises` 在普通起念门禁前处理账本（最多提前 31 天），从已有加密模板复制上下文；schema 11 的 `push_arm_promise` 锁计划行，在同一事务内校验版本、创建任务并关联时间线，稳定 trigger_key 幂等。`push_cancel_stale_promises` 跨计划撤销过时 pending 任务；生成中的任务成文前后检查最新账本版本，冲突时不写 outbox。包含未来未执行约定任务的旧计划不被 7 天清理删除。不会从时间经过推断事件完成。
+
+`lib/guanian-cloud-history.ts` 是合并历史的正本，由 `push:build-dist` 注入判断和生成 worker，`check:push` 同时校验这两个片段和 promise 规则。每个会话分别读取最近 200 条镜像与 200 轮 outbox，按时间合并后取最近窗口（生成 80 条，裁决按原 judgeLines）。不再用最新镜像时间作为 outbox 截止，也不只拿最早 5 轮。宿主镜像携带 responseBatchId，schema 存 response_batch_id；旧镜像缺少批次时保留云端正文，避免丢失事实，但无法保证旧数据完全去重。
+
+`push_generation_lease` 按用户/会话串行生成，10 分钟租约、写入前续租、finally 释放；已有同 job outbox 时只恢复任务状态。读取失败留 pending 重试。outbox.meta.guanianContext 保存使用的消息 ID、核对时间和事件版本，不记录模型凭据。生成事实在下一次复核前独立合入账本，3 小时回音统计仍单独等待；明确区分已生成、已收取、事件完成。
+
+任务扫描仍每分钟，复核扫描每 5 分钟；新约定提示可缩短普通判断间隔至 1 分钟，实际等待仍由扫描周期决定，且不绕过总调用上限。自动识别依赖模型语义判断，未识别时可手动记一件；本次没有改动暂缓的设备接管协议。
+
+专项检查：check-gua-nian-promises.mjs、check-gua-nian-promise-recheck.mjs、check-gua-nian-promises-sql.mjs（传 PGlite 路径）；既有 P2、fact-replies、deferred-reply-cloud 验证兼容路径。宿主消息回端仍须发布 timestamp 修复；已消费的旧消息不批量回写。
+
+
+## 约定一致性修复（0.9.24）
+
+开启 cloudRecheck 时 syncPromiseTasks 不再调用宿主 push.wake：明确约定统一由 reconcilePromises / push_arm_promise 创建，普通起念保留原机制。关闭云端时本机约定使用当前时间加 65 秒的最小缓冲，失败逐项记录并重试。promiseNeedsTask 排除同版本已提标记；改期/恢复清除标记并增加版本。云端计划与 genKit 均通过真实 readHistory.sessionId 上传；旧空会话计划从本角色绑定模板恢复会话，失败不伪造空历史。
+
+schema 11 新增 push_preserve_promise_state BEFORE 触发器：按 revision、at 合并跨天事件，保留完成/取消与已提标记，保留上传遗漏的 promise items，同一事件同版本的不同 wakeId 只保留一个激活项。AFTER 触发器在同一事务撤销过时 pending jobs，失败整次写入回滚；非约定项仍沿用原计划覆盖规则。push_arm_promise 跨计划复用已有 job 的 wakeId。网关保存前探测 push_promise_storage_ready，避免保存后才发现迁移缺失；promise-tasks-v2 能力还核对两个 worker。此修复未改变设备接管协议。
+
+editThreadLedger 使用现有 _planLock，成功拉取后再修改账本并上传。pullCloudDecisionsBody 对改期、完成、云端撤销与同版本替代项同步撤销旧本地登记；取消失败不抹除旧 wakeId，下次继续处理。worker 从加密 payload 的 guanianPromise 标记识别脱离计划的孤儿，不能退化为普通起念；成文前后验证事件，历史中同事件同版本已有输出时短路。
+
+专项验证增加 check-gua-nian-promise-repair.mjs；promise-recheck 覆盖旧会话恢复和 RPC 裁决保留，promises-sql 覆盖跨天复用、旧快照回退、完成不复活和撤销失败事务回滚。PGlite 验证数据库函数与触发器，不代表生产并发或手机端完整验证。普通回箱消费和其他审计项不在本段修复范围。
+
+## 调度与计划版本（0.9.25 / schema 12）
+
+`domain/promises.mjs` 的 `recheckEvidence` 区分新用户消息与只需核对承诺的角色消息；`ordinaryQuota` 统一普通起念计数，明确约定不计入该配额。`lib/guanian-cloud-history.ts` 的 `guanianLastProactiveAt` 只从普通 timedwake 输出计算主动间隔，生成器与复核器共用，不能用任意 assistant 时间代替。
+
+计划 `state_version` 与 `updated_at` 分离：前者在 context/items/新裁决变化时递增，后者仍代表手机上传时间，保留 cron 36 小时窗口语义。手机保存导入的 `cloudStateVersion`、项目 URL 和 `cloudSlotKeys`，上传走 `push_save_recheck_plan` 原子比较版本；worker PATCH 强制加版本条件。裁决 ACK 只移除已导入条目，不改变版本。普通时刻的撤旧由数据库提交触发器执行，失败或冲突的计划不会提前撤预约；worker 未成功提交的新预约在 finally 撤回。
+
+复核异常使用独立 retry_count/next_retry_at/retry_error/retry_stopped 元数据，cron 跳过退避和已停止计划；模型失败也累计已用次数。消息生成任务在 result_note 保留错误重试计数，普通等待不计错，已生成正文仍保存在加密 payload。`scheduler-retry` 只显式恢复当前角色当天计划关联的失败挂念任务和复核状态，不清除成文，也不恢复外部动作执行结果未知的任务。
+
+手机导入普通时刻时按 wakeId 或 source/from/origFireAt 对应改期，保留本地展示字段，撤销已确认被替代的本地登记；已知云端时刻被删除也会撤本地登记。旧版本缺少来源信息且无法对应的历史项不盲目删除。设备接管和多页面消费锁仍按之前约定暂缓。
+
+
+## 撤销前的发送凭据（0.9.26）
+
+`dropThreadSlots` 不再只相信本地 thDone/generatedAt。个人云 `cancel-wake` 按 owner、timed_task 和完整 triggerKey 读取任务与 outbox：已有输出或成功回执保留；执行中和暂存正文待投递拒绝撤销；只有 pending 且 updated_at 未变化才能原子改成 cancelled，保留任务证据。APP 保存 sendConfirmed/generatedAt 并保留 act 与 wakeId，界面不会改成作罢、普通配额不回吐。无法查询或确认则保留原计划与未了结账本，提示重试；循环中已经确认的操作在 finally 落盘。
+
+没有个人云时，本地已到点且 cancelWake 返回无登记不代表未发送，保持待确认。已有云端而网关不支持新动作时操作失败并保留记录，需要更新网关。本轮不改变设备接管协议、不增加 schema。
+
+
+## 历史证据与时区（0.9.27）
+
+`GuanianCloudHistory.uncertainLegacy` 保存无法确立独立发言身份的旧镜像，正文相同的候选只引用原云端输出，其他原文在提示词的待核对资料区保留。这些记录不进入 messages，因此不参与 fresh、未回应轮数和自动承诺线索门禁；原始镜像/outbox 不删除。确定匹配先对所有输出建立归属，避免两个同文输出依处理顺序争用镜像。
+
+`guanianTimezone` 严格区分缺失值与显式 0；`guanianContextTimezone` 读取 day.tz、genKit.tz、独立 tzOffsetMin，最后尝试按当前时刻解析 IANA 区名。旧网关曾把缺失 userSleepTz 写为 0，因此不单独信任该字段。复核还能从本计划的冻结请求恢复；仍未知则走已有异常退避。生成端从计划/冻结请求恢复失败会明确停止，保留任务供同步后重试。复核刷新计划后再次统一 day.tz，约定克隆也保存已核实偏移。

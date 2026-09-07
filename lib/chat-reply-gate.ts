@@ -48,7 +48,7 @@ export type ReplyGateDecision =
     | { kind: "delay"; until: number; note: string; reason: "sleep" | "busy"; busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean };
 
 export type DeferredReply = {
-    cloud?: { key: string; projectUrl: string; revision: number; syncedRevision: number; attempted: boolean; cancelRequested?: boolean; state: "syncing" | "active" | "running" | "error" | "done" | "failed" | "cancelled" };
+    cloud?: { key: string; projectUrl: string; revision: number; syncedRevision: number; acceptedMessageId?: string; attempted: boolean; cancelRequested?: boolean; state: "syncing" | "active" | "running" | "error" | "done" | "failed" | "cancelled" };
     until: number; note: string; firedAt?: number;
     characterId?: string; reason?: "sleep" | "busy";
     busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean;

@@ -1,6 +1,6 @@
   function decRow(w) {
     const st = decStatus(w);
-    return '<div class="dec ' + st.cls + '" data-t="' + esc(w.time) + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
+    return '<div class="dec ' + st.cls + '" data-t="' + esc(w.time) + '" data-wake="' + esc(w.wakeId || "") + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
       '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + adjBadge(w) + "</div>" +
       '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
       "</div>";
@@ -108,7 +108,7 @@
       el.onclick = () => {
         const card = el.closest(".day-card");
         const rec = card && arc.byDate[card.dataset.d];
-        const w = rec && rec.plan && (rec.plan.items || []).find((x) => x.time === el.dataset.t);
+        const w = rec && rec.plan && (rec.plan.items || []).find((x) => el.dataset.wake ? x.wakeId === el.dataset.wake : x.time === el.dataset.t);
         if (w) openDetail(w, rec.plan);
       };
     });

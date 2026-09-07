@@ -930,7 +930,9 @@ export async function parseAndSaveResponse(
     await getChatPluginRuntime().ensureReady();
     const responseBatchId = options?.responseBatchId || createResponseBatchId();
     const revealDelays = new Map<string, number>();
-    const batch = options?.durable ? createChatMessageBatch(`${sessionId}:${responseBatchId}`) : null;
+    const insertByCreatedAt = !!options?.createdAt && Number.isFinite(Date.parse(options.createdAt));
+    const batch = options?.durable || insertByCreatedAt
+        ? createChatMessageBatch(`${sessionId}:${responseBatchId}`, { insertByCreatedAt, receipt: { sessionId, batchId: responseBatchId } }) : null;
     const saveMessage = batch ? batch.push : pushChatMessage;
     const afterCommit: Array<() => void> = [];
     const rawResponseText = options?.rawResponseText ?? rawText;

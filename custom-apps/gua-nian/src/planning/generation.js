@@ -1,12 +1,22 @@
   async function applyThreads(cx, parsed, nowMs, by, planItems) {
     if (!S.settings.threadsOn || !parsed) return 0;
-    const list = (cx.threads || []).map(t => ({ ...t })), notes = [];
+    let list = (cx.threads || []).map(t => ({ ...t }));
+    const notes = [];
+    const promises = (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2).filter(k => k && (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
+    const before = list;
+    list = GuaNianPromises.updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs) })), nowMs, by);
+    for (const t of list.filter(t => t.kind === "promise")) {
+      const old = before.find(x => x.id === t.id);
+      if (old && (old.due !== t.due || Number(old.revision || 1) !== Number(t.revision || 1) || (!old.done && t.done))) await dropThreadSlots(cx, t.id, "约定已改期或了结", planItems);
+      if (!old || JSON.stringify(old) !== JSON.stringify(t)) notes.push("更新约定「" + t.text + "」");
+    }
     for (const id of (Array.isArray(parsed.settle) ? parsed.settle : []).slice(0, 6)) {
       const t = list.find((x) => x.id === String(id).replace(/[\[\]]/g, "").trim());
       if (t) await dropThreadSlots(cx, t.id, "这件事你说了结了", planItems);
       if (t && !t.done) { t.done = true; t.at = nowMs; t.by = by; notes.push("了结「" + t.text + "」"); }
     }
     for (const k of (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2)) {
+      if (promises.includes(k)) continue;
       const text = String((k && k.text) || "").trim().slice(0, 60);
       if (!text) continue;
       const kind = THREAD_KIND[k.kind] ? k.kind : "topic";
@@ -19,6 +29,7 @@
     }
     const alive = list.filter((t) => threadAlive(t, nowMs, S.settings.threadDays)).slice(-30);
     if (notes.length || alive.length !== list.length) await saveThreads(cx, alive);
+    if (planItems) await syncPromiseTasks(cx, planItems, nowMs);
     if (notes.length) await log(cx, "惦记账本：" + notes.join("，"));
     return notes.length;
   }

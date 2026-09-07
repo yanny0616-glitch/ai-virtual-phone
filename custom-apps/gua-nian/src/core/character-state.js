@@ -124,7 +124,7 @@
       if (r && r.sessionId) cx._session = r.sessionId; // 云端预约记录只认会话 id，撤孤儿预约时靠它认人
       return (r && r.messages || [])
         .filter((m) => !m.isRetracted && (m.role === "user" || m.role === "assistant"))
-        .map((m) => ({ role: m.role, t: new Date(m.createdAt).getTime() || 0, c: String(m.content || "").replace(/\s+/g, " ").trim() }))
+        .map((m) => ({ id: m.id, role: m.role, t: new Date(m.createdAt).getTime() || 0, c: String(m.content || "").replace(/\s+/g, " ").trim() }))
         .filter((m) => m.c);
     } catch (e) {
       await log(cx, "读聊天记录失败（不影响编排，只是少了聊天上下文）：" + (e && e.message || e));
@@ -134,5 +134,5 @@
   // 把最近聊天压成给模型看的几行摘录
   function chatExcerpt(msgs, maxLines) {
     return msgs.slice(-(maxLines || 24)).map((m) =>
-      (m.role === "user" ? "我：" : "TA：") + (m.c.length > 200 ? m.c.slice(0, 200) + "…" : m.c));
+      "[" + (m.id || "") + "] " + new Date(m.t).toLocaleString() + " " + (m.role === "user" ? "我：" : "TA：") + (m.c.length > 200 ? m.c.slice(0, 200) + "…" : m.c));
   }
