@@ -560,7 +560,7 @@ type RecheckPlanRow = {
   plan_date: string;
   context?: Record<string, unknown>;
   decisions?: unknown[];
-  items?: { time?: string; wakeId?: string }[];
+  items?: { time?: string; wakeId?: string; act?: boolean; intent?: string; fireAt?: number; origFireAt?: number; from?: string }[];
 };
 
 /** 挂念寄存的计划：靠 trigger_key 里的 wakeId 回查。取两天：跨零点触发时最新的那份可能已经是明天的计划。 */
@@ -569,7 +569,7 @@ async function loadRecheckPlan(
   userId: string,
   characterId: string,
   wakeId: string,
-): Promise<{ row: RecheckPlanRow | null; item: { time?: string; wakeId?: string } | null }> {
+): Promise<{ row: RecheckPlanRow | null; item: NonNullable<RecheckPlanRow["items"]>[number] | null }> {
   if (!characterId || !wakeId) return { row: null, item: null };
   const response = await rest(
     `push_recheck_plans?user_id=eq.${encodeURIComponent(userId)}`
@@ -765,6 +765,13 @@ function appendUserNote(body: Record<string, unknown>, providerKind: ProviderKin
   return true;
 }
 
+// 与预约 ID 的稳定抽样一起使用：只在空闲、实际准备发送时抽一次，忙时不反复抽。
+function guanianWaitingChance(nowMs: number, originalAt: number, halfLifeMin: number): number {
+  const age = Math.max(0, nowMs - originalAt) / 60000;
+  const halfLife = Number.isFinite(halfLifeMin) && halfLifeMin > 0 ? halfLifeMin : 180;
+  return Math.pow(0.5, age / halfLife);
+}
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const DAILY_GENERATION_CAP = 50;
 
@@ -956,11 +963,11 @@ Deno.serve(async (req: Request) => {
             `push_chat_mirror?user_id=eq.${encodeURIComponent(job.user_id)}`
             + `&session_id=eq.${encodeURIComponent(contextSessionId)}`
             + `&message_at=gt.${encodeURIComponent(new Date(snapshotMs).toISOString())}`
-            + "&select=role,content,message_at&order=message_at.asc&limit=30",
+            + "&select=role,content,message_at&order=message_at.desc&limit=60",
           );
           const mirrorRows = (mirrorResponse.ok
             ? await mirrorResponse.json() as { role: string; content: string; message_at: string }[]
-            : []).filter(row => (row.role === "user" || row.role === "assistant") && String(row.content || "").trim());
+            : []).reverse().filter(row => (row.role === "user" || row.role === "assistant") && String(row.content || "").trim());
           // 镜像里已经有的那几条角色消息就是客户端取走过的，outbox 只补它之后的，免得同一句说两遍
           const newestMirrorMs = mirrorRows.length > 0 ? Date.parse(mirrorRows[mirrorRows.length - 1].message_at) : NaN;
           const outboxSince = Number.isFinite(newestMirrorMs) ? Math.max(snapshotMs, newestMirrorMs) : snapshotMs;
@@ -1030,6 +1037,10 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify({ decisions: [...prior, entry].slice(-60) }),
       }).catch(() => undefined);
     };
+    if (guanianPlan.item?.act === false) {
+      await finish("done", "guanian skip: 这条念头已在复核中作罢");
+      return;
+    }
     if (job.kind === "timed_task") {
       const cooldownRounds = Number(payload.merge?.cooldownRounds);
       const coolTarget = Number.isFinite(cooldownRounds) && cooldownRounds > 0 ? cooldownRounds : 0;
@@ -1156,10 +1167,9 @@ Deno.serve(async (req: Request) => {
         return Number.isFinite(v) && v >= 0 ? v : def;
       };
       const nowMs = Date.now();
-      // 复核改约过的念头 fireAt 已是新时刻，押后的上限要从最初那个时刻起算，再被念头自己的保质期 until 封顶
-      const pi = guanianPlan.item as { fireAt?: unknown; origFireAt?: unknown; until?: unknown };
+      // 旧 busyMaxHoldMin 现在表示等待概率的半衰期；until 不再是强制截止。
+      const pi = guanianPlan.item;
       const origFireAt = Number(pi.origFireAt) || Number(pi.fireAt) || nowMs;
-      const maxHoldMs = Math.min(cnum("busyMaxHoldMin", 180) * 60_000, (Number(pi.until) || Infinity) - origFireAt);
       // 忙完 / 醒来再等多久不取整：按设定值上下浮动四成，种子用任务 id，同一条重判不会漂
       const bufferMs = cnum("busyBufferMin", 10) * 60_000 * (0.6 + guanianRoll(job.id + ":buffer") / 100 * 0.8);
       // 押后 = 这条任务改回 pending、到点时刻往后挪；判据记进计划，面板能看到「押后到几点」
@@ -1176,10 +1186,10 @@ Deno.serve(async (req: Request) => {
         if (mode === 1) {
           const wakeHM = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(qe || "");
           const untilMs = guanianLocalHMToMs(wakeHM, tzMin, nowMs) + bufferMs;
-          if (untilMs > nowMs && untilMs - origFireAt <= maxHoldMs) {
+          if (untilMs > nowMs) {
             await hold(untilMs, `TA睡着了，押到起床后（${wakeHM}）再发`);
           } else {
-            await finish("done", "guanian asleep, hold would exceed max");
+            await finish("failed", "guanian wake time unavailable");
           }
           return;
         }
@@ -1199,13 +1209,19 @@ Deno.serve(async (req: Request) => {
         const busyEnd = guanianBusyUntil(day, localHM);
         if (busyEnd) {
           const untilMs = guanianLocalHMToMs(busyEnd, tzMin, nowMs) + bufferMs;
-          if (untilMs - origFireAt <= maxHoldMs) {
-            await hold(untilMs, `TA正忙着顾不上，押到 ${busyEnd} 之后再发`);
-          } else {
-            await finish("done", `guanian busy until ${busyEnd}, hold would exceed max`);
-          }
+          await hold(untilMs, `TA正忙着顾不上，等 ${busyEnd} 忙完后再判断`);
           return;
         }
+      }
+      const chance = guanianWaitingChance(nowMs, origFireAt, cnum("busyMaxHoldMin", 180));
+      const roll = guanianRoll(job.id + ":waiting") / 100;
+      const cooled = roll >= chance;
+      await appendDecision({ at: nowMs, kind: "freshness", time: pi.time || "", by: "cloud",
+        note: `等待 ${Math.max(0, Math.round((nowMs - origFireAt) / 60000))} 分钟，保留发送概率 ${Math.round(chance * 100)}%` + (cooled ? "，这次念头淡去了" : "，继续核对事实"),
+        blocked: cooled, chance: Math.round(chance * 100) });
+      if (cooled) {
+        await finish("done", "guanian skip: 等待后念头淡去了");
+        return;
       }
       try {
         const aff = ctx.affection && typeof ctx.affection === "object" ? ctx.affection as GuanianAffection : null;
@@ -1215,6 +1231,30 @@ Deno.serve(async (req: Request) => {
           await progress("context patched: guanian state" + (sleepy ? " (sleepy)" : ""));
         }
       } catch { /* 状态算不出来就按冻结快照发 */ }
+    }
+
+    if (guanianPlan.item) {
+      const topic = guanianPlan.item;
+      const threads = guanianPlan.row?.context?.threads;
+      if (topic.from && Array.isArray(threads) && threads.some(t => t && t.id === topic.from && t.done === true)) {
+        await finish("done", "guanian skip: 挂着的这件事已经了结");
+        return;
+      }
+      // 最新聊天是判断事实的依据；读取失败时稍后重试，不能拿旧快照重复问。
+      const sid = payload.merge?.sessionId;
+      if (sid) {
+        const recent = await rest(`push_chat_mirror?user_id=eq.${encodeURIComponent(job.user_id)}&session_id=eq.${encodeURIComponent(sid)}&select=role,content,message_at&order=message_at.desc&limit=60`);
+        if (!recent.ok) {
+          await rest(`push_jobs?id=eq.${encodeURIComponent(job.id)}`, { method: "PATCH", body: JSON.stringify({ status: "pending", execute_at: new Date(Date.now() + 5 * 60000).toISOString(), result_note: "hold: 最新聊天读取失败，稍后核对", updated_at: new Date().toISOString() }) });
+          return;
+        }
+        const rows = await recent.json() as { role: string; content: string }[];
+        const facts = rows.reverse().filter(r => r.role === "user" || r.role === "assistant").map(r => `${r.role === "user" ? "用户" : "你"}：${String(r.content || "").slice(0, 1500)}`).join("\n");
+        appendUserNote(payload.request.body, payload.request.providerKind,
+          `[挂念发送前的事实核对，不是用户消息]\n原念头：${topic.intent || "按上文预约意图"}\n最新聊天（按先后）：\n${facts || "没有新增镜像记录，请结合已有聊天，不可编造。"}\n`
+          + "先核对这个念头是否仍有必要：如果你已经在聊天里问过、说过这件事，用户已经回答或事情已经解决，就不要再发，也不要换个话题凑消息。仅仅出现相关词不等于已经说过，按实际问答与语义判断。具体约定或事件是否过时也按事实判断，不因单纯经过多少分钟而认定失效。\n"
+          + "无需再发时，只输出 [挂念作罢：聊天已提过] 或 [挂念作罢：事情已解决或发生变化]，不要输出台词、独白或其他标签；仍有未说过且符合当前事实的内容时，按原格式自然成文。用户的最新事实优先于旧预约意图。");
+      }
     }
 
     // 挂念挂的时刻受「一天最多调多少次模型」约束；聊天兜底之类不是挂念的不拦，只记账
@@ -1251,6 +1291,13 @@ Deno.serve(async (req: Request) => {
     let rawText = extractResponseText(payload.request.providerKind, data).trim();
     if (!rawText) {
       await finish("failed", "empty response");
+      return;
+    }
+
+    const abandoned = guanianPlan.item && /^\[挂念作罢[：:]([^\]\r\n]{1,120})\]$/.exec(rawText);
+    if (abandoned) {
+      await appendDecision({ at: Date.now(), kind: "factcheck", time: guanianPlan.item?.time || "", by: "cloud", blocked: true, note: abandoned[1] });
+      await finish("done", `guanian skip: ${abandoned[1]}`);
       return;
     }
 

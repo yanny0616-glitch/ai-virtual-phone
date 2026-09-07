@@ -99,7 +99,7 @@
             biasText() || null,
             canJudge ? "还没到点的时刻（act 是之前的判断）：" : null,
             canJudge ? JSON.stringify(remaining.map((w) => ({ time: w.time, source: w.source, act: !!w.act, intent: w.intent || "", energy: energyAt(cx.day, w.fireAt) }))) : null,
-            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念","from":"如果这条出自账本里某件事，填它的 id，否则空字符串"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-15到15的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
+            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"time":"HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念","from":"如果这条出自账本里某件事，填它的 id，否则空字符串"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-15到15的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
             "feel 描述的是聊天带来的情绪变化，不是今天的底色：被安慰/被逗笑/聊得投入给正 energy，被冷落/吵架/说累了给负；聊得平淡就把 intensity 给低分。",
             (S.settings.chatEditsDay
               ? "sched 只在聊天里确实出现了会改变TA今天安排的事才给：约好了几点做什么、临时被叫走、说了某件事不去了。最多 2 条，时间必须晚于现在（" + fmtHM(nowMs) + "）；只是随口聊到、没有落实的事不要写进来，没有就给空数组。"
@@ -110,7 +110,7 @@
             canPost
               ? "post：如果此刻更想发一条朋友圈而不是私聊（晒一下刚做的事、随手记一句、发个感慨——给所有人看的，不是说给用户听的），就在 post.hint 里写想发的由头或大意（30字内），由系统按人设成文。这周已发 " + moState(cx).weekN + " 条。私聊和发圈可以只要一个，也可以都不要；不想发就写 null。"
               : "post 一律写 null。",
-            "改约：act 给 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断你、TA心思还没到这上面），而话本身还想说，就在 defer 里写一个今天更晚的 HH:MM，整个念头会挪过去，不占新额度；真的不想说了才把 defer 留空。TA到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。只能挪到这个念头的保质期（until）之前——过了那个点这话就不新鲜了，宁可作罢。",
+            "改约：act 给 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断你、TA心思还没到这上面），而话本身还想说，就在 defer 里写一个今天更晚的 HH:MM，整个念头会挪过去，不占新额度；真的不想说了才把 defer 留空。TA到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。没有固定时间截止；等待会让发送概率逐渐降低。是否已说过或已失去意义，按最新聊天和事实判断。",
             "decisions 与上面时刻一一对应、顺序一致；没有变化就原样回传。extra 最多 1 条：只有聊天里确实有没聊完的话头、约好的事、或明显被勾起的牵挂才加（账本里快到点的约定、到了的日子也算），没有就给空数组。",
             "extra 和 keep 是两条路，同一件事只能进一边：今天之内说得掉的（下午问一句、晚上接着聊）走 extra 排个时刻；今天说不掉的（要等结果、要到某个日子、隔几天再问才自然）走 keep 记进账本，以后自己会想起来。今天的额度和间隔在上面，说不说得下就按它判。extra 出自账本里已有的某件事时，from 填那条的 id——发出去之后系统会自动把账本那条了结或标成提过了，你不用再写进 settle。"
               + (S.settings.chatCandidates ? "" : "（临时起念已被用户关闭，extra 必须是空数组）"),
@@ -151,11 +151,9 @@
             // 只在历史里分开记：那边是到点机械顺延，这边是复核时TA自己改的主意。
             const dh = normHM(d.defer), dms = dh ? timeToMs(dh) : null;
             const dgap = (S.settings.minGapMin || 0) * 60000;
-            // 挪的上限是念头自己的保质期 until（生成时模型给的，老计划没有就按原时刻 +
-            // busyMaxHoldMin 兜底）。不数次数——过了保质期这话就不新鲜了，由头本身不成立。
+            // 保留最初起念时刻，改约不重置等待概率；没有固定截止。
             const dorig = +w.origFireAt || w.fireAt;
-            const dcap = +w.until || dorig + (S.settings.busyMaxHoldMin || 180) * 60000;
-            if (dms && dms > nowMs + 2 * 60000 && !inQuiet(dh) && !asleepAt(cx.day, dh) && dms <= dcap
+            if (dms && dms > nowMs + 2 * 60000 && !inQuiet(dh) && !asleepAt(cx.day, dh)
               && !items.some((x) => x !== w && x.time === dh)
               && !(dgap && items.some((x) => x.act && x !== w && Math.abs(x.fireAt - dms) < dgap))) {
               if (w.wakeId) { try { await AiPhone.push.cancelWake(w.wakeId); } catch (e) { /* 忽略 */ } }
@@ -206,7 +204,7 @@
             const res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt: ms, intent: String(x.intent || "有句话没说完，想找用户"), source: "tool", cooldownRounds: S.settings.maxUnanswered });
             const xUms = timeToMs(normHM(x.until) || "");
             items.push({
-              time: hm, fireAt: ms, until: xUms && xUms > ms ? Math.min(xUms, ms + 6 * 3600000) : ms + 90 * 60000,
+              time: hm, fireAt: ms, until: xUms && xUms > ms ? Math.min(xUms, ms + 6 * 3600000) : 0,
               source: "临时·" + String(x.about || "未完话题").slice(0, 10),
               act: true, adj: "extra", why: String(x.why || ""), intent: String(x.intent || ""),
               delivery: res.armed ? "push" : "local", reason: res.reason || "", wakeId: res.id,

@@ -22,6 +22,7 @@
     "gua-nian:build": "node scripts/build-gua-nian.mjs",
     "gua-nian:check": "node scripts/build-gua-nian.mjs --check",
     "gua-nian:package": "node scripts/build-gua-nian.mjs --package",
+    "check:reply-delivery": "node scripts/check-gua-nian-fact-replies.mjs && node scripts/check-typing-rhythm-delivery.mjs",
     "gua-nian:test": "node scripts/check-gua-nian-domain.mjs && node scripts/check-gua-nian-delivery.mjs && node scripts/check-gua-nian-p1.mjs && node scripts/check-gua-nian-p2.mjs && node scripts/check-gua-nian-energy.mjs && node scripts/check-reply-gate.mjs && node scripts/check-busy-reply-plugin.mjs"
   },
   "dependencies": {

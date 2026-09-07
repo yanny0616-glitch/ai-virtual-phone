@@ -108,6 +108,7 @@
       if (d.kind === "hold") {
         // 云端把这条押后了：到点时刻往后挪，面板上继续按「待发」算
         markAdj = false;
+        w.origFireAt = +w.origFireAt || w.fireAt;
         if (+d.until > 0) w.fireAt = +d.until;
         w.held = true;
       } else if (d.kind === "defer") {
@@ -120,6 +121,8 @@
         w.wakeId = ni.wakeId || ""; w.delivery = ni.wakeId ? "push" : ""; w.reason = ni.reason || "";
         if (ni.until) w.until = ni.until;
         w.why = ni.why || w.why; w.intent = ni.intent || w.intent;
+      } else if (d.kind === "freshness" || d.kind === "factcheck") {
+        markAdj = false;
       } else if (d.kind === "presend") {
         // 到点复核只是这一条的执行判据，不算「云端改过计划」，不打调整角标
         markAdj = false;

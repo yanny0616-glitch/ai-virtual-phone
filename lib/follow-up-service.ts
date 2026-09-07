@@ -19,6 +19,8 @@ import {
     getLatestCharacterStateValues,
 } from "./chat-storage";
 import type { ChatMessage, StateValue } from "./chat-storage";
+import { getChatPluginRuntime } from "./chat-plugin-runtime";
+import { runChatPluginTransform } from "./chat-plugin-hooks";
 import { generateChatCompletion, flattenCompletionResult } from "./chat-engine";
 import { armFollowUpBailout, armIdleReconnectBailout, cancelBailoutKey, cancelBailoutPrefix, cancelFollowUpBailout, startBailoutHeartbeat } from "./push-bailout-client";
 import { isWithinPushQuietHours } from "./push-client";
@@ -268,12 +270,29 @@ function delay(ms: number): Promise<void> {
     return new Promise<void>(resolve => { bgSetTimeout(resolve, ms); });
 }
 
-async function dispatchBackgroundMessagesOneByOne(sessionId: string, messages: ChatMessage[], immediate = false) {
-    for (let index = 0; index < messages.length; index += 1) {
-        if (index > 0 && !immediate) await delay(BACKGROUND_MESSAGE_STAGGER_MS);
-        window.dispatchEvent(new CustomEvent("followup-message-saved", {
-            detail: { sessionId, message: messages[index] },
-        }));
+const pendingBackgroundReveals = new Set<string>();
+export function isBackgroundMessagePending(id: string): boolean { return pendingBackgroundReveals.has(id); }
+
+async function dispatchBackgroundMessagesOneByOne(sessionId: string, messages: ChatMessage[], immediate = false, delays?: Map<string, number>) {
+    const ownsTyping = !backgroundGeneratingSessions.has(sessionId) && messages.some(m => (delays?.get(m.id) || 0) > 0);
+    if (ownsTyping) {
+        backgroundGeneratingSessions.add(sessionId);
+        window.dispatchEvent(new CustomEvent("followup-started", { detail: { sessionId } }));
+    }
+    try {
+        for (let index = 0; index < messages.length; index += 1) {
+            const message = messages[index];
+            const ms = delays?.get(message.id) ?? (index > 0 && !immediate ? BACKGROUND_MESSAGE_STAGGER_MS : 0);
+            if (ms > 0) await delay(ms);
+            pendingBackgroundReveals.delete(message.id);
+            window.dispatchEvent(new CustomEvent("followup-message-saved", { detail: { sessionId, message } }));
+        }
+    } finally {
+        messages.forEach(m => pendingBackgroundReveals.delete(m.id));
+        if (ownsTyping) {
+            backgroundGeneratingSessions.delete(sessionId);
+            window.dispatchEvent(new CustomEvent("followup-fired", { detail: { sessionId } }));
+        }
     }
 }
 
@@ -884,7 +903,7 @@ function canCarryFollowUpPanel(part: ParsedMessagePart): boolean {
 // 朋友圈动作标签都走这里；聊天室前台有自己的原生实现。
 // options.senderCharacterId/senderName：群聊消息的发言角色（单聊不传）。
 // options.silent：静默落账（离线推送回端合并用）——立即写入全部消息、立即派发事件，
-// 不弹横幅/系统通知（推送在设备上已经弹过一遍了）。
+// 不弹横幅/系统通知（推送在设备上已经弹过一遍了）；插件仍可设置气泡展示间隔。
 export async function parseAndSaveResponse(
     rawText: string,
     sessionId: string,
@@ -908,7 +927,9 @@ export async function parseAndSaveResponse(
         shortcutMarker?: { text: string; insertAt: number; name: string };
     },
 ): Promise<{ hasVisible: boolean; newCount: number; stateValues: StateValue[] }> {
+    await getChatPluginRuntime().ensureReady();
     const responseBatchId = options?.responseBatchId || createResponseBatchId();
+    const revealDelays = new Map<string, number>();
     const batch = options?.durable ? createChatMessageBatch(`${sessionId}:${responseBatchId}`) : null;
     const saveMessage = batch ? batch.push : pushChatMessage;
     const afterCommit: Array<() => void> = [];
@@ -1089,6 +1110,16 @@ export async function parseAndSaveResponse(
     for (let i = 0; i < filteredParts.length; i++) {
         if (i === markerPartIdx) saveShortcutMarkerPair();
         const generatedPart = buildGeneratedFollowUpImageMessage(filteredParts[i]);
+        const defaultDelay = options?.silent || i === 0 ? 0 : BACKGROUND_MESSAGE_STAGGER_MS;
+        const reveal = await runChatPluginTransform("message.beforeReveal", {
+            sessionId, isGroup: sess?.isGroup === true,
+            characterId: options?.senderCharacterId || (sess?.isGroup ? undefined : sess?.contactId),
+            responseBatchId, index: i, total: filteredParts.length,
+            content: generatedPart.content, mediaType: generatedPart.mediaType,
+            streamed: false, delayMs: defaultDelay, cancelled: false,
+        });
+        if (reveal.cancelled) continue;
+        const revealDelay = Number.isFinite(reveal.delayMs) ? Math.max(0, Math.min(120000, reveal.delayMs)) : defaultDelay;
         const createdAt = nextCreatedAt();
         const saved = saveMessage({
             sessionId,
@@ -1119,16 +1150,22 @@ export async function parseAndSaveResponse(
             if (batch) deferredImageTasks.push(run);
             else imageReplacementTasks.push(run());
         }
+        revealDelays.set(saved.id, revealDelay);
         savedMessages.push(saved);
     }
     if (markerPartIdx >= filteredParts.length) saveShortcutMarkerPair();
 
-    if (batch) {
-        await batch.commit();
-        afterCommit.forEach(run => run());
-        imageReplacementTasks.push(...deferredImageTasks.map(run => run()));
+    savedMessages.forEach(m => pendingBackgroundReveals.add(m.id));
+    try {
+        if (batch) {
+            await batch.commit();
+            afterCommit.forEach(run => run());
+            imageReplacementTasks.push(...deferredImageTasks.map(run => run()));
+        }
+        await dispatchBackgroundMessagesOneByOne(sessionId, savedMessages, options?.silent === true, revealDelays);
+    } finally {
+        savedMessages.forEach(m => pendingBackgroundReveals.delete(m.id));
     }
-    await dispatchBackgroundMessagesOneByOne(sessionId, savedMessages, options?.silent === true);
     if (imageReplacementTasks.length > 0) {
         await Promise.allSettled(imageReplacementTasks);
     }
@@ -1147,7 +1184,7 @@ export async function parseAndSaveResponse(
         const partBody = (part: ParsedMessagePart) => bodyPrefix + ((part.content || "").trim()
             || (part.mediaType === "image" && part.mediaData?.label ? `发了一张照片: ${part.mediaData.label}` : "发来一条消息"));
         const { sendBrowserNotification } = await import("./browser-notification");
-        filteredParts.forEach((part, index) => {
+        savedMessages.filter(message => message.role === "assistant").forEach((part, index) => {
             bgSetTimeout(() => {
                 dispatchChatMessageNotice({
                     sessionId,

@@ -9,7 +9,7 @@ const quiet = { log() {}, warn() {}, error() {} };
 const flush = async () => { for (let i = 0; i < 35; i++) await Promise.resolve(); };
 const clone = value => structuredClone(value);
 let checks = 0;
-async function test(name, fn) { await fn(); checks++; console.log('PASS', name); }
+async function test(name, fn) { if (process.env.FLOAT_CHECK_FILTER && !new RegExp(process.env.FLOAT_CHECK_FILTER).test(name)) return; await fn(); checks++; console.log('PASS', name); }
 function load(file, globals, expose) {
     let src = stripTypeScriptTypes(fs.readFileSync(new URL(file, root), 'utf8'));
     src = src.replace(/^import\s[\s\S]*?;\s*$/gm, '').replace(/\bexport\s+(?=(?:async\s+)?function|const |class )/g, '')
@@ -72,7 +72,7 @@ function chatHarness() {
     const CustomEvent = class { constructor(type, init) { this.type=type; this.detail=init?.detail; } };
     const chat = load('lib/chat-storage.ts', { ...db, window: browser, CustomEvent, registerKvMigration() {}, kvGet: () => null, resolveUserIdentity: () => ({name:'User'}), loadCharacters: () => [], emitChatPluginEvent() {}, runChatPluginTransformSync: (_p,v) => { state.hooks++; return v; }, dbReplaceSessions() {} }, 'pushChatMessage,loadChatMessages,persistChatMessages,createChatMessageBatch,upsertImportedChatMessageAsync,seed(s,msgs=[]){_sessionsCache=[s];_messagesCache=msgs;_hydrated=true;}');
     chat.seed(session);
-    const parser = load('lib/follow-up-service.ts', { ...chat, window: browser, CustomEvent, loadChatSessions: () => [session], createResponseBatchId: () => 'random-batch', isPendingChatGeneratedImageMessage: () => false, parseAIResponse: text => ({parts: text === 'call' ? [{mediaType:'voice_call'}] : text === 'transfer' ? [{mediaType:'accept_transfer'},{mediaType:'accept_transfer'}] : text.split('|').map(content => ({content})), stateValues:[],freshStateValues:[]}) }, 'parseAndSaveResponse');
+    const parser = load('lib/follow-up-service.ts', { ...chat, getChatPluginRuntime: () => ({ensureReady:async()=>{}}), runChatPluginTransform: async (_point,payload) => payload, window: browser, CustomEvent, loadChatSessions: () => [session], createResponseBatchId: () => 'random-batch', isPendingChatGeneratedImageMessage: () => false, parseAIResponse: text => ({parts: text === 'call' ? [{mediaType:'voice_call'}] : text === 'transfer' ? [{mediaType:'accept_transfer'},{mediaType:'accept_transfer'}] : text.split('|').map(content => ({content})), stateValues:[],freshStateValues:[]}) }, 'parseAndSaveResponse');
     const outbox = load('lib/push-outbox-client.ts', { ...chat,...parser, window: browser, isPersonalPushCloudActive: () => true, loadScreenChatSettings: () => ({enabled:true}), getChatPluginRuntime: () => ({ensureStarted:async()=>{}}), loadChatSessions: () => [session], runChatPluginTransform: async (_p,v) => { state.transforms++; return v; }, stripHallucinatedTimestamps: t => t, scheduleFollowUp() {}, reindexSessionMessageOrdersByTime() {}, saveScreenChatAck() {}, bridgeEngine: {applyServerBridgeEntry:async()=>({sessionId:'s'})}, personalPushFetch:async(_a,init)=>{
         if (init) { if(state.ackFail) return Response.json({ok:false},{status:503}); const ids=JSON.parse(init.body).ids; state.acks.push(...ids); state.entries=state.entries.filter(e=>!ids.includes(e.id)); return Response.json({ok:true}); }
         return Response.json({ok:true,entries:state.entries});

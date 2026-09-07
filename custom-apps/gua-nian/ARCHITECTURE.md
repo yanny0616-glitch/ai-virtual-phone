@@ -220,3 +220,11 @@ scripts/check-gua-nian-p2.mjs 覆盖以上六项的真实 APP 和云函数入口
 聊天入口等待插件运行时完成启动/重载；本地到点扫描启动前不执行，云端快照也在插件就绪后读取。运行时完成变更发 reply-policy-updated；同步器重建未生成的云端请求，策略关闭时将下一检查提前到现在。手动 presenceOverride 使用一次性的 startsAt/expiresAt，序列化为绝对时间，跨午夜不续期。API 凭据及计时/通知仍由通用宿主与个人云处理，插件不执行 API 调用。
 
 回归 `check-busy-reply-plugin.mjs` 执行实际插件及宿主/云端入口，覆盖一次性迁移、false/0、旧源不复活、独立设置、手动状态、紧急开关、跨午夜和关闭云端等待。安装需要宿主、忙碌回复插件和新版挂念；云端支持需更新网关/生成器，不新增 schema。
+
+## 等待概率与发送事实（0.9.22）
+
+`push-generate` 的忙碌顺延不再比较 until/maxHold；`busyMaxHoldMin` 兼容原存储键，但解释为概率半衰期。以 origFireAt（缺失时 fireAt）计算等待时长，空闲时概率为 0.5^(等待分钟/半衰期分钟)，任务 ID 的固定抽样避免轮询多抽。旧 until 保留往返兼容，新生成不再要求模型填写；本机与云端复核改约移除此硬截止。
+
+生成前读取该会话最新 60 条聊天镜像，结合原意图和已补入的云端消息，在同一次成文调用中判断是否已经提过或事实已改变。严格作罢标记在任何消息入箱或通知前截获，判定记入 factcheck；概率判定记入 freshness。镜像读取失败保留原任务、5 分钟后重试。已作罢计划与已了结账本在成文前短路。UI 列表与计数统一调用 decStatus，并在心动页刷新回执；hold 合并保留 origFireAt。
+
+`check-gua-nian-fact-replies.mjs` 覆盖真实 worker 的等待、无硬截止、概率下降、已聊过作罢、镜像失败与 UI 回执一致性；`check-typing-rhythm-delivery.mjs` 覆盖宿主前后台非流式和云端回端的实际展示路径。

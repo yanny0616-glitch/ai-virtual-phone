@@ -79,6 +79,13 @@
     const ctx = { day: cx.day, plan: cx.plan, settings: S.settings, character: cx.character, now: Date.now() };
     v.innerHTML = HEART_PANELS.filter((p) => p.when(ctx)).map((p) => p.html(ctx)).join("");
     bindPanels(cx, v);
+    const slots = cx.plan && cx.plan.items || [];
+    if (cloudCfg() && !cx._heartReceipts && slots.some(w => w.act && w.wakeId && (!receiptFor(w, cx) || Date.now() - receiptFor(w, cx).checkedAt >= 60000))) {
+      cx._heartReceipts = true;
+      refreshReceipts(cx, slots).then(() => {
+        if (cur() === cx && S.tab === "heart") renderHeart();
+      }).finally(() => { cx._heartReceipts = false; });
+    }
   }
   // 后台页：诊断和用量两段，段切换只换子容器
   function renderBack() {
@@ -227,10 +234,10 @@
     const cx = cur();
     const items = sortedItems(c);
     const armed = items.filter((w) => w.act);
-    const fired = armed.filter((w) => w.fireAt < c.now);
-    const wait = armed.filter((w) => w.fireAt >= c.now);
+    const fired = armed.filter((w) => decStatus(w, null, cx).status === "sent");
+    const wait = armed.filter((w) => ["pending", "running", "unknown"].includes(decStatus(w, null, cx).status));
     const reach = wait.filter((w) => w.delivery === "push");
-    const skipped = items.filter((w) => !w.act);
+    const skipped = items.filter((w) => ["skipped", "cancelled", "failed"].includes(decStatus(w, null, cx).status));
     const imp = items.filter(isImpromptu);
     const adj = items.filter((w) => w.adj);
     const last = fired.length ? fired[fired.length - 1] : null;
@@ -249,7 +256,7 @@
         ? '<div class="quote"><div class="from">' + esc(last.time) + ' · 最近一次想起你</div>「' + esc(last.intent) + "」</div>"
         : '<div class="quote dim">今天还没想起过你</div>') +
       '<div class="stats four" style="margin:12px 0 2px">' +
-      stat(fired.length, "已想起") + stat(wait.length, "待 发", 60) +
+      stat(fired.length, "已发出") + stat(wait.length, "待处理", 60) +
       stat(skipped.length, "作 罢", 120) + stat(armed.length + "/" + quota, "配 额", 180) + "</div>" +
       '<div class="strip">' +
       tag(wait.length ? (reach.length === wait.length ? "待发的都离线可达" : "离线可达 " + reach.length + " / " + wait.length) : "没有待发", wait.length && reach.length === wait.length ? "ok" : (wait.length ? "warn" : "")) +
@@ -392,9 +399,7 @@
     let badge = "", intent = "";
     if (w.act) {
       const fired = w.fireAt < Date.now();
-      badge = fired ? '<span class="badge done">已想起你</span>'
-        : w.delivery === "push" ? '<span class="badge push">离线可达</span>'
-        : '<span class="badge local" title="' + esc(w.reason) + '">仅在线</span>';
+      badge = decStatus(w).badge;
       intent = '<div class="intent">「' + esc(w.intent) + '」</div>';
       if (!fired && w.delivery === "local" && w.reason) intent += '<div class="nt">未挂上离线推送：' + esc(w.reason) + "</div>";
     } else {

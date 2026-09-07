@@ -896,9 +896,9 @@ function buildImpulseInstruction(day: { mood: string; energy: number; schedule: 
     "【后台系统任务，不是聊天：不要以角色口吻说话、不要直接写消息内容，只输出判断 JSON】",
     "你是当前角色的内心。现在是 " + nowHM + "。想一想：今天剩下的时间里，TA会在哪些时刻想给用户发消息？",
     "念头是TA自己冒出来的，不必挂在日程上——刚做完一件事想说、路上看见什么、忽然惦记、白天没聊完的话头、单纯想搭句话，都算；一件事也可以不产生任何念头。按TA的性格克制判断，宁可少也别硬凑。",
-    '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"impulses":[{"time":"这个念头最想说出口的时刻HH:MM","until":"过了这个时刻这话就不新鲜了、不必再发HH:MM","about":"这个念头的由头（8字内，例：路过花店/刚开完会/昨晚那事没聊完）","sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"想聊的话题（8字内）","intent":"TA当时的第一人称心理动机（40字内，不写台词）","why":"为什么这会儿会想起（20字内）"}]}',
+    '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"impulses":[{"time":"这个念头最想说出口的时刻HH:MM","about":"这个念头的由头（8字内，例：路过花店/刚开完会/昨晚那事没聊完）","sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"想聊的话题（8字内）","intent":"TA当时的第一人称心理动机（40字内，不写台词）","why":"为什么这会儿会想起（20字内）"}]}',
     "impulses 按时刻从早到晚排；一个也没有就给空数组，不要为了填满而编。",
-    "until 是这个念头的保质期：接话头、约好的事可以短（半小时到一小时），单纯想分享的可以长（两三小时）。不写就按一个半小时算。",
+    "没有固定保质期。已经说过、已经解决或事实发生变化就作罢；等待仅让发送概率逐渐降低。",
     "TA今天的生活面（背景，不是候选时刻）：", JSON.stringify({ mood: day.mood, energy: day.energy, schedule: day.schedule }),
     "（energy 是TA刚醒时的基线，不是此刻的）",
     "", "今天剩下的时间长这样（按TA的日程逐段列出，end 是这段结束的时刻，空档也单列一行；精力越低越懒得开口，busy=true 那几段顾不上看手机，别把念头排在里面——排在它结束之后反而正好）：",
@@ -1196,7 +1196,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
         const uhm = normHM(x?.until), ums = uhm ? hmToMs(uhm) : null;
         const about = String(x?.about || "想起用户").slice(0, 12);
         const item: Record<string, unknown> = {
-          time: hm, fireAt: ms, until: ums && ums > ms ? Math.min(ums, ms + 6 * 3600_000) : ms + 90 * 60_000,
+          time: hm, fireAt: ms, until: ums && ums > ms ? Math.min(ums, ms + 6 * 3600_000) : 0,
           source: about, act: true, kind: "plan",
           why: String(x?.why || ""), intent: String(x?.intent || ""), delivery: "", reason: "", wakeId: "",
           sem: String(x?.sem || ""), topic: String(x?.topic || ""),
@@ -1741,7 +1741,7 @@ Deno.serve(async (req: Request) => {
       "",
       threadsOn && threadLinesNow.length ? "你心里还挂着的事：\n" + threadLinesNow.join("\n") : "",
       selfReason
-        ? selfBrief(selfKind, selfReason) + fbLine(context.fb, selfKind) + "不想说就老实写 []，不要为了发而发。真要发的话时刻定在接下来 5 到 40 分钟之间，until 给这话的保质期（半小时到两三小时）。"
+        ? selfBrief(selfKind, selfReason) + fbLine(context.fb, selfKind) + "不想说就老实写 []，不要为了发而发。真要发的话时刻定在接下来 5 到 40 分钟之间。已经说过或已经解决的事不要重复起念。"
         : canJudge
         ? "根据刚才聊过的内容重新判断每个时刻：聊过的话题已经了了就别再提，"
           + "用户说了忙/情绪不好就收敛，聊到一半没说完或约好了要说的事可以点亮"
@@ -1755,7 +1755,7 @@ Deno.serve(async (req: Request) => {
         : '"decisions":[]')
       + ","
       + (canImpulse
-        ? '"extra":[{"time":"HH:MM","until":"过了这个时刻这话就不新鲜了HH:MM","about":"这个念头的由头（8字内）","intent":"想说的事","why":"为什么现在加","from":"出自账本里某件事就填它的 id，否则空字符串"}]'
+        ? '"extra":[{"time":"HH:MM","about":"这个念头的由头（8字内）","intent":"想说的事","why":"为什么现在加","from":"出自账本里某件事就填它的 id，否则空字符串"}]'
         : '"extra":[]')
       + (threadsOn && !selfReason
         ? ',"keep":[{"kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"]'
@@ -1764,7 +1764,7 @@ Deno.serve(async (req: Request) => {
       + "}",
       threadsOn && !selfReason ? THREAD_TASK : "",
       judge ? "decisions 只写你要改的时刻（其余的保持原样就不用写）。" : "decisions 一律写 []。",
-      judge ? `改约：act 写 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断对方），而话本身还想说，就在 defer 里填今天更晚的 HH:MM，整个念头挪过去、不占新额度；真的不想说了才把 defer 留空。到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。只能挪到这个念头的保质期（until）之前——过了那个点这话就不新鲜了，宁可作罢。` : "",
+      judge ? `改约：act 写 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断对方），而话本身还想说，就在 defer 里填今天更晚的 HH:MM，整个念头挪过去、不占新额度；真的不想说了才把 defer 留空。到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。没有固定时间截止；等待会让发送概率逐渐降低。是否已说过或已失去意义，按最新聊天和事实判断。` : "",
       canImpulse ? "extra 最多 1 条，没有就写 []。" : "今日额度已满，extra 一律写 []。",
       canImpulse && threadsOn
         ? "extra 和 keep 是两条路，同一件事只能进一边：今天之内说得掉的走 extra 排个时刻；今天说不掉的（要等结果、要到某个日子、隔几天再问才自然）走 keep 记进账本，以后自己会想起来。extra 出自账本里已有的某件事时 from 填那条的 id，发出去之后系统会自动把账本那条了结或标成提过了，不用再写进 settle。"
@@ -1896,12 +1896,10 @@ Deno.serve(async (req: Request) => {
         const deferAt = deferHM && anchorTrusted
           ? anchor.fireAt + ((Number(deferHM.split(":")[0]) * 60 + Number(deferHM.split(":")[1])) - anchorLocal) * 60_000
           : 0;
-        // 挪的上限是念头自己的保质期 until（生成时模型给的，老计划没有就按原时刻 +
-        // busyMaxHoldMin 兜底）。不数次数——过了保质期这话就不新鲜了，由头本身不成立。
+        // 保留最初起念时刻，改约不重置等待概率；没有固定截止。
         const deferOrig = Number(item.origFireAt) || item.fireAt;
-        const deferCap = Number(item.until) || deferOrig + Number(context.busyMaxHoldMin ?? 180) * 60_000;
         if (
-          deferAt > nowMs + LEAD_MS && !inQuiet(deferHM) && deferAt <= deferCap
+          deferAt > nowMs + LEAD_MS && !inQuiet(deferHM)
           && !nextItems.some(other => other !== item && other.time === deferHM)
           && !tooClose(deferAt, nextItems, item)
         ) {
@@ -1984,7 +1982,7 @@ Deno.serve(async (req: Request) => {
       nextItems.push({
         time,
         fireAt,
-        until: exUms > fireAt ? Math.min(exUms, fireAt + 6 * 3600_000) : fireAt + 90 * 60_000,
+        until: exUms > fireAt ? Math.min(exUms, fireAt + 6 * 3600_000) : 0,
         source: `${selfReason ? "自发" : "临时"}·${String(one.about || (selfReason ? (SELF_KIND[selfKind] || "想起你") : "未完话题")).slice(0, 10)}`,
         act: true,
         kind: selfReason ? selfKind : "extra",

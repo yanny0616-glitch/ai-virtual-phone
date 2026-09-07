@@ -30,7 +30,7 @@
       }
       if (j.status === "failed") return state("failed", "发送失败", "warn", "对应预约执行失败。" + (j.resultNote || ""));
       if (j.status === "cancelled") return state("cancelled", "已取消", "off", "对应预约已取消。" + (j.resultNote || ""));
-      if (j.status === "done" && /^(presend skip:|guanian |template expired|no_subscription|daily cap)/.test(String(j.resultNote || ""))) {
+      if (j.status === "done" && /^(presend skip:|guanian |template expired|no_subscription|daily cap|usage cap:)/.test(String(j.resultNote || ""))) {
         return state("skipped", "未发送", "off", "对应预约已结束，本次未发送。" + j.resultNote);
       }
       // 缓存的进行中状态在刷新失败时不再当作当前状态。
@@ -44,7 +44,7 @@
   }
 
   /* ================= 时刻详情弹层 ================= */
-  const HIST_KIND = { plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核" };
+  const HIST_KIND = { plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对" };
 
   function detailHtml(w, plan) {
     const cx = cur();
@@ -63,6 +63,10 @@
       : '<div class="d-intent" style="color:var(--tx3)">' + esc(w.why || "TA这会儿不想") + "</div>";
     h += "</div>";
 
+    if (w.act) {
+      const halfLife = +S.settings.busyMaxHoldMin > 0 ? +S.settings.busyMaxHoldMin : 180;
+      h += '<div class="d-sec"><div class="d-t">等 待 规 则</div><div class="d-why">没有固定截止时间。忙时先等；每等待 ' + halfLife + ' 分钟，保留发送的概率减半。忙完仍需核对最新聊天，已经提过或事情已解决就作罢。实际判定见执行回执；个人云需更新到支持此规则的版本。</div></div>';
+    }
     // 数值层（判断那一刻的规则计算快照）
     if (w.score) {
       const s = w.score;

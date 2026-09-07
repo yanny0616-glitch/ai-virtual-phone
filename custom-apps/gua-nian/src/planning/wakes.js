@@ -202,11 +202,11 @@
         if (inQuiet(hm) || asleepAt(cx.day, hm)) { await log(cx, "念头丢弃：" + hm + " 落在免打扰或睡着的时段"); continue; }
         if (taken[hm]) { await log(cx, "念头丢弃：" + hm + " 已经有一个了"); continue; }
         taken[hm] = 1;
-        // until 是这个念头的保质期，改约只能在它之前挪；模型没给或给反了就按 90 分钟，最长不超过 6 小时
+        // 保留旧 until 字段供旧数据往返；新版不再把它作为发送或改约截止。
         const uhm = normHM(x.until), ums = uhm ? timeToMs(uhm) : null;
         const about = String((x && x.about) || "想起用户").slice(0, 12);
         const item = {
-          time: hm, fireAt: ms, until: ums && ums > ms ? Math.min(ums, ms + 6 * 3600000) : ms + 90 * 60000,
+          time: hm, fireAt: ms, until: ums && ums > ms ? Math.min(ums, ms + 6 * 3600000) : 0,
           source: about, act: true,
           why: String(x.why || ""), intent: String(x.intent || ""), delivery: "", reason: "", wakeId: "",
           sem: String(x.sem || ""), topic: String(x.topic || ""),

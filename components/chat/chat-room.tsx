@@ -47,7 +47,7 @@ import { loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUse
 import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseGroupChatResponse, buildEditableGroupRoundText } from "@/lib/group-chat-engine";
 import { appendChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
 import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
-import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating } from "@/lib/follow-up-service";
+import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating, isBackgroundMessagePending } from "@/lib/follow-up-service";
 import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismiss-auto-send";
 import { queueDeferredReplyCloud, cancelDeferredReplyCloud, DEFERRED_REPLY_CLOUD_STATUS_EVENT } from "@/lib/deferred-reply-cloud";
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
@@ -1396,7 +1396,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     }, []);
 
     const applyStoredMessageWindow = useCallback((allMsgs: ChatMessage[]) => {
-        const { nextMessages, nextHasMore } = selectStoredMessageWindow(allMsgs);
+        const { nextMessages, nextHasMore } = selectStoredMessageWindow(allMsgs.filter(m => !isBackgroundMessagePending(m.id)));
         visibleMessagesRef.current = nextMessages;
         hasMoreRef.current = nextHasMore;
         setHasMore(nextHasMore);
@@ -2411,6 +2411,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         signal?: AbortSignal,
     ): Promise<{ cancelled: boolean }> => {
         const defaultDelay = bubble.index === 0 || streamed ? 0 : 800;
+        await getChatPluginRuntime().ensureReady();
         const payload = await runChatPluginTransform("message.beforeReveal", {
             sessionId: session.id,
             isGroup: !!session.isGroup,
