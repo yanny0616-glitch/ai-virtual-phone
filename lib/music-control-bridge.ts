@@ -22,6 +22,8 @@ export type MusicControlBridge = {
     next: () => void;
     prev: () => void;
     setPlayMode: (mode: PlayMode) => void;
+    seek?: (time: number) => void;
+    openPlayer?: () => void;
 };
 
 let bridge: MusicControlBridge | null = null;

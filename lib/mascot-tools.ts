@@ -1,15 +1,8 @@
 // lib/mascot-tools.ts
-// 小卷工具系统：7 个套件 + 36 个细粒度工具，支持文本协议和原生协议双轨。
-//
-// 套件设计（默认只暴露 loader，按需展开）：
-//   - 角色卡套件 (character_pack)     — 3 个子工具
-//   - 世界书套件 (worldbook_pack)     — 5 个子工具
-//   - 预设套件 (preset_pack)          — 5 个子工具
-//   - 正则套件 (regex_pack)           — 5 个子工具
-//   - CSS套件 (css_pack)              — 3 个子工具
-//   - 图像处理套件 (image_pack)       — 10 个子工具
-//   - 导航工具 (navigate)             — 1 个独立工具（直接暴露）
+// 小卷套件与工具注册表：支持文本协议和原生协议。编辑动作统一进入版本校验、草稿、预览与撤销管线。
 
+import { MASCOT_EDIT_PACKAGE, LEGACY_EDIT_NAMES, EDIT_GUIDE, runMascotEditTool } from "./mascot-edit-tools";
+import type { EditRead } from "./mascot-edit-domain";
 import type { LlmToolDefinition } from "./llm-provider-adapter";
 import type { ToolCall, ToolResult } from "./tool-executor";
 import type { MascotPageContext } from "./mascot-context";
@@ -275,7 +268,8 @@ const UPLOAD_IMAGE_ASSET_SCHEMA = {
 const READ_CHARACTER_SCHEMA = {
     type: "object",
     properties: {
-        name: { type: "string", description: "角色名；不传则列出所有角色" },
+        name: { type: "string", description: "可选角色名；同名时必须使用 id；都不传列出全部角色" },
+        id: { type: "string", description: "准确角色 ID，优先于 name" },
     },
     additionalProperties: false,
 };
@@ -283,6 +277,11 @@ const READ_CHARACTER_SCHEMA = {
 const CREATE_CHARACTER_SCHEMA = {
     type: "object",
     properties: {
+        tags: { type: "array", items: { type: "string" }, description: "角色标签" },
+        timeZone: { type: "string", description: "IANA 时区，空字符串跟随系统" },
+        avatar: { type: "string", description: "图片 data URL 或 HTTP(S) URL；未设置可省略" },
+        wechatID: { type: "string", description: "角色微信号" },
+        embeddedWorldBook: { type: "string", description: "卡内世界书的 JSON 对象字符串，格式以读取角色返回的字段为准" },
         name: { type: "string", description: "角色全名" },
         persona: { type: "string", description: "完整人设（7 段式 markdown）" },
         personality: { type: "string", description: "性格简介（80-200 字）" },
@@ -295,11 +294,13 @@ const CREATE_CHARACTER_SCHEMA = {
 const UPDATE_CHARACTER_FIELD_SCHEMA = {
     type: "object",
     properties: {
-        name: { type: "string", description: "要修改的角色名" },
-        field: { type: "string", enum: ["name", "persona", "personality", "briefPersona"], description: "字段名" },
-        value: { type: "string", description: "新值" },
+        name: { type: "string", description: "可选角色名，优先使用 id" },
+        id: { type: "string", description: "准确角色 ID" },
+        field: { type: "string", enum: ["name", "persona", "personality", "briefPersona", "tags", "addTags", "removeTags", "timeZone", "wechatID", "avatar", "embeddedWorldBook"], description: "字段名" },
+        value: { type: "string", description: "新值。普通字段传文本；标签传 JSON 数组字符串；世界书传 JSON 对象字符串；头像传字符串 null 可清空。" },
+        preview: { type: "boolean", description: "true 只准备并预览，不应用" },
     },
-    required: ["name", "field", "value"],
+    required: ["field", "value"],
     additionalProperties: false,
 };
 
@@ -664,6 +665,7 @@ const UPDATE_DIY_WIDGET_SCHEMA = {
 const PREVIEW_DIY_WIDGET_SCHEMA = {
     type: "object",
     properties: {
+        widgetId: { type: "string", description: "可选实例 ID，带入其真实配置预览" },
         templateId: { type: "string", description: "要预览的 DIY 模板 id" },
     },
     required: ["templateId"],
@@ -953,6 +955,7 @@ const MIX_SAVE_RECIPE_SCHEMA = {
 };
 
 export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
+    MASCOT_EDIT_PACKAGE,
     {
         id: "css_pack",
         label: "CSS样式套件",
@@ -985,13 +988,13 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
     {
         id: "character_pack",
         label: "角色卡套件",
-        description: "创建 / 修改 / 查看 角色卡。角色由 name/persona/personality 三个字段组成，可另写简量人设 briefPersona（给同世界有关联的角色看，防 OOC）。",
+        description: "按 ID/唯一名字读取和编辑角色卡：人设、简量人设、标签、时区、头像、微信号、卡内世界书。支持草稿预览和撤销；批量修改用读取预览撤销套件。",
         subTools: [
-            { name: "读取角色", description: "不传 name 时列出所有角色；传 name 时返回完整字段。", parameterSchema: READ_CHARACTER_SCHEMA },
+            { name: "读取角色", description: "不传参数列出角色；按 id 或唯一 name 读取完整字段和版本（含标签）。", parameterSchema: READ_CHARACTER_SCHEMA },
             { name: "创建角色", description: "新建一张角色卡。persona 必须包含 7 段式人设（基础信息/外貌/世界观/性格/补充信息/经历）。", parameterSchema: CREATE_CHARACTER_SCHEMA },
-            { name: "更新角色字段", description: "修改某角色的单个字段（name/persona/personality）。", parameterSchema: UPDATE_CHARACTER_FIELD_SCHEMA },
+            { name: "更新角色字段", description: "按 ID/唯一名字修改角色字段（含标签、头像、时区、微信号、卡内世界书）；修改前必读，支持撤销。", parameterSchema: UPDATE_CHARACTER_FIELD_SCHEMA },
         ],
-        usageGuide: CHARACTER_CARD_PROMPT,
+        usageGuide: `${CHARACTER_CARD_PROMPT}\n\n${EDIT_GUIDE}`,
     },
     {
         id: "character_world_pack",
@@ -1066,7 +1069,7 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
     {
         id: "widget_pack",
         label: "桌面组件套件",
-        description: "创建 / 更新 / 预览 / 摆放 DIY 桌面组件（自包含 HTML，沙箱渲染）。更新后桌面实时热更新，适合小步迭代。",
+        description: "创建、读取、更新和预览 DIY 组件，支持内部音乐当前播放联动。移动图标、文件夹/Dock、单实例改款、外观与统一预览撤销使用读取预览撤销套件。",
         subTools: [
             { name: "列出组件目录", description: "列出内置组件与 DIY 组件模板（含 templateId、尺寸、模式）。", parameterSchema: LIST_WIDGET_CATALOG_SCHEMA },
             { name: "查看桌面布局", description: "查看某一页 6x4 网格的占用情况和该页组件实例列表（含实例 id）。", parameterSchema: READ_DESKTOP_LAYOUT_SCHEMA },
@@ -1076,7 +1079,7 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
             { name: "摆放组件", description: "把 DIY 模板或内置组件摆上桌面；不传行列时自动找空位。", parameterSchema: PLACE_WIDGET_SCHEMA },
             { name: "移除DIY组件", description: "把 DIY 实例移下桌面，或删除 DIY 模板（连同其所有桌面实例）。", parameterSchema: REMOVE_DIY_WIDGET_SCHEMA },
         ],
-        usageGuide: WIDGET_PROMPT,
+        usageGuide: `${WIDGET_PROMPT}\n\n${EDIT_GUIDE}`,
     },
     {
         id: "mixology_pack",
@@ -1242,6 +1245,15 @@ const MASCOT_NATIVE_TOOL_NAMES: Record<string, string> = {
     "更新插件": "mascot_plugin_update",
     "启停插件": "mascot_plugin_set_enabled",
     "生成九宫格CSS": "mascot_build_nine_slice_css",
+    "读取编辑对象": "mascot_read_edit_object",
+    "读取DIY组件": "mascot_read_diy_source",
+    "准备修改": "mascot_prepare_edit",
+    "预览修改": "mascot_preview_edit",
+    "应用修改": "mascot_apply_edit",
+    "撤销修改": "mascot_undo_edit",
+    "列出修改记录": "mascot_list_edits",
+    "读取组件诊断": "mascot_read_widget_diagnostics",
+    "导入桌面素材": "mascot_import_desktop_asset",
     "读取角色": "mascot_read_character",
     "创建角色": "mascot_create_character",
     "更新角色字段": "mascot_update_character_field",
@@ -1282,6 +1294,7 @@ const MASCOT_NATIVE_TOOL_NAMES: Record<string, string> = {
 };
 
 const MASCOT_NATIVE_LOADER_NAMES: Record<string, string> = {
+    editing_pack: "mascot_load_editing_pack",
     css_pack: "mascot_load_css_pack",
     image_pack: "mascot_load_image_pack",
     character_pack: "mascot_load_character_pack",
@@ -1369,11 +1382,13 @@ export type MascotToolContext = {
     history?: CssAssetUserImageHistoryMessage[];
     /** 同一条用户消息触发的整轮任务共享，用于保证每个角色只备份一次。 */
     characterBackupIds?: Set<string>;
+    editReads?: EditRead[];
 };
 
 /** 执行小卷工具调用 */
 export async function executeMascotToolCall(call: ToolCall, ctx: MascotToolContext): Promise<ToolResult> {
     try {
+        if (LEGACY_EDIT_NAMES.includes(call.name) || MASCOT_EDIT_PACKAGE.subTools.some(t => t.name === call.name)) return await runMascotEditTool(call, ctx);
         switch (call.name) {
             // ─── CSS ───
             case "读取CSS": return await handleReadCss(call.args, ctx);
@@ -1397,9 +1412,6 @@ export async function executeMascotToolCall(call: ToolCall, ctx: MascotToolConte
             case "生成九宫格CSS": return await handleBuildNineSliceCss(call.args);
 
             // ─── 角色 ───
-            case "读取角色": return await handleReadCharacter(call.args);
-            case "创建角色": return await handleCreateCharacter(call.args);
-            case "更新角色字段": return await handleUpdateCharacterField(call.args, ctx);
 
             // ─── 角色世界（世界卷宗）───
             case "列出世界卷宗": return await handleListCharacterWorlds();
@@ -1437,13 +1449,7 @@ export async function executeMascotToolCall(call: ToolCall, ctx: MascotToolConte
             case "更新正则规则": return await handleUpdateRegexRule(call.args);
 
             // ─── 桌面组件 ───
-            case "列出组件目录": return await handleListWidgetCatalog();
-            case "查看桌面布局": return await handleReadDesktopLayout(call.args);
-            case "创建DIY组件": return await handleCreateDiyWidget(call.args);
-            case "更新DIY组件": return await handleUpdateDiyWidget(call.args);
             case "预览DIY组件": return await handlePreviewDiyWidget(call.args);
-            case "摆放组件": return await handlePlaceWidget(call.args);
-            case "移除DIY组件": return await handleRemoveDiyWidget(call.args);
 
             // ─── 独家特调 ───
             case "列出酒柜": case "读取材料": case "读取制作说明": case "创建材料": case "更新材料": case "保存配方":
@@ -1948,86 +1954,6 @@ async function handleClearCss(args: Record<string, unknown>, ctx: MascotToolCont
     if (!location || !CSS_LOCATION_LABELS[location]) return { name: "清除CSS", success: false, error: `未知位置：${location}` };
     const result = await writeCssAt(location, "", ctx, sessionName);
     return { name: "清除CSS", success: true, data: `已清除 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的 CSS` };
-}
-
-// ── Character Handlers ──────────────────────────
-
-async function handleReadCharacter(args: Record<string, unknown>): Promise<ToolResult> {
-    const { loadCharacters } = await import("./character-storage");
-    const chars = loadCharacters();
-    const name = args.name as string | undefined;
-    if (!name) {
-        if (chars.length === 0) return { name: "读取角色", success: true, data: "（没有角色）" };
-        const lines = chars.map((c) => `· ${c.name || "(未命名)"} [id: ${c.id}]`);
-        return { name: "读取角色", success: true, data: `共 ${chars.length} 个角色：\n${lines.join("\n")}` };
-    }
-    const char = chars.find((c) => c.name === name);
-    if (!char) return { name: "读取角色", success: false, error: `找不到角色：${name}` };
-    const parts: string[] = [];
-    parts.push(`id: ${char.id}`);
-    parts.push(`name: ${char.name || ""}`);
-    parts.push(`personality: ${char.personality || ""}`);
-    parts.push(`briefPersona: ${char.briefPersona || "（未设置）"}`);
-    parts.push(`persona:\n${char.persona || ""}`);
-    return { name: "读取角色", success: true, data: parts.join("\n") };
-}
-
-async function handleCreateCharacter(args: Record<string, unknown>): Promise<ToolResult> {
-    const { loadCharacters, saveCharacters } = await import("./character-storage");
-    const chars = loadCharacters();
-    if (chars.find((c) => c.name === args.name)) return { name: "创建角色", success: false, error: "已存在同名角色" };
-    const now = new Date().toISOString();
-    const briefPersona = typeof args.briefPersona === "string" ? args.briefPersona.trim() : "";
-    const newChar = {
-        id: `char_${Date.now()}`,
-        name: args.name as string,
-        avatar: null,
-        persona: args.persona as string,
-        personality: args.personality as string,
-        briefPersona: briefPersona || undefined,
-        briefPersonaUpdatedAt: briefPersona ? now : undefined,
-        createdAt: now,
-        updatedAt: now,
-    };
-    chars.push(newChar as typeof chars[number]);
-    saveCharacters(chars);
-    return { name: "创建角色", success: true, data: `已创建角色 ${newChar.name} (${newChar.id})${briefPersona ? "，含简量人设" : ""}` };
-}
-
-async function handleUpdateCharacterField(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
-    const { loadCharacters, saveCharacters } = await import("./character-storage");
-    const { backupCharacterVersion, getCharacterCurrentVersion } = await import("./character-version-storage");
-    const chars = loadCharacters();
-    const idx = chars.findIndex((c) => c.name === args.name);
-    if (idx < 0) return { name: "更新角色字段", success: false, error: `找不到角色：${args.name}` };
-    const field = args.field as string;
-    const value = args.value as string;
-    const now = new Date().toISOString();
-    const char = { ...chars[idx] } as Record<string, unknown>;
-    if (field === "name" || field === "persona" || field === "personality") {
-        char[field] = value;
-    } else if (field === "briefPersona") {
-        char.briefPersona = value;
-        char.briefPersonaUpdatedAt = now;
-    } else {
-        return { name: "更新角色字段", success: false, error: `不支持的字段：${field}` };
-    }
-    // 一条用户消息触发的整轮小卷任务中，同一角色只在第一次写入前备份。
-    const backupIds = ctx.characterBackupIds ?? (ctx.characterBackupIds = new Set<string>());
-    const didBackup = !backupIds.has(chars[idx].id);
-    const nextVersion = didBackup
-        ? backupCharacterVersion(chars[idx], "mascot", "小卷本次任务修改前自动备份")
-        : getCharacterCurrentVersion(chars[idx].id);
-    backupIds.add(chars[idx].id);
-
-    char.updatedAt = now;
-    chars[idx] = char as typeof chars[number];
-    saveCharacters(chars);
-    return {
-        name: "更新角色字段",
-        success: true,
-        data: `${didBackup ? "已为本次任务自动备份旧卡，并" : "本次任务已备份，继续"}更新 ${args.name} 的 ${field}；当前版本 V${nextVersion}`,
-    };
 }
 
 // ── Worldbook Handlers ──────────────────────────
@@ -2688,276 +2614,25 @@ async function handleUpdateRegexRule(args: Record<string, unknown>): Promise<Too
     return { name: "更新正则规则", success: true, data: `已更新规则 ${args.ruleId}` };
 }
 
-// ── 桌面组件 Handlers ─────────────────────────
-
-const DIY_HTML_MAX_LENGTH = 300_000;
-
-async function widgetToolDeps() {
-    const storage = await import("./widget-storage");
-    const types = await import("./widget-types");
-    const layoutStore = await import("./desktop-layout-storage");
-    const { kvGet } = await import("./kv-db");
-    const events = await import("./mascot-events");
-    return { storage, types, layoutStore, kvGet, events };
-}
-
-type WidgetToolDeps = Awaited<ReturnType<typeof widgetToolDeps>>;
-
-function readDesktopIconLayout(deps: WidgetToolDeps) {
-    try {
-        const raw = deps.kvGet(deps.layoutStore.ICON_LAYOUT_STORAGE_KEY);
-        return deps.layoutStore.normalizeDesktopIconLayout(raw ? JSON.parse(raw) : null);
-    } catch {
-        return deps.layoutStore.normalizeDesktopIconLayout(null);
-    }
-}
-
-function desktopPageIcons(deps: WidgetToolDeps, page: number) {
-    const layout = readDesktopIconLayout(deps);
-    const pageKey = deps.layoutStore.getDesktopPageKey(page);
-    return layout[pageKey] ?? [];
-}
-
-/** 在指定页为 size 找落点：给了 row/col 则校验，否则扫第一个空位 */
-function resolveWidgetSpot(
-    deps: WidgetToolDeps,
-    size: string,
-    page: number,
-    row?: number,
-    col?: number,
-): { ok: true; row: number; col: number } | { ok: false; error: string } {
-    const { GRID_ROWS, GRID_COLS } = deps.types;
-    const widgets = deps.storage.loadWidgets();
-    const grid = deps.storage.buildOccupancyGrid(desktopPageIcons(deps, page), widgets, page);
-    const sizeKey = size as keyof typeof deps.types.WIDGET_SIZE_CELLS;
-    if (typeof row === "number" && typeof col === "number") {
-        if (!deps.storage.canPlaceWidget(grid, sizeKey, row, col)) {
-            return { ok: false, error: `第 ${page} 页 行${row}列${col} 放不下 ${size}（越界或被占用）。可用「查看桌面布局」找空位。` };
-        }
-        return { ok: true, row, col };
-    }
-    for (let r = 1; r <= GRID_ROWS; r++) {
-        for (let c = 1; c <= GRID_COLS; c++) {
-            if (deps.storage.canPlaceWidget(grid, sizeKey, r, c)) return { ok: true, row: r, col: c };
-        }
-    }
-    return { ok: false, error: `第 ${page} 页没有能放下 ${size} 的空位。可换一页，或先移除/挪动一些内容。` };
-}
-
-function diyTemplateDisplay(t: { id: string; name: string; size: string; mode: string }): string {
-    return `· [DIY] ${t.name}（${t.size}，${t.mode === "code" ? "代码" : "图片"}模式）[templateId: ${t.id}]`;
-}
-
-async function handleListWidgetCatalog(): Promise<ToolResult> {
-    const deps = await widgetToolDeps();
-    const lines: string[] = [];
-    lines.push("内置组件（type → 名称/尺寸）：");
-    for (const entry of deps.types.WIDGET_CATALOG) {
-        lines.push(`· ${entry.type} — ${entry.name}（${entry.size}${entry.track === "freestyle" ? "，自由艺术" : ""}）`);
-    }
-    const templates = deps.storage.loadDIYTemplates();
-    lines.push("");
-    if (templates.length === 0) {
-        lines.push("DIY 组件模板：（暂无）");
-    } else {
-        lines.push("DIY 组件模板：");
-        for (const t of templates) lines.push(diyTemplateDisplay(t));
-    }
-    return { name: "列出组件目录", success: true, data: lines.join("\n") };
-}
-
-async function handleReadDesktopLayout(args: Record<string, unknown>): Promise<ToolResult> {
-    const deps = await widgetToolDeps();
-    const page = numberOption(args.page, 1);
-    if (page < 1 || page > 9) return { name: "查看桌面布局", success: false, error: `页码不合法：${page}` };
-    const widgets = deps.storage.loadWidgets();
-    const grid = deps.storage.buildOccupancyGrid(desktopPageIcons(deps, page), widgets, page);
-    const lines: string[] = [];
-    lines.push(`第 ${page} 页 6x4 占用（W=组件 I=图标 ·=空）：`);
-    grid.forEach((rowCells, r) => {
-        const cells = rowCells.map((cell) => (cell === null ? "·" : cell.startsWith("widget:") ? "W" : "I"));
-        lines.push(`行${r + 1}  ${cells.join(" ")}`);
-    });
-    const pageWidgets = widgets.filter((w) => w.page === page);
-    lines.push("");
-    if (pageWidgets.length === 0) {
-        lines.push("本页组件实例：（无）");
-    } else {
-        const templates = deps.storage.loadDIYTemplates();
-        lines.push("本页组件实例：");
-        for (const w of pageWidgets) {
-            const diy = templates.find((t) => t.id === w.type);
-            const builtin = deps.types.WIDGET_CATALOG.find((e) => e.type === w.type);
-            const label = diy ? `${diy.name}（DIY）` : builtin ? builtin.name : w.type;
-            lines.push(`· ${label} ${w.size} @行${w.row}列${w.col} [实例 id: ${w.id}]`);
-        }
-    }
-    const otherPages = Array.from(new Set(widgets.map((w) => w.page))).filter((p) => p !== page).sort();
-    if (otherPages.length > 0) lines.push(`（其他页也有组件：第 ${otherPages.join("、")} 页）`);
-    return { name: "查看桌面布局", success: true, data: lines.join("\n") };
-}
-
-async function handleCreateDiyWidget(args: Record<string, unknown>): Promise<ToolResult> {
-    const name = typeof args.name === "string" ? args.name.trim() : "";
-    const size = typeof args.size === "string" ? args.size : "";
-    const htmlString = typeof args.htmlString === "string" ? args.htmlString : "";
-    if (!name) return { name: "创建DIY组件", success: false, error: "name 不能为空" };
-    if (!WIDGET_SIZE_ENUM.includes(size)) return { name: "创建DIY组件", success: false, error: `尺寸不合法：${size}。可用：${WIDGET_SIZE_ENUM.join("/")}` };
-    if (!htmlString.trim()) return { name: "创建DIY组件", success: false, error: "htmlString 不能为空" };
-    if (htmlString.length > DIY_HTML_MAX_LENGTH) return { name: "创建DIY组件", success: false, error: `htmlString 过长（${htmlString.length} 字符，上限 ${DIY_HTML_MAX_LENGTH}）` };
-
-    const deps = await widgetToolDeps();
-    const templates = deps.storage.loadDIYTemplates();
-    const id = `diy-${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
-    templates.push({ id, name, size: size as never, mode: "code", htmlString });
-    deps.storage.saveDIYTemplates(templates);
-
-    const autoPlace = args.autoPlace !== false;
-    let placement = "未上桌（autoPlace=false）。之后可用「摆放组件」摆上桌面。";
-    if (autoPlace) {
-        const page = numberOption(args.page, 1);
-        const spot = resolveWidgetSpot(deps, size, page);
-        if (spot.ok) {
-            const widgets = deps.storage.placeWidget(deps.storage.loadWidgets(), {
-                type: id, size: size as never, page, row: spot.row, col: spot.col,
-            });
-            deps.storage.saveWidgets(widgets);
-            placement = `已自动摆到第 ${page} 页 行${spot.row}列${spot.col}，桌面已刷新。`;
-        } else {
-            placement = `模板已创建，但${spot.error}`;
-        }
-    }
-    deps.events.notifyDesktopWidgetsChanged();
-    return { name: "创建DIY组件", success: true, data: `DIY 组件「${name}」已创建 [templateId: ${id}]。${placement}` };
-}
-
-async function handleUpdateDiyWidget(args: Record<string, unknown>): Promise<ToolResult> {
-    const templateId = typeof args.templateId === "string" ? args.templateId : "";
-    if (!templateId) return { name: "更新DIY组件", success: false, error: "缺少 templateId" };
-    const deps = await widgetToolDeps();
-    const templates = deps.storage.loadDIYTemplates();
-    const idx = templates.findIndex((t) => t.id === templateId);
-    if (idx < 0) return { name: "更新DIY组件", success: false, error: `找不到模板：${templateId}。用「列出组件目录」确认 id。` };
-
-    const target = { ...templates[idx] };
-    const changed: string[] = [];
-    if (typeof args.name === "string" && args.name.trim()) { target.name = args.name.trim(); changed.push("名称"); }
-    if (typeof args.htmlString === "string" && args.htmlString.trim()) {
-        if (args.htmlString.length > DIY_HTML_MAX_LENGTH) return { name: "更新DIY组件", success: false, error: `htmlString 过长（上限 ${DIY_HTML_MAX_LENGTH}）` };
-        target.htmlString = args.htmlString;
-        changed.push("HTML");
-    }
-    const newSize = typeof args.size === "string" ? args.size : "";
-    const sizeChanged = Boolean(newSize && newSize !== target.size);
-    if (newSize && !WIDGET_SIZE_ENUM.includes(newSize)) return { name: "更新DIY组件", success: false, error: `尺寸不合法：${newSize}` };
-    if (sizeChanged) { target.size = newSize as never; changed.push("尺寸"); }
-    if (changed.length === 0) return { name: "更新DIY组件", success: false, error: "没有可更新的字段（name/size/htmlString 至少传一个）" };
-
-    templates[idx] = target;
-    deps.storage.saveDIYTemplates(templates);
-
-    let instanceNote = "";
-    if (sizeChanged) {
-        const widgets = deps.storage.loadWidgets();
-        const kept: typeof widgets = [];
-        let dropped = 0;
-        for (const w of widgets) {
-            if (w.type !== templateId) { kept.push(w); continue; }
-            const others = widgets.filter((o) => o.id !== w.id);
-            const grid = deps.storage.buildOccupancyGrid(desktopPageIcons(deps, w.page), others, w.page);
-            if (deps.storage.canPlaceWidget(grid, newSize as never, w.row, w.col)) {
-                kept.push({ ...w, size: newSize as never });
-            } else {
-                dropped += 1;
-            }
-        }
-        deps.storage.saveWidgets(kept);
-        instanceNote = dropped > 0
-            ? ` 有 ${dropped} 个桌面实例原位置放不下新尺寸，已移下桌面（模板还在，可用「摆放组件」重新摆）。`
-            : " 桌面实例已按新尺寸原位更新。";
-    }
-    deps.events.notifyDesktopWidgetsChanged();
-    return { name: "更新DIY组件", success: true, data: `模板「${target.name}」已更新（${changed.join("/")}），桌面实时生效。${instanceNote}` };
-}
+// ── DIY preview (mutations live in mascot-edit-tools) ──
 
 async function handlePreviewDiyWidget(args: Record<string, unknown>): Promise<ToolResult> {
     const templateId = typeof args.templateId === "string" ? args.templateId : "";
     if (!templateId) return { name: "预览DIY组件", success: false, error: "缺少 templateId" };
-    const deps = await widgetToolDeps();
+    const deps = { storage: await import("./widget-storage"), events: await import("./mascot-events") };
     const template = deps.storage.loadDIYTemplates().find((t) => t.id === templateId);
     if (!template) return { name: "预览DIY组件", success: false, error: `找不到模板：${templateId}` };
-    if (template.mode !== "code" || !template.htmlString) return { name: "预览DIY组件", success: false, error: "该模板不是代码模式，暂不支持弹窗预览" };
+    const instance = args.widgetId ? deps.storage.loadWidgets().find(w => w.id === args.widgetId && w.type === templateId) : deps.storage.loadWidgets().find(w => w.type === templateId);
+    if (args.widgetId && !instance) return { name: "预览DIY组件", success: false, error: "该实例不属于所选模板" };
     const handled = deps.events.requestDiyWidgetPreview({
         templateId: template.id,
         name: template.name,
         size: template.size,
-        htmlString: template.htmlString,
+        htmlString: template.htmlString ?? "",
+        mode: template.mode, bgAssetId: template.bgAssetId, slots: template.slots, instance,
     });
     if (!handled) return { name: "预览DIY组件", success: false, error: "预览弹窗当前不可用（桌宠界面未挂载）" };
     return { name: "预览DIY组件", success: true, data: `已弹出「${template.name}」的预览，用户可直接查看效果。` };
-}
-
-async function handlePlaceWidget(args: Record<string, unknown>): Promise<ToolResult> {
-    const type = typeof args.type === "string" ? args.type.trim() : "";
-    if (!type) return { name: "摆放组件", success: false, error: "缺少 type" };
-    const deps = await widgetToolDeps();
-
-    let size: string | null = null;
-    let label = type;
-    if (type.startsWith("diy-")) {
-        const template = deps.storage.loadDIYTemplates().find((t) => t.id === type);
-        if (!template) return { name: "摆放组件", success: false, error: `找不到 DIY 模板：${type}` };
-        size = template.size;
-        label = template.name;
-    } else {
-        const entry = deps.types.WIDGET_CATALOG.find((e) => e.type === type);
-        if (!entry) return { name: "摆放组件", success: false, error: `未知组件类型：${type}。用「列出组件目录」查看可用类型。` };
-        size = entry.size;
-        label = entry.name;
-    }
-
-    const page = numberOption(args.page, 1);
-    const row = typeof args.row === "number" ? args.row : undefined;
-    const col = typeof args.col === "number" ? args.col : undefined;
-    const spot = resolveWidgetSpot(deps, size, page, row, col);
-    if (!spot.ok) return { name: "摆放组件", success: false, error: spot.error };
-
-    const widgets = deps.storage.placeWidget(deps.storage.loadWidgets(), {
-        type, size: size as never, page, row: spot.row, col: spot.col,
-    });
-    deps.storage.saveWidgets(widgets);
-    deps.events.notifyDesktopWidgetsChanged();
-    return { name: "摆放组件", success: true, data: `「${label}」已摆到第 ${page} 页 行${spot.row}列${spot.col}，桌面已刷新。` };
-}
-
-async function handleRemoveDiyWidget(args: Record<string, unknown>): Promise<ToolResult> {
-    const widgetId = typeof args.widgetId === "string" ? args.widgetId.trim() : "";
-    const templateId = typeof args.templateId === "string" ? args.templateId.trim() : "";
-    if (!widgetId && !templateId) return { name: "移除DIY组件", success: false, error: "widgetId 和 templateId 至少传一个" };
-    const deps = await widgetToolDeps();
-
-    if (widgetId) {
-        const widgets = deps.storage.loadWidgets();
-        const target = widgets.find((w) => w.id === widgetId);
-        if (!target) return { name: "移除DIY组件", success: false, error: `找不到组件实例：${widgetId}` };
-        if (!target.type.startsWith("diy-")) return { name: "移除DIY组件", success: false, error: "只允许移除 DIY 组件实例；内置组件请让用户自己长按整理。" };
-        deps.storage.saveWidgets(deps.storage.removeWidget(widgets, widgetId));
-        deps.events.notifyDesktopWidgetsChanged();
-        return { name: "移除DIY组件", success: true, data: `实例 ${widgetId} 已移下桌面（模板保留）。` };
-    }
-
-    if (!templateId.startsWith("diy-")) return { name: "移除DIY组件", success: false, error: "templateId 必须是 diy- 开头的 DIY 模板 id" };
-    const templates = deps.storage.loadDIYTemplates();
-    const idx = templates.findIndex((t) => t.id === templateId);
-    if (idx < 0) return { name: "移除DIY组件", success: false, error: `找不到模板：${templateId}` };
-    const [removed] = templates.splice(idx, 1);
-    deps.storage.saveDIYTemplates(templates);
-    const widgets = deps.storage.loadWidgets();
-    const remaining = widgets.filter((w) => w.type !== templateId);
-    const removedInstances = widgets.length - remaining.length;
-    deps.storage.saveWidgets(remaining);
-    deps.events.notifyDesktopWidgetsChanged();
-    return { name: "移除DIY组件", success: true, data: `模板「${removed.name}」已删除，同时移除了 ${removedInstances} 个桌面实例。` };
 }
 
 // ── Navigation ────────────────────────────────

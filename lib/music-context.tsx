@@ -439,11 +439,13 @@ export function MusicProvider({ children }: { children: ReactNode }) {
             next,
             prev,
             setPlayMode,
+            seek,
+            openPlayer: openFullPlayer,
         });
         return () => registerMusicControlBridge(null);
     }, [
         currentTrack, isPlaying, currentTime, duration, playMode, queue, volume,
-        playResolvedTrack, playByQuery, addToQueue, pause, resume, stop, next, prev, setPlayMode,
+        playResolvedTrack, playByQuery, addToQueue, pause, resume, stop, next, prev, setPlayMode, seek, openFullPlayer,
     ]);
 
     const controlsValue = useMemo<MusicControlsValue>(() => ({

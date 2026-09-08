@@ -166,6 +166,11 @@ function getCharacterTimeZoneOptions(currentTimeZone = ""): string[] {
 export function PhoneCharacterApp({ onClose, onNotice }: PhoneCharacterAppProps) {
   const [view, setView] = useState<{ type: ViewType; id: string | null; isEditing?: boolean }>({ type: "list", id: null, isEditing: false });
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters());
+  useEffect(() => {
+    const refresh = () => setCharacters(loadCharacters());
+    window.addEventListener("mascot-edit-changed", refresh);
+    return () => window.removeEventListener("mascot-edit-changed", refresh);
+  }, []);
   const [bgItems, setBgItems] = useState<CanvasBgItem[]>(() => loadBackgroundItems());
   const [transition, setTransition] = useState<TransitionState | null>(null);
   const [pendingPlacementChar, setPendingPlacementChar] = useState<Character | null>(null);

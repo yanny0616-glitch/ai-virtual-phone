@@ -491,3 +491,7 @@ async function triggerDownload(blob: Blob, filename: string): Promise<void> {
   const { downloadFile } = await import("./download-utils");
   await downloadFile(blob, filename);
 }
+
+
+/** A durable batch writer updated the character rows without calling saveCharacters. */
+export function invalidateCharacterCache(): void { _charsCache = null; }

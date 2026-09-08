@@ -10,12 +10,26 @@
 // 这个宿主挂在桌宠旁边、不带任何条件，两个入口都能弹出来。
 
 import { useEffect, useState } from "react";
+import { WidgetEditPreview, MascotEditReview, MascotEditHistory, MascotReviewDialog } from "./mascot-edit-review";
+import { MASCOT_EDIT_PREVIEW_EVENT, MASCOT_EDIT_HISTORY_EVENT } from "@/lib/mascot-edit-store";
+import type { EditPlan } from "@/lib/mascot-edit-domain";
+import type { WidgetSize } from "@/lib/widget-types";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import {
+  DIY_WIDGET_PREVIEW_EVENT,
+  type DiyWidgetPreviewEventDetail,
+  type DiyWidgetPreviewRequest,
   STATUS_BAR_PREVIEW_EVENT,
   type StatusBarPreviewEventDetail,
   type StatusBarPreviewRequest,
 } from "@/lib/mascot-events";
+
+function DiyWidgetPreviewDialog({ request, onClose }: { request: DiyWidgetPreviewRequest; onClose: () => void }) {
+  return <MascotReviewDialog title={`组件预览 · ${request.name}（${request.size}）`} onClose={onClose}>
+    <WidgetEditPreview template={{ id: request.templateId, name: request.name, size: request.size as WidgetSize, mode: request.mode ?? 'code', htmlString: request.htmlString, bgAssetId: request.bgAssetId, slots: request.slots }} instance={request.instance} prefix="preview-diy" />
+    <p style={{ fontSize: 12, marginTop: 10 }}>预览配置不会保存；音乐状态同步，播放控制请应用到桌面后使用。</p>
+  </MascotReviewDialog>;
+}
 
 /** 线上聊天状态栏预览：用 CustomStatusFrame 跑，和聊天里真实渲染走的是同一个组件
  *  与同一套高度桥，所见即所得。示例数据经 window.STATUS_RAW / {{RAW}} 注入。 */
@@ -54,6 +68,9 @@ function StatusBarPreviewDialog({ request, onClose }: { request: StatusBarPrevie
 }
 
 export function MascotPreviewHost() {
+  const [editPreview, setEditPreview] = useState<EditPlan | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [diyWidgetPreview, setDiyWidgetPreview] = useState<DiyWidgetPreviewRequest | null>(null);
   const [statusBarPreview, setStatusBarPreview] = useState<StatusBarPreviewRequest | null>(null);
 
   useEffect(() => {
@@ -61,12 +78,40 @@ export function MascotPreviewHost() {
       const detail = (event as CustomEvent<StatusBarPreviewEventDetail>).detail;
       if (!detail?.request) return;
       detail.handled = true;
+      setEditPreview(null); setHistoryOpen(false);
+      setDiyWidgetPreview(null);
       setStatusBarPreview(detail.request);
     };
+    const diyHandler = (event: Event) => {
+      const detail = (event as CustomEvent<DiyWidgetPreviewEventDetail>).detail;
+      if (!detail?.request) return;
+      detail.handled = true;
+      setEditPreview(null); setHistoryOpen(false);
+      setStatusBarPreview(null);
+      setDiyWidgetPreview(detail.request);
+    };
+    const editHandler = (event: Event) => {
+      const detail = (event as CustomEvent<{plan: EditPlan; handled: boolean}>).detail;
+      if (!detail?.plan) return;
+      detail.handled = true;
+      setEditPreview(detail.plan); setHistoryOpen(false); setDiyWidgetPreview(null); setStatusBarPreview(null);
+    };
+    const historyHandler = () => { setHistoryOpen(true); setEditPreview(null); setDiyWidgetPreview(null); setStatusBarPreview(null); };
+    window.addEventListener(MASCOT_EDIT_PREVIEW_EVENT, editHandler);
+    window.addEventListener(MASCOT_EDIT_HISTORY_EVENT, historyHandler);
     window.addEventListener(STATUS_BAR_PREVIEW_EVENT, handler);
-    return () => window.removeEventListener(STATUS_BAR_PREVIEW_EVENT, handler);
+    window.addEventListener(DIY_WIDGET_PREVIEW_EVENT, diyHandler);
+    return () => {
+      window.removeEventListener(MASCOT_EDIT_PREVIEW_EVENT, editHandler);
+      window.removeEventListener(MASCOT_EDIT_HISTORY_EVENT, historyHandler);
+      window.removeEventListener(STATUS_BAR_PREVIEW_EVENT, handler);
+      window.removeEventListener(DIY_WIDGET_PREVIEW_EVENT, diyHandler);
+    };
   }, []);
 
+  if (editPreview) return <MascotEditReview key={editPreview.id} initialPlan={editPreview} onClose={() => setEditPreview(null)} />;
+  if (historyOpen) return <MascotEditHistory onClose={() => setHistoryOpen(false)} onSelect={plan => { setHistoryOpen(false); setEditPreview(plan); }} />;
+  if (diyWidgetPreview) return <DiyWidgetPreviewDialog request={diyWidgetPreview} onClose={() => setDiyWidgetPreview(null)} />;
   if (!statusBarPreview) return null;
   return <StatusBarPreviewDialog request={statusBarPreview} onClose={() => setStatusBarPreview(null)} />;
 }

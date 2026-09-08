@@ -83,12 +83,27 @@ export function loadCharacterVersions(characterId: string): CharacterVersion[] {
 }
 
 /** 保存修改前的完整角色卡，并返回修改完成后的当前版本号。 */
-export function backupCharacterVersion(
+export function backupCharacterVersion(character: Character, source: CharacterVersionSource, label?: string): number {
+  const store = loadStore();
+  const version = appendCharacterBackup(store, character, source, label);
+  saveStore(store);
+  return version;
+}
+
+/** Prepare old-style card history for inclusion in the same durable edit transaction. */
+export function prepareCharacterVersionBackups(characters: Character[], source: CharacterVersionSource, label: string): { key: string; expected: string | null; value: string } {
+  const expected = kvGet(STORAGE_KEY);
+  const store = loadStore();
+  for (const character of characters) appendCharacterBackup(store, character, source, label);
+  return { key: STORAGE_KEY, expected, value: JSON.stringify(store) };
+}
+
+function appendCharacterBackup(
+  store: CharacterVersionStore,
   character: Character,
   source: CharacterVersionSource,
   label?: string,
 ): number {
-  const store = loadStore();
   const state = normalizeState(store[character.id]);
   const snapshotVersion = state.currentVersion;
   const snapshot: CharacterVersion = {
@@ -111,7 +126,6 @@ export function backupCharacterVersion(
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     .slice(-MAX_VERSIONS_PER_CHARACTER);
   store[character.id] = state;
-  saveStore(store);
   return state.currentVersion;
 }
 

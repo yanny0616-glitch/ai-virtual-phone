@@ -267,6 +267,9 @@ function MascotInfoPanel({
                 </div>
 
                 <div className="menu-group">
+                    <button type="button" className="menu-item" onClick={() => window.dispatchEvent(new CustomEvent("mascot-edit-history"))}>
+                        <span className="menu-label">小卷修改记录</span><span className="menu-desc">查看草稿、预览和撤销修改</span>
+                    </button>
                     <button
                         className="menu-item"
                         disabled={chat.isThinking || !hasToolHistory}

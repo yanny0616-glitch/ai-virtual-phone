@@ -34,6 +34,10 @@ export type DiyWidgetPreviewRequest = {
   name: string;
   size: string;
   htmlString: string;
+  mode?: "code" | "image";
+  bgAssetId?: string;
+  slots?: import("./widget-types").DIYTemplateSlot[];
+  instance?: import("./widget-types").WidgetInstance;
 };
 
 export type DiyWidgetPreviewEventDetail = {

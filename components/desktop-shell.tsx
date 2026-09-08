@@ -137,6 +137,7 @@ import { requestBackgroundChatReply, scheduleFollowUp } from "@/lib/follow-up-se
 import { CHAT_MESSAGE_NOTICE_EVENT, CHAT_OPEN_SESSION_EVENT, type ChatMessageNoticeDetail } from "@/lib/chat-notification-events";
 import { startIncomingCallVibration } from "@/lib/call-vibration";
 import { setMascotContext } from "@/lib/mascot-context";
+import { MASCOT_EDIT_CHANGED_EVENT } from "@/lib/mascot-edit-store";
 import { DESKTOP_WIDGETS_CHANGED_EVENT } from "@/lib/mascot-events";
 import { useWeixinBridge } from "@/lib/use-weixin-bridge";
 import { startWeixinCloudRealtimeSync } from "@/lib/weixin-cloud-sync";
@@ -1116,6 +1117,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const scopes = (event as CustomEvent<{scopes: string[]}>).detail?.scopes || [];
+      if (scopes.includes('appearance')) { const fresh = readThemeProfile(); setSavedTheme(fresh); setDraftTheme(fresh); }
+    };
+    window.addEventListener(MASCOT_EDIT_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(MASCOT_EDIT_CHANGED_EVENT, refresh);
+  }, []);
   // Listen for theme CSS updates from 小卷
   useEffect(() => {
     const onThemeUpdate = () => {
@@ -3649,7 +3658,9 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
         mascotWidgetsDirtyRef.current = true;
         return;
       }
-      setWidgets(loadWidgets());
+      const freshWidgets = loadWidgets(), freshDock = loadDockLayout(), freshFolders = loadDesktopFolders();
+      const freshLayout = normalizeLayout(JSON.parse(kvGet(ICON_LAYOUT_STORAGE_KEY) || "null"), freshWidgets, new Set(freshDock), freshFolders);
+      setWidgets(freshWidgets); setDock(freshDock); dockRef.current = freshDock; setFolders(freshFolders); setLayout(freshLayout);
     };
     window.addEventListener(DESKTOP_WIDGETS_CHANGED_EVENT, reload);
     return () => window.removeEventListener(DESKTOP_WIDGETS_CHANGED_EVENT, reload);
@@ -3657,7 +3668,9 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
   useEffect(() => {
     if (!editMode && mascotWidgetsDirtyRef.current) {
       mascotWidgetsDirtyRef.current = false;
-      setWidgets(loadWidgets());
+      const freshWidgets = loadWidgets(), freshDock = loadDockLayout(), freshFolders = loadDesktopFolders();
+      const freshLayout = normalizeLayout(JSON.parse(kvGet(ICON_LAYOUT_STORAGE_KEY) || "null"), freshWidgets, new Set(freshDock), freshFolders);
+      setWidgets(freshWidgets); setDock(freshDock); dockRef.current = freshDock; setFolders(freshFolders); setLayout(freshLayout);
     }
   }, [editMode]);
 

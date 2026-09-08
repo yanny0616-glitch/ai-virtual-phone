@@ -236,3 +236,27 @@ export function kvKeysWithPrefix(prefix: string): string[] {
 export function kvEntries(): Array<{ key: string; value: string }> {
     return Array.from(_cache.entries()).map(([key, value]) => ({ key, value }));
 }
+
+
+/** Atomic durable commit for reviewed edits. Cache is changed only after IDB commits.
+ * Exact persisted comparisons also reject stale edits from another tab. */
+export async function kvCompareAndSetBatch(changes: Array<{ key: string; expected: string | null; value: string }>): Promise<void> {
+    if (new Set(changes.map(c => c.key)).size !== changes.length) throw new Error("重复的存储键");
+    const checkCache = () => {
+        for (const c of changes) if (kvGet(c.key) !== c.expected) throw new Error("内容已变化，请重新读取后再修改");
+    };
+    checkCache();
+    await kvDb.transaction("rw", kvDb.entries, async () => {
+        const rows = await kvDb.entries.bulkGet(changes.map(c => c.key));
+        checkCache();
+        changes.forEach((c, i) => {
+            if ((rows[i]?.value ?? null) !== c.expected) throw new Error("其他页面已修改内容，请刷新后重新读取");
+        });
+        await kvDb.entries.bulkPut(changes.map(({ key, value }) => ({ key, value })));
+    });
+    for (const c of changes) {
+        // A manual edit queued after our transaction owns the newer cache value.
+        if (kvGet(c.key) === c.expected) _cache.set(c.key, c.value);
+        if (isManagedLegacyKey(c.key)) removeLegacyLocalStorageKeyIfValue(c.key, c.expected ?? "");
+    }
+}

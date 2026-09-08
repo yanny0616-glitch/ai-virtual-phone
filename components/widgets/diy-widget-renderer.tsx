@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useId } from "react";
 import type { WidgetInstance, DIYWidgetTemplate } from "@/lib/widget-types";
+import { attachWidgetMusicBridge, widgetMusicClientScript } from "@/lib/widget-music-bridge";
 import { getThemeAssetMap } from "@/lib/theme-storage";
 
 type Props = {
@@ -7,6 +8,8 @@ type Props = {
   preview?: boolean;
   template: DIYWidgetTemplate;
   onConfigChange?: (widgetId: string, config: Record<string, unknown>) => void;
+  readOnly?: boolean;
+  inert?: boolean;
 };
 
 const CODE_WIDGET_BRIDGE_SOURCE = "ai-phone-diy-widget";
@@ -35,7 +38,7 @@ function inlineJson(value: unknown): string {
 }
 
 function injectCodeWidgetBridge(html: string, widgetId: string, config: Record<string, unknown> | undefined): string {
-  const bridge = `${DIY_WIDGET_GUARD_STYLE}<script>
+  const bridge = `${DIY_WIDGET_GUARD_STYLE}${widgetMusicClientScript(widgetId)}<script>
 (function(){
   var SOURCE = ${inlineJson(CODE_WIDGET_BRIDGE_SOURCE)};
   var HOST_SOURCE = SOURCE + "-host";
@@ -389,6 +392,7 @@ function sanitizeWidgetConfigPatch(value: unknown): Record<string, unknown> {
 
 /** Picker preview for code widgets: real iframe, lazily mounted on first scroll into view. */
 function DIYCodePreview({ html }: { html: string }) {
+  const previewId = `picker-${useId()}`;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -409,11 +413,11 @@ function DIYCodePreview({ html }: { html: string }) {
   return (
     <div ref={hostRef} className="w-full h-full relative rounded-[18px] overflow-hidden">
       {mounted ? (
-        <iframe
-          srcDoc={html}
-          sandbox="allow-scripts"
-          className="w-full h-full border-none"
-          style={{ pointerEvents: "none" }}
+        <DIYCodeWidgetFrame
+          widget={{ id: previewId, type: previewId, size: '2x2', page: 1, row: 1, col: 1 }}
+          template={{ id: previewId, name: '组件预览', mode: 'code', size: '2x2', htmlString: html }}
+          readOnly
+          inert
         />
       ) : (
         <div
@@ -449,11 +453,16 @@ export function DIYWidgetRenderer({ widget, preview, template, onConfigChange }:
   return <DIYImageWidgetFrame widget={widget} preview={preview} template={template} onConfigChange={onConfigChange} />;
 }
 
-function DIYCodeWidgetFrame({ widget, template, onConfigChange }: Omit<Props, "preview">) {
+export function DIYCodeWidgetFrame({ widget, template, onConfigChange, readOnly = false, inert = false }: Omit<Props, "preview">) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [srcDoc, setSrcDoc] = useState(() =>
     injectCodeWidgetBridge(template.htmlString || "", widget.id, widget.config)
   );
+
+  useEffect(() => {
+    const target = iframeRef.current?.contentWindow;
+    if (target) return attachWidgetMusicBridge(target, widget.id, readOnly);
+  }, [widget.id, readOnly, template.htmlString]);
 
   useEffect(() => {
     setSrcDoc(injectCodeWidgetBridge(template.htmlString || "", widget.id, widget.config));
@@ -487,12 +496,13 @@ function DIYCodeWidgetFrame({ widget, template, onConfigChange }: Omit<Props, "p
   }, [onConfigChange, widget.id]);
 
   return (
-    <div className="w-full h-full relative rounded-[18px] overflow-hidden" style={{ pointerEvents: 'auto' }}>
+    <div inert={inert} className="w-full h-full relative rounded-[18px] overflow-hidden" style={{ pointerEvents: 'auto' }}>
       <iframe
         ref={iframeRef}
         srcDoc={srcDoc}
         sandbox="allow-scripts"
         className="w-full h-full border-none"
+        title="DIY 组件"
       />
     </div>
   );
