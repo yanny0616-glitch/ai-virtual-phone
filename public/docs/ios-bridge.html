@@ -131,6 +131,20 @@
     .copy-head { gap:8px; padding-left:12px; } .copy-block pre { padding:14px; } .cap-no { display:none; } .capability summary { flex-wrap:wrap; }
     .config-grid { grid-template-columns:1fr; gap:4px; } .config-grid>span:nth-child(odd) { margin-top:10px; }
   }
+  .table-wrap.stack td::before { display:none; }
+  @media(max-width:800px) {
+    .table-wrap.stack { border:0; background:none; box-shadow:none; overflow:visible; }
+    .table-wrap.stack table { min-width:0; display:block; }
+    .table-wrap.stack caption { display:block; background:none; border:0; padding:0 0 10px; }
+    .table-wrap.stack thead { display:none; }
+    .table-wrap.stack tbody,.table-wrap.stack tr,.table-wrap.stack td { display:block; }
+    .table-wrap.stack tr { background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:6px 16px 10px; margin-bottom:12px; }
+    .table-wrap.stack td { border:0; padding:8px 0; min-width:0; background:none!important; }
+    .table-wrap.stack td+td { border-top:1px solid var(--line); }
+    .table-wrap.stack td::before { display:block; content:attr(data-label); font-size:.72rem; font-weight:650; letter-spacing:.08em; color:var(--soft); margin-bottom:2px; }
+    .table-wrap.stack td:first-child { font-size:1.02rem; padding-top:10px; }
+    .table-wrap.stack td:first-child::before { display:none; }
+  }
   @media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
   @media print { .topbar,.sidebar,.copy,.skip,.finish,footer { display:none!important; } .layout { display:block; } main { max-width:none; padding:0; } body { font-size:11pt; color:#000; background:#fff; } .chapter { padding:24px 0; } h1 { font-size:30pt; } h2 { font-size:22pt; } .table-wrap { overflow:visible; box-shadow:none; } table { min-width:0; } .copy-block,.notice,.first-task,.lesson { background:#fff; box-shadow:none; } h2,h3,summary { break-after:avoid; } .copy-block,tr { break-inside:avoid; } .flow { background:#fff; color:#000; border:1px solid #999; } }
 }
@@ -161,12 +175,12 @@
   <p class="lead">iPhone 快捷指令与小手机之间的双向桥。本页按「能做什么、照着抄怎么配」写，27 个场景全部基于当前源码里的接口和向导文案。</p>
   <div class="meta"><span>适用于 Float 小手机</span><span>核对：2026-09-08</span><span>地址里的 &lt;你的项目&gt; 指个人云 Supabase 域名</span></div>
   <div class="jump-grid start-links"><a href="#inbox-recipes">现实发生的事让 TA 知道 →</a><a href="#state-recipes">让 TA 随时看你的电量步数 →</a><a href="#action-recipes">让 TA 操作你的 iPhone →</a><a href="#screen">截屏跟 TA 聊 →</a></div>
-  <div class="table-wrap"><table><caption>五条通道 · 一句话分工</caption><thead><tr><th>通道</th><th>方向</th><th>谁触发</th><th>典型用途</th><th>APP 里的位置</th></tr></thead><tbody>
-  <tr><td><strong>A 收件箱 + 自动联动</strong></td><td>iPhone → 小手机</td><td>iOS 自动化（到家、收短信、充电、闹钟…）</td><td>现实里发生了事 → 角色知道 / 回话 / 记住 / 记日历</td><td>现实桥 → 自动联动</td></tr>
-  <tr><td><strong>B 状态快照 + 主动查询</strong></td><td>iPhone → 小手机</td><td>定时自动化覆盖上传</td><td>角色聊天时随时查你的电量、步数、睡眠、位置</td><td>现实桥 → 主动查询</td></tr>
-  <tr><td><strong>C 快捷动作</strong></td><td>小手机 → iPhone</td><td>角色，或 A 通道的规则</td><td>角色替你写备忘录、开灯、放歌、拍照回传、截屏看你在干嘛</td><td>现实桥 → 快捷动作</td></tr>
-  <tr><td><strong>D 屏幕速聊</strong></td><td>双向</td><td>你双击辅助触控</td><td>截当前屏幕，角色在系统弹窗里跟你聊，写回聊天记录</td><td>现实桥 → 屏幕速聊</td></tr>
-  <tr><td><strong>E 发件箱</strong></td><td>小手机 → iPhone</td><td>自定义 APP</td><td>APP 把信号丢给 iPhone 上的「检查回传」快捷指令执行</td><td>无界面，SDK 调用</td></tr>
+  <div class="table-wrap stack"><table><caption>五条通道 · 一句话分工</caption><thead><tr><th>通道</th><th>方向</th><th>谁触发</th><th>典型用途</th><th>APP 里的位置</th></tr></thead><tbody>
+  <tr><td data-label="通道"><strong>A 收件箱 + 自动联动</strong></td><td data-label="方向">iPhone → 小手机</td><td data-label="谁触发">iOS 自动化（到家、收短信、充电、闹钟…）</td><td data-label="典型用途">现实里发生了事 → 角色知道 / 回话 / 记住 / 记日历</td><td data-label="APP 里的位置">现实桥 → 自动联动</td></tr>
+  <tr><td data-label="通道"><strong>B 状态快照 + 主动查询</strong></td><td data-label="方向">iPhone → 小手机</td><td data-label="谁触发">定时自动化覆盖上传</td><td data-label="典型用途">角色聊天时随时查你的电量、步数、睡眠、位置</td><td data-label="APP 里的位置">现实桥 → 主动查询</td></tr>
+  <tr><td data-label="通道"><strong>C 快捷动作</strong></td><td data-label="方向">小手机 → iPhone</td><td data-label="谁触发">角色，或 A 通道的规则</td><td data-label="典型用途">角色替你写备忘录、开灯、放歌、拍照回传、截屏看你在干嘛</td><td data-label="APP 里的位置">现实桥 → 快捷动作</td></tr>
+  <tr><td data-label="通道"><strong>D 屏幕速聊</strong></td><td data-label="方向">双向</td><td data-label="谁触发">你双击辅助触控</td><td data-label="典型用途">截当前屏幕，角色在系统弹窗里跟你聊，写回聊天记录</td><td data-label="APP 里的位置">现实桥 → 屏幕速聊</td></tr>
+  <tr><td data-label="通道"><strong>E 发件箱</strong></td><td data-label="方向">小手机 → iPhone</td><td data-label="谁触发">自定义 APP</td><td data-label="典型用途">APP 把信号丢给 iPhone 上的「检查回传」快捷指令执行</td><td data-label="APP 里的位置">无界面，SDK 调用</td></tr>
   </tbody></table></div>
   <div class="flow"><span><b>iPhone 自动化</b><br>POST 一个 JSON</span><span>→</span><span><b>你的 Supabase Storage</b><br>bridge-inbox / bridge-state</span><span>→</span><span><b>小手机</b><br>每 20 秒拉取，按规则执行</span><span>→</span><span><b>角色</b><br>回话 / 记忆 / 日历 / 反向触发快捷指令</span></div>
   <div class="first-task"><div class="task-heading"><span class="number">01</span><div><span class="small-label">约 2 分钟 · 只需要云端备份已接通</span><h2>完成你的第一条联动</h2></div></div>
@@ -186,13 +200,13 @@
   </ol>
   <h3>地址与令牌一览</h3>
   <p>全部在现实桥 APP 里点击即复制，这里列形状方便对照。</p>
-  <div class="table-wrap"><table><caption>所有会用到的地址 · 真实值在 APP 里复制</caption><thead><tr><th>用途</th><th>形状</th><th>在哪复制</th></tr></thead><tbody>
-  <tr><td>收件箱上传</td><td><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-inbox/[文件名].json</code></td><td>自动联动向导第 2 步</td></tr>
-  <tr><td>状态快照上传</td><td><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-state/&lt;key&gt;.json</code></td><td>主动查询向导第 3 步，或数据卡片「复制上传地址」</td></tr>
-  <tr><td>Storage 密钥</td><td><code>Bearer &lt;云端备份的 key&gt;</code>，头部名 <code>Authorization</code></td><td>同上，屏幕上打码，点击复制完整值</td></tr>
-  <tr><td>唤醒地址</td><td><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/ai-phone-push?action=bridge-wake&amp;token=&lt;bridgeToken&gt;</code></td><td>自动联动向导第 2 步 → 离线增强</td></tr>
-  <tr><td>屏幕速聊接口</td><td><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/screen-chat</code></td><td>屏幕速聊向导第 3 步</td></tr>
-  <tr><td>bridgeToken</td><td>36 位十六进制。一个账号一个，唤醒与屏幕速聊共用</td><td>屏幕速聊向导第 3 步「问题 2」</td></tr>
+  <div class="table-wrap stack"><table><caption>所有会用到的地址 · 真实值在 APP 里复制</caption><thead><tr><th>用途</th><th>形状</th><th>在哪复制</th></tr></thead><tbody>
+  <tr><td data-label="用途">收件箱上传</td><td data-label="形状"><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-inbox/[文件名].json</code></td><td data-label="在哪复制">自动联动向导第 2 步</td></tr>
+  <tr><td data-label="用途">状态快照上传</td><td data-label="形状"><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-state/&lt;key&gt;.json</code></td><td data-label="在哪复制">主动查询向导第 3 步，或数据卡片「复制上传地址」</td></tr>
+  <tr><td data-label="用途">Storage 密钥</td><td data-label="形状"><code>Bearer &lt;云端备份的 key&gt;</code>，头部名 <code>Authorization</code></td><td data-label="在哪复制">同上，屏幕上打码，点击复制完整值</td></tr>
+  <tr><td data-label="用途">唤醒地址</td><td data-label="形状"><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/ai-phone-push?action=bridge-wake&amp;token=&lt;bridgeToken&gt;</code></td><td data-label="在哪复制">自动联动向导第 2 步 → 离线增强</td></tr>
+  <tr><td data-label="用途">屏幕速聊接口</td><td data-label="形状"><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/screen-chat</code></td><td data-label="在哪复制">屏幕速聊向导第 3 步</td></tr>
+  <tr><td data-label="用途">bridgeToken</td><td data-label="形状">36 位十六进制。一个账号一个，唤醒与屏幕速聊共用</td><td data-label="在哪复制">屏幕速聊向导第 3 步「问题 2」</td></tr>
   </tbody></table></div>
   <div class="notice"><strong>令牌不要外传。</strong><p>唤醒地址和屏幕速聊令牌都是账号级凭证。把快捷指令分享给别人之前，先把这两个字段清空。</p></div>
 </section>
@@ -305,25 +319,25 @@ Content-Type: application/json
 
 <section id="state-recipes" class="chapter">
   <div class="eyebrow">07 / 快照场景</div><h2>7 个值得常年挂着的快照</h2>
-  <div class="table-wrap"><table><caption>每行一个数据项 · 触发时机是建议值</caption><thead><tr><th>key</th><th>触发</th><th>取数据</th><th>角色能干嘛</th></tr></thead><tbody>
-  <tr><td><code>battery</code></td><td>充电器连接 / 断开 + 每小时</td><td>「获取电池电量」+「获取设备详细信息 → 是否在充电」<br><code>{"电量":"85%","充电":"是"}</code></td><td>说「你手机快没电了吧」时终于有依据</td></tr>
-  <tr><td><code>health</code></td><td>每天 8:00 和 22:00</td><td>「查找健康样本」×3：步数（今天，求和）、静息心率（最新）、睡眠（昨天，时长）</td><td>早上问你睡得怎么样、晚上看你走了多少步</td></tr>
-  <tr><td><code>where</code></td><td>每 2 小时 / 到达常去地点</td><td>「获取当前位置」→「获取当前天气」<br><code>{"城市":"…","天气":"…","气温":"…°C"}</code></td><td>不想给精确地址就只传城市和天气</td></tr>
-  <tr><td><code>agenda</code></td><td>每天 7:00 + 每 3 小时</td><td>「查找日历事件」（今天，按开始时间）→ 拼成列表</td><td>主动问「下午三点的会开完了吗」</td></tr>
-  <tr><td><code>nowplaying</code></td><td>打开音乐 App 或每 30 分钟</td><td>「获取当前播放的歌曲」→ 名称 + 艺人</td><td>接「你最近一直在循环这首啊」</td></tr>
-  <tr><td><code>todo</code></td><td>每天 9:00 / 21:00</td><td>「查找提醒事项」（未完成，按到期时间）</td><td>晚上盘点你今天还有什么没做</td></tr>
-  <tr><td><code>phone</code></td><td>专注模式开启 / 关闭</td><td><code>{"专注模式":"睡眠","从":"23:10"}</code></td><td>看到「睡眠」就知道别在这时候闹你</td></tr>
+  <div class="table-wrap stack"><table><caption>每行一个数据项 · 触发时机是建议值</caption><thead><tr><th>key</th><th>触发</th><th>取数据</th><th>角色能干嘛</th></tr></thead><tbody>
+  <tr><td data-label="key"><code>battery</code></td><td data-label="触发">充电器连接 / 断开 + 每小时</td><td data-label="取数据">「获取电池电量」+「获取设备详细信息 → 是否在充电」<br><code>{"电量":"85%","充电":"是"}</code></td><td data-label="角色能干嘛">说「你手机快没电了吧」时终于有依据</td></tr>
+  <tr><td data-label="key"><code>health</code></td><td data-label="触发">每天 8:00 和 22:00</td><td data-label="取数据">「查找健康样本」×3：步数（今天，求和）、静息心率（最新）、睡眠（昨天，时长）</td><td data-label="角色能干嘛">早上问你睡得怎么样、晚上看你走了多少步</td></tr>
+  <tr><td data-label="key"><code>where</code></td><td data-label="触发">每 2 小时 / 到达常去地点</td><td data-label="取数据">「获取当前位置」→「获取当前天气」<br><code>{"城市":"…","天气":"…","气温":"…°C"}</code></td><td data-label="角色能干嘛">不想给精确地址就只传城市和天气</td></tr>
+  <tr><td data-label="key"><code>agenda</code></td><td data-label="触发">每天 7:00 + 每 3 小时</td><td data-label="取数据">「查找日历事件」（今天，按开始时间）→ 拼成列表</td><td data-label="角色能干嘛">主动问「下午三点的会开完了吗」</td></tr>
+  <tr><td data-label="key"><code>nowplaying</code></td><td data-label="触发">打开音乐 App 或每 30 分钟</td><td data-label="取数据">「获取当前播放的歌曲」→ 名称 + 艺人</td><td data-label="角色能干嘛">接「你最近一直在循环这首啊」</td></tr>
+  <tr><td data-label="key"><code>todo</code></td><td data-label="触发">每天 9:00 / 21:00</td><td data-label="取数据">「查找提醒事项」（未完成，按到期时间）</td><td data-label="角色能干嘛">晚上盘点你今天还有什么没做</td></tr>
+  <tr><td data-label="key"><code>phone</code></td><td data-label="触发">专注模式开启 / 关闭</td><td data-label="取数据"><code>{"专注模式":"睡眠","从":"23:10"}</code></td><td data-label="角色能干嘛">看到「睡眠」就知道别在这时候闹你</td></tr>
   </tbody></table></div>
 </section>
 
 <section id="actions" class="chapter">
   <div class="eyebrow">08 / 快捷动作</div><h2>角色替你操作 iPhone</h2>
   <p>登记一个「动作名 + 快捷指令名 + 参数 + 结果模式」，角色就能像用工具一样调用。两种送达方式：</p>
-  <div class="table-wrap"><table><caption>通知点击 vs 邮件自动</caption><thead><tr><th></th><th>通知点击运行（默认）</th><th>邮件自动运行（实验）</th></tr></thead><tbody>
-  <tr><td>原理</td><td>个人云推一条系统通知，你点通知 → 跳 <code>shortcuts://</code> 运行</td><td>站点发一封带标记的邮件，iOS「收到邮件时」自动化立即运行</td></tr>
-  <tr><td>需要你操作</td><td>点一下通知</td><td>不用</td></tr>
-  <tr><td>额外条件</td><td>离线推送已开</td><td>站点配 Resend，验证收件邮箱，iCloud / Exchange 邮箱才能秒收</td></tr>
-  <tr><td>适合</td><td>要你在场确认的动作（发消息、拍照、截屏）</td><td>无需确认的（开灯、写备忘录、切歌）</td></tr>
+  <div class="table-wrap stack"><table><caption>通知点击 vs 邮件自动</caption><thead><tr><th></th><th>通知点击运行（默认）</th><th>邮件自动运行（实验）</th></tr></thead><tbody>
+  <tr><td data-label="">原理</td><td data-label="通知点击运行（默认）">个人云推一条系统通知，你点通知 → 跳 <code>shortcuts://</code> 运行</td><td data-label="邮件自动运行（实验）">站点发一封带标记的邮件，iOS「收到邮件时」自动化立即运行</td></tr>
+  <tr><td data-label="">需要你操作</td><td data-label="通知点击运行（默认）">点一下通知</td><td data-label="邮件自动运行（实验）">不用</td></tr>
+  <tr><td data-label="">额外条件</td><td data-label="通知点击运行（默认）">离线推送已开</td><td data-label="邮件自动运行（实验）">站点配 Resend，验证收件邮箱，iCloud / Exchange 邮箱才能秒收</td></tr>
+  <tr><td data-label="">适合</td><td data-label="通知点击运行（默认）">要你在场确认的动作（发消息、拍照、截屏）</td><td data-label="邮件自动运行（实验）">无需确认的（开灯、写备忘录、切歌）</td></tr>
   </tbody></table></div>
   <div class="config-grid"><span>结果模式</span><span>「不需要结果」发出即算完成；「等文本」快捷指令要把结果 POST 回来；「等图片」可回传图片（≤8MB，可附 OCR 文字）。等待 30 秒～15 分钟，默认 2 分钟。</span><span>参数</span><span>给角色填的坑，简易模式一行一个（名字 / 文本或数字 / 描述）。角色调用时自动组成 JSON 送给快捷指令。</span></div>
   <h3>快捷指令怎么搭</h3>
