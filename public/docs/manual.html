@@ -18,6 +18,7 @@
     --line:#e9e2d9; --line-strong:#d9d0c4;
     --paper:#f8f5ef; --card:#ffffff; --wash:#f1ece4; --code-bg:#f4efe7;
     --shadow:0 1px 2px rgba(60,40,20,.06),0 12px 32px -18px rgba(60,40,20,.25);
+    --accent-2:#f2a67f; --block:var(--ink); --block-fg:var(--paper);
     font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Segoe UI","Microsoft YaHei",sans-serif; font-size:16px;
   }
   @media (prefers-color-scheme:dark) {
@@ -29,6 +30,7 @@
       --line:#332d28; --line-strong:#463e37;
       --paper:#171412; --card:#1f1b18; --wash:#241f1b; --code-bg:#262019;
       --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -18px rgba(0,0,0,.7);
+      --accent-2:#f2a67f; --block:#2a2521; --block-fg:#efe9e2;
     }
   }
   * { box-sizing:border-box; } html { scroll-behavior:smooth; scroll-padding-top:96px; }
@@ -58,6 +60,16 @@
   .sidebar nav a { display:flex; gap:10px; align-items:center; min-height:40px; padding:6px 12px; color:var(--muted); text-decoration:none; font-size:.9rem; border-radius:10px; transition:background .15s,color .15s; }
   .sidebar nav a span { font:600 .7rem ui-monospace,monospace; color:var(--soft); min-width:1.6em; } .sidebar nav a:hover { background:var(--wash); color:var(--ink); }
   .sidebar nav a[aria-current] { background:var(--accent-wash); color:var(--accent-ink); font-weight:650; } .sidebar nav a[aria-current] span { color:var(--accent); }
+  .book { margin-bottom:18px; }
+  .part { margin:2px 0; }
+  .part > summary { display:flex; align-items:center; justify-content:space-between; gap:8px; list-style:none; min-height:36px; padding:6px 12px; border-radius:10px; font-size:.86rem; font-weight:650; color:var(--ink); cursor:pointer; }
+  .part > summary::-webkit-details-marker { display:none; }
+  .part > summary::after { content:'▸'; font-size:.9rem; color:var(--soft); }
+  .part[open] > summary::after { content:'▾'; }
+  .part > summary:hover { background:var(--wash); }
+  .part.current > summary { color:var(--accent-ink); }
+  .part > a { margin-left:10px; padding-left:14px; border-left:2px solid var(--line); border-radius:0 10px 10px 0; }
+  .part > a[aria-current] { border-left-color:var(--accent); }
   .sidebar-note { margin:26px 12px 0; padding:16px; font-size:.85rem; background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); } .sidebar-note p { color:var(--muted); margin:6px 0 10px; } .sidebar-note a { text-decoration:none; font-weight:600; }
   main { min-width:0; max-width:900px; padding:0 56px; } .chapter { padding:60px 0; border-bottom:1px solid var(--line); scroll-margin-top:20px; } .chapter.first { padding-top:48px; } .chapter:last-of-type { border-bottom:0; }
   footer { display:flex; justify-content:space-between; gap:20px; padding:28px 0 56px; font-size:.85rem; color:var(--muted); border-top:1px solid var(--line); }
@@ -66,7 +78,7 @@
   .eyebrow { display:inline-block; color:var(--accent-ink); background:var(--accent-wash); font-size:.74rem; font-weight:700; letter-spacing:.12em; margin-bottom:16px; padding:4px 10px; border-radius:999px; }
   .lead { color:var(--muted); font-size:1.08rem; max-width:640px; line-height:1.9; } .meta { display:flex; flex-wrap:wrap; gap:6px 10px; font-size:.78rem; color:var(--muted); margin:20px 0 30px; } .meta span { background:var(--wash); border-radius:999px; padding:3px 11px; }
   .first-task { border:1px solid var(--line); padding:26px 28px; border-radius:18px; background:var(--card); box-shadow:var(--shadow); margin-bottom:22px; position:relative; overflow:hidden; }
-  .first-task::before { content:''; position:absolute; inset:0 auto 0 0; width:5px; background:linear-gradient(var(--accent),#f2a67f); }
+  .first-task::before { content:''; position:absolute; inset:0 auto 0 0; width:5px; background:linear-gradient(var(--accent),var(--accent-2)); }
   .task-heading { display:flex; gap:16px; align-items:center; margin-bottom:14px; } .number { color:var(--accent); font:800 2.2rem ui-monospace,monospace; letter-spacing:-.06em; }
   .small-label { color:var(--muted); font-size:.85rem; } .task-heading h2 { font-size:1.3rem; margin:4px 0 0; }
   .steps { padding-left:0; margin:18px 0 22px; list-style:none; counter-reset:step; } .steps li { position:relative; padding-left:38px; margin:10px 0; counter-increment:step; }
@@ -80,7 +92,7 @@
   .table-wrap { width:100%; overflow-x:auto; margin:22px 0 28px; border:1px solid var(--line); border-radius:14px; background:var(--card); box-shadow:var(--shadow); } table { width:100%; border-collapse:collapse; text-align:left; font-size:.92rem; min-width:520px; }
   caption { text-align:left; padding:10px 16px; font-size:.78rem; color:var(--muted); background:var(--wash); border-bottom:1px solid var(--line); } th { background:var(--card); color:var(--muted); font-size:.78rem; font-weight:650; letter-spacing:.06em; text-transform:uppercase; }
   td,th { padding:13px 16px; border-bottom:1px solid var(--line); vertical-align:top; } tbody tr:nth-child(even) td { background:color-mix(in srgb,var(--wash) 55%,transparent); } tr:last-child td { border-bottom:0; } td:first-child { min-width:120px; }
-  .flow { display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--ink); color:var(--paper); padding:22px 20px; margin:28px 0; border-radius:16px; font-size:.88rem; line-height:1.55; } .flow span { text-align:center; } .flow b { font-weight:650; color:#f2a67f; }
+  .flow { display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--block); color:var(--block-fg); padding:22px 20px; margin:28px 0; border-radius:16px; font-size:.88rem; line-height:1.55; } .flow span { text-align:center; } .flow b { font-weight:650; color:var(--accent-2); }
   .capability { border-bottom:1px solid var(--line); } .capability:first-of-type { border-top:1px solid var(--line); } summary { cursor:pointer; }
   .capability summary { display:flex; align-items:center; gap:15px; padding:20px 0; list-style:none; } summary::-webkit-details-marker { display:none; }
   .capability summary::after,.lesson summary::after { content:'+'; font:400 1.4rem ui-monospace,monospace; color:var(--accent); margin-left:6px; transition:transform .2s; } details[open]>summary::after { content:'−'; }
@@ -92,8 +104,8 @@
   .recipe { padding:24px 0 18px; border-top:1px solid var(--line); } .recipe:first-of-type { border-top:0; } .recipe-top { display:flex; align-items:center; justify-content:space-between; gap:12px; } .recipe-index { font:800 1.6rem ui-monospace,monospace; color:var(--accent); letter-spacing:-.05em; } .recipe h3 { margin-top:8px; }
   .glossary { margin:24px 0; } .glossary div { display:grid; grid-template-columns:170px minmax(0,1fr); gap:20px; border-bottom:1px solid var(--line); padding:15px 0; } dt { font-weight:650; } dd { margin:0; color:var(--muted); }
   .sources { display:grid; gap:12px; font-size:.9rem; margin:22px 0; }
-  .finish { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-top:44px; background:var(--ink); color:var(--paper); border-radius:18px; padding:28px; }
-  .finish .small-label { color:#f2a67f; } .finish h3 { margin:6px 0 10px; color:inherit; } .finish p { font-size:.9rem; margin:0; opacity:.8; }
+  .finish { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-top:44px; background:var(--block); color:var(--block-fg); border-radius:18px; padding:28px; }
+  .finish .small-label { color:var(--accent-2); } .finish h3 { margin:6px 0 10px; color:inherit; } .finish p { font-size:.9rem; margin:0; opacity:.8; }
   .button { flex-shrink:0; display:inline-flex; gap:12px; align-items:center; padding:12px 18px; min-height:46px; border-radius:12px; background:var(--accent); color:#fff; text-decoration:none; font-size:.9rem; font-weight:650; } .button:hover { text-decoration:none; filter:brightness(1.06); }
 }
 @layer responsive {
@@ -126,6 +138,8 @@
     .sidebar nav { display:none; max-height:calc(100dvh - 120px); overflow:auto; padding:4px 12px 14px; border-top:1px solid var(--line); }
     .sidebar.open nav { display:block; }
     .nav-label { margin:14px 8px 6px; font-size:.7rem; color:var(--accent-ink); }
+    .part > summary { min-height:44px; font-size:.95rem; }
+    .part > a { margin-left:8px; border-radius:0 12px 12px 0; }
     .sidebar nav a { display:flex; min-height:44px; padding:8px 12px; margin:2px 0; border:1px solid var(--line); background:var(--card); border-radius:12px; font-size:.92rem; color:var(--ink); } .sidebar nav a[aria-current] { border-color:var(--accent); background:var(--accent-wash); color:var(--accent-ink); } .sidebar nav a span { display:inline; color:var(--soft); } .sidebar-note { display:none; }
     main { padding:0 18px; max-width:760px; margin:auto; } .chapter { padding:40px 0; } .chapter.first { padding-top:28px; } h1 { font-size:2.3rem; } .lead { font-size:1rem; }
     .first-task { padding:20px 18px; } .task-heading { gap:12px; } .task-heading h2 { font-size:1.15rem; } .detail-body { padding-left:0; }
@@ -170,37 +184,60 @@
 <a class="skip" href="#content">跳到正文</a>
 <header class="topbar"><a class="brand" href="#start"><span class="brand-mark" aria-hidden="true">F</span><span>Float <span class="brand-sub">使用手册</span></span></a><span class="edition">工具箱 · 现实桥 <span class="edition-date">· 2026.09</span></span></header>
 <div class="layout">
-<aside class="sidebar"><button class="toc-toggle" type="button" aria-expanded="false" aria-controls="toc"><span class="toc-toggle-label">目录</span><span class="toc-toggle-current"></span><span class="toc-toggle-arrow" aria-hidden="true">▾</span></button><nav id="toc" aria-label="手册目录"><p class="nav-label">工具箱与 MCP · 17 章</p><a href="#start"><span>01</span> 第一次使用</a>
+<aside class="sidebar"><button class="toc-toggle" type="button" aria-expanded="false" aria-controls="toc"><span class="toc-toggle-label">目录</span><span class="toc-toggle-current"></span><span class="toc-toggle-arrow" aria-hidden="true">▾</span></button><nav id="toc" aria-label="手册目录"><div class="book"><p class="nav-label">工具箱与 MCP</p>
+<details class="part"><summary>入门</summary>
+<a href="#start"><span>01</span> 第一次使用</a>
 <a href="#choose"><span>02</span> 选择工具</a>
 <a href="#protocol"><span>03</span> 调用与权限</a>
+</details>
+<details class="part"><summary>内置能力</summary>
 <a href="#builtin"><span>04</span> 10 项内置能力</a>
 <a href="#actions"><span>05</span> 41 项动作参数</a>
 <a href="#phone-workflows"><span>06</span> 查手机的 6 个动作</a>
 <a href="#tools"><span>07</span> 网页、天气与搜索</a>
 <a href="#setup"><span>08</span> 配套服务接入</a>
+</details>
+<details class="part"><summary>REST 工具</summary>
 <a href="#rest"><span>09</span> 添加 REST 入门</a>
 <a href="#rest-reference"><span>10</span> REST 完整配置</a>
+</details>
+<details class="part"><summary>MCP</summary>
 <a href="#mcp"><span>11</span> MCP 入门</a>
 <a href="#mcp-reference"><span>12</span> MCP 接入与自建</a>
+</details>
+<details class="part"><summary>组合与 APP</summary>
 <a href="#compose"><span>13</span> 套件与 APP</a>
 <a href="#composite-reference"><span>14</span> 组合完整配置</a>
+</details>
+<details class="part"><summary>场景与排查</summary>
 <a href="#recipes"><span>15</span> 使用场景</a>
 <a href="#fix"><span>16</span> 故障排查</a>
 <a href="#reference"><span>17</span> 术语与资料</a>
-<p class="nav-label">现实桥 · 13 章</p>
+</details>
+</div>
+<div class="book"><p class="nav-label">现实桥 · iOS</p>
+<details class="part"><summary>入门</summary>
 <a href="#bridge-start"><span>01</span> 一图看懂</a>
 <a href="#bridge-prep"><span>02</span> 准备工作</a>
+</details>
+<details class="part"><summary>iPhone → 小手机</summary>
 <a href="#bridge-inbox"><span>03</span> 收件箱与联动</a>
 <a href="#bridge-inbox-recipes"><span>04</span> 联动场景 ×10</a>
 <a href="#bridge-wake"><span>05</span> 离线增强</a>
 <a href="#bridge-state"><span>06</span> 状态快照</a>
 <a href="#bridge-state-recipes"><span>07</span> 快照场景 ×7</a>
+</details>
+<details class="part"><summary>小手机 → iPhone</summary>
 <a href="#bridge-actions"><span>08</span> 快捷动作</a>
 <a href="#bridge-action-recipes"><span>09</span> 动作场景 ×10</a>
 <a href="#bridge-screen"><span>10</span> 屏幕速聊</a>
 <a href="#bridge-outbox"><span>11</span> 发件箱与 APP</a>
+</details>
+<details class="part"><summary>进阶</summary>
 <a href="#bridge-combo"><span>12</span> 组合玩法</a>
-<a href="#bridge-fix"><span>13</span> 排错与上限</a></nav><div class="sidebar-note"><strong>不用背指令。</strong><p>先接好工具，再用一句普通话告诉角色你要做什么。</p><a href="#start">先完成一次查询 →</a><p style="margin-top:12px">现实桥在目录下半部分。</p><a href="#bridge-start">跳到现实桥 →</a></div></aside>
+<a href="#bridge-fix"><span>13</span> 排错与上限</a>
+</details>
+</div></nav><div class="sidebar-note"><strong>不用背指令。</strong><p>先接好工具，再用一句普通话告诉角色你要做什么。</p><a href="#start">先完成一次查询 →</a><p style="margin-top:12px">现实桥在目录下半部分。</p><a href="#bridge-start">跳到现实桥 →</a></div></aside>
 <main id="content">
 <section id="start" class="chapter first">
   <div class="eyebrow">01 / 第一次使用</div><h1>工具箱与 MCP<br><span>完整参考手册</span></h1>
@@ -2086,6 +2123,7 @@ document.querySelectorAll('.copy').forEach((button) => {
   });
 });
 const links = [...document.querySelectorAll('.sidebar nav a')];
+document.querySelectorAll('.part > summary').forEach((sm) => sm.addEventListener('click', (e) => { e.preventDefault(); const p = sm.parentElement; p.open = !p.open; }));
 const sections = [...document.querySelectorAll('main > section')];
 const titleOf = (section) => {
   const link = links.find((a) => a.hash === `#${section.id}`);
@@ -2117,7 +2155,7 @@ function showSection(section, { scrollTo, scrollTop } = {}) {
     sections.forEach((s) => { s.hidden = s !== section; });
     currentSection = section;
     for (const link of links) {
-      if (link.hash === `#${section.id}`) { link.setAttribute('aria-current', 'page'); if (!sidebar.classList.contains('open') && window.innerWidth > 800) link.scrollIntoView({ block:'nearest' }); }
+      if (link.hash === `#${section.id}`) { link.setAttribute('aria-current', 'page'); document.querySelectorAll('.part').forEach((p) => { const here = p.contains(link); p.open = here; p.classList.toggle('current', here); }); if (!sidebar.classList.contains('open') && window.innerWidth > 800) link.scrollIntoView({ block:'nearest' }); }
       else link.removeAttribute('aria-current');
     }
     if (tocCurrent) { const group = links.find((a) => a.hash === `#${section.id}`)?.closest('nav')?.querySelector('.nav-label') ; const label = [...document.querySelectorAll('.nav-label')].filter((el) => el.compareDocumentPosition(links.find((a) => a.hash === `#${section.id}`) || el) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1); tocCurrent.textContent = `${label ? label.textContent.split(' ·')[0] + ' · ' : ''}${titleOf(section)}`; }
