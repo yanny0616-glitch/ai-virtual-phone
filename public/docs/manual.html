@@ -52,6 +52,7 @@
   .brand-sub { margin-left:8px; font-size:.85rem; color:var(--muted); font-weight:500; }
   .edition { font-size:.8rem; color:var(--muted); background:var(--wash); border:1px solid var(--line); border-radius:999px; padding:4px 12px; }
   .layout { display:grid; grid-template-columns:264px minmax(0,1fr); max-width:1400px; margin:auto; }
+  .toc-toggle { display:none; }
   .sidebar { position:sticky; top:64px; height:calc(100dvh - 64px); overflow:auto; padding:28px 16px 24px 24px; }
   .nav-label { color:var(--soft); font-size:.72rem; letter-spacing:.14em; margin:22px 12px 8px; font-weight:600; } .nav-label:first-child { margin-top:0; }
   .sidebar nav a { display:flex; gap:10px; align-items:center; min-height:40px; padding:6px 12px; color:var(--muted); text-decoration:none; font-size:.9rem; border-radius:10px; transition:background .15s,color .15s; }
@@ -117,8 +118,15 @@
   @media(max-width:1100px) { .layout { grid-template-columns:228px minmax(0,1fr); } main { padding:0 32px; } .sidebar { padding:24px 10px 20px 16px; } .finish { flex-direction:column; align-items:flex-start; } }
   @media(max-width:800px) {
     html { scroll-padding-top:120px; } .topbar { height:56px; padding:0 16px; } .edition-date { display:none; } .layout { display:block; }
-    .sidebar { position:sticky; top:56px; z-index:9; height:auto; padding:10px 12px; background:color-mix(in srgb,var(--paper) 88%,transparent); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:1px solid var(--line); } .sidebar nav { display:flex; gap:6px; overflow-x:auto; padding:2px 0 4px; scrollbar-width:none; } .sidebar nav::-webkit-scrollbar { display:none; }
-    .sidebar nav a { flex-shrink:0; font-size:.84rem; padding:7px 12px; min-height:36px; border:1px solid var(--line); background:var(--card); border-radius:999px; } .sidebar nav a[aria-current] { border-color:var(--accent); } .sidebar nav a span,.sidebar-note { display:none; } .nav-label { display:flex; align-items:center; flex-shrink:0; margin:0 4px 0 0; padding:0 8px; font-size:.7rem; color:var(--accent-ink); border-left:2px solid var(--accent); white-space:nowrap; }
+    .sidebar { position:sticky; top:56px; z-index:9; height:auto; padding:0; background:color-mix(in srgb,var(--paper) 92%,transparent); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:1px solid var(--line); }
+    .toc-toggle { display:flex; width:100%; align-items:center; gap:10px; min-height:48px; padding:8px 16px; border:0; background:transparent; color:var(--ink); text-align:left; font-size:.92rem; }
+    .toc-toggle-label { font-size:.72rem; font-weight:700; letter-spacing:.1em; color:var(--accent-ink); background:var(--accent-wash); padding:3px 9px; border-radius:999px; flex-shrink:0; }
+    .toc-toggle-current { flex:1; min-width:0; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .toc-toggle-arrow { color:var(--soft); transition:transform .2s; } .toc-toggle[aria-expanded="true"] .toc-toggle-arrow { transform:rotate(180deg); }
+    .sidebar nav { display:none; max-height:calc(100dvh - 120px); overflow:auto; padding:4px 12px 14px; border-top:1px solid var(--line); }
+    .sidebar.open nav { display:block; }
+    .nav-label { margin:14px 8px 6px; font-size:.7rem; color:var(--accent-ink); }
+    .sidebar nav a { display:flex; min-height:44px; padding:8px 12px; margin:2px 0; border:1px solid var(--line); background:var(--card); border-radius:12px; font-size:.92rem; color:var(--ink); } .sidebar nav a[aria-current] { border-color:var(--accent); background:var(--accent-wash); color:var(--accent-ink); } .sidebar nav a span { display:inline; color:var(--soft); } .sidebar-note { display:none; }
     main { padding:0 18px; max-width:760px; margin:auto; } .chapter { padding:40px 0; } .chapter.first { padding-top:28px; } h1 { font-size:2.3rem; } .lead { font-size:1rem; }
     .first-task { padding:20px 18px; } .task-heading { gap:12px; } .task-heading h2 { font-size:1.15rem; } .detail-body { padding-left:0; }
     .capability summary { gap:10px; } .capability summary strong { font-size:1rem; } .capability summary small { font-size:.85rem; } .badge { padding:2px 7px; }
@@ -162,7 +170,7 @@
 <a class="skip" href="#content">跳到正文</a>
 <header class="topbar"><a class="brand" href="#start"><span class="brand-mark" aria-hidden="true">F</span><span>Float <span class="brand-sub">使用手册</span></span></a><span class="edition">工具箱 · 现实桥 <span class="edition-date">· 2026.09</span></span></header>
 <div class="layout">
-<aside class="sidebar"><nav aria-label="手册目录"><p class="nav-label">工具箱与 MCP · 17 章</p><a href="#start"><span>01</span> 第一次使用</a>
+<aside class="sidebar"><button class="toc-toggle" type="button" aria-expanded="false" aria-controls="toc"><span class="toc-toggle-label">目录</span><span class="toc-toggle-current"></span><span class="toc-toggle-arrow" aria-hidden="true">▾</span></button><nav id="toc" aria-label="手册目录"><p class="nav-label">工具箱与 MCP · 17 章</p><a href="#start"><span>01</span> 第一次使用</a>
 <a href="#choose"><span>02</span> 选择工具</a>
 <a href="#protocol"><span>03</span> 调用与权限</a>
 <a href="#builtin"><span>04</span> 10 项内置能力</a>
@@ -2093,6 +2101,15 @@ sections.forEach((section, i) => {
     (next ? `<a class="pager-next" href="#${next.id}"><small>下一章</small><span>${titleOf(next)} →</span></a>` : `<a class="pager-next" href="#${sections[0].id}"><small>读完了</small><span>回到第一章 ↑</span></a>`);
   section.appendChild(pager);
 });
+const sidebar = document.querySelector('.sidebar');
+const tocToggle = document.querySelector('.toc-toggle');
+const tocCurrent = document.querySelector('.toc-toggle-current');
+tocToggle?.addEventListener('click', () => {
+  const open = !sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', open);
+  tocToggle.setAttribute('aria-expanded', String(open));
+});
+links.forEach((a) => a.addEventListener('click', () => { sidebar.classList.remove('open'); tocToggle?.setAttribute('aria-expanded', 'false'); }));
 let currentSection = null;
 function showSection(section, { scrollTo, scrollTop } = {}) {
   if (!section) return;
@@ -2100,9 +2117,10 @@ function showSection(section, { scrollTo, scrollTop } = {}) {
     sections.forEach((s) => { s.hidden = s !== section; });
     currentSection = section;
     for (const link of links) {
-      if (link.hash === `#${section.id}`) { link.setAttribute('aria-current', 'page'); link.scrollIntoView({ block:'nearest', inline:'center' }); }
+      if (link.hash === `#${section.id}`) { link.setAttribute('aria-current', 'page'); if (!sidebar.classList.contains('open') && window.innerWidth > 800) link.scrollIntoView({ block:'nearest' }); }
       else link.removeAttribute('aria-current');
     }
+    if (tocCurrent) { const group = links.find((a) => a.hash === `#${section.id}`)?.closest('nav')?.querySelector('.nav-label') ; const label = [...document.querySelectorAll('.nav-label')].filter((el) => el.compareDocumentPosition(links.find((a) => a.hash === `#${section.id}`) || el) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1); tocCurrent.textContent = `${label ? label.textContent.split(' ·')[0] + ' · ' : ''}${titleOf(section)}`; }
     document.title = document.title.replace(/^.*? · /, '') ? `${titleOf(section)} · ${document.title.replace(/^.*? · /, '')}` : document.title;
   }
   if (scrollTo && scrollTo !== section) {
