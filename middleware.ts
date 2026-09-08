@@ -24,6 +24,8 @@ const STATIC_ROUTE_PREFIXES = [
   "/_next/",
   "/birds/",
   "/diary/",
+  // 公开使用文档（public/docs/），不需要登录
+  "/docs/",
   "/fonts/",
   "/game-builtins/",
   "/game-covers/",

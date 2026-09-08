@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>现实桥使用手册 · iOS 桥接</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1f2328;--muted:#656d76;--line:#e5e7eb;--card:#fff;--code:#f3f4f6;--accent:#0f766e;--accent-soft:#e6f4f1;--warn:#fff7e6;--warn-line:#f5c36a;--tip:#eef4ff;--tip-line:#9db7f5}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--fg:#e6e8eb;--muted:#9aa4b2;--line:#2a2f3a;--card:#171a21;--code:#1e222b;--accent:#5eead4;--accent-soft:#12312d;--warn:#3a2c10;--warn-line:#8a6a2a;--tip:#15213a;--tip-line:#3a5390}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+a{color:var(--accent)}
+.wrap{display:grid;grid-template-columns:250px minmax(0,1fr);gap:0;max-width:1180px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:24px 16px;border-right:1px solid var(--line);font-size:13.5px}
+nav h3{margin:0 0 10px;font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+nav a{display:block;color:var(--fg);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--accent-soft)}
+nav a.sub{padding-left:20px;color:var(--muted);font-size:13px}
+main{padding:28px 36px 100px;min-width:0}
+h1{font-size:28px;margin:0 0 6px}
+h2{font-size:22px;margin:56px 0 12px;padding-top:12px;border-top:2px solid var(--line)}
+h3{font-size:17px;margin:32px 0 8px}
+h4{font-size:15px;margin:22px 0 6px}
+p{margin:8px 0}
+.lead{color:var(--muted);font-size:15px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--code)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:13px;line-height:1.55;margin:10px 0}
+pre code{background:none;padding:0}
+pre button.copy{position:absolute;top:6px;right:6px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:6px;padding:2px 8px;cursor:pointer}
+.box{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0;background:var(--card)}
+.warn{background:var(--warn);border-color:var(--warn-line)}
+.tip{background:var(--tip);border-color:var(--tip-line)}
+.box b:first-child{display:block;margin-bottom:4px}
+.ex{border-left:4px solid var(--accent);padding:10px 16px;margin:18px 0;background:var(--card);border-radius:0 10px 10px 0}
+.ex h4{margin:0 0 6px;font-size:15px}
+.ex .meta{font-size:13px;color:var(--muted);margin-bottom:6px}
+.steps{counter-reset:s;padding-left:0;list-style:none;margin:8px 0}
+.steps li{position:relative;padding-left:32px;margin:6px 0}
+.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:3px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;text-align:center;line-height:22px;font-weight:600}
+.pill{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font-size:12.5px;background:var(--card)}
+ul,ol{padding-left:22px}
+li{margin:3px 0}
+.toc-toggle{display:none}
+@media (max-width:860px){
+  .wrap{grid-template-columns:1fr}
+  nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);display:none}
+  nav.open{display:block}
+  .toc-toggle{display:block;position:sticky;top:0;z-index:5;background:var(--bg);border:0;border-bottom:1px solid var(--line);width:100%;text-align:left;padding:10px 16px;font-size:14px;color:var(--accent)}
+  main{padding:20px 16px 80px}
+  h2{margin-top:40px}
+}
+</style>
+</head>
+<body>
+<button class="toc-toggle" onclick="document.querySelector('nav').classList.toggle('open')">☰ 目录</button>
+<div class="wrap">
+<nav>
+<h3>目录</h3>
+<a href="#overview">0. 一图看懂五条通道</a>
+<a href="#prep">1. 准备工作</a>
+<a href="#prep-addr" class="sub">地址与令牌一览</a>
+<a href="#inbox">2. 收件箱 · 自动联动</a>
+<a href="#inbox-shortcut" class="sub">上传快捷指令模板</a>
+<a href="#inbox-rules" class="sub">规则：匹配 / 冷却 / 加工 / 动作</a>
+<a href="#inbox-examples" class="sub">场景例子 ×10</a>
+<a href="#inbox-wake" class="sub">离线增强（唤醒）</a>
+<a href="#state">3. 状态快照 · 主动查询</a>
+<a href="#state-examples" class="sub">场景例子 ×7</a>
+<a href="#actions">4. 快捷动作 · 角色操作 iPhone</a>
+<a href="#actions-build" class="sub">快捷指令怎么搭</a>
+<a href="#actions-examples" class="sub">场景例子 ×10</a>
+<a href="#actions-offline" class="sub">离线时角色怎么触发</a>
+<a href="#screen">5. 屏幕速聊</a>
+<a href="#outbox">6. 发件箱 · 自定义 APP</a>
+<a href="#combo">7. 组合玩法</a>
+<a href="#debug">8. 排错与坑</a>
+</nav>
+<main>
+
+<h1>现实桥使用手册</h1>
+<p class="lead">iPhone 快捷指令 ↔ 小手机 的双向桥。本页按「能做什么、照着抄怎么配」写，面向自己用。所有地址里的 <code>&lt;你的项目&gt;</code> 指个人云 Supabase 项目域名，真实值在 APP 里点一下就能复制。</p>
+
+<h2 id="overview">0. 一图看懂五条通道</h2>
+<table>
+<tr><th>通道</th><th>方向</th><th>触发者</th><th>典型用途</th><th>在 APP 里的位置</th></tr>
+<tr><td><b>A 收件箱 + 自动联动</b></td><td>iPhone → 小手机</td><td>iOS 自动化（到家、收短信、充电、闹钟…）</td><td>现实里发生了事 → 角色知道 / 回话 / 记住 / 记日历</td><td>现实桥 → 自动联动</td></tr>
+<tr><td><b>B 状态快照 + 主动查询</b></td><td>iPhone → 小手机</td><td>定时自动化覆盖上传</td><td>角色聊天时随时查你的电量、步数、睡眠、位置…</td><td>现实桥 → 主动查询</td></tr>
+<tr><td><b>C 快捷动作</b></td><td>小手机 → iPhone</td><td>角色（或规则）</td><td>角色替你写备忘录、开灯、放歌、拍照回传、截屏看你在干嘛</td><td>现实桥 → 快捷动作</td></tr>
+<tr><td><b>D 屏幕速聊</b></td><td>双向</td><td>你双击辅助触控</td><td>截当前屏幕，角色在系统弹窗里跟你聊，写回聊天记录</td><td>现实桥 → 屏幕速聊</td></tr>
+<tr><td><b>E 发件箱</b></td><td>小手机 → iPhone</td><td>自定义 APP</td><td>APP 把信号丢给 iPhone 上的「检查回传」快捷指令去执行</td><td>无 UI，SDK 调用</td></tr>
+</table>
+<p>A、B 本质都是「快捷指令往你自己的 Supabase Storage 里 POST 一个 JSON 文件」；C、D 则是个人云的 Edge Function 在中间转。所以准备工作只有两件：配好云端备份的 Supabase、部署个人云。</p>
+
+<h2 id="prep">1. 准备工作</h2>
+<ol class="steps">
+<li><b>云端备份接通。</b>设置 → 数据管理 → 云端备份，填 Supabase 项目地址与密钥。现实桥复用这份配置读写 <code>ai-phone-backup</code> 桶。现实桥主页顶部会显示「云端存储 已连接」。</li>
+<li><b>个人云部署。</b>设置 → 云服务部署，勾上离线推送与快捷动作。快捷动作的「通知点击运行」、屏幕速聊、离线唤醒都走这套函数。屏幕速聊要求 Schema v3 以上，旧的会提示重新部署。</li>
+<li><b>开启离线推送。</b>聊天信息页里打开「离线推送与定时消息」，并在用户资料面板点一次「测试推送」确认这台 iPhone 能收到通知。快捷动作的通知就是靠它送到手机的。</li>
+<li><b>启用「现实桥」内置能力。</b>工具箱 → 内置能力 → 现实桥，默认是关的。不开的话角色调用任何快捷动作 / 数据项都会报「能力未启用」。</li>
+<li><b>把小手机装到主屏幕</b>（Safari 分享 → 添加到主屏幕）。通知点击、后台补拉都依赖 PWA 模式。</li>
+</ol>
+
+<h3 id="prep-addr">地址与令牌一览</h3>
+<p>全部在现实桥 APP 里可点击复制，这里列出形状方便对照。</p>
+<table>
+<tr><th>用途</th><th>形状</th><th>在哪复制</th></tr>
+<tr><td>收件箱上传地址</td><td><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-inbox/[文件名].json</code></td><td>自动联动向导第 2 步</td></tr>
+<tr><td>状态快照上传地址</td><td><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-state/&lt;key&gt;.json</code></td><td>主动查询向导第 3 步，或数据卡片上的「复制上传地址」</td></tr>
+<tr><td>Storage 密钥（头部 Authorization）</td><td><code>Bearer &lt;云端备份的 key&gt;</code></td><td>同上，屏幕上打码显示，点击复制完整值</td></tr>
+<tr><td>唤醒地址</td><td><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/ai-phone-push?action=bridge-wake&amp;token=&lt;bridgeToken&gt;</code></td><td>自动联动向导第 2 步 →「离线增强」</td></tr>
+<tr><td>屏幕速聊接口</td><td><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/screen-chat</code></td><td>屏幕速聊向导第 3 步</td></tr>
+<tr><td>bridgeToken（令牌）</td><td>36 位十六进制，一个账号只有一个，唤醒与屏幕速聊共用</td><td>屏幕速聊向导第 3 步「问题 2」</td></tr>
+</table>
+<div class="box warn"><b>令牌不要外传</b>唤醒地址和屏幕速聊令牌都是账号级凭证。共享快捷指令给别人前先把这两个字段清空。</div>
+
+<h2 id="inbox">2. 收件箱 · 自动联动（iPhone → 小手机）</h2>
+<p>现实里发生一件事，iOS 自动化把它写成一条 <code>{type, payload}</code> 丢进收件箱；小手机每 20 秒拉一次（可在桥接设置里调 15～300 秒，前台切回时立刻补拉），按「自动联动」里的规则处理。</p>
+
+<h3 id="inbox-shortcut">上传快捷指令模板</h3>
+<p>所有 A 通道的自动化都长一个样，只有触发条件和 payload 内容不同。搭一次之后可以「复制」自动化改条件。</p>
+<ol class="steps">
+<li>快捷指令 App → 自动化 → 新建，选触发条件（见下面的例子）。</li>
+<li>添加「获取 URL 内容」。URL 粘贴收件箱上传地址，把 <code>[文件名]</code> 删掉，原位置插入「当前日期」变量，点变量把日期格式改成「自定义」填 <code>yyyyMMddHHmmss</code>，后面保留 <code>.json</code>。文件名同时决定顺序和唯一性。</li>
+<li>展开选项：方法 <b>POST</b>，请求体 <b>JSON</b>。头部加一项 <code>Authorization</code> = 复制来的 <code>Bearer …</code>。</li>
+<li>请求体加两个「文本」字段：<code>type</code> 填信号名（英文小写好记，例如 <code>duanxin</code>），<code>payload</code> 填正文，可插入变量。payload 里可以写 <code>{{user}}</code> / <code>{{char}}</code>，送达时替换成名字。</li>
+<li>关闭「运行前询问」，保存，手动运行一次。回到现实桥 → 自动联动向导第 3 步点「刚发了测试数据？点此刷新」，看到「收到 1 条新消息」就通了。</li>
+</ol>
+<pre><code>POST https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-inbox/20260908213000.json
+Authorization: Bearer &lt;key&gt;
+Content-Type: application/json
+
+{"type":"duanxin","payload":"招商银行：您尾号1234于09月08日消费58.00元"}</code></pre>
+<p>字段规则：<code>type</code> 必填，最长 60 字；<code>payload</code> 字符串或任意 JSON（自动转字符串），最长 8000 字；可选 <code>createdAt</code>。</p>
+
+<h3 id="inbox-rules">规则：匹配 / 冷却 / 加工 / 动作</h3>
+<p>一条规则 = 「哪个信号」+「多久触发一次」+「先怎么加工」+「做哪些事」。向导五步对应这四块加命名。</p>
+<table>
+<tr><th>块</th><th>选项</th><th>说明</th></tr>
+<tr><td>匹配</td><td>信号名 / <code>*</code></td><td>严格等于 type，不支持前缀或正则。<code>*</code> 表示全部。向导会把最近收到的 8 个信号名做成按钮。</td></tr>
+<tr><td>冷却</td><td>0 / 5 / 15 / 30 / 60 / 180 / 720 / 1440 分钟</td><td>按规则计时，不看内容。间隔内再收到只进「历史」不执行。适合「低电量」这类会反复触发的信号。</td></tr>
+<tr><td>加工：原样</td><td></td><td>payload 直接用。</td></tr>
+<tr><td>加工：套句式</td><td><code>{payload}</code> <code>{type}</code></td><td>例：<code>我今天走了 {payload} 步</code>。</td></tr>
+<tr><td>加工：AI 加工</td><td>提示词</td><td>用辅助模型（记忆总结那个）改写后再执行动作。例：「把这条银行短信浓缩成『花了多少钱、在哪花的』一句话」。</td></tr>
+<tr><td>动作：写入聊天</td><td>角色 / 显示身份 / 记忆身份 / 让 TA 回话</td><td>显示身份三选一（我说的 / TA 说的 / 旁白小字）；记忆身份可另选（例如显示为旁白但 TA 记成「发生的事件」）。勾「让 TA 回话」角色会接着回复。</td></tr>
+<tr><td>动作：写入记忆</td><td>长期 / 核心</td><td>直接进角色记忆库，重要度 0.6。</td></tr>
+<tr><td>动作：写入时间线</td><td></td><td>角色时间线上多一条「现实桥」事件。</td></tr>
+<tr><td>动作：发送卡片</td><td></td><td>聊天里出现一张标题为信号名的卡片，正文是加工结果。</td></tr>
+<tr><td>动作：写入日历</td><td>过去 / 未来 + 时长</td><td>以触发时刻为锚，「过去 45 分钟」适合跑步结束，「未来 60 分钟」适合到达公司。</td></tr>
+<tr><td>动作：执行快捷动作</td><td>选一个推送类快捷动作</td><td>收到信号 → 反过来让 iPhone 干一件事，见 <a href="#combo">组合玩法</a>。</td></tr>
+</table>
+<div class="box tip"><b>写入聊天的身份怎么选</b>想让角色「感知到」而不是「看到你说了什么」，用「显示为旁白小字」+「TA 记成：发生的事件」+ 让 TA 回话。想模拟你亲口告诉 TA，用「显示为我说的」。</div>
+
+<h3 id="inbox-examples">场景例子</h3>
+
+<div class="ex"><h4>① 银行短信 → 一句话账单 + 记忆</h4>
+<div class="meta"><span class="pill">触发：信息</span><span class="pill">AI 加工</span><span class="pill">卡片 + 记忆</span></div>
+<p>自动化条件：「信息」→ 收到含有「消费」的信息。payload 插入「短信正文」变量，type 填 <code>duanxin</code>。</p>
+<p>规则：匹配 <code>duanxin</code>，AI 加工提示词「把这条银行短信浓缩成『花了多少钱、在哪花的』一句话，不要其他内容」；动作勾「发送卡片」+「写入记忆（长期）」。</p>
+<p>效果：聊天里出现卡片「duanxin：星巴克花了 38 元」，角色以后能记得你的消费习惯。想让 TA 当场吐槽，再勾「写入聊天：旁白小字 + 让 TA 回话」。</p></div>
+
+<div class="ex"><h4>② 到家 / 离家 → 角色迎接或叮嘱</h4>
+<div class="meta"><span class="pill">触发：到达 / 离开</span><span class="pill">套句式</span><span class="pill">写入聊天 + 回话</span></div>
+<p>两条自动化：「到达」家（type <code>daojia</code>，payload 随便写「到家了」）、「离开」家（type <code>lijia</code>）。</p>
+<p>两条规则：<code>daojia</code> 套句式「{{user}} 刚到家了」，写入聊天，显示为旁白小字，TA 记成发生的事件，让 TA 回话。<code>lijia</code> 同理，句式「{{user}} 出门了」。</p>
+<p>加上冷却 30 分钟，避免在门口徘徊反复触发。配合 <a href="#inbox-wake">离线增强</a>，小手机关着也能收到 TA 的迎接通知。</p></div>
+
+<div class="ex"><h4>③ 晚上插电 → 晚安</h4>
+<div class="meta"><span class="pill">触发：充电器 + 时间段</span><span class="pill">冷却 720</span></div>
+<p>自动化条件「充电器 → 已连接」，在动作前加「如果 当前日期 晚于 22:00」再上传，type <code>shuiqian</code>。规则：套句式「{{user}} 把手机插上充电了，准备睡了」，写入聊天让 TA 回话，冷却 720 分钟（一晚只说一次晚安）。</p></div>
+
+<div class="ex"><h4>④ 早上关闹钟 → 早安 + 昨晚睡眠</h4>
+<div class="meta"><span class="pill">触发：闹钟停止</span><span class="pill">健康数据</span></div>
+<p>自动化条件「闹钟 → 已停止」。动作里先「查找健康样本」（睡眠，昨天），把时长塞进 payload：「闹钟关了，昨晚睡了 <i>时长</i>」，type <code>qichuang</code>。规则写入聊天让 TA 回话，冷却 180 分钟。</p></div>
+
+<div class="ex"><h4>⑤ 跑完步 → 时间线 + 日历「过去 45 分钟」</h4>
+<div class="meta"><span class="pill">触发：体能训练结束</span><span class="pill">日历 past</span></div>
+<p>Apple Watch 或健身 App 结束训练时触发（自动化条件「体能训练 → 结束」）。payload：「跑步 5.2 公里，用时 32 分钟」（用变量）。规则动作：写入时间线 + 写入日历（过去，45 分钟）+ 写入聊天让 TA 回话。日历上就会出现一段「跑步 5.2 公里…」。</p></div>
+
+<div class="ex"><h4>⑥ 低电量 → TA 催你充电（不刷屏）</h4>
+<div class="meta"><span class="pill">触发：电池电量 &lt; 20%</span><span class="pill">冷却 180</span></div>
+<p>自动化条件「电池电量 → 低于 20%」，type <code>dianliang</code>，payload 插入「获取电池电量」变量。规则套句式「{{user}} 的手机只剩 {payload}% 电了」，写入聊天让 TA 回话，冷却 180 分钟。没有冷却的话 19%、18%…每次掉电都会触发一次。</p></div>
+
+<div class="ex"><h4>⑦ 打开某个 App → TA 知道你在干嘛</h4>
+<div class="meta"><span class="pill">触发：打开 App</span><span class="pill">冷却 60</span></div>
+<p>自动化「打开 App → 王者荣耀」（可以多选几个游戏），type <code>wanyouxi</code>，payload「打开了游戏」。规则写入聊天（旁白小字，TA 记成发生的事件），让 TA 回话，冷却 60 分钟。再来一条「打开 App → 小红书 / 抖音」type <code>shuashipin</code> 也一样。</p></div>
+
+<div class="ex"><h4>⑧ 到公司 → 日历「未来 60 分钟」+ 不打扰</h4>
+<div class="meta"><span class="pill">触发：到达</span><span class="pill">日历 future</span></div>
+<p>到达公司地址触发，type <code>shangban</code>，payload「到公司了」。规则：写入日历（未来，60 分钟）+ 写入时间线，不勾回话。角色查日历时会知道你这段时间在忙。</p></div>
+
+<div class="ex"><h4>⑨ 语音日记 → 核心记忆</h4>
+<div class="meta"><span class="pill">触发：手动 / 轻点背面</span><span class="pill">听写文本</span><span class="pill">记忆 core</span></div>
+<p>新建一条普通快捷指令（不是自动化）：「听写文本」→ 上传，type <code>riji</code>，payload 插入听写结果。在设置 → 辅助功能 → 触控 → 轻点背面绑定它。规则：AI 加工「整理成第一人称的一段日记，保留情绪和事实」，写入记忆（核心）+ 写入聊天（显示为我说的，让 TA 回话）。</p></div>
+
+<div class="ex"><h4>⑩ NFC 贴纸 → 任意信号</h4>
+<div class="meta"><span class="pill">触发：NFC</span><span class="pill">*</span></div>
+<p>自动化条件「NFC → 扫描标签」。床头贴一张 type <code>shuijiao</code>，书桌贴一张 type <code>xuexi</code>，冰箱贴一张 type <code>chifan</code>。一条规则 matchType <code>*</code> 套句式「{{user}} 现在：{type}」也能用，但分开建规则可以各自配冷却和回话。</p></div>
+
+<h3 id="inbox-wake">离线增强（唤醒）</h3>
+<p>小手机彻底关掉时，收件箱没人拉，规则不会跑。在上传的「获取 URL 内容」之后再加一个「获取 URL 内容」，GET 唤醒地址，不需要头部和请求体：</p>
+<pre><code>GET https://&lt;你的项目&gt;.supabase.co/functions/v1/ai-phone-push?action=bridge-wake&amp;token=&lt;bridgeToken&gt;</code></pre>
+<p>服务端 45 秒后扫一次收件箱：小手机在线就会先把文件拉走，服务端扫到空文件夹什么也不做；小手机不在线则由服务端执行规则，带「让 TA 回话」的回复通过系统通知推给你。前提是聊天设置开了离线推送。服务端只执行写入聊天、通知、快捷动作三类动作，记忆 / 日历 / 时间线等会在你下次打开小手机时补做。</p>
+
+<h2 id="state">3. 状态快照 · 主动查询（角色随时看）</h2>
+<p>和收件箱不同，这里是「覆盖写」：iPhone 定期把最新状态写到固定文件 <code>bridge-state/&lt;key&gt;.json</code>，角色聊天时调工具读，回复自动带「更新于 N 分钟前」。</p>
+<ol class="steps">
+<li>现实桥 → 主动查询 → 新建数据项。名称是角色看到的工具名（≤20 字，如「查看健康数据」），标识是文件名（小写字母数字下划线，如 <code>health</code>），说明写给角色看（≤200 字）。最多 30 项。</li>
+<li>快捷指令 → 自动化，选触发时机（见例子）。先用系统动作取数据，再「获取 URL 内容」POST 到上传地址，请求体 JSON，内容随意，例如 <code>{"电量":"85%","充电中":"是"}</code>。</li>
+<li>头部两项都要：<code>Authorization</code> = Bearer 密钥，<code>x-upsert</code> = <code>true</code>。少了 x-upsert 第二次上传会 409。</li>
+<li>手动运行一次，回向导第 4 步点「已上传过数据？读取看看」，能看到原文和更新时间就成了。</li>
+</ol>
+<pre><code>POST https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-state/health.json
+Authorization: Bearer &lt;key&gt;
+x-upsert: true
+Content-Type: application/json
+
+{"步数":8342,"静息心率":58,"昨晚睡眠":"7小时12分"}</code></pre>
+<p>角色侧会多出两个工具：每个数据项一个（<code>[执行动作:查看健康数据({})]</code>），加一个「查看全部手机数据」把所有快照一次读完。快照没上传过时角色会得到「手机尚未上传过 health.json」这样的明确提示，不会瞎编。</p>
+
+<h3 id="state-examples">场景例子</h3>
+<div class="ex"><h4>① 电量 <span class="pill">key: battery</span></h4><div class="meta">触发：充电器连接 / 断开 + 每小时</div><p>动作「获取电池电量」+「获取设备详细信息 → 是否在充电」。JSON：<code>{"电量":"电池电量%","充电":"是/否"}</code>。角色说「你手机快没电了吧」时终于有依据。</p></div>
+<div class="ex"><h4>② 健康 <span class="pill">key: health</span></h4><div class="meta">触发：每天 8:00 和 22:00</div><p>「查找健康样本」三次：步数（今天，求和）、静息心率（最新）、睡眠（昨天，时长）。让角色早上问你睡得怎么样、晚上看你走了多少步。</p></div>
+<div class="ex"><h4>③ 位置与天气 <span class="pill">key: where</span></h4><div class="meta">触发：每 2 小时 / 到达常去地点</div><p>「获取当前位置」→「获取当前天气」。JSON：<code>{"城市":"…","区域":"…","天气":"…","气温":"…°C"}</code>。不想给精确地址就只传城市和天气。</p></div>
+<div class="ex"><h4>④ 接下来的日程 <span class="pill">key: agenda</span></h4><div class="meta">触发：每天 7:00 + 日历事件变动无法触发，用每 3 小时</div><p>「查找日历事件」（今天，排序按开始时间）→「获取文本」拼成列表。角色能主动问「下午三点的会开完了吗」。</p></div>
+<div class="ex"><h4>⑤ 正在听的歌 <span class="pill">key: nowplaying</span></h4><div class="meta">触发：打开 音乐 / 网易云 App，或每 30 分钟</div><p>「获取当前播放的歌曲」→ 取名称和艺人。角色能接「你最近一直在循环这首啊」。</p></div>
+<div class="ex"><h4>⑥ 待办 <span class="pill">key: todo</span></h4><div class="meta">触发：每天 9:00 / 21:00</div><p>「查找提醒事项」（未完成，按到期时间）。让角色晚上盘点你今天还有什么没做。</p></div>
+<div class="ex"><h4>⑦ 手机使用状态 <span class="pill">key: phone</span></h4><div class="meta">触发：勿扰 / 睡眠专注模式开启或关闭</div><p>自动化条件「专注模式」。JSON <code>{"专注模式":"睡眠","从":"23:10"}</code>。角色看到「睡眠」就知道别在这时候闹你。</p></div>
+
+<h2 id="actions">4. 快捷动作 · 角色操作 iPhone（小手机 → iPhone）</h2>
+<p>你在小手机里登记一个「动作名 + 对应的快捷指令名 + 参数 + 结果模式」，角色就能像用工具一样调用它。两种送达方式：</p>
+<table>
+<tr><th></th><th>通知点击运行（默认，推荐）</th><th>邮件自动运行（实验）</th></tr>
+<tr><td>原理</td><td>个人云推一条系统通知，你点通知 → 跳 <code>shortcuts://</code> 运行</td><td>站点发一封带标记的邮件，iOS「收到邮件时」自动化立即运行</td></tr>
+<tr><td>需要你操作</td><td>点一下通知</td><td>不用，真·自动</td></tr>
+<tr><td>额外条件</td><td>离线推送已开</td><td>站点配 Resend，验证收件邮箱，iCloud / Exchange 邮箱才能秒收</td></tr>
+<tr><td>适合</td><td>需要你在场确认的动作（发消息、拍照、截屏）</td><td>无需确认的（开灯、写备忘录、切歌）</td></tr>
+</table>
+<p><b>结果模式</b>决定角色等不等回音：「不需要结果」发出即算完成；「等文本」快捷指令要把结果 POST 回来；「等图片」可以回传图片（≤8MB，可附 OCR 文字）。等待时长 30 秒～15 分钟，默认 2 分钟。</p>
+<p><b>参数</b>是给角色填的坑，简易模式一行一个（名字 / 文本或数字 / 描述）。角色调用时会自动组成 JSON 送给快捷指令。</p>
+
+<h3 id="actions-build">快捷指令怎么搭</h3>
+<p>向导第 5 步会按你的选择动态生成清单，通用骨架如下：</p>
+<ol class="steps">
+<li>快捷指令标签页新建（不是自动化），名字和登记的「快捷指令名」一字不差。</li>
+<li><b>接参数</b>：「获取文本」（输入：快捷指令输入）→「获取字典值」，字典选「文本」，键名填参数名。每个参数一次。快捷指令拿到的输入是这样的 JSON：
+<pre><code>{"memo":"记得买牛奶","commandId":"cmd_…","resultUrl":"https://&lt;你的项目&gt;.supabase.co/functions/v1/push-shortcut-result?command=cmd_…&amp;ticket=…"}</code></pre></li>
+<li>干正事（写备忘录、拍照、调 HomeKit…）。</li>
+<li><b>回传文本</b>（结果模式为「等文本」时）：「获取字典值」取 <code>resultUrl</code> →「获取 URL 内容」POST 到它，请求体 JSON，文本字段 <code>text</code> 填结果。</li>
+<li><b>回传图片</b>（「等图片」时）：同上取 <code>resultUrl</code>，只传图就请求体选「文件」直接放图片；图 + 文字则先「Base64 编码」，请求体 JSON 放 <code>image</code>（编码结果）和 <code>ocr</code>（文字）。</li>
+<li>自己手动跑一次，再到向导第 6 步「发送测试通知」走整条链路。参数会自动填「来自小手机的测试」。</li>
+</ol>
+<div class="box tip"><b>邮件模式多一步</b>自动化 → 新建「电子邮件」自动化：发件人填页面显示的地址，主题「包含」页面显示的 <code>[FloatBridge:shortcut_…]</code> 标记，选「立即运行」，动作 = 运行这条快捷指令并把邮件正文作为输入。邮件正文就是上面那段 JSON。</div>
+
+<h3 id="actions-examples">场景例子</h3>
+
+<div class="ex"><h4>① 写备忘录</h4>
+<div class="meta"><span class="pill">参数 memo</span><span class="pill">不需要结果</span><span class="pill">邮件自动更爽</span></div>
+<p>登记：动作名「写进备忘录」，说明「把一段文字保存到 {{user}} 手机的备忘录里」，参数 <code>memo</code>（文本，要写入的内容）。快捷指令：取 memo →「创建备忘录」。</p>
+<p>聊天里说「帮我记一下明天要带身份证」，角色就会 <code>[执行动作:写进备忘录({"memo":"明天带身份证"})]</code>。</p></div>
+
+<div class="ex"><h4>② 给某人发短信 / 微信</h4>
+<div class="meta"><span class="pill">参数 content</span><span class="pill">不需要结果</span><span class="pill">通知点击（要你确认）</span></div>
+<p>参数 <code>content</code>。快捷指令「发送信息」收件人写死成你妈或谁，正文取 content。用通知点击模式，点之前还能看一眼。角色说「我替你跟妈妈说一声晚点回家」就真的发了。</p></div>
+
+<div class="ex"><h4>③ 放一首歌 / 切歌单</h4>
+<div class="meta"><span class="pill">参数 song</span><span class="pill">不需要结果</span></div>
+<p>快捷指令「搜索音乐」（Apple Music）→「播放音乐」。参数 <code>song</code>（文本，歌名或歌手）。也可以做无参数版「播放我的睡前歌单」。角色晚上说「放首歌陪你睡」就会真放。</p></div>
+
+<div class="ex"><h4>④ 前置拍一张回传</h4>
+<div class="meta"><span class="pill">无参数</span><span class="pill">等图片</span><span class="pill">等待 120 秒</span></div>
+<p>快捷指令「拍照」（前置，不预览）→ 取 resultUrl → POST，请求体选「文件」放照片。开着图像识别的话角色能看图评价你今天的状态；关着则只知道「已回传图片」。</p></div>
+
+<div class="ex"><h4>⑤ 截屏看你在干嘛</h4>
+<div class="meta"><span class="pill">参数 waitSeconds</span><span class="pill">等图片 + OCR</span></div>
+<p>参数用预置的 <code>waitSeconds</code>（数字，0～10）。快捷指令：「等待」waitSeconds 秒（给你时间切回想被看的界面）→「截屏」→「从图像中提取文本」→「Base64 编码」→ POST JSON <code>{image, ocr}</code>。角色说「让我看看你在偷偷看什么」时可用。</p></div>
+
+<div class="ex"><h4>⑥ 现在在哪 / 天气怎样（文本回传）</h4>
+<div class="meta"><span class="pill">无参数</span><span class="pill">等文本</span></div>
+<p>「获取当前位置」→「获取当前天气」→「获取文本」拼一句 → POST JSON <code>{"text":"在杭州西湖区，晴 26°C"}</code>。和 B 通道的区别：这是角色想知道时实时问，B 是定时快照。两者都配也行。</p></div>
+
+<div class="ex"><h4>⑦ 设闹钟</h4>
+<div class="meta"><span class="pill">参数 time</span><span class="pill">不需要结果</span></div>
+<p>参数 <code>time</code>（文本，例如 07:30）。快捷指令「创建闹钟」取 time。角色说「明天早点起，我给你定 7 点半」就落地了。</p></div>
+
+<div class="ex"><h4>⑧ 开灯 / 家居场景</h4>
+<div class="meta"><span class="pill">参数 scene</span><span class="pill">不需要结果</span><span class="pill">邮件自动</span></div>
+<p>参数 <code>scene</code>（文本，描述里写清可选值：回家 / 睡觉 / 观影）。快捷指令「如果 scene = 回家 → 运行家庭场景 A；否则如果 = 睡觉 → 场景 B…」。邮件模式下角色一句「我帮你把灯关了」就是真关。</p></div>
+
+<div class="ex"><h4>⑨ 开启勿扰 / 睡眠专注</h4>
+<div class="meta"><span class="pill">无参数</span><span class="pill">不需要结果</span></div>
+<p>快捷指令「设定专注模式 → 睡眠 → 开启 直到 关闭」。搭配 A 通道的晚安规则（例 ③）勾「执行快捷动作」，形成插电 → 晚安 → 自动勿扰。</p></div>
+
+<div class="ex"><h4>⑩ 读剪贴板 / 读最新一条短信回传</h4>
+<div class="meta"><span class="pill">无参数</span><span class="pill">等文本</span></div>
+<p>「获取剪贴板」→ POST text。用来「把我刚复制的地址发给你看看」。注意通知点击模式下快捷指令在前台运行，剪贴板权限会弹一次询问。</p></div>
+
+<h3 id="actions-offline">离线时角色怎么触发</h3>
+<p>小手机在线：角色在工具循环里发 <code>[执行动作:动作名({...})]</code>，聊天里出现「已发送「X」到 iPhone」，收到结果后接着回。</p>
+<p>小手机被杀、由个人云生成回复时：角色在正文里写 <code>【快捷动作：动作名({"参数":"值"})】</code>，标记会从正文剥掉再执行，一次回复最多执行一个。结果回来后 30 秒内如果你没打开小手机，云端会替角色再生成一句接结果的话推给你。</p>
+<p>限额：同时最多 10 条待执行命令，1 分钟最多 6 次；超过会报 429。</p>
+
+<h2 id="screen">5. 屏幕速聊</h2>
+<p>双击辅助触控悬浮球 → 截屏 → 角色在系统弹窗里回复 → 可以继续在弹窗里打字聊 15 轮。每一轮都按顺序写回该角色原本的聊天窗口，不另开会话。截图只在 Edge Function 内存里过一遍，不落库。</p>
+<ol class="steps">
+<li>现实桥 → 屏幕速聊，开启并选角色。没部署或 Schema 旧会提示先去「云服务部署」。</li>
+<li>点「一键导入屏幕速聊」，导入 iCloud 上的通用快捷指令。导入问题 1 填接口地址，问题 2 填令牌，两个都在页面上点击复制。</li>
+<li>设置 → 辅助功能 → 触控 → 辅助触控 → 轻点两下 → 选「屏幕速聊」。</li>
+<li>首次运行允许截屏、网络、显示提醒。每轮 3～8 秒。</li>
+</ol>
+<p>手工搭的话请求体是四个文本字段：<code>token</code>、<code>image</code>（Base64 JPEG，先缩到宽 960）、<code>imageType</code> = image/jpeg、<code>ocr</code>（从图像中提取文本，图像识别关着时的兜底）。续聊只发 <code>token</code> + <code>text</code>。响应取 <code>reply</code> 显示提醒，失败时读 <code>error</code>。</p>
+<div class="box tip"><b>怎么玩</b>看到一条好笑的评论、一道题、一张菜单、一段聊天记录，双击悬浮球，角色当场评论 / 解题 / 推荐 / 帮你想回复。角色的正常「状态栏 / 内心」标记在弹窗里会被剥掉，只留说的话。</div>
+
+<h2 id="outbox">6. 发件箱 · 自定义 APP</h2>
+<p>面向写自定义 APP 的场景，不需要写 APP 可以跳过。</p>
+<ul>
+<li>APP 调 <code>AiPhone.bridge.send({ type, payload })</code>（权限 <code>bridge.send</code>）把一条信号追加到 <code>bridge-outbox/queue.json</code>，最多保留 50 条，payload ≤ 2000 字。</li>
+<li>iPhone 侧做一条「检查回传」快捷指令，GET 这个文件、按 type 分支执行，然后 DELETE 或覆盖它。小手机不会替你清空。</li>
+<li>APP 监听 <code>AiPhone.on("bridge.data", handler)</code>（manifest 里声明 events，可 background）能收到 A 通道每一条数据；桥接设置里的「允许自定义 APP 订阅」是总开关。</li>
+<li><code>AiPhone.bridge.readState({ key })</code>（权限 <code>bridge.read</code>）读 B 通道快照；<code>AiPhone.tools.invoke("动作名", 参数)</code>（权限 <code>chat.tools</code>）触发 C 通道并等结果。</li>
+</ul>
+
+<h2 id="combo">7. 组合玩法</h2>
+<div class="ex"><h4>到家 → 开灯 + 迎接</h4><p>A 通道 <code>daojia</code> 规则勾「执行快捷动作 → 回家场景」（C 通道，邮件模式最丝滑）+「写入聊天让 TA 回话」。人到门口灯亮、TA 说欢迎回来。</p></div>
+<div class="ex"><h4>插电 → 晚安 → 勿扰 → 早安</h4><p>例 ③ + 例 ⑨ + 例 ④ 串起来。晚上插电触发晚安并开启睡眠专注，早上关闹钟触发早安并带昨晚睡眠。</p></div>
+<div class="ex"><h4>「你在干嘛」三连</h4><p>B 通道 nowplaying + where 快照给角色背景；角色想深挖再调 C 通道「截屏看看」。角色会先看快照再决定要不要打扰你。</p></div>
+<div class="ex"><h4>低电量 → 催充电 → 你插电 → TA 放心</h4><p>例 ⑥ 冷却 180 分钟负责催，充电器连接自动化 type <code>chongdian</code> 规则套句式「{{user}} 插上电了」让 TA 回话，冷却 60 分钟。</p></div>
+<div class="ex"><h4>角色替你安排明天</h4><p>晚上聊天时角色调「写进备忘录」+「设闹钟」两个动作；第二天早上 B 通道 agenda 快照让 TA 检查你有没有照做。</p></div>
+
+<h2 id="debug">8. 排错与坑</h2>
+<table>
+<tr><th>现象</th><th>原因 / 处理</th></tr>
+<tr><td>快捷指令上传返回 401 / 403</td><td>头部名必须是 <code>Authorization</code>，值以 <code>Bearer </code> 开头。若云端备份用的是新式 <code>sb_secret_…</code> 密钥，把头部改成 <code>apikey</code> = 密钥原文（不加 Bearer），教程里的 Authorization 写法对这种密钥会被网关拒绝。</td></tr>
+<tr><td>状态快照第二次上传 409</td><td>缺 <code>x-upsert: true</code> 头。</td></tr>
+<tr><td>收件箱数据丢失或顺序乱</td><td>文件名没用「当前日期 yyyyMMddHHmmss」变量，重名会覆盖。</td></tr>
+<tr><td>规则没触发但「历史」里有记录，备注「还在触发间隔内」</td><td>冷却在起作用，按规则计时。改小或清 0。</td></tr>
+<tr><td>历史里是「仅存档（无匹配规则）」</td><td>信号名不一致。匹配是严格相等，大小写、空格都算。</td></tr>
+<tr><td>角色说「能力未启用」</td><td>工具箱 → 内置能力 → 打开「现实桥」。</td></tr>
+<tr><td>角色说「现实桥未连接」</td><td>设置 → 数据管理 → 云端备份没配。</td></tr>
+<tr><td>测试通知「已发送」但手机没弹</td><td>推送订阅是旧的。到聊天设置关掉再打开离线推送，或去「云服务部署」重新部署一次。前台时不弹通知，锁屏或退后台再试。</td></tr>
+<tr><td>点通知没有跳转快捷指令</td><td>快捷指令名和登记的不一致，或小手机没装到主屏幕。</td></tr>
+<tr><td>快捷动作 429</td><td>待执行超过 10 条或 1 分钟超过 6 次。到历史 →「最近快捷指令」看堆积的命令，等过期或删掉。</td></tr>
+<tr><td>屏幕速聊 409「尚未同步」</td><td>在小手机里启用并选角色后等几秒让快照同步上去；或 413 时把截图缩到宽 960 转 JPEG。</td></tr>
+<tr><td>屏幕速聊 403 令牌无效</td><td>令牌是个人云那份，不是站点的。重新在屏幕速聊向导第 3 步复制。</td></tr>
+<tr><td>唤醒后没有服务端回复</td><td>聊天设置没开离线推送，或小手机其实在线（在线时服务端主动让位，是正常的）。</td></tr>
+</table>
+<p>看流水：现实桥右下角时钟图标 → 「最近收到」（每条数据命中了哪些规则、执行了什么、报了什么错）和「最近快捷指令」（推送 / 邮件、状态）。清空只删本地列表。</p>
+
+<h3>硬上限速查</h3>
+<table>
+<tr><th>项目</th><th>上限</th></tr>
+<tr><td>type / payload</td><td>60 字 / 8000 字</td></tr>
+<tr><td>规则、数据项、快捷动作</td><td>各 30 条</td></tr>
+<tr><td>轮询间隔</td><td>10～300 秒，默认 20</td></tr>
+<tr><td>快捷动作等待</td><td>30～900 秒，默认 120</td></tr>
+<tr><td>回传图片</td><td>8MB，JPEG / PNG / WebP</td></tr>
+<tr><td>屏幕速聊请求</td><td>3MB，图 2MB，续聊文本 2000 字</td></tr>
+<tr><td>发件箱</td><td>50 条，每条 2000 字</td></tr>
+<tr><td>历史流水</td><td>200 条，页面显示 20 条</td></tr>
+</table>
+
+</main>
+</div>
+<script>
+document.querySelectorAll('pre').forEach(function(pre){
+  var b=document.createElement('button');b.className='copy';b.textContent='复制';
+  b.onclick=function(){navigator.clipboard.writeText(pre.querySelector('code').innerText).then(function(){b.textContent='已复制';setTimeout(function(){b.textContent='复制'},1200)})};
+  pre.appendChild(b);
+});
+document.querySelectorAll('nav a').forEach(function(a){a.onclick=function(){document.querySelector('nav').classList.remove('open')}});
+</script>
+</body>
+</html>
