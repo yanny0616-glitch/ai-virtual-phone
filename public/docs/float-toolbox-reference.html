@@ -1,0 +1,1769 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15283f">
+  <meta name="description" content="Float 小手机工具箱与 MCP 中文手册：第一次调用、十项内置能力、REST 配置、MCP 接入、组合流程和故障排查，附可复制话术。">
+  <title>工具箱与 MCP 完整参考手册 · Float</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MCA0MCI+PHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiByeD0iMTAiIGZpbGw9IiMxNTI4M2YiLz48cGF0aCBkPSJNMTIgMTBoMTh2NUgxOHY1aDEwdjVIMTh2OWgtNnoiIGZpbGw9IiNmZmYiLz48L3N2Zz4K">
+  <style>
+@layer base, layout, content, responsive;
+@layer base {
+  :root { color-scheme:light; --ink:#15283f; --muted:#546479; --blue:#145de2; --line:#dce3eb; --paper:#fff; --wash:#f4f7fb; --nav:#10243b; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; font-size:16px; }
+  * { box-sizing:border-box; } html { scroll-behavior:smooth; scroll-padding-top:100px; }
+  body { margin:0; background:var(--paper); color:var(--ink); line-height:1.85; }
+  a { color:var(--blue); text-underline-offset:4px; text-decoration-thickness:1px; } a:hover { text-decoration:underline; }
+  a:focus-visible,button:focus-visible,summary:focus-visible { outline:3px solid #f39f28; outline-offset:4px; }
+  button { font:inherit; cursor:pointer; } h1,h2,h3,p { margin-top:0; } h1,h2,h3 { letter-spacing:-.035em; line-height:1.3; }
+  h1 { font-size:clamp(2.6rem,5vw,4.3rem); font-weight:750; margin-bottom:24px; } h1 span { color:var(--blue); }
+  h2 { font-size:clamp(1.6rem,3vw,2.15rem); margin-bottom:20px; } h3 { font-size:1.2rem; margin:32px 0 14px; }
+  p { margin-bottom:18px; } strong { font-weight:650; } code,pre { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+  code { font-size:.9em; overflow-wrap:anywhere; background:#eaf0f8; padding:.13em .35em; border-radius:4px; }
+  ::selection { background:#c6dcff; color:#10243b; }
+  .sr-only,.skip:not(:focus) { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .skip:focus { position:fixed; z-index:99; top:8px; left:12px; padding:10px 20px; background:#fff; }
+}
+@layer layout {
+  .topbar { height:76px; padding:0 36px; position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; gap:20px; background:var(--nav); color:#fff; border-bottom:1px solid #29405a; }
+  .brand { display:flex; align-items:center; gap:13px; color:#fff; text-decoration:none; font-size:1.28rem; font-weight:700; letter-spacing:-.03em; }
+  .brand-mark { width:34px; height:34px; display:grid; place-items:center; border:1px solid #7592b5; border-radius:9px; font-size:1.25rem; font-weight:800; }
+  .brand-sub { margin-left:14px; font-size:.9rem; color:#becddd; font-weight:400; letter-spacing:.03em; }
+  .edition { font:500 .875rem ui-monospace,monospace; color:#c7d6e7; }
+  .layout { display:grid; grid-template-columns:270px minmax(0,1fr); max-width:1512px; margin:auto; }
+  .sidebar { position:sticky; top:76px; height:calc(100dvh - 76px); overflow:auto; padding:36px 24px 24px; border-right:1px solid var(--line); background:var(--wash); }
+  .nav-label { color:#617086; font-size:.75rem; letter-spacing:.13em; margin:25px 12px 10px; } .nav-label:first-child { margin-top:0; }
+  .sidebar nav a { display:flex; gap:12px; align-items:center; min-height:44px; padding:8px 12px; color:#394d66; text-decoration:none; font-size:.9rem; border-radius:7px; }
+  .sidebar nav a span { font:500 .75rem ui-monospace,monospace; color:#687c94; } .sidebar nav a:hover { background:#e7eef8; }
+  .sidebar nav a[aria-current] { background:#e1ecff; color:#164eba; font-weight:650; } .sidebar nav a[aria-current] span { color:var(--blue); }
+  .sidebar-note { border-top:1px solid var(--line); margin:32px 12px 0; padding-top:24px; font-size:.875rem; } .sidebar-note p { color:var(--muted); margin:6px 0 12px; } .sidebar-note a { text-decoration:none; }
+  main { min-width:0; max-width:1016px; padding:0 64px; } .chapter { padding:64px 0; border-bottom:1px solid var(--line); scroll-margin-top:22px; } .chapter.first { padding-top:56px; }
+  footer { display:flex; justify-content:space-between; gap:20px; padding:32px 0 48px; font-size:.875rem; color:var(--muted); }
+}
+@layer content {
+  .eyebrow { color:var(--blue); font-size:.8rem; font-weight:650; letter-spacing:.13em; margin-bottom:18px; }
+  .lead { color:#4b6078; font-size:1.1rem; max-width:650px; line-height:1.9; } .meta { display:flex; flex-wrap:wrap; gap:8px 20px; font-size:.8rem; color:var(--muted); margin:24px 0 34px; }
+  .first-task { border:1px solid #b8cff5; border-top:4px solid var(--blue); padding:28px 30px; border-radius:0 0 12px 12px; background:linear-gradient(125deg,#f1f6ff 0%,#fff 65%); margin-bottom:22px; }
+  .task-heading { display:flex; gap:18px; align-items:center; margin-bottom:16px; } .number { color:var(--blue); font:500 2.4rem ui-monospace,monospace; letter-spacing:-.07em; }
+  .small-label { color:var(--muted); font-size:.875rem; } .task-heading h2 { font-size:1.4rem; margin:5px 0 0; }
+  .steps { padding-left:1.7em; margin:20px 0 24px; } .steps li { padding-left:.3em; margin:10px 0; } .steps li::marker { color:var(--blue); font-weight:700; }
+  .copy-block { margin:22px 0; border:1px solid #d2dce9; border-radius:9px; overflow:hidden; background:var(--wash); }
+  .copy-head { min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid #dce5f0; padding:3px 10px 3px 17px; color:#4a607c; font-size:.875rem; }
+  .copy { flex-shrink:0; min-height:40px; padding:7px 10px; color:#164fae; border:0; border-radius:5px; background:transparent; font-size:.875rem; font-weight:600; } .copy:hover { background:#e0eaff; }
+  .copy-block pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:17px 20px 19px; margin:0; line-height:1.85; font-family:inherit; font-size:1rem; } .code-block pre { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.9rem; }
+  .result { border-left:3px solid #267458; padding-left:14px; margin-bottom:14px; color:#264f42; } .note { font-size:.9rem; color:var(--muted); line-height:1.85; }
+  .notice { background:#eef4ff; border-left:3px solid var(--blue); padding:18px 22px; margin:24px 0; font-size:.96rem; } .notice p { margin:8px 0 0; }
+  .table-wrap { width:100%; overflow-x:auto; margin:24px 0 30px; border:1px solid var(--line); border-radius:9px; } table { width:100%; border-collapse:collapse; text-align:left; font-size:.94rem; min-width:530px; }
+  caption { text-align:left; padding:12px 18px; font-size:.8rem; color:var(--muted); background:#fbfcfe; border-bottom:1px solid var(--line); } th { background:#edf2f8; color:#344b67; font-size:.875rem; font-weight:650; }
+  td,th { padding:15px 18px; border-bottom:1px solid var(--line); vertical-align:top; } tr:last-child td { border-bottom:0; } td:first-child { min-width:135px; }
+  .flow { display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--nav); padding:24px 20px; margin:30px 0; border-radius:9px; color:#e9f1fd; font-size:.9rem; } .flow span { text-align:center; } .flow b { font-weight:400; color:#8bbaff; }
+  .capability { border-bottom:1px solid var(--line); } .capability:first-of-type { border-top:1px solid var(--line); } summary { cursor:pointer; }
+  .capability summary { display:flex; align-items:center; gap:15px; padding:22px 0; list-style:none; } summary::-webkit-details-marker { display:none; }
+  .capability summary::after,.lesson summary::after { content:'+'; font:400 1.5rem ui-monospace,monospace; color:var(--blue); margin-left:6px; } details[open]>summary::after { content:'−'; }
+  .cap-no { flex-shrink:0; font:.85rem ui-monospace,monospace; color:#587495; } .capability summary>span:nth-child(2) { flex:1; } .capability summary strong { display:block; font-size:1.1rem; } .capability summary small { display:block; font-size:.875rem; color:var(--muted); margin-top:2px; }
+  .badge { font-size:.75rem; border-radius:5px; padding:3px 8px; background:#e2edff; color:#2255a5; white-space:nowrap; } .badge.neutral { background:#edf1f5; color:#536276; }
+  .detail-body { padding:0 0 10px 35px; } .detail-body>p { margin:0 0 15px; }
+  .lesson { border:1px solid var(--line); border-radius:9px; margin:26px 0; } .lesson summary { display:flex; justify-content:space-between; align-items:center; gap:15px; list-style:none; padding:18px 22px; font-weight:650; } .lesson[open] summary { border-bottom:1px solid var(--line); margin-bottom:20px; } .lesson .detail-body { padding:0 22px 8px; }
+  .config-grid { display:grid; grid-template-columns:140px minmax(0,1fr); gap:12px 16px; margin:22px 0; font-size:.94rem; } .config-grid>span:nth-child(odd) { color:var(--muted); } .config-grid code { align-self:start; }
+  .recipe { padding:28px 0 18px; border-top:1px solid var(--line); } .recipe-top { display:flex; align-items:center; justify-content:space-between; gap:12px; } .recipe-index { font:500 1.8rem ui-monospace,monospace; color:#7694bc; } .recipe h3 { margin-top:10px; }
+  .glossary { margin:26px 0; } .glossary div { display:grid; grid-template-columns:180px minmax(0,1fr); gap:20px; border-bottom:1px solid var(--line); padding:17px 0; } dt { font-weight:650; } dd { margin:0; color:#4e6178; }
+  .sources { display:grid; gap:12px; font-size:.9rem; margin:24px 0; } .finish { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-top:48px; background:var(--nav); color:#fff; border-radius:10px; padding:28px; }
+  .finish .small-label { color:#afc6e1; } .finish h3 { margin:6px 0 10px; } .finish p { font-size:.9rem; margin:0; color:#cad8e9; } .button { flex-shrink:0; display:inline-flex; gap:14px; align-items:center; padding:12px 17px; min-height:48px; border-radius:6px; background:#fff; color:#12458e; text-decoration:none; font-size:.9rem; font-weight:600; }
+}
+@layer responsive {
+  .jump-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:24px 0; }
+  .jump-grid a { display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:48px; padding:10px 14px; border:1px solid var(--line); border-radius:7px; text-decoration:none; font-size:.94rem; }
+  .jump-grid a:hover { background:#e9f1ff; }
+  .jump-grid a span { color:var(--muted); font-size:.8rem; }
+  .action-group { margin:40px 0; scroll-margin-top:100px; }
+  .action-group>h3 { padding-bottom:14px; border-bottom:3px solid var(--ink); }
+  .action-group h3 .badge { font-weight:400; margin-left:12px; }
+  .action-entry { border-bottom:1px solid var(--line); scroll-margin-top:100px; }
+  .action-entry>summary { list-style:none; padding:18px 0; display:flex; justify-content:space-between; align-items:center; gap:16px; }
+  .action-entry>summary::after { content:'+'; color:var(--blue); font:1.4rem ui-monospace,monospace; }
+  .action-entry[open]>summary::after { content:'−'; }
+  .action-entry summary strong,.action-entry summary small { display:block; }
+  .action-entry summary small { color:var(--muted); font-size:.875rem; font-weight:400; margin-top:5px; }
+  .action-entry .detail-body { padding-left:0; }
+  .schema-raw { margin:20px 0; background:#f8faff; padding:12px 16px; border-radius:7px; }
+  .schema-raw>summary { font-size:.9rem; color:var(--blue); min-height:32px; }
+  .download-link { display:inline-block; padding:14px 18px; min-height:48px; color:white; background:var(--blue); border-radius:7px; text-decoration:none; }
+  #start h1 { font-size:clamp(2rem,4vw,3.2rem); }
+  .sidebar { padding-top:24px; }
+  .sidebar nav a { min-height:40px; }
+  @media(min-width:1450px) { main { padding-right:48px; padding-left:80px; } }
+  @media(max-width:1100px) { .layout { grid-template-columns:232px minmax(0,1fr); } main { padding:0 36px; } .sidebar { padding:30px 14px 20px; } .finish { flex-direction:column; align-items:flex-start; } }
+  @media(max-width:800px) {
+    html { scroll-padding-top:86px; } .topbar { height:64px; padding:0 20px; } .brand-sub { margin-left:8px; } .edition-date { display:none; } .layout { display:block; }
+    .sidebar { position:static; height:auto; padding:14px 16px; border-right:0; border-bottom:1px solid var(--line); } .sidebar nav { display:flex; gap:6px; overflow-x:auto; padding:2px 0 6px; }
+    .sidebar nav a { flex-shrink:0; font-size:.875rem; padding:8px 11px; border:1px solid var(--line); background:#fff; } .sidebar nav a span,.nav-label,.sidebar-note { display:none; }
+    main { padding:0 24px; max-width:760px; margin:auto; } .chapter { padding:44px 0; } .chapter.first { padding-top:34px; } h1 { font-size:2.7rem; } .lead { font-size:1rem; }
+    .first-task { padding:22px 20px; } .task-heading { gap:13px; } .task-heading h2 { font-size:1.22rem; } .detail-body { padding-left:0; }
+    .capability summary { gap:10px; } .capability summary strong { font-size:1rem; } .capability summary small { font-size:.875rem; } .badge { padding:2px 6px; }
+    .config-grid { grid-template-columns:108px minmax(0,1fr); gap:12px; } .flow { padding:20px 14px; font-size:.875rem; flex-wrap:wrap; justify-content:center; gap:12px; } .glossary div { grid-template-columns:1fr; gap:5px; } footer { flex-direction:column; gap:6px; }
+  }
+  @media(max-width:420px) {
+    .jump-grid { grid-template-columns:1fr; }
+    .edition { font-size:.75rem; } .brand { gap:8px; font-size:1.1rem; } .brand-sub { font-size:.8rem; } main { padding:0 18px; } .first-task { padding:20px 16px; }
+    .copy-head { gap:8px; padding-left:12px; } .copy-block pre { padding:14px; } .cap-no { display:none; } .capability summary { flex-wrap:wrap; }
+    .config-grid { grid-template-columns:1fr; gap:5px; } .config-grid>span:nth-child(odd) { margin-top:10px; font-size:.875rem; } .lesson summary { padding:16px; } .lesson .detail-body { padding:0 16px 6px; }
+  }
+  @media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
+  @media print { .topbar,.sidebar,.copy,.skip,.finish,footer { display:none!important; } .layout { display:block; } main { max-width:none; padding:0; } body { font-size:11pt; color:#000; } .chapter { padding:24px 0; } h1 { font-size:30pt; } h2 { font-size:22pt; } .table-wrap { overflow:visible; } table { min-width:0; } .copy-block,.notice,.first-task { background:#fff; } h2,h3,summary { break-after:avoid; } .copy-block,tr { break-inside:avoid; } .flow { background:#fff; color:#000; border:1px solid #999; } }
+}
+
+</style>
+</head>
+<body>
+<a class="skip" href="#content">跳到正文</a>
+<header class="topbar"><a class="brand" href="#start"><span class="brand-mark" aria-hidden="true">F</span><span>Float <span class="brand-sub">使用手册</span></span></a><span class="edition">工具箱 / MCP <span class="edition-date">· 2026.09</span></span></header>
+<div class="layout">
+<aside class="sidebar"><nav aria-label="手册目录"><p class="nav-label">完整参考 · 17 章</p><a href="#start"><span>01</span> 第一次使用</a>
+<a href="#choose"><span>02</span> 选择工具</a>
+<a href="#protocol"><span>03</span> 调用与权限</a>
+<a href="#builtin"><span>04</span> 10 项内置能力</a>
+<a href="#actions"><span>05</span> 41 项动作参数</a>
+<a href="#phone-workflows"><span>06</span> 查手机的 6 个动作</a>
+<a href="#tools"><span>07</span> 网页、天气与搜索</a>
+<a href="#setup"><span>08</span> 配套服务接入</a>
+<a href="#rest"><span>09</span> 添加 REST 入门</a>
+<a href="#rest-reference"><span>10</span> REST 完整配置</a>
+<a href="#mcp"><span>11</span> MCP 入门</a>
+<a href="#mcp-reference"><span>12</span> MCP 接入与自建</a>
+<a href="#compose"><span>13</span> 套件与 APP</a>
+<a href="#composite-reference"><span>14</span> 组合完整配置</a>
+<a href="#recipes"><span>15</span> 使用场景</a>
+<a href="#fix"><span>16</span> 故障排查</a>
+<a href="#reference"><span>17</span> 术语与资料</a></nav><div class="sidebar-note"><strong>不用背指令。</strong><p>先接好工具，再用一句普通话告诉角色你要做什么。</p><a href="#start">先完成一次查询 →</a></div></aside>
+<main id="content">
+<section id="start" class="chapter first">
+  <div class="eyebrow">01 / 第一次使用</div><h1>工具箱与 MCP<br><span>完整参考手册</span></h1>
+  <p class="lead">先做一次查询，再按需查动作、参数与配置。覆盖当前工具箱的 10 项内置能力、41 项固定动作、6 个内置组合，以及 REST、MCP 和自定义 APP 接入。</p>
+  <div class="meta"><span>适用于 Float 小手机</span><span>参考版 v2 · 核对：2026-09-08</span></div>
+  <div class="jump-grid start-links"><a href="#actions">查动作与参数 →</a><a href="#rest-reference">照填 REST 配置 →</a><a href="#mcp-reference">接入 / 自建 MCP →</a><a href="#setup">连接内置服务 →</a></div><div class="first-task"><div class="task-heading"><span class="number">01</span><div><span class="small-label">约 2 分钟 · 不需要 MCP 或 API Key</span><h2>完成你的第一次工具调用</h2></div></div>
+  <ol class="steps"><li>打开<strong>设置 → 聊天工具箱 → 内置能力</strong>。</li><li>确认<strong>本地资料库</strong>已开启。</li><li>进入普通角色单聊，把下面这句话发给角色。</li><li>查看工具返回的记录；没有结果时，把关键词换成你确实聊过的内容。</li></ol>
+  <div class="copy-block"><div class="copy-head"><span>发给角色</span><button class="copy" type="button">复制话术</button></div><pre>请使用本地资料库，搜索我们聊天里关于“旅行”的内容。列出最多三条找到的原文；不足三条就按实际数量，没有就直说，不要补写。</pre></div>
+  <p class="result"><strong>成功的样子：</strong>实际调用了搜索或读取工具，并根据返回记录回答。只有一句“我查过了”还不能证明成功。</p></div>
+  <p class="note">本页是使用说明，不会读取你的小手机、代你开启工具或连接账号。下文默认状态来自源码，你设备上已保存的设置可能不同。</p>
+</section>
+<section id="choose" class="chapter">
+  <div class="eyebrow">02 / 选择工具</div><h2>先看你想完成什么</h2><p>工具箱是统一入口。内置能力、REST、MCP 和 APP 工具都是角色可以调用的不同来源。</p>
+  <div class="table-wrap"><table><caption>需求与工具类型对照</caption><thead><tr><th>你的需求</th><th>选择</th><th>需要准备</th></tr></thead><tbody>
+  <tr><td>查聊天、操作日程、放音乐</td><td><a href="#builtin">内置能力</a></td><td>开启对应能力；部分功能还需连接服务</td></tr><tr><td>读链接、查天气、搜索互联网</td><td><a href="#tools">已有 Tools</a></td><td>网页链接，或天气 / 搜索服务的 Key</td></tr><tr><td>接入一个有 API 文档的服务</td><td><a href="#rest">REST 工具</a></td><td>接口地址、参数和鉴权配置</td></tr><tr><td>接入能自动列出动作的外部服务</td><td><a href="#mcp">MCP</a></td><td>MCP 服务地址及所需授权</td></tr><tr><td>重复执行一串固定操作</td><td><a href="#compose">组合工具</a></td><td>已能正常调用的基础工具</td></tr>
+  </tbody></table></div>
+  <div class="flow" role="img" aria-label="你提出需求，角色选择工具，系统执行，角色带着结果回答"><span>你说需求</span><b aria-hidden="true">→</b><span>角色选工具</span><b aria-hidden="true">→</b><span>系统执行</span><b aria-hidden="true">→</b><span>带着结果回答</span></div>
+  <h3>需要手写“执行动作”吗？</h3><p>通常不需要。你说清楚事情，角色负责生成动作和参数。为了让调用更明确，可以直接说“请使用本地资料库”或“请使用搜索工具”。</p>
+  <h3>角色会自己查吗？</h3><p><strong>工具已开启、聊天预设也提供了工具入口时，角色可以在回复过程中自行决定调用。</strong>这不意味着每次聊天都读取全部资料，也不意味着它在页面关闭后持续运行。工具开关、模型、预设和运行环境都会影响实际行为。</p>
+  <p class="note">当前普通聊天会检查预设是否包含工具入口；线下模式不走这套普通工具调用流程。初次体验请使用普通单聊。</p>
+</section>
+<section id="protocol" class="chapter">
+<div class="eyebrow">03 / 调用与权限</div><h2>角色何时能调用，怎样才算成功</h2>
+<p>先在普通角色单聊验证。工具名称与用途要进入当前预设，模型才知道可以用；打开工具开关不等于模型一定会选中它。</p>
+<div class="table-wrap"><table><caption>聊天环境对照</caption><thead><tr><th>环境</th><th>行为与条件</th></tr></thead><tbody><tr><td>普通单聊</td><td>启用工具，并确保当前生效预设含工具入口；默认条目名是“▸ 聊天工具箱”。自定义预设要保留对应工具宏。</td></tr><tr><td>群聊</td><td>按具体发言角色执行；需要角色上下文的动作归到该角色。稍后主动联系不支持这个群聊上下文。</td></tr><tr><td>线下模式</td><td>当前普通聊天工具流程禁用；不要拿线下模式判断工具是否配好。</td></tr><tr><td>自定义 APP / 工坊</td><td>APP 有自己的可用工具范围和调用管线；普通聊天的内置能力列表不会无条件全部提供。工坊电脑与角色电脑有独立开关。</td></tr><tr><td>页面关闭</td><td>不保证继续执行正在运行的 REST、MCP 或浏览器脚本。稍后联系、现实桥等专门离线流程还依赖推送订阅、个人云或服务端接管配置。</td></tr></tbody></table></div>
+<h3>文本指令与原生工具调用</h3><p>你始终可以用普通话。文本模式中，角色先输出 <code>[获取指令:本地资料库]</code> 获得动作定义，再输出具体动作。已经拿到的定义通常不必反复获取。配置支持原生工具协议时，宿主会走原生工具调用；不要求你或角色再手动展示方括号。</p>
+<div class="copy-block code-block"><div class="copy-head"><span>动作格式参考 · 给角色参考，不是用户强制执行命令</span><button class="copy" type="button">复制格式</button></div><pre>[获取指令:本地资料库]
+[执行动作:列出资料目录({"path":"/","limit":10})]</pre></div>
+<p>群聊文本格式要带发言者，例如 <code>["角色名"执行动作:列出资料目录({"path":"/"})]</code>。一次回复的动作应由同一个角色发起。动作参数用合法 JSON：双引号、数字不加引号、布尔值写 true / false。</p>
+<div class="notice"><strong>界面上的“执行前确认”不是通用保险开关。</strong><p>当前执行器只有“写入记忆”检查 confirm 并创建待确认请求。角色电脑、发送文件、现实桥、稍后主动联系没有对应的逐次确认分支，即使界面允许选这个模式，也不能据此保证弹窗。其他五项在界面中只提供开关并自动执行。本手册只说明现状，没有修改这些行为。</p></div>
+<h3>确认结果的四种方式</h3><div class="table-wrap"><table><caption>不要只看“已完成”三个字</caption><thead><tr><th>操作</th><th>要确认的证据</th></tr></thead><tbody><tr><td>查询</td><td>工具返回的正文、记录 ID、时间或来源链接，能与原资料对应。</td></tr><tr><td>写入 / 发布</td><td>到实际目标检查：长期记忆、角色日历、公共便签墙或外部笔记。</td></tr><tr><td>命令 / 文件</td><td>电脑命令检查退出码；文件真的能重读、打开或下载。success=true 不保证命令退出码为 0。</td></tr><tr><td>现实桥 / 延时联系</td><td>分清“已排队”“已送达”“执行成功”“已收到回传”。预约成功也不保证角色到点一定发消息。</td></tr></tbody></table></div>
+<h3>不希望角色主动翻查时</h3><p>检查“本地资料库”，也检查组合区的“查你的手机”套件；其中日程、订单等脚本可直接读取浏览器数据，不完全依赖资料库开关。你自己添加的脚本和 APP 也可能有查询路径。只说“不要查”是提示要求，停用相应入口才会移除其能力；关闭这些工具不等于清空正常聊天上下文。</p>
+<p class="note">自动匹配同名动作的顺序是内置 → REST → 组合 → MCP → 自定义 APP。重名时可在组合步骤中指定类别、工具 ID 或 MCP 服务器 ID；普通聊天尽量使用互不重名的工具。</p>
+</section>
+<section id="builtin" class="chapter">
+  <div class="eyebrow">04 / 内置能力</div><h2>小手机已经准备好的 10 项能力</h2><p>统一入口：<strong>设置 → 聊天工具箱 → 内置能力</strong>。点开功能查看准备步骤、话术和结果位置。</p>
+  <div class="notice"><strong>开启前先分清执行方式</strong><p>本地资料库、日历管理、网易云音乐、便签墙、工具箱管理，当前界面中开启后自动执行，没有逐次确认选项。实际只有写入记忆实现了 confirm 待确认分支；角色电脑、现实桥、发送文件和稍后主动联系不能依赖此选项保证弹窗。详见“调用与权限”。</p></div>
+  <details class="capability" open><summary><span class="cap-no">01</span><span><strong>本地资料库</strong><small>查询小手机里的本地数据</small></span><span class="badge">默认开启</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>列目录、搜索、查看字段、读取文件或单条记录。范围包括角色卡、聊天、朋友圈、记忆、工具箱、设置和应用数据。</p><p><strong>先准备：</strong>开启本地资料库，在普通聊天中使用。</p>
+  <div class="copy-block"><div class="copy-head"><span>查过去的约定</span><button class="copy" type="button">复制话术</button></div><pre>用本地资料库查一下我们聊过的“看电影”。只看相关聊天记录，告诉我约定了什么，附找到的原文。</pre></div>
+  <p class="result"><strong>检查结果：</strong>回答应对应实际查到的内容；有返回日期或记录标识时，可据此回到原聊天核对。</p><p class="note">“文件”是小手机数据的虚拟目录，不是手机系统的照片、微信或任意文件。此工具提供读取与搜索；关闭它不会同时关闭正常聊天历史和记忆注入。访问范围也不能简单当作“只限当前角色”。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">02</span><span><strong>写入记忆</strong><small>保存稳定、长期有价值的信息</small></span><span class="badge neutral">默认关闭</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>把长期偏好、身份信息、重要约定、关系里程碑写入长期记忆。</p><p><strong>先准备：</strong>开启写入记忆。源码默认模式为“执行前确认”；这个模式下需要确认请求后才落库。</p>
+  <div class="copy-block"><div class="copy-head"><span>保存偏好</span><button class="copy" type="button">复制话术</button></div><pre>请用写入记忆工具记住：我长期不喝咖啡，平时更喜欢喝茶。</pre></div>
+  <p class="result"><strong>检查结果：</strong>如有确认请求先确认，再到对应角色长期记忆中检查。</p><p class="note">今天有点累、一次玩笑、角色的猜测等，不属于这个工具指导写入的长期信息。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">03</span><span><strong>日历管理</strong><small>安排当前角色的日程</small></span><span class="badge neutral">默认关闭</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>查看指定周，添加、修改或取消当前角色日程。</p><p><strong>先准备：</strong>开启能力；说清日期、开始与结束时间。当前工具参数要求时间在 08:00–23:00，结束晚于开始。</p>
+  <div class="copy-block"><div class="copy-head"><span>添加一个安排</span><button class="copy" type="button">复制话术</button></div><pre>用日历管理，把明天 20:00–21:00 在家一起看电影加入你的日程。添加后再查一下，确认日期和时间。</pre></div>
+  <p class="result"><strong>检查结果：</strong>当前角色日程中出现安排。修改或取消前，让角色先查询原安排。</p><p class="note">操作对象是小手机当前角色的日程，不会自动同步到系统日历、Google 日历等其他账号。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">04</span><span><strong>网易云音乐</strong><small>让角色真的放歌、切歌</small></span><span class="badge neutral">默认关闭</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>搜索、播放、暂停、继续、切歌，查看本地音乐库、网易云歌单和播放列表，也能向播放列表加歌。</p><p><strong>先准备：</strong>开启能力；本地音乐需要已有歌曲，在线歌曲需要相应音乐服务配置可用。</p>
+  <div class="copy-block"><div class="copy-head"><span>直接播放</span><button class="copy" type="button">复制话术</button></div><pre>请用音乐工具播放周杰伦的《晴天》，直接播放给我听。找不到可播放的版本就告诉我。</pre></div>
+  <p class="result"><strong>检查结果：</strong>播放器当前歌曲改变并播放，不只是收到音乐分享卡片。</p><p class="note">能否播放取决于音乐来源与权限；浏览器也可能要求你先点击页面才能播放声音。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">05</span><span><strong>便签墙</strong><small>阅读和参与公共社区</small></span><span class="badge neutral">默认关闭</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>查看便签列表、正文和评论，以角色身份发布便签或评论。</p><p><strong>先准备：</strong>确认公共便签墙服务可访问，再开启能力。它不是私人便签本，发布动作会直接执行。</p>
+  <div class="copy-block"><div class="copy-head"><span>先试只读操作</span><button class="copy" type="button">复制话术</button></div><pre>用便签墙工具看看最新的五张便签，选一张读给我听。这次只查看，不发布也不评论。</pre></div>
+  <p class="result"><strong>检查结果：</strong>回答来自实际便签；若明确要求发布，可回到公共便签墙查看。</p><p class="note">“只查看”是对角色的要求，不是系统权限开关；不希望角色具备社区操作能力时，应关闭此能力。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">06</span><span><strong>现实桥</strong><small>连接真实手机的数据与快捷动作</small></span><span class="badge neutral">默认关闭</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>查询你接入的电量、健康等现实数据，运行你登记的快捷指令。</p><p><strong>先准备：</strong>在现实桥里配置对应数据或快捷动作，再到工具箱开启能力。开一个开关不会自动授予所有系统能力。</p>
+  <div class="copy-block"><div class="copy-head"><span>查询已接入的数据</span><button class="copy" type="button">复制话术</button></div><pre>用现实桥查看我手机最近上报的电量。如果有更新时间也告诉我，没有数据就直接说没有。</pre></div>
+  <p class="result"><strong>检查结果：</strong>数据与现实桥记录一致，注意可能是最近上报值；快捷动作要在真实设备上核对效果。</p><p class="note">只能使用已经登记并能工作的能力，不能因此任意读取真实手机里的其他 APP。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">07</span><span><strong>角色电脑</strong><small>保存文件，执行支持的命令</small></span><span class="badge neutral">默认关闭</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>使用持久文件空间写日记、读旧文件、交付文件；在支持 shell 或容器的模式下运行相应命令。</p><p><strong>先准备：</strong>进入设置里的角色电脑，按页面流程部署服务，填写地址和连接密钥，测试连接并允许角色使用。</p>
+  <div class="copy-block"><div class="copy-head"><span>保存一份日记</span><button class="copy" type="button">复制话术</button></div><pre>在你的角色电脑里写一份今天的日记，保存成 Markdown 文件。保存后重新读取一次，告诉我文件名和保存位置。</pre></div>
+  <p class="result"><strong>检查结果：</strong>能重新读取同一个文件。先看连接测试显示的基础、shell 或容器模式，再决定能否要求运行程序。</p><p class="note">角色电脑是独立连接的环境。小手机部署在某台 VPS 上，不代表角色自动获得那台 VPS 的完整访问能力。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">08</span><span><strong>发送文件</strong><small>把外部文件交付到聊天里</small></span><span class="badge neutral">默认关闭</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>把外部 URL 指向的文件、音频或视频等作为聊天内容交付。</p><p><strong>先准备：</strong>开启能力，准备可访问的实际文件链接，通常不能用登录后的网页代替文件直链。</p>
+  <div class="copy-block"><div class="copy-head"><span>替换占位文字后发送</span><button class="copy" type="button">复制话术</button></div><pre>请用发送文件工具，把这个链接的音频作为文件发给我：[在这里粘贴真实音频文件链接]。</pre></div>
+  <p class="result"><strong>检查结果：</strong>聊天里出现可打开、播放或下载的文件内容。</p><p class="note">这个工具负责交付现有文件。生成图片、声音或制作文档，需要相应生成工具或角色电脑配合。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">09</span><span><strong>工具箱管理</strong><small>让角色给自己添加工具</small></span><span class="badge">默认开启</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>创建、更新、启停或删除 AI 自己创建的 REST 工具、组合工具及套件。</p><p><strong>先准备：</strong>开启能力，提供真实 API 文档和需求；密钥在设置中填写。</p>
+  <div class="copy-block"><div class="copy-head"><span>让角色配置一个接口</span><button class="copy" type="button">复制话术</button></div><pre>请使用工具箱管理，根据我接下来提供的 API 文档添加一个查询工具。地址、参数和返回字段必须以文档为准，不要编造。缺少密钥的位置留给我在设置里填写；先不要发送测试请求。</pre></div>
+  <p class="result"><strong>检查结果：</strong>工具箱中出现 AI 标记的工具；检查配置、补全密钥后，再要求角色测试。</p><p class="note">系统拒绝修改你手动创建或受保护的内置内容。这套管理动作不等于自动部署 MCP 或注册外部服务账号。</p></div></details>
+  <details class="capability"><summary><span class="cap-no">10</span><span><strong>稍后主动联系</strong><small>约定过一段时间再来找你</small></span><span class="badge neutral">默认关闭</span></summary><div class="detail-body">
+  <p><strong>能做什么：</strong>在当前普通单聊中，设置若干分钟后的联系意图，到点后让角色判断是否发消息。</p><p><strong>先准备：</strong>开启能力，在普通角色单聊使用；页面关闭后的接管依赖可用离线推送环境、订阅和安静时段设置。</p>
+  <div class="copy-block"><div class="copy-head"><span>约定稍后联系</span><button class="copy" type="button">复制话术</button></div><pre>用“稍后主动联系”设置 20 分钟后再来问问我：刚才那件事情做完了吗？</pre></div>
+  <p class="result"><strong>检查结果：</strong>先看到预约成功的工具结果，再观察到点行为。口头答应不代表已预约。</p><p class="note">同一聊天只保留一个约定，新约定替换旧约定；到点后允许静默。它不是保证准点响铃的闹钟，也不是任意工具的后台定时器。</p></div></details>
+</section>
+<section id="actions" class="chapter"><div class="eyebrow">05 / 动作字典</div><h2>41 项固定动作的参数与示例</h2><p>包含 40 个静态动作及“查看全部手机数据”这 1 个有条件出现的入口；现实桥自定义动作另按配置生成。角色电脑的五种 op 也逐一列出。参数从源码提取，下面给每个动作配了普通话和 JSON 例子。</p><div class="jump-grid"><a href="#ref-reality_bridge_send">现实桥 <span>1</span></a><a href="#ref-memory_write">写入记忆 <span>1</span></a><a href="#ref-note_wall_service">便签墙 <span>4</span></a><a href="#ref-music_control">网易云音乐 <span>7</span></a><a href="#ref-calendar_management">日历管理 <span>4</span></a><a href="#ref-agent_computer">角色电脑 <span>1</span></a><a href="#ref-send_file">发送文件 <span>1</span></a><a href="#ref-local_data_library">本地资料库 <span>5</span></a><a href="#ref-toolbox_management">工具箱管理 <span>16</span></a><a href="#ref-timed_wake">稍后主动联系 <span>1</span></a></div><p class="notice">方括号例子是给角色参考的调用格式，贴成用户消息不代表宿主会强制执行。示例中的 ID、日期、用户名、文件地址需换成真实值；写入、发布和删除示例会产生真实效果，不要用它们验证“是否可连接”。</p><div class="action-group" id="ref-reality_bridge_send"><h3>现实桥 <span class="badge">1 个固定动作</span></h3><p class="note">源码默认：关闭；保存模式：auto。实际设备设置可能不同。</p><p>动态工具名由你登记的数据项和快捷动作生成。下面只列固定的“查看全部手机数据”；只有已建立数据项时，它才出现在给角色的工具列表里。每个数据项查询参数为 {}；快捷动作参数以你配置的 Schema 为准。</p><details class="action-entry" id="action-reality_bridge_send-1"><summary><span><strong>查看全部手机数据</strong><small>读取{{user}}真实手机上传的全部状态快照（电量、健康数据等），每项附带更新时间。</small></span></summary><div class="detail-body"><p class="note">无参数，传空对象 <code>{}</code>。</p><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>用现实桥查看已上传的全部手机快照，保留每项更新时间。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看全部手机数据({})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{}</pre></div></details></div></details></div><div class="action-group" id="ref-memory_write"><h3>写入记忆 <span class="badge">1 个固定动作</span></h3><p class="note">源码默认：关闭；保存模式：confirm。实际设备设置可能不同。</p><p>content 最多 240 个字符，超长拒绝。需要有效角色与聊天上下文。“执行前确认”在这一项有实际 pendingApproval 分支；没有确认时不会写入。importance 会归一到允许范围；不要用它保存猜测。</p><details class="action-entry" id="action-memory_write-1"><summary><span><strong>写入记忆</strong><small>将明确、稳定、长期有价值的信息写入长期记忆。仅限关系里程碑、长期偏好、身份信息、重要约定；禁止写入短期情绪、普通寒暄、猜测或未确认内容。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>content</code></td><td>string<br><span class="note">必填</span></td><td>要写入的事实性长期记忆，用简洁中文描述</td></tr><tr><td><code>importance</code></td><td>number<br><span class="note">可选</span></td><td>重要性，0 到 1 之间，仅在确实重要时使用较高分值</td></tr><tr><td><code>reason</code></td><td>string<br><span class="note">可选</span></td><td>简短说明为什么这条信息值得长期记住</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>请记住我长期不喝咖啡；如果出现确认请求，等我确认。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:写入记忆({&quot;content&quot;:&quot;用户长期不喝咖啡。&quot;,&quot;importance&quot;:0.7,&quot;reason&quot;:&quot;稳定的饮食偏好&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;content&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要写入的事实性长期记忆，用简洁中文描述&quot;
+    },
+    &quot;importance&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;重要性，0 到 1 之间，仅在确实重要时使用较高分值&quot;
+    },
+    &quot;reason&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;简短说明为什么这条信息值得长期记住&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;content&quot;
+  ]
+}</pre></div></details></div></details></div><div class="action-group" id="ref-note_wall_service"><h3>便签墙 <span class="badge">4 个固定动作</span></h3><p class="note">源码默认：关闭；保存模式：auto。实际设备设置可能不同。</p><p>读写对象是公共便签墙，能力执行需要当前角色上下文；发布会实际写入。summary 硬截断为 80 字符，正文 3000 字符，评论正文 1200 字符；Schema 中的较短长度是写作建议。noteId 必须来自实际便签。</p><details class="action-entry" id="action-note_wall_service-1"><summary><span><strong>查看便签列表</strong><small>查看公共便签墙上的便签列表。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>返回数量，1-30，默认 20</td></tr><tr><td><code>sort</code></td><td>string<br><span class="note">可选</span></td><td>排序方式：latest=最新，hot=互动最多，all=全部，默认 latest</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>查看最新五张公共便签，只读，不发帖。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看便签列表({&quot;limit&quot;:5,&quot;sort&quot;:&quot;latest&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;返回数量，1-30，默认 20&quot;
+    },
+    &quot;sort&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;排序方式：latest=最新，hot=互动最多，all=全部，默认 latest&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-note_wall_service-2"><summary><span><strong>查看便签详情及评论</strong><small>查看某张便签的完整正文和评论。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>noteId</code></td><td>string<br><span class="note">必填</span></td><td>便签列表或上下文中提供的 noteId</td></tr><tr><td><code>commentLimit</code></td><td>number<br><span class="note">可选</span></td><td>返回评论数量，1-30，默认 20</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>读取我指定的那张便签和最近十条评论。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看便签详情及评论({&quot;noteId&quot;:&quot;替换为列表返回的noteId&quot;,&quot;commentLimit&quot;:10})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;noteId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;便签列表或上下文中提供的 noteId&quot;
+    },
+    &quot;commentLimit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;返回评论数量，1-30，默认 20&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;noteId&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-note_wall_service-3"><summary><span><strong>发送便签</strong><small>以当前角色身份在公共便签墙上发送一张便签。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>authorName</code></td><td>string<br><span class="note">可选</span></td><td>右下角落款名，由你自己决定</td></tr><tr><td><code>summary</code></td><td>string<br><span class="note">必填</span></td><td>便签标题；便签卡片上方加粗显示的短标题，建议 4-18 字，不要复述 body 的第一句</td></tr><tr><td><code>body</code></td><td>string<br><span class="note">必填</span></td><td>点开后的完整正文；口语、具体、有生活细节；不要重复 summary，也不要以 summary 原文开头再扩写，可用 \n 分成 2-4 段</td></tr><tr><td><code>size</code></td><td>string<br><span class="note">可选</span></td><td>small|medium|large，默认 medium</td></tr><tr><td><code>paper</code></td><td>string<br><span class="note">可选</span></td><td>plain|cream|pink|blue|kraft，默认 plain</td></tr><tr><td><code>tape</code></td><td>string<br><span class="note">可选</span></td><td>none(透明胶)|masking|stripe|flower，默认 none</td></tr><tr><td><code>font</code></td><td>string<br><span class="note">可选</span></td><td>default|huangyou|shangshangqian|huiwen，默认 default</td></tr><tr><td><code>isAnonymous</code></td><td>boolean<br><span class="note">可选</span></td><td>是否匿名。即使匿名，也要填写 authorName，前台会显示匿名</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>在公共便签墙发布我确认的这段文字，标题用“今天的小发现”。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:发送便签({&quot;summary&quot;:&quot;今天的小发现&quot;,&quot;body&quot;:&quot;今天发现窗边的薄荷又长出了一片新叶。&quot;,&quot;authorName&quot;:&quot;示例落款&quot;,&quot;paper&quot;:&quot;cream&quot;,&quot;isAnonymous&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;authorName&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;右下角落款名，由你自己决定&quot;
+    },
+    &quot;summary&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;便签标题；便签卡片上方加粗显示的短标题，建议 4-18 字，不要复述 body 的第一句&quot;
+    },
+    &quot;body&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;点开后的完整正文；口语、具体、有生活细节；不要重复 summary，也不要以 summary 原文开头再扩写，可用 \\n 分成 2-4 段&quot;
+    },
+    &quot;size&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;small|medium|large，默认 medium&quot;
+    },
+    &quot;paper&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;plain|cream|pink|blue|kraft，默认 plain&quot;
+    },
+    &quot;tape&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;none(透明胶)|masking|stripe|flower，默认 none&quot;
+    },
+    &quot;font&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;default|huangyou|shangshangqian|huiwen，默认 default&quot;
+    },
+    &quot;isAnonymous&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否匿名。即使匿名，也要填写 authorName，前台会显示匿名&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;summary&quot;,
+    &quot;body&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-note_wall_service-4"><summary><span><strong>发送便签评论</strong><small>以当前角色身份回复某张便签。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>noteId</code></td><td>string<br><span class="note">必填</span></td><td>要回复的便签 noteId</td></tr><tr><td><code>authorName</code></td><td>string<br><span class="note">可选</span></td><td>评论显示的落款名，由你自己决定</td></tr><tr><td><code>body</code></td><td>string<br><span class="note">必填</span></td><td>评论内容，20-160字更自然；短、口语、接住具体点，别客服腔或总结腔</td></tr><tr><td><code>isAnonymous</code></td><td>boolean<br><span class="note">可选</span></td><td>是否匿名。即使匿名，也要填写 authorName</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>在指定便签下发布我确认的这条评论。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:发送便签评论({&quot;noteId&quot;:&quot;替换为便签noteId&quot;,&quot;body&quot;:&quot;这片新叶看起来很有精神。&quot;,&quot;authorName&quot;:&quot;示例落款&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;noteId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要回复的便签 noteId&quot;
+    },
+    &quot;authorName&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;评论显示的落款名，由你自己决定&quot;
+    },
+    &quot;body&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;评论内容，20-160字更自然；短、口语、接住具体点，别客服腔或总结腔&quot;
+    },
+    &quot;isAnonymous&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否匿名。即使匿名，也要填写 authorName&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;noteId&quot;,
+    &quot;body&quot;
+  ]
+}</pre></div></details></div></details></div><div class="action-group" id="ref-music_control"><h3>网易云音乐 <span class="badge">7 个固定动作</span></h3><p class="note">源码默认：关闭；保存模式：auto。实际设备设置可能不同。</p><p>播放可用 query，或 source + songId；Schema 虽未将其标为必填，实际请求仍需能定位歌曲。加入列表可使用 query、歌曲 ID 或歌单 ID；replace=true 会替换当前播放列表。切换枚举 next / prev / pause / resume / stop 分别是下一首、上一首、暂停、继续、停止。</p><details class="action-entry" id="action-music_control-1"><summary><span><strong>播放音乐</strong><small>按歌曲 ID 或关键词播放音乐。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>query</code></td><td>string<br><span class="note">可选</span></td><td>歌曲关键词</td></tr><tr><td><code>source</code></td><td>string<br><span class="note">可选</span></td><td>按 ID 播放时填写 local 或 netease</td></tr><tr><td><code>songId</code></td><td>number / string<br><span class="note">可选</span></td><td>本地歌曲 ID 或网易云歌曲 ID</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>用音乐工具直接播放周杰伦的晴天。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:播放音乐({&quot;query&quot;:&quot;晴天 周杰伦&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;query&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;歌曲关键词&quot;
+    },
+    &quot;source&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;按 ID 播放时填写 local 或 netease&quot;
+    },
+    &quot;songId&quot;: {
+      &quot;type&quot;: [
+        &quot;number&quot;,
+        &quot;string&quot;
+      ],
+      &quot;description&quot;: &quot;本地歌曲 ID 或网易云歌曲 ID&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-music_control-2"><summary><span><strong>搜索音乐</strong><small>搜索本地音乐和网易云音乐。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>query</code></td><td>string<br><span class="note">必填</span></td><td>搜索关键词，可以是歌名、歌手或歌名+歌手</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>返回数量，1-20，默认 10</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>搜索五首陈奕迅的歌，先给我候选，不播放。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:搜索音乐({&quot;query&quot;:&quot;陈奕迅&quot;,&quot;limit&quot;:5})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;query&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;搜索关键词，可以是歌名、歌手或歌名+歌手&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;返回数量，1-20，默认 10&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;query&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-music_control-3"><summary><span><strong>查看音乐状态</strong><small>查看当前播放歌曲、播放状态、播放模式和当前播放列表。</small></span></summary><div class="detail-body"><p class="note">无参数，传空对象 <code>{}</code>。</p><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>看看现在播放器放的是什么、是否正在播放。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看音乐状态({})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {}
+}</pre></div></details></div></details><details class="action-entry" id="action-music_control-4"><summary><span><strong>查看音乐库概览</strong><small>查看本地音乐、网易云登录状态、网易云歌单和近期播放概览。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>playlistLimit</code></td><td>number<br><span class="note">可选</span></td><td>返回网易云歌单数量，1-30，默认 12</td></tr><tr><td><code>localLimit</code></td><td>number<br><span class="note">可选</span></td><td>返回本地歌曲数量，1-50，默认 20</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>列出我的十首本地音乐和五个网易云歌单。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看音乐库概览({&quot;playlistLimit&quot;:5,&quot;localLimit&quot;:10})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;playlistLimit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;返回网易云歌单数量，1-30，默认 12&quot;
+    },
+    &quot;localLimit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;返回本地歌曲数量，1-50，默认 20&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-music_control-5"><summary><span><strong>查看歌单歌曲</strong><small>查看某个网易云歌单里的歌曲。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>playlistId</code></td><td>number / string<br><span class="note">必填</span></td><td>网易云歌单 ID</td></tr><tr><td><code>offset</code></td><td>number<br><span class="note">可选</span></td><td>从第几首开始，默认 0</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>返回数量，1-50，默认 30</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>读取我选中的那个歌单前十首歌。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看歌单歌曲({&quot;playlistId&quot;:&quot;替换为实际歌单ID&quot;,&quot;offset&quot;:0,&quot;limit&quot;:10})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;playlistId&quot;: {
+      &quot;type&quot;: [
+        &quot;number&quot;,
+        &quot;string&quot;
+      ],
+      &quot;description&quot;: &quot;网易云歌单 ID&quot;
+    },
+    &quot;offset&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;从第几首开始，默认 0&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;返回数量，1-50，默认 30&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;playlistId&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-music_control-6"><summary><span><strong>加入播放列表</strong><small>把搜索结果、指定歌曲或一个歌单加入当前播放列表。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>query</code></td><td>string<br><span class="note">可选</span></td><td>搜索关键词</td></tr><tr><td><code>source</code></td><td>string<br><span class="note">可选</span></td><td>按 ID 添加时填写 local 或 netease</td></tr><tr><td><code>songId</code></td><td>number / string<br><span class="note">可选</span></td><td>本地歌曲 ID 或网易云歌曲 ID</td></tr><tr><td><code>playlistId</code></td><td>number / string<br><span class="note">可选</span></td><td>网易云歌单 ID；填写后加入该歌单歌曲</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>从搜索或歌单加入多少首，1-50，默认 10</td></tr><tr><td><code>replace</code></td><td>boolean<br><span class="note">可选</span></td><td>是否替换当前播放列表，默认 false</td></tr><tr><td><code>playFirst</code></td><td>boolean<br><span class="note">可选</span></td><td>是否立即播放加入的第一首，默认 false</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>找三首钢琴曲加入播放列表，保留原有列表，先不播放。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:加入播放列表({&quot;query&quot;:&quot;钢琴&quot;,&quot;limit&quot;:3,&quot;replace&quot;:false,&quot;playFirst&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;query&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;搜索关键词&quot;
+    },
+    &quot;source&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;按 ID 添加时填写 local 或 netease&quot;
+    },
+    &quot;songId&quot;: {
+      &quot;type&quot;: [
+        &quot;number&quot;,
+        &quot;string&quot;
+      ],
+      &quot;description&quot;: &quot;本地歌曲 ID 或网易云歌曲 ID&quot;
+    },
+    &quot;playlistId&quot;: {
+      &quot;type&quot;: [
+        &quot;number&quot;,
+        &quot;string&quot;
+      ],
+      &quot;description&quot;: &quot;网易云歌单 ID；填写后加入该歌单歌曲&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;从搜索或歌单加入多少首，1-50，默认 10&quot;
+    },
+    &quot;replace&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否替换当前播放列表，默认 false&quot;
+    },
+    &quot;playFirst&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否立即播放加入的第一首，默认 false&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-music_control-7"><summary><span><strong>切换音乐</strong><small>控制当前播放器上一首、下一首、暂停、继续或停止。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>action</code></td><td>string<br><span class="note">必填</span></td><td>next|prev|pause|resume|stop</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>用音乐工具暂停当前播放。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:切换音乐({&quot;action&quot;:&quot;pause&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;action&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;next|prev|pause|resume|stop&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;action&quot;
+  ]
+}</pre></div></details></div></details></div><div class="action-group" id="ref-calendar_management"><h3>日历管理 <span class="badge">4 个固定动作</span></h3><p class="note">源码默认：关闭；保存模式：auto。实际设备设置可能不同。</p><p>操作的是当前角色日程。“修改日程”并非仅传一个变动字段：Schema 要求 date、startTime、endTime、title。先查 itemId，或给出能唯一定位的 keyword。日期写 YYYY-MM-DD，时间写 HH:MM；08:00–23:00，结束晚于开始。</p><details class="action-entry" id="action-calendar_management-1"><summary><span><strong>查看日程</strong><small>查看当前角色指定周的日程。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>date</code></td><td>string<br><span class="note">可选</span></td><td>YYYY-MM-DD，可选；留空表示当前日期所在周</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>查看你在 2026 年 9 月 9 日所在周的日程。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看日程({&quot;date&quot;:&quot;2026-09-09&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;date&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;YYYY-MM-DD，可选；留空表示当前日期所在周&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-calendar_management-2"><summary><span><strong>添加日程</strong><small>添加一条日程。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>date</code></td><td>string<br><span class="note">必填</span></td><td>日期，YYYY-MM-DD</td></tr><tr><td><code>startTime</code></td><td>string<br><span class="note">必填</span></td><td>开始时间，HH:MM，范围 08:00-23:00</td></tr><tr><td><code>endTime</code></td><td>string<br><span class="note">必填</span></td><td>结束时间，HH:MM，必须晚于开始时间</td></tr><tr><td><code>location</code></td><td>string<br><span class="note">可选</span></td><td>地点；不确定写“无”</td></tr><tr><td><code>title</code></td><td>string<br><span class="note">必填</span></td><td>事项</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>把 2026 年 9 月 9 日 20:00 到 21:00 在家看电影加入你的日程。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:添加日程({&quot;date&quot;:&quot;2026-09-09&quot;,&quot;startTime&quot;:&quot;20:00&quot;,&quot;endTime&quot;:&quot;21:00&quot;,&quot;title&quot;:&quot;一起看电影&quot;,&quot;location&quot;:&quot;家&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;date&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;日期，YYYY-MM-DD&quot;
+    },
+    &quot;startTime&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;开始时间，HH:MM，范围 08:00-23:00&quot;
+    },
+    &quot;endTime&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;结束时间，HH:MM，必须晚于开始时间&quot;
+    },
+    &quot;location&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;地点；不确定写“无”&quot;
+    },
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;事项&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;date&quot;,
+    &quot;startTime&quot;,
+    &quot;endTime&quot;,
+    &quot;title&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-calendar_management-3"><summary><span><strong>修改日程</strong><small>修改一条已存在日程。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>itemId</code></td><td>string<br><span class="note">可选</span></td><td>查看日程返回的日程 ID，可选</td></tr><tr><td><code>keyword</code></td><td>string<br><span class="note">可选</span></td><td>原事项关键词；没有 itemId 时必填</td></tr><tr><td><code>date</code></td><td>string<br><span class="note">必填</span></td><td>新日期，YYYY-MM-DD</td></tr><tr><td><code>startTime</code></td><td>string<br><span class="note">必填</span></td><td>新开始时间，HH:MM</td></tr><tr><td><code>endTime</code></td><td>string<br><span class="note">必填</span></td><td>新结束时间，HH:MM</td></tr><tr><td><code>location</code></td><td>string<br><span class="note">可选</span></td><td>新地点</td></tr><tr><td><code>title</code></td><td>string<br><span class="note">必填</span></td><td>新事项</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>把刚查到的看电影安排改到 21:00 到 22:00，保留同一天、地点和标题。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:修改日程({&quot;itemId&quot;:&quot;替换为查询返回的itemId&quot;,&quot;date&quot;:&quot;2026-09-09&quot;,&quot;startTime&quot;:&quot;21:00&quot;,&quot;endTime&quot;:&quot;22:00&quot;,&quot;title&quot;:&quot;一起看电影&quot;,&quot;location&quot;:&quot;家&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;itemId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;查看日程返回的日程 ID，可选&quot;
+    },
+    &quot;keyword&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;原事项关键词；没有 itemId 时必填&quot;
+    },
+    &quot;date&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;新日期，YYYY-MM-DD&quot;
+    },
+    &quot;startTime&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;新开始时间，HH:MM&quot;
+    },
+    &quot;endTime&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;新结束时间，HH:MM&quot;
+    },
+    &quot;location&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;新地点&quot;
+    },
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;新事项&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;date&quot;,
+    &quot;startTime&quot;,
+    &quot;endTime&quot;,
+    &quot;title&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-calendar_management-4"><summary><span><strong>取消日程</strong><small>取消一条已存在日程。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>itemId</code></td><td>string<br><span class="note">可选</span></td><td>查看日程返回的日程 ID，可选</td></tr><tr><td><code>keyword</code></td><td>string<br><span class="note">可选</span></td><td>事项关键词；没有 itemId 时必填</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>取消我指定的那条日程；先核对准确的 itemId。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:取消日程({&quot;itemId&quot;:&quot;替换为查询返回的itemId&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;itemId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;查看日程返回的日程 ID，可选&quot;
+    },
+    &quot;keyword&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;事项关键词；没有 itemId 时必填&quot;
+    }
+  }
+}</pre></div></details></div></details></div><div class="action-group" id="ref-agent_computer"><h3>角色电脑 <span class="badge">1 个固定动作</span></h3><p class="note">源码默认：关闭；保存模式：auto。实际设备设置可能不同。</p><p>op 共五种，下面参数表后有每种完整示例。write 需要非空 path 与 content，read/send 需要 path，list 默认 /，exec 需要 command。读取请求上限为 20000 字符；exec 的工具 success=true 只表示收到了命令响应，还要检查结果中的退出码，非零不算命令成功。</p><details class="action-entry" id="action-agent_computer-1"><summary><span><strong>角色电脑</strong><small>你拥有一台自己的云端小电脑（持久硬盘 + 终端）：可以自己写文件记录生活、翻看旧文件，把电脑里的文件发给{{user}}，也能在终端里执行 shell 命令。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>op</code></td><td>string<br><span class="note">必填</span></td><td>操作：write 写文件 / read 读文件 / list 列目录 / send 把文件发给用户 / exec 执行 shell 命令；可选值：write / read / list / send / exec</td></tr><tr><td><code>path</code></td><td>string<br><span class="note">可选</span></td><td>自己电脑里的文件或目录路径，如 /日记/八月.txt</td></tr><tr><td><code>content</code></td><td>string<br><span class="note">可选</span></td><td>写入的完整内容（op=write 必填）</td></tr><tr><td><code>command</code></td><td>string<br><span class="note">可选</span></td><td>要执行的 shell 命令（op=exec 必填）</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>列一下你的角色电脑根目录。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:角色电脑({&quot;op&quot;:&quot;list&quot;,&quot;path&quot;:&quot;/&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;op&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;write&quot;,
+        &quot;read&quot;,
+        &quot;list&quot;,
+        &quot;send&quot;,
+        &quot;exec&quot;
+      ],
+      &quot;description&quot;: &quot;操作：write 写文件 / read 读文件 / list 列目录 / send 把文件发给用户 / exec 执行 shell 命令&quot;
+    },
+    &quot;path&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;自己电脑里的文件或目录路径，如 /日记/八月.txt&quot;
+    },
+    &quot;content&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;写入的完整内容（op=write 必填）&quot;
+    },
+    &quot;command&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要执行的 shell 命令（op=exec 必填）&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;op&quot;
+  ]
+}</pre></div></details></div></details><details class="lesson"><summary>角色电脑五种 op 的完整示例</summary><div class="detail-body"><div class="copy-block code-block"><div class="copy-head"><span>list 示例</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:角色电脑({&quot;op&quot;:&quot;list&quot;,&quot;path&quot;:&quot;/&quot;})]</pre></div><div class="copy-block code-block"><div class="copy-head"><span>write 示例</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:角色电脑({&quot;op&quot;:&quot;write&quot;,&quot;path&quot;:&quot;/日记/示例.txt&quot;,&quot;content&quot;:&quot;今天完成了第一次工具调用。&quot;})]</pre></div><div class="copy-block code-block"><div class="copy-head"><span>read 示例</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:角色电脑({&quot;op&quot;:&quot;read&quot;,&quot;path&quot;:&quot;/日记/示例.txt&quot;})]</pre></div><div class="copy-block code-block"><div class="copy-head"><span>send 示例</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:角色电脑({&quot;op&quot;:&quot;send&quot;,&quot;path&quot;:&quot;/日记/示例.txt&quot;})]</pre></div><div class="copy-block code-block"><div class="copy-head"><span>exec 示例</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:角色电脑({&quot;op&quot;:&quot;exec&quot;,&quot;command&quot;:&quot;pwd&quot;})]</pre></div><p class="note">write 写入完整内容，目标同名文件可能被覆盖；先 list/read 确认。容器中执行命令时，持久文件放 /workspace。</p></div></details></div><div class="action-group" id="ref-send_file"><h3>发送文件 <span class="badge">1 个固定动作</span></h3><p class="note">源码默认：关闭；保存模式：auto。实际设备设置可能不同。</p><p>优先把可下载的远程文件转为本地媒体；下载代理失败时可回退原始 URL。因此“文件已发送”不保证链接可打开，需要实际点开检查。示例域名路径是占位，不是真实文件。</p><details class="action-entry" id="action-send_file-1"><summary><span><strong>发送文件</strong><small>将外部 URL 文件（音频、图片、视频）发送给{{user}}，{{user}}可以直接播放或下载。用于配合其他工具生成内容后交付给用户。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>url</code></td><td>string<br><span class="note">必填</span></td><td>文件的完整 URL 地址</td></tr><tr><td><code>type</code></td><td>string<br><span class="note">必填</span></td><td>文件类型；可选值：audio / image / video / file</td></tr><tr><td><code>title</code></td><td>string<br><span class="note">可选</span></td><td>文件标题/描述（可选）</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>把我提供的真实文件直链作为文件发给我，发完我会点开核对。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:发送文件({&quot;url&quot;:&quot;https://example.com/replace-with-real-file.pdf&quot;,&quot;type&quot;:&quot;file&quot;,&quot;title&quot;:&quot;示例文档&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;文件的完整 URL 地址&quot;
+    },
+    &quot;type&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;audio&quot;,
+        &quot;image&quot;,
+        &quot;video&quot;,
+        &quot;file&quot;
+      ],
+      &quot;description&quot;: &quot;文件类型&quot;
+    },
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;文件标题/描述（可选）&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;url&quot;,
+    &quot;type&quot;
+  ]
+}</pre></div></details></div></details></div><div class="action-group" id="ref-local_data_library"><h3>本地资料库 <span class="badge">5 个固定动作</span></h3><p class="note">源码默认：开启；保存模式：auto。实际设备设置可能不同。</p><p>limit 默认 30、范围 1–200，offset 从 0 开始；字段抽样默认 5、最大 50。IndexedDB 搜索存在最多扫描 3000 条记录的上限，不保证扫描整库。较长字符串可能在 4000 字符处截断，本地资料库结果超过 12000 字符会直接截断，可能使 JSON 无法解析。先列目录，按模块查，fields 与 select 二选一即可。</p><details class="action-entry" id="action-local_data_library-1"><summary><span><strong>列出资料目录</strong><small>列出本地资料库虚拟目录、数据源、文件、IndexedDB store 或记录键。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>path</code></td><td>string<br><span class="note">可选</span></td><td>虚拟资料目录路径，默认 /。例如 /characters、/chat/indexeddb/AiPhoneChatDB</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>返回数量上限，默认 30，最大 200</td></tr><tr><td><code>offset</code></td><td>number<br><span class="note">可选</span></td><td>分页偏移量，默认 0</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>用本地资料库列出根目录，先看看有哪些数据模块。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:列出资料目录({&quot;path&quot;:&quot;/&quot;,&quot;limit&quot;:30,&quot;offset&quot;:0})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;path&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;虚拟资料目录路径，默认 /。例如 /characters、/chat/indexeddb/AiPhoneChatDB&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;返回数量上限，默认 30，最大 200&quot;
+    },
+    &quot;offset&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;分页偏移量，默认 0&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-local_data_library-2"><summary><span><strong>读取资料文件</strong><small>读取本地资料库里的 KV/localStorage JSON 文件，或读取 IndexedDB store 的分页记录。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>path</code></td><td>string<br><span class="note">必填</span></td><td>要读取的虚拟文件或 IndexedDB store 路径</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>读取数组或记录列表时的数量上限，默认 30，最大 200</td></tr><tr><td><code>offset</code></td><td>number<br><span class="note">可选</span></td><td>读取数组或记录列表时的分页偏移量，默认 0</td></tr><tr><td><code>fields</code></td><td>array<br><span class="note">可选</span></td><td>可选，只返回这些字段；支持点路径，例如 mediaData.label</td></tr><tr><td><code>select</code></td><td>array<br><span class="note">可选</span></td><td>fields 的别名</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>读取角色资料文件，只返回前十条的 id 和名称。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:读取资料文件({&quot;path&quot;:&quot;/characters/kv/ai_phone_characters_v1.json&quot;,&quot;limit&quot;:10,&quot;fields&quot;:[&quot;id&quot;,&quot;name&quot;]})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;path&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要读取的虚拟文件或 IndexedDB store 路径&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;读取数组或记录列表时的数量上限，默认 30，最大 200&quot;
+    },
+    &quot;offset&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;读取数组或记录列表时的分页偏移量，默认 0&quot;
+    },
+    &quot;fields&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;description&quot;: &quot;可选，只返回这些字段；支持点路径，例如 mediaData.label&quot;
+    },
+    &quot;select&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;description&quot;: &quot;fields 的别名&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;path&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-local_data_library-3"><summary><span><strong>查看资料字段</strong><small>抽样查看某个资料文件或 IndexedDB store 可用字段，方便后续用 fields/select 只读取部分字段。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>path</code></td><td>string<br><span class="note">必填</span></td><td>要查看字段的 KV/localStorage JSON 文件或 IndexedDB store 路径</td></tr><tr><td><code>sample</code></td><td>number<br><span class="note">可选</span></td><td>抽样记录数，默认 5，最大 50</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>抽样看看聊天消息表有哪些字段，再决定怎么查询。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看资料字段({&quot;path&quot;:&quot;/chat/indexeddb/AiPhoneChatDB/messages&quot;,&quot;sample&quot;:5})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;path&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要查看字段的 KV/localStorage JSON 文件或 IndexedDB store 路径&quot;
+    },
+    &quot;sample&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;抽样记录数，默认 5，最大 50&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;path&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-local_data_library-4"><summary><span><strong>搜索资料记录</strong><small>在本地资料库指定路径内按关键词搜索记录；可用于查角色、聊天、朋友圈、工具箱等。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>path</code></td><td>string<br><span class="note">可选</span></td><td>搜索范围路径，默认 /。可以是模块、资料源、KV 文件或 IndexedDB store</td></tr><tr><td><code>query</code></td><td>string<br><span class="note">必填</span></td><td>关键词；留空时返回该范围内的前几条记录</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>返回数量上限，默认 30，最大 200</td></tr><tr><td><code>offset</code></td><td>number<br><span class="note">可选</span></td><td>分页偏移量，默认 0</td></tr><tr><td><code>fields</code></td><td>array<br><span class="note">可选</span></td><td>可选，只返回这些字段；支持点路径，例如 mediaData.label</td></tr><tr><td><code>select</code></td><td>array<br><span class="note">可选</span></td><td>fields 的别名</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>在聊天模块搜索旅行，返回最多十条记录的 id、正文和时间。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:搜索资料记录({&quot;path&quot;:&quot;/chat&quot;,&quot;query&quot;:&quot;旅行&quot;,&quot;limit&quot;:10,&quot;offset&quot;:0,&quot;fields&quot;:[&quot;id&quot;,&quot;content&quot;,&quot;createdAt&quot;]})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;path&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;搜索范围路径，默认 /。可以是模块、资料源、KV 文件或 IndexedDB store&quot;
+    },
+    &quot;query&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;关键词；留空时返回该范围内的前几条记录&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;返回数量上限，默认 30，最大 200&quot;
+    },
+    &quot;offset&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;分页偏移量，默认 0&quot;
+    },
+    &quot;fields&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;description&quot;: &quot;可选，只返回这些字段；支持点路径，例如 mediaData.label&quot;
+    },
+    &quot;select&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;description&quot;: &quot;fields 的别名&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;query&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-local_data_library-5"><summary><span><strong>读取资料记录</strong><small>按主键读取某个 IndexedDB store 中的一条记录。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>path</code></td><td>string<br><span class="note">必填</span></td><td>IndexedDB store 路径，例如 /chat/indexeddb/AiPhoneChatDB/messages</td></tr><tr><td><code>key</code></td><td>string<br><span class="note">必填</span></td><td>记录主键；复杂主键可使用 JSON 字符串</td></tr><tr><td><code>fields</code></td><td>array<br><span class="note">可选</span></td><td>可选，只返回这些字段；支持点路径，例如 mediaData.label</td></tr><tr><td><code>select</code></td><td>array<br><span class="note">可选</span></td><td>fields 的别名</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>按刚才返回的主键读取那条消息，不要拿联系人名称当主键。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:读取资料记录({&quot;path&quot;:&quot;/chat/indexeddb/AiPhoneChatDB/messages&quot;,&quot;key&quot;:&quot;替换为真实记录主键&quot;,&quot;fields&quot;:[&quot;id&quot;,&quot;content&quot;,&quot;createdAt&quot;]})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;path&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;IndexedDB store 路径，例如 /chat/indexeddb/AiPhoneChatDB/messages&quot;
+    },
+    &quot;key&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;记录主键；复杂主键可使用 JSON 字符串&quot;
+    },
+    &quot;fields&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;description&quot;: &quot;可选，只返回这些字段；支持点路径，例如 mediaData.label&quot;
+    },
+    &quot;select&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;description&quot;: &quot;fields 的别名&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;path&quot;,
+    &quot;key&quot;
+  ]
+}</pre></div></details></div></details></div><div class="action-group" id="ref-toolbox_management"><h3>工具箱管理 <span class="badge">16 个固定动作</span></h3><p class="note">源码默认：开启；保存模式：auto。实际设备设置可能不同。</p><p>只管理 AI 创建且未受保护的工具/套件。定位优先 id，其次 name；即使 Schema 没把 id/name 标为必填，更新、启停、删除也必须能定位对象。parameterSchema 是 JSON 字符串；这里的 steps[].argsTemplate 是对象，保存到导出配置后才变成 JSON 字符串。删除套件同时删除其子工具，含非 AI 或受保护子工具时拒绝。删除会立即执行，话术里的等待只是要求，不是确认弹窗。</p><details class="action-entry" id="action-toolbox_management-1"><summary><span><strong>添加REST套件</strong><small>添加一个 AI 创建的 REST 工具套件，用来分组管理多个 REST 子工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>name</code></td><td>string<br><span class="note">必填</span></td><td>套件名称，必须唯一</td></tr><tr><td><code>description</code></td><td>string<br><span class="note">必填</span></td><td>套件用途说明，会展示给 AI</td></tr><tr><td><code>enabled</code></td><td>boolean<br><span class="note">可选</span></td><td>是否立即启用，默认 true</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>用工具箱管理创建“示例接口套件”，先停用。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:添加REST套件({&quot;name&quot;:&quot;示例接口套件&quot;,&quot;description&quot;:&quot;用于演示的工具集合&quot;,&quot;enabled&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;套件名称，必须唯一&quot;
+    },
+    &quot;description&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;套件用途说明，会展示给 AI&quot;
+    },
+    &quot;enabled&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否立即启用，默认 true&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;name&quot;,
+    &quot;description&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-2"><summary><span><strong>更新REST套件</strong><small>更新 AI 自己创建的 REST 工具套件；不允许更新用户手动创建或内置套件。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要更新的 AI REST 套件 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要更新的 AI REST 套件名称；没有 id 时使用</td></tr><tr><td><code>updates</code></td><td>object<br><span class="note">必填</span></td><td>要更新的字段。只能更新 AI 创建的 REST 套件。</td></tr><tr><td><code>updates.name</code></td><td>string<br><span class="note">可选</span></td><td>新的套件名称，必须唯一</td></tr><tr><td><code>updates.description</code></td><td>string<br><span class="note">可选</span></td><td>新的套件用途说明</td></tr><tr><td><code>updates.enabled</code></td><td>boolean<br><span class="note">可选</span></td><td>是否启用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>更新你创建的“示例接口套件”的用途说明。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:更新REST套件({&quot;name&quot;:&quot;示例接口套件&quot;,&quot;updates&quot;:{&quot;description&quot;:&quot;已整理的演示工具集合&quot;}})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要更新的 AI REST 套件 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要更新的 AI REST 套件名称；没有 id 时使用&quot;
+    },
+    &quot;updates&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;description&quot;: &quot;要更新的字段。只能更新 AI 创建的 REST 套件。&quot;,
+      &quot;properties&quot;: {
+        &quot;name&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;新的套件名称，必须唯一&quot;
+        },
+        &quot;description&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;新的套件用途说明&quot;
+        },
+        &quot;enabled&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;,
+          &quot;description&quot;: &quot;是否启用&quot;
+        }
+      }
+    }
+  },
+  &quot;required&quot;: [
+    &quot;updates&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-3"><summary><span><strong>设置REST套件启用</strong><small>启用或停用 AI 自己创建的 REST 工具套件；不允许操作用户手动创建或内置套件。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要启用/停用的 AI REST 套件 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要启用/停用的 AI REST 套件名称；没有 id 时使用</td></tr><tr><td><code>enabled</code></td><td>boolean<br><span class="note">必填</span></td><td>true 启用，false 停用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>停用你创建的“示例接口套件”。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:设置REST套件启用({&quot;name&quot;:&quot;示例接口套件&quot;,&quot;enabled&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要启用/停用的 AI REST 套件 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要启用/停用的 AI REST 套件名称；没有 id 时使用&quot;
+    },
+    &quot;enabled&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;true 启用，false 停用&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;enabled&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-4"><summary><span><strong>删除REST套件</strong><small>删除 AI 自己创建的 REST 工具套件，并删除该套件下 AI 自己创建的 REST 子工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要删除的 AI REST 套件 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要删除的 AI REST 套件名称；没有 id 时使用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>删除你创建的“示例接口套件”；先说明其中子工具会如何处理，等我确认。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:删除REST套件({&quot;name&quot;:&quot;示例接口套件&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要删除的 AI REST 套件 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要删除的 AI REST 套件名称；没有 id 时使用&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-5"><summary><span><strong>添加REST工具</strong><small>添加一个 AI 创建的 REST 工具；可作为单件工具，也可放入 AI 自己创建的 REST 套件。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>packageId</code></td><td>string<br><span class="note">可选</span></td><td>目标 AI REST 套件 ID；优先使用 packageId</td></tr><tr><td><code>packageName</code></td><td>string<br><span class="note">可选</span></td><td>目标 AI REST 套件名称；没有 packageId 时使用。留空则创建单件 REST 工具</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">必填</span></td><td>工具名称，必须唯一</td></tr><tr><td><code>description</code></td><td>string<br><span class="note">必填</span></td><td>工具用途说明，会展示给 AI</td></tr><tr><td><code>endpoint</code></td><td>string<br><span class="note">必填</span></td><td>HTTP/HTTPS 接口地址，支持 {{参数名}} 转义插入；支持 {{{参数名}}} 原样插入完整 URL/路径</td></tr><tr><td><code>method</code></td><td>string<br><span class="note">必填</span></td><td>请求方式；可选值：GET / POST</td></tr><tr><td><code>headers</code></td><td>object<br><span class="note">可选</span></td><td>请求头，支持 {{参数名}} 占位符</td></tr><tr><td><code>bodyTemplate</code></td><td>string<br><span class="note">可选</span></td><td>POST JSON 请求体模板，支持 {{参数名}} 占位符；整项为 {{参数名}} 时会保留原始类型</td></tr><tr><td><code>parameterSchema</code></td><td>string<br><span class="note">必填</span></td><td>AI 可见参数 JSON Schema 字符串</td></tr><tr><td><code>fixedParams</code></td><td>object<br><span class="note">可选</span></td><td>固定参数，不暴露给 AI，例如 api_key</td></tr><tr><td><code>directFetch</code></td><td>boolean<br><span class="note">可选</span></td><td>是否浏览器直连；默认 true</td></tr><tr><td><code>enabled</code></td><td>boolean<br><span class="note">可选</span></td><td>是否立即启用，默认 true</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>按真实 API 文档添加一个 REST 工具，先停用，待我检查配置。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:添加REST工具({&quot;name&quot;:&quot;示例查询&quot;,&quot;description&quot;:&quot;读取公开示例网页&quot;,&quot;endpoint&quot;:&quot;https://r.jina.ai/{{{url}}}&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;parameterSchema&quot;:&quot;{\&quot;type\&quot;:\&quot;object\&quot;,\&quot;properties\&quot;:{\&quot;url\&quot;:{\&quot;type\&quot;:\&quot;string\&quot;}},\&quot;required\&quot;:[\&quot;url\&quot;]}&quot;,&quot;directFetch&quot;:false,&quot;enabled&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;packageId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;目标 AI REST 套件 ID；优先使用 packageId&quot;
+    },
+    &quot;packageName&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;目标 AI REST 套件名称；没有 packageId 时使用。留空则创建单件 REST 工具&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;工具名称，必须唯一&quot;
+    },
+    &quot;description&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;工具用途说明，会展示给 AI&quot;
+    },
+    &quot;endpoint&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;HTTP/HTTPS 接口地址，支持 {{参数名}} 转义插入；支持 {{{参数名}}} 原样插入完整 URL/路径&quot;
+    },
+    &quot;method&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;GET&quot;,
+        &quot;POST&quot;
+      ],
+      &quot;description&quot;: &quot;请求方式&quot;
+    },
+    &quot;headers&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;additionalProperties&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;description&quot;: &quot;请求头，支持 {{参数名}} 占位符&quot;
+    },
+    &quot;bodyTemplate&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;POST JSON 请求体模板，支持 {{参数名}} 占位符；整项为 {{参数名}} 时会保留原始类型&quot;
+    },
+    &quot;parameterSchema&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;AI 可见参数 JSON Schema 字符串&quot;
+    },
+    &quot;fixedParams&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;additionalProperties&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      &quot;description&quot;: &quot;固定参数，不暴露给 AI，例如 api_key&quot;
+    },
+    &quot;directFetch&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否浏览器直连；默认 true&quot;
+    },
+    &quot;enabled&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否立即启用，默认 true&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;name&quot;,
+    &quot;description&quot;,
+    &quot;endpoint&quot;,
+    &quot;method&quot;,
+    &quot;parameterSchema&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-6"><summary><span><strong>更新REST工具</strong><small>更新 AI 自己创建的 REST 工具；不允许更新用户手动创建或内置工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要更新的 AI 工具 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要更新的 AI 工具名称；没有 id 时使用</td></tr><tr><td><code>updates</code></td><td>object<br><span class="note">必填</span></td><td>要更新的字段。只能更新 AI 创建的 REST 工具。</td></tr><tr><td><code>updates.packageId</code></td><td>string<br><span class="note">可选</span></td><td>移动到目标 AI REST 套件 ID</td></tr><tr><td><code>updates.packageName</code></td><td>string<br><span class="note">可选</span></td><td>移动到目标 AI REST 套件名称</td></tr><tr><td><code>updates.name</code></td><td>string<br><span class="note">可选</span></td><td>工具名称，必须唯一</td></tr><tr><td><code>updates.description</code></td><td>string<br><span class="note">可选</span></td><td>工具用途说明，会展示给 AI</td></tr><tr><td><code>updates.endpoint</code></td><td>string<br><span class="note">可选</span></td><td>HTTP/HTTPS 接口地址，支持 {{参数名}} 转义插入；支持 {{{参数名}}} 原样插入完整 URL/路径</td></tr><tr><td><code>updates.method</code></td><td>string<br><span class="note">可选</span></td><td>请求方式；可选值：GET / POST</td></tr><tr><td><code>updates.headers</code></td><td>object<br><span class="note">可选</span></td><td>请求头，支持 {{参数名}} 占位符</td></tr><tr><td><code>updates.bodyTemplate</code></td><td>string<br><span class="note">可选</span></td><td>POST JSON 请求体模板，支持 {{参数名}} 占位符；整项为 {{参数名}} 时会保留原始类型</td></tr><tr><td><code>updates.parameterSchema</code></td><td>string<br><span class="note">可选</span></td><td>AI 可见参数 JSON Schema 字符串</td></tr><tr><td><code>updates.fixedParams</code></td><td>object<br><span class="note">可选</span></td><td>固定参数，不暴露给 AI，例如 api_key</td></tr><tr><td><code>updates.directFetch</code></td><td>boolean<br><span class="note">可选</span></td><td>是否浏览器直连；默认 true</td></tr><tr><td><code>updates.enabled</code></td><td>boolean<br><span class="note">可选</span></td><td>是否启用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>更新你创建的“示例查询”的说明。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:更新REST工具({&quot;name&quot;:&quot;示例查询&quot;,&quot;updates&quot;:{&quot;description&quot;:&quot;用于演示的查询或整理动作&quot;}})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要更新的 AI 工具 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要更新的 AI 工具名称；没有 id 时使用&quot;
+    },
+    &quot;updates&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;description&quot;: &quot;要更新的字段。只能更新 AI 创建的 REST 工具。&quot;,
+      &quot;properties&quot;: {
+        &quot;packageId&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;移动到目标 AI REST 套件 ID&quot;
+        },
+        &quot;packageName&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;移动到目标 AI REST 套件名称&quot;
+        },
+        &quot;name&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;工具名称，必须唯一&quot;
+        },
+        &quot;description&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;工具用途说明，会展示给 AI&quot;
+        },
+        &quot;endpoint&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;HTTP/HTTPS 接口地址，支持 {{参数名}} 转义插入；支持 {{{参数名}}} 原样插入完整 URL/路径&quot;
+        },
+        &quot;method&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;enum&quot;: [
+            &quot;GET&quot;,
+            &quot;POST&quot;
+          ],
+          &quot;description&quot;: &quot;请求方式&quot;
+        },
+        &quot;headers&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;additionalProperties&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;description&quot;: &quot;请求头，支持 {{参数名}} 占位符&quot;
+        },
+        &quot;bodyTemplate&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;POST JSON 请求体模板，支持 {{参数名}} 占位符；整项为 {{参数名}} 时会保留原始类型&quot;
+        },
+        &quot;parameterSchema&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;AI 可见参数 JSON Schema 字符串&quot;
+        },
+        &quot;fixedParams&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;additionalProperties&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;description&quot;: &quot;固定参数，不暴露给 AI，例如 api_key&quot;
+        },
+        &quot;directFetch&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;,
+          &quot;description&quot;: &quot;是否浏览器直连；默认 true&quot;
+        },
+        &quot;enabled&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;,
+          &quot;description&quot;: &quot;是否启用&quot;
+        }
+      }
+    }
+  },
+  &quot;required&quot;: [
+    &quot;updates&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-7"><summary><span><strong>设置REST工具启用</strong><small>启用或停用 AI 自己创建的 REST 工具；不允许操作用户手动创建或内置工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要启用/停用的 AI 工具 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要启用/停用的 AI 工具名称；没有 id 时使用</td></tr><tr><td><code>enabled</code></td><td>boolean<br><span class="note">必填</span></td><td>true 启用，false 停用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>停用你创建的“示例查询”。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:设置REST工具启用({&quot;name&quot;:&quot;示例查询&quot;,&quot;enabled&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要启用/停用的 AI 工具 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要启用/停用的 AI 工具名称；没有 id 时使用&quot;
+    },
+    &quot;enabled&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;true 启用，false 停用&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;enabled&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-8"><summary><span><strong>删除REST工具</strong><small>删除 AI 自己创建的 REST 工具；不允许删除用户手动创建或内置工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要删除的 AI 工具 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要删除的 AI 工具名称；没有 id 时使用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>删除你创建的“示例查询”；先确认是我指的这个工具。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:删除REST工具({&quot;name&quot;:&quot;示例查询&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要删除的 AI 工具 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要删除的 AI 工具名称；没有 id 时使用&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-9"><summary><span><strong>添加组合工具套件</strong><small>添加一个 AI 创建的组合工具套件，用来分组管理多个组合工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>name</code></td><td>string<br><span class="note">必填</span></td><td>组合工具套件名称，必须唯一</td></tr><tr><td><code>description</code></td><td>string<br><span class="note">必填</span></td><td>套件用途说明，会展示给 AI</td></tr><tr><td><code>enabled</code></td><td>boolean<br><span class="note">可选</span></td><td>是否立即启用，默认 true</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>用工具箱管理创建“示例流程套件”，先停用。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:添加组合工具套件({&quot;name&quot;:&quot;示例流程套件&quot;,&quot;description&quot;:&quot;用于演示的工具集合&quot;,&quot;enabled&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;组合工具套件名称，必须唯一&quot;
+    },
+    &quot;description&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;套件用途说明，会展示给 AI&quot;
+    },
+    &quot;enabled&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否立即启用，默认 true&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;name&quot;,
+    &quot;description&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-10"><summary><span><strong>更新组合工具套件</strong><small>更新 AI 自己创建的组合工具套件；不允许更新用户手动创建或内置套件。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要更新的 AI 组合工具套件 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要更新的 AI 组合工具套件名称；没有 id 时使用</td></tr><tr><td><code>updates</code></td><td>object<br><span class="note">必填</span></td><td>要更新的字段。只能更新 AI 创建的组合工具套件。</td></tr><tr><td><code>updates.name</code></td><td>string<br><span class="note">可选</span></td><td>新的套件名称，必须唯一</td></tr><tr><td><code>updates.description</code></td><td>string<br><span class="note">可选</span></td><td>新的套件用途说明</td></tr><tr><td><code>updates.enabled</code></td><td>boolean<br><span class="note">可选</span></td><td>是否启用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>更新你创建的“示例流程套件”的用途说明。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:更新组合工具套件({&quot;name&quot;:&quot;示例流程套件&quot;,&quot;updates&quot;:{&quot;description&quot;:&quot;已整理的演示工具集合&quot;}})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要更新的 AI 组合工具套件 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要更新的 AI 组合工具套件名称；没有 id 时使用&quot;
+    },
+    &quot;updates&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;description&quot;: &quot;要更新的字段。只能更新 AI 创建的组合工具套件。&quot;,
+      &quot;properties&quot;: {
+        &quot;name&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;新的套件名称，必须唯一&quot;
+        },
+        &quot;description&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;新的套件用途说明&quot;
+        },
+        &quot;enabled&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;,
+          &quot;description&quot;: &quot;是否启用&quot;
+        }
+      }
+    }
+  },
+  &quot;required&quot;: [
+    &quot;updates&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-11"><summary><span><strong>设置组合工具套件启用</strong><small>启用或停用 AI 自己创建的组合工具套件；不允许操作用户手动创建或内置套件。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要启用/停用的 AI 组合工具套件 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要启用/停用的 AI 组合工具套件名称；没有 id 时使用</td></tr><tr><td><code>enabled</code></td><td>boolean<br><span class="note">必填</span></td><td>true 启用，false 停用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>停用你创建的“示例流程套件”。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:设置组合工具套件启用({&quot;name&quot;:&quot;示例流程套件&quot;,&quot;enabled&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要启用/停用的 AI 组合工具套件 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要启用/停用的 AI 组合工具套件名称；没有 id 时使用&quot;
+    },
+    &quot;enabled&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;true 启用，false 停用&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;enabled&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-12"><summary><span><strong>删除组合工具套件</strong><small>删除 AI 自己创建的组合工具套件，并删除该套件下 AI 自己创建的组合工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要删除的 AI 组合工具套件 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要删除的 AI 组合工具套件名称；没有 id 时使用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>删除你创建的“示例流程套件”；先说明其中子工具会如何处理，等我确认。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:删除组合工具套件({&quot;name&quot;:&quot;示例流程套件&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要删除的 AI 组合工具套件 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要删除的 AI 组合工具套件名称；没有 id 时使用&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-13"><summary><span><strong>添加组合工具</strong><small>添加一个 AI 创建的组合工具；可作为单件组合工具，也可放入 AI 自己创建的组合工具套件。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>packageId</code></td><td>string<br><span class="note">可选</span></td><td>目标 AI 组合工具套件 ID；优先使用 packageId</td></tr><tr><td><code>packageName</code></td><td>string<br><span class="note">可选</span></td><td>目标 AI 组合工具套件名称；没有 packageId 时使用。留空则创建单件组合工具</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">必填</span></td><td>组合工具名称，必须唯一</td></tr><tr><td><code>description</code></td><td>string<br><span class="note">必填</span></td><td>组合工具用途说明，会展示给 AI</td></tr><tr><td><code>parameterSchema</code></td><td>string<br><span class="note">必填</span></td><td>组合工具对 AI 暴露的参数 JSON Schema 字符串</td></tr><tr><td><code>steps</code></td><td>array<br><span class="note">必填</span></td><td>顺序执行的步骤列表</td></tr><tr><td><code>steps[].toolName</code></td><td>string<br><span class="note">可选</span></td><td>要调用的具体动作名称，例如 搜索、读取资料文件、某个 MCP 子工具名或组合工具名</td></tr><tr><td><code>steps[].toolType</code></td><td>string<br><span class="note">可选</span></td><td>工具类别；不确定时用 auto；script 表示执行一段 JS 中间处理逻辑；可选值：auto / rest / internal / mcp / composite / script</td></tr><tr><td><code>steps[].toolId</code></td><td>string<br><span class="note">可选</span></td><td>可选，REST/组合工具 ID，用于同名工具时精确定位</td></tr><tr><td><code>steps[].serverId</code></td><td>string<br><span class="note">可选</span></td><td>可选，MCP 服务器 ID，用于同名 MCP 工具时精确定位</td></tr><tr><td><code>steps[].argsTemplate</code></td><td>object<br><span class="note">可选</span></td><td>传给该步骤的参数模板，支持 {{input.xxx}}、{{last.data}}、{{steps.名称.data}}</td></tr><tr><td><code>steps[].script</code></td><td>string<br><span class="note">可选</span></td><td>toolType 为 script 时执行的异步 JS；可直接访问 window、localStorage、fetch、document，并通过 return 返回结果</td></tr><tr><td><code>steps[].saveAs</code></td><td>string<br><span class="note">可选</span></td><td>保存该步骤结果的名称，供后续步骤通过 {{steps.名称.data}} 引用</td></tr><tr><td><code>outputTemplate</code></td><td>string<br><span class="note">可选</span></td><td>最终返回模板，支持 {{last.data}} 和 {{steps.名称.data}}；留空则返回步骤摘要</td></tr><tr><td><code>enabled</code></td><td>boolean<br><span class="note">可选</span></td><td>是否立即启用，默认 true</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>创建一个只返回输入查询词的演示组合工具，先停用。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:添加组合工具({&quot;name&quot;:&quot;示例整理&quot;,&quot;description&quot;:&quot;返回传入的查询词&quot;,&quot;parameterSchema&quot;:&quot;{\&quot;type\&quot;:\&quot;object\&quot;,\&quot;properties\&quot;:{\&quot;query\&quot;:{\&quot;type\&quot;:\&quot;string\&quot;,\&quot;description\&quot;:\&quot;查询词\&quot;}},\&quot;required\&quot;:[\&quot;query\&quot;]}&quot;,&quot;steps&quot;:[{&quot;toolType&quot;:&quot;script&quot;,&quot;script&quot;:&quot;return { query: input.query };&quot;,&quot;saveAs&quot;:&quot;result&quot;,&quot;argsTemplate&quot;:{}}],&quot;outputTemplate&quot;:&quot;{{last.data}}&quot;,&quot;enabled&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;packageId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;目标 AI 组合工具套件 ID；优先使用 packageId&quot;
+    },
+    &quot;packageName&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;目标 AI 组合工具套件名称；没有 packageId 时使用。留空则创建单件组合工具&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;组合工具名称，必须唯一&quot;
+    },
+    &quot;description&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;组合工具用途说明，会展示给 AI&quot;
+    },
+    &quot;parameterSchema&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;组合工具对 AI 暴露的参数 JSON Schema 字符串&quot;
+    },
+    &quot;steps&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;properties&quot;: {
+          &quot;toolName&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;description&quot;: &quot;要调用的具体动作名称，例如 搜索、读取资料文件、某个 MCP 子工具名或组合工具名&quot;
+          },
+          &quot;toolType&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;enum&quot;: [
+              &quot;auto&quot;,
+              &quot;rest&quot;,
+              &quot;internal&quot;,
+              &quot;mcp&quot;,
+              &quot;composite&quot;,
+              &quot;script&quot;
+            ],
+            &quot;description&quot;: &quot;工具类别；不确定时用 auto；script 表示执行一段 JS 中间处理逻辑&quot;
+          },
+          &quot;toolId&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;description&quot;: &quot;可选，REST/组合工具 ID，用于同名工具时精确定位&quot;
+          },
+          &quot;serverId&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;description&quot;: &quot;可选，MCP 服务器 ID，用于同名 MCP 工具时精确定位&quot;
+          },
+          &quot;argsTemplate&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;description&quot;: &quot;传给该步骤的参数模板，支持 {{input.xxx}}、{{last.data}}、{{steps.名称.data}}&quot;
+          },
+          &quot;script&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;description&quot;: &quot;toolType 为 script 时执行的异步 JS；可直接访问 window、localStorage、fetch、document，并通过 return 返回结果&quot;
+          },
+          &quot;saveAs&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;description&quot;: &quot;保存该步骤结果的名称，供后续步骤通过 {{steps.名称.data}} 引用&quot;
+          }
+        }
+      },
+      &quot;description&quot;: &quot;顺序执行的步骤列表&quot;
+    },
+    &quot;outputTemplate&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;最终返回模板，支持 {{last.data}} 和 {{steps.名称.data}}；留空则返回步骤摘要&quot;
+    },
+    &quot;enabled&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;是否立即启用，默认 true&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;name&quot;,
+    &quot;description&quot;,
+    &quot;parameterSchema&quot;,
+    &quot;steps&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-14"><summary><span><strong>更新组合工具</strong><small>更新 AI 自己创建的组合工具；不允许更新用户手动创建或内置组合工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要更新的 AI 组合工具 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要更新的 AI 组合工具名称；没有 id 时使用</td></tr><tr><td><code>updates</code></td><td>object<br><span class="note">必填</span></td><td>要更新的字段。只能更新 AI 创建的组合工具。</td></tr><tr><td><code>updates.packageId</code></td><td>string<br><span class="note">可选</span></td><td>移动到目标 AI 组合工具套件 ID</td></tr><tr><td><code>updates.packageName</code></td><td>string<br><span class="note">可选</span></td><td>移动到目标 AI 组合工具套件名称</td></tr><tr><td><code>updates.name</code></td><td>string<br><span class="note">可选</span></td><td>组合工具名称，必须唯一</td></tr><tr><td><code>updates.description</code></td><td>string<br><span class="note">可选</span></td><td>组合工具用途说明，会展示给 AI</td></tr><tr><td><code>updates.parameterSchema</code></td><td>string<br><span class="note">可选</span></td><td>组合工具对 AI 暴露的参数 JSON Schema 字符串</td></tr><tr><td><code>updates.steps</code></td><td>array<br><span class="note">可选</span></td><td>顺序执行的步骤列表</td></tr><tr><td><code>updates.steps[].toolName</code></td><td>string<br><span class="note">可选</span></td><td>要调用的具体动作名称，例如 搜索、读取资料文件、某个 MCP 子工具名或组合工具名</td></tr><tr><td><code>updates.steps[].toolType</code></td><td>string<br><span class="note">可选</span></td><td>工具类别；不确定时用 auto；script 表示执行一段 JS 中间处理逻辑；可选值：auto / rest / internal / mcp / composite / script</td></tr><tr><td><code>updates.steps[].toolId</code></td><td>string<br><span class="note">可选</span></td><td>可选，REST/组合工具 ID，用于同名工具时精确定位</td></tr><tr><td><code>updates.steps[].serverId</code></td><td>string<br><span class="note">可选</span></td><td>可选，MCP 服务器 ID，用于同名 MCP 工具时精确定位</td></tr><tr><td><code>updates.steps[].argsTemplate</code></td><td>object<br><span class="note">可选</span></td><td>传给该步骤的参数模板，支持 {{input.xxx}}、{{last.data}}、{{steps.名称.data}}</td></tr><tr><td><code>updates.steps[].script</code></td><td>string<br><span class="note">可选</span></td><td>toolType 为 script 时执行的异步 JS；可直接访问 window、localStorage、fetch、document，并通过 return 返回结果</td></tr><tr><td><code>updates.steps[].saveAs</code></td><td>string<br><span class="note">可选</span></td><td>保存该步骤结果的名称，供后续步骤通过 {{steps.名称.data}} 引用</td></tr><tr><td><code>updates.outputTemplate</code></td><td>string<br><span class="note">可选</span></td><td>最终返回模板，支持 {{last.data}} 和 {{steps.名称.data}}；留空则返回步骤摘要</td></tr><tr><td><code>updates.enabled</code></td><td>boolean<br><span class="note">可选</span></td><td>是否启用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>更新你创建的“示例整理”的说明。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:更新组合工具({&quot;name&quot;:&quot;示例整理&quot;,&quot;updates&quot;:{&quot;description&quot;:&quot;用于演示的查询或整理动作&quot;}})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要更新的 AI 组合工具 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要更新的 AI 组合工具名称；没有 id 时使用&quot;
+    },
+    &quot;updates&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;description&quot;: &quot;要更新的字段。只能更新 AI 创建的组合工具。&quot;,
+      &quot;properties&quot;: {
+        &quot;packageId&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;移动到目标 AI 组合工具套件 ID&quot;
+        },
+        &quot;packageName&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;移动到目标 AI 组合工具套件名称&quot;
+        },
+        &quot;name&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;组合工具名称，必须唯一&quot;
+        },
+        &quot;description&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;组合工具用途说明，会展示给 AI&quot;
+        },
+        &quot;parameterSchema&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;组合工具对 AI 暴露的参数 JSON Schema 字符串&quot;
+        },
+        &quot;steps&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;properties&quot;: {
+              &quot;toolName&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;description&quot;: &quot;要调用的具体动作名称，例如 搜索、读取资料文件、某个 MCP 子工具名或组合工具名&quot;
+              },
+              &quot;toolType&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;enum&quot;: [
+                  &quot;auto&quot;,
+                  &quot;rest&quot;,
+                  &quot;internal&quot;,
+                  &quot;mcp&quot;,
+                  &quot;composite&quot;,
+                  &quot;script&quot;
+                ],
+                &quot;description&quot;: &quot;工具类别；不确定时用 auto；script 表示执行一段 JS 中间处理逻辑&quot;
+              },
+              &quot;toolId&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;description&quot;: &quot;可选，REST/组合工具 ID，用于同名工具时精确定位&quot;
+              },
+              &quot;serverId&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;description&quot;: &quot;可选，MCP 服务器 ID，用于同名 MCP 工具时精确定位&quot;
+              },
+              &quot;argsTemplate&quot;: {
+                &quot;type&quot;: &quot;object&quot;,
+                &quot;description&quot;: &quot;传给该步骤的参数模板，支持 {{input.xxx}}、{{last.data}}、{{steps.名称.data}}&quot;
+              },
+              &quot;script&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;description&quot;: &quot;toolType 为 script 时执行的异步 JS；可直接访问 window、localStorage、fetch、document，并通过 return 返回结果&quot;
+              },
+              &quot;saveAs&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;description&quot;: &quot;保存该步骤结果的名称，供后续步骤通过 {{steps.名称.data}} 引用&quot;
+              }
+            }
+          },
+          &quot;description&quot;: &quot;顺序执行的步骤列表&quot;
+        },
+        &quot;outputTemplate&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;最终返回模板，支持 {{last.data}} 和 {{steps.名称.data}}；留空则返回步骤摘要&quot;
+        },
+        &quot;enabled&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;,
+          &quot;description&quot;: &quot;是否启用&quot;
+        }
+      }
+    }
+  },
+  &quot;required&quot;: [
+    &quot;updates&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-15"><summary><span><strong>设置组合工具启用</strong><small>启用或停用 AI 自己创建的组合工具；不允许操作用户手动创建或内置组合工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要启用/停用的 AI 组合工具 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要启用/停用的 AI 组合工具名称；没有 id 时使用</td></tr><tr><td><code>enabled</code></td><td>boolean<br><span class="note">必填</span></td><td>true 启用，false 停用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>停用你创建的“示例整理”。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:设置组合工具启用({&quot;name&quot;:&quot;示例整理&quot;,&quot;enabled&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要启用/停用的 AI 组合工具 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要启用/停用的 AI 组合工具名称；没有 id 时使用&quot;
+    },
+    &quot;enabled&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;true 启用，false 停用&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;enabled&quot;
+  ]
+}</pre></div></details></div></details><details class="action-entry" id="action-toolbox_management-16"><summary><span><strong>删除组合工具</strong><small>删除 AI 自己创建的组合工具；不允许删除用户手动创建或内置组合工具。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>id</code></td><td>string<br><span class="note">可选</span></td><td>要删除的 AI 组合工具 ID，优先使用 id</td></tr><tr><td><code>name</code></td><td>string<br><span class="note">可选</span></td><td>要删除的 AI 组合工具名称；没有 id 时使用</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>删除你创建的“示例整理”；先确认是我指的这个工具。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:删除组合工具({&quot;name&quot;:&quot;示例整理&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要删除的 AI 组合工具 ID，优先使用 id&quot;
+    },
+    &quot;name&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;要删除的 AI 组合工具名称；没有 id 时使用&quot;
+    }
+  }
+}</pre></div></details></div></details></div><div class="action-group" id="ref-timed_wake"><h3>稍后主动联系 <span class="badge">1 个固定动作</span></h3><p class="note">源码默认：关闭；保存模式：auto。实际设备设置可能不同。</p><p>仅普通单聊的聊天引擎支持，不适用于群聊或自定义 APP 调用上下文。delayMinutes 实际归一到 1–10080 分钟，缺省回退 15；intent 最长 300 字符。同一聊天的新预约替换旧预约，到点允许静默。界面模式不能当作此动作必有确认的保证。</p><details class="action-entry" id="action-timed_wake-1"><summary><span><strong>稍后主动联系</strong><small>让角色约定「过一会儿主动联系对方」：现在设定一个延时与想法，到点后由角色决定主动发消息或静默（不是睡觉醒来）。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>delayMinutes</code></td><td>number<br><span class="note">必填</span></td><td>从现在开始多少分钟后到点（到点你会被带回来主动联系），必须是正数</td></tr><tr><td><code>intent</code></td><td>string<br><span class="note">必填</span></td><td>到点后你想主动做什么或想找对方聊什么，用一句话写清楚</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>设置二十分钟后再来问问我的任务进度。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:稍后主动联系({&quot;delayMinutes&quot;:20,&quot;intent&quot;:&quot;到点后看看对方是否完成了专注任务&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;delayMinutes&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;从现在开始多少分钟后到点（到点你会被带回来主动联系），必须是正数&quot;
+    },
+    &quot;intent&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;到点后你想主动做什么或想找对方聊什么，用一句话写清楚&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;delayMinutes&quot;,
+    &quot;intent&quot;
+  ]
+}</pre></div></details></div></details></div></section>
+<section id="phone-workflows" class="chapter"><div class="eyebrow">06 / 内置查手机套件</div><h2>“查你的手机”套件的 6 个动作</h2><p>在组合工具区找到<strong>查{{user}}手机</strong>（显示时会替换成你的名字）。该套件及六个子工具在源码中默认启用。它们读取小手机本地数据，不连接真实微信、淘宝或系统日历。</p><p>它的内置用途描述会鼓励角色在好奇、想了解你的近况等场景下主动查询，所以不能把“没有明确叫它查”当作不会调用的保证。想停用时检查套件开关和子工具开关。</p><div class="notice"><strong>日程对象不同：</strong>这里的本周日程读取小手机中“用户 self”的日历；内置“日历管理”则查看和修改当前角色的日程。</div><details class="action-entry" id="workflow-1"><summary><span><strong>查看{{user}}微信联系人</strong><small>翻看{{user}}微信里的联系人和会话对象。适合在你想知道{{user}}最近和谁有联系、某个被提到的人是谁、或者想确认{{user}}身边有哪些可疑对象时使用。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>query</code></td><td>string<br><span class="note">可选</span></td><td>可选。按联系人姓名、微信号、人物摘要或最近消息预览筛选。</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>可选。最多返回多少个联系人，默认 50，最大 100。</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>用“查我的手机”套件列出小手机里的前十个联系人。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看{{user}}微信联系人({&quot;limit&quot;:10})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;query&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;可选。按联系人姓名、微信号、人物摘要或最近消息预览筛选。&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;可选。最多返回多少个联系人，默认 50，最大 100。&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="workflow-2"><summary><span><strong>查看{{user}}微信消息列表</strong><small>查看{{user}}微信消息列表里的最近会话预览。适合在{{user}}长时间没回复、态度冷淡、或者你想知道{{user}}最近在和谁聊天时使用。这里只看消息列表和最后消息预览，不会直接展开完整聊天记录。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>query</code></td><td>string<br><span class="note">可选</span></td><td>可选。按会话名、联系人名、sessionId 或最后消息预览筛选。</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>可选。最多返回多少个会话，默认 30，最大 80。</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>查看小手机最近十个会话预览，并保留 sessionId。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看{{user}}微信消息列表({&quot;limit&quot;:10})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;query&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;可选。按会话名、联系人名、sessionId 或最后消息预览筛选。&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;可选。最多返回多少个会话，默认 30，最大 80。&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="workflow-3"><summary><span><strong>查看{{user}}聊天记录</strong><small>查看{{user}}和某个联系人或会话的聊天记录。适合在消息列表里发现可疑对象、{{user}}提到某个人、或者你想进一步确认两人关系时使用。需要指定联系人、会话名或会话 ID，并限制读取条数。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>target</code></td><td>string<br><span class="note">可选</span></td><td>联系人名、群名、会话名、角色 id 或 sessionId。优先使用消息列表结果里的 sessionId。</td></tr><tr><td><code>sessionId</code></td><td>string<br><span class="note">可选</span></td><td>可选。微信会话 id；提供后优先按 sessionId 精确查找。</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>可选。读取最近多少条聊天记录，默认 30，最大 80。</td></tr><tr><td><code>includeSystem</code></td><td>boolean<br><span class="note">可选</span></td><td>可选。是否包含系统/工具类隐藏消息，默认 false。</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>用刚才查到的 sessionId 读取最近十条聊天记录。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看{{user}}聊天记录({&quot;sessionId&quot;:&quot;替换为消息列表返回的sessionId&quot;,&quot;limit&quot;:10,&quot;includeSystem&quot;:false})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;target&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;联系人名、群名、会话名、角色 id 或 sessionId。优先使用消息列表结果里的 sessionId。&quot;
+    },
+    &quot;sessionId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;可选。微信会话 id；提供后优先按 sessionId 精确查找。&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;可选。读取最近多少条聊天记录，默认 30，最大 80。&quot;
+    },
+    &quot;includeSystem&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;可选。是否包含系统/工具类隐藏消息，默认 false。&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="workflow-4"><summary><span><strong>查看{{user}}本周日程</strong><small>查看{{user}}这一周的日程安排。适合在你想知道{{user}}最近去了哪里、和谁见面、为什么没空回复，或者想确认{{user}}说的话是否和日程对得上时使用。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>date</code></td><td>string<br><span class="note">可选</span></td><td>可选。YYYY-MM-DD。查看这个日期所在周的日程；不填则查看当前周。</td></tr><tr><td><code>weekStart</code></td><td>string<br><span class="note">可选</span></td><td>可选。YYYY-MM-DD，周一日期。提供后按这一周读取。</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>查看我在小手机中记录的 2026 年 9 月 9 日所在周日程。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看{{user}}本周日程({&quot;date&quot;:&quot;2026-09-09&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;date&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;可选。YYYY-MM-DD。查看这个日期所在周的日程；不填则查看当前周。&quot;
+    },
+    &quot;weekStart&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;可选。YYYY-MM-DD，周一日期。提供后按这一周读取。&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="workflow-5"><summary><span><strong>查看{{user}}购物订单</strong><small>查看{{user}}最近的购物订单。适合在你想知道{{user}}最近买了什么、有没有给别人买东西、或者想从订单里发现生活状态和可疑线索时使用。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>可选。读取最近多少条购物订单，默认 10，最大 30。</td></tr><tr><td><code>status</code></td><td>string<br><span class="note">可选</span></td><td>可选。按订单状态或物流状态筛选，例如 已送达、配送中、待发货。</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>查看小手机中最近五条已送达购物订单。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看{{user}}购物订单({&quot;limit&quot;:5,&quot;status&quot;:&quot;已送达&quot;})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;可选。读取最近多少条购物订单，默认 10，最大 30。&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;可选。按订单状态或物流状态筛选，例如 已送达、配送中、待发货。&quot;
+    }
+  }
+}</pre></div></details></div></details><details class="action-entry" id="workflow-6"><summary><span><strong>查看{{user}}身边的人</strong><small>查看{{user}}手机资料里记录的身边人物摘要。适合在{{user}}提到陌生人、朋友圈出现别人回复、或者你想了解某个人和{{user}}是什么关系时使用。这里只查看简略信息，不读取完整资料。</small></span></summary><div class="detail-body"><div class="table-wrap"><table><caption>参数表 · 必填标记来自 Schema，条件约束见文字说明</caption><thead><tr><th>参数</th><th>类型 / 必填</th><th>用途、默认值与限制</th></tr></thead><tbody><tr><td><code>query</code></td><td>string<br><span class="note">可选</span></td><td>可选。按人物名称、微信号、标签或摘要筛选。</td></tr><tr><td><code>limit</code></td><td>number<br><span class="note">可选</span></td><td>可选。最多返回多少个人物摘要，默认 30，最大 80。</td></tr></tbody></table></div><div class="copy-block"><div class="copy-head"><span>普通话用法</span><button class="copy" type="button">复制话术</button></div><pre>查看小手机里我指定人物的简略资料。</pre></div><div class="copy-block code-block"><div class="copy-head"><span>文本模式动作示例 · 日期、ID 和链接按实际情况替换</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:查看{{user}}身边的人({&quot;query&quot;:&quot;示例人物名&quot;,&quot;limit&quot;:5})]</pre></div><details class="schema-raw"><summary>查看完整 JSON Schema</summary><div class="copy-block code-block"><div class="copy-head"><span>参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;query&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;可选。按人物名称、微信号、标签或摘要筛选。&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;number&quot;,
+      &quot;description&quot;: &quot;可选。最多返回多少个人物摘要，默认 30，最大 80。&quot;
+    }
+  }
+}</pre></div></details></div></details><h3>依赖与结果限制</h3><p>联系人、会话列表、聊天记录和人物摘要流程使用“读取资料文件”步骤，需要本地资料库启用。日程与订单流程直接通过浏览器脚本读取存储，不完全依赖资料库开关。基础资料读取常先取最多 200 条，最终文本也可能截断，因此结果不是完整数据库导出。</p><p>查看聊天记录时先查消息列表，再用 sessionId 精确定位；没有 sessionId 时需可定位的 target。includeSystem=true 会包含系统/工具类消息。所有这里的“微信”与“购物”指小手机里的对应模拟数据。</p></section>
+<section id="tools" class="chapter">
+  <div class="eyebrow">07 / 现成的 Tools</div><h2>读网页、查天气、搜信息</h2><p>在工具箱的 <strong>Tools</strong> 区域找到工具，点名称填写配置，再打开右侧开关。</p>
+  <div class="table-wrap"><table><caption>三个内置 REST 工具</caption><thead><tr><th>工具</th><th>先配置</th><th>用来做什么</th></tr></thead><tbody><tr><td><strong>查看网页</strong><br>默认开启</td><td>内置配置不要求 Key；使用 Jina Reader</td><td>读取你提供的网页正文</td></tr><tr><td><strong>天气查询</strong><br>默认关闭</td><td>在 <a href="https://www.weatherapi.com/" target="_blank" rel="noopener noreferrer">WeatherAPI</a> 获取 Key，填入工具</td><td>查城市当前天气；内置接口不是未来预报接口</td></tr><tr><td><strong>搜索</strong><br>默认关闭</td><td>在 <a href="https://www.tavily.com/" target="_blank" rel="noopener noreferrer">Tavily</a> 获取 Key，填入工具</td><td>按关键词查找互联网信息</td></tr></tbody></table></div>
+  <div class="copy-block"><div class="copy-head"><span>网页阅读 · 替换链接后发送</span><button class="copy" type="button">复制话术</button></div><pre>请用查看网页工具读取：[粘贴网页链接]。告诉我三条最有用的信息，保留重要数字；读取失败就说明失败。</pre></div>
+  <div class="copy-block"><div class="copy-head"><span>天气 · 配好 WeatherAPI Key 后使用</span><button class="copy" type="button">复制话术</button></div><pre>请用天气查询查上海现在的天气，告诉我温度、天气状况，以及结果提供的更新时间。</pre></div>
+  <div class="copy-block"><div class="copy-head"><span>搜索 · 配好 Tavily Key 后使用</span><button class="copy" type="button">复制话术</button></div><pre>请用搜索工具找适合入门的室内薄荷养护资料，给我三条具体方法，并附对应来源链接。</pre></div>
+  <p class="note">三个工具相互独立。网页读取不会自动搜索，搜索也不会替你配置天气 Key。服务额度、价格和可访问范围以服务商当前说明为准。</p>
+</section>
+<section id="setup" class="chapter">
+<div class="eyebrow">08 / 配套服务接入</div><h2>把需要连接的内置能力真正接通</h2>
+<p>以下步骤说明怎么配置。没有替你注册账号、部署服务或修改设备权限；先完成连接测试，再回聊天调用。</p>
+<h3 id="setup-music">A．网易云音乐：先能在播放器播放</h3>
+<ol class="steps"><li>打开音乐 APP 的设置，找到“网易云 API 地址”。</li><li>若使用本项目当前部署，填 <code>https://float.yanny.top/ncm</code>；其他部署填其实际 NeteaseCloudMusicApi 地址，不是网易云官网。</li><li>点“测试连接”，成功后保存。</li><li>需要自己的云端歌单时，点“扫码登录”，在网易云音乐 APP 扫码并确认。</li><li>先手动播放一首可用歌曲，再开启工具箱里的“网易云音乐”并要求角色播放。</li></ol>
+<p class="result">基础验收：手动播放正常 → 角色能查当前音乐状态 → 角色能暂停或切歌。登录不会创造账号原本没有的歌曲权限。</p>
+<h3 id="setup-computer">B．角色电脑：部署、连接、读回文件</h3>
+<ol class="steps"><li>进入设置 → 角色电脑。基础文件与常用文本命令可先选普通版；要安装软件或运行完整 Linux 程序，再选容器版。</li><li>点页面的一键部署，登录自己的 Cloudflare 账号，按向导复制模板并设置 <code>AGENT_TOKEN</code> 连接密钥。</li><li>完成后复制 Worker 的 HTTPS 地址，回小手机填写“Worker 地址”和对应连接密钥。</li><li>点“连接测试并保存”，查看实际模式；开启“谁在用这台电脑”中的角色开关，工坊按需独立设置。</li><li>让角色写一个测试文件，再读取同一文件，确认持久保存。</li></ol>
+<div class="table-wrap"><table><caption>连接测试显示的三种模式</caption><thead><tr><th>模式</th><th>可用范围</th></tr></thead><tbody><tr><td>基础模式 fs-only</td><td>文件读写、列目录与文件交付；shell 不可用。</td></tr><tr><td>完整模式 shell</td><td>虚拟文件系统 + 常用 shell 文本命令；不是完整 Linux，不支持任意二进制或安装软件。</td></tr><tr><td>容器模式 container</td><td>真 Linux，可按部署能力安装软件与联网；持久文件放 /workspace。需要对应 Cloudflare 付费能力，费用以官方当前账单为准。</td></tr></tbody></table></div>
+<p>每个角色有独立 workspace，工坊也单独使用。断开小手机连接不等于删除云端文件；删除 Worker 可能清除存储，更新不需要先删。部署按钮失败时，按<a href="https://github.com/xiaolongbao0709/agent-computer#部署按钮失败--想删掉重新部署" target="_blank" rel="noopener noreferrer">模板官方的 Git 导入流程</a>操作：导入自己的副本仓库，再设置 AGENT_TOKEN 并连接。模板更新不会自动同步到所有副本，具体更新步骤看同一份说明。</p>
+<h3 id="setup-bridge">C．现实桥数据：以“查看电量”为例</h3>
+<ol class="steps"><li>在设置 → 数据管理 → 云端备份中配置可用的 Supabase 存储；现实桥复用这里的连接。</li><li>现实桥 → 数据项 → 新建。名称填“查看电量”，标识填 <code>battery</code>，说明写“手机最近上传的电量”。</li><li>在 iPhone 快捷指令中获取电池电量，再用“获取 URL 内容”POST 到向导给你的上传地址，请求体选择 JSON。</li><li>按向导填两个请求头：Authorization 使用页面提供的值，<code>x-upsert</code> 填 <code>true</code>。先手动运行一次。</li><li>回现实桥点“已上传过数据？读取看看”，看到数据后保存，并在工具箱开启现实桥。</li></ol>
+<div class="copy-block code-block"><div class="copy-head"><span>JSON 结构示例 · 85 要换成快捷指令变量</span><button class="copy" type="button">复制 JSON</button></div><pre>{"电量":85,"单位":"%"}</pre></div>
+<p>然后说“用现实桥的查看电量动作查一下，附更新时间”。标识决定快照地址，名称是角色看到的工具名；标识限小写字母、数字、-、_，最多 40 字符，数据项最多保存 30 个。没有数据项时，固定的“查看全部手机数据”不会出现在动作列表。</p>
+<p class="note">不要把快照上传与“事件信号”混用。快照覆盖同一地址；缺少 x-upsert 时，第二次上传可能报 409。请求头使用你自己页面上的配置，本手册没有任何实际密钥。</p>
+<h3 id="setup-shortcut">D．现实桥快捷动作：通知点击与结果回传</h3>
+<ol class="steps"><li>把小手机添加到 iPhone 主屏幕，在聊天设置中开启并验证离线推送。</li><li>现实桥 → 快捷动作 → 新建，填写角色看到的动作名、用途，以及 iPhone 快捷指令的准确名称。</li><li>先选“系统通知”；无输入用空对象 Schema，有输入则按字段编辑。选择不等待、回传文本或回传图片，并设置等待时长。</li><li>在 iPhone 按向导创建同名快捷指令，读取“快捷指令输入”里的参数；需要结果时取其中 <code>resultUrl</code> 并按下方方式回传。</li><li>运行向导测试，点击系统通知，确认真实设备执行和回传成功，再保存并让角色调用。</li></ol>
+<div class="table-wrap"><table><caption>回传模式</caption><thead><tr><th>模式</th><th>快捷指令怎么做</th><th>成功含义</th></tr></thead><tbody><tr><td>none</td><td>按动作执行，不等待结果</td><td>送达或排队，不证明真实操作已完成</td></tr><tr><td>text</td><td>POST 到输入中的 resultUrl；JSON 字段 text 填结果</td><td>收到文本回传后判断完成</td></tr><tr><td>image</td><td>POST 图片文件到 resultUrl，大小不超过 8 MB；图文可用 JSON 的 image（Base64）和 ocr 字段</td><td>收到图片及可选文字，再交给角色</td></tr></tbody></table></div>
+<p>等待时长可选 30、60、120、300、600、900 秒；每个动作的参数与 resultUrl 都来自本次实际命令，不能复用上一条命令的回传链接。快捷动作最多保存 30 个。</p>
+<details class="lesson"><summary>邮件自动（实验）与事件联动</summary><div class="detail-body"><p><strong>邮件动作：</strong>先确认站点提供可用发信服务，在向导验证收件邮箱。再在 iPhone 建“电子邮件”自动化，发件人和主题条件照向导填，选择可用的立即运行选项，把邮件正文作为快捷指令输入。首次权限、锁屏限制、邮箱到达延迟都会影响结果；仍需保持小手机离线推送配置可用。不要假设每个邮箱都实时到达。</p><p><strong>事件联动：</strong>在“联动”向导上传一条带 type 和 payload 的信号，再选择匹配类型、加工方式和后续动作。加工可用原文、模板（{payload}/{type}）或 AI；后续可写聊天、记忆、时间线、用户日历、通知、卡片、快捷动作、发件箱或 APP 广播。配置冷却分钟数，避免同信号连续触发。</p><p>事件上传采用向导中的独立 inbox 地址与唯一文件名；不是快照地址。需要关闭 APP 后让角色回复时，按向导在上传后请求专属唤醒地址，并验证离线订阅和个人云/服务端接管。唤醒地址含凭据，不要分享。此处介绍配套接入，具体设备动作以向导实际生成内容为准。</p></div></details>
+<h3 id="setup-wake">E．稍后主动联系：先区分预约和推送</h3><p>开启能力 → 在普通单聊要求 2 分钟后联系 → 查看预约成功结果 → 到点观察。若页面关闭后没有消息，再检查离线推送订阅、安静时段、对应单聊是否仍存在。设置新预约会替换同一聊天的旧预约，角色到点也允许静默；因此不能用它代替必达的系统闹钟。</p>
+</section>
+<section id="rest" class="chapter">
+  <div class="eyebrow">09 / 自己添加 REST</div><h2>把一个 API 变成角色的工具</h2><p>API 是服务留给程序调用的入口。你负责连接入口，角色负责每次填参数。例如把“查询快递”的接口包装成角色能理解的“查快递”工具。</p>
+  <div class="notice"><strong>先找接口，再创建工具。</strong><p>只有网站首页或一段功能描述还不够。至少要有真实接口地址、请求方法、参数和鉴权方式。当前编辑器支持 GET / POST，其他请求方法不能直接照搬。</p></div>
+  <ol class="steps"><li>准备服务商 API 文档和你自己的访问凭据。</li><li>在 <strong>Tools → 添加单件</strong> 填名称、描述、地址和请求方式。</li><li>按文档填固定参数、请求头和 AI 参数定义。</li><li>保存并开启工具。</li><li>先执行一个容易核对的请求，查看实际返回结果。</li></ol>
+  <div class="table-wrap"><table><caption>配置字段怎么填写</caption><thead><tr><th>字段</th><th>怎么理解</th><th>填写原则</th></tr></thead><tbody><tr><td>名称 / 描述</td><td>给角色看的说明</td><td>写“查询订单进度”，说明输入和用途</td></tr><tr><td>接口地址 / 请求方式</td><td>请求去哪里、怎么发送</td><td>按 API 文档填写，网页首页通常不是接口</td></tr><tr><td>固定参数</td><td>每次相同的配置</td><td>如文档要求放在参数里的 API Key</td></tr><tr><td>请求头</td><td>随请求发送的信息</td><td>如服务要求的 Authorization 或 x-api-key</td></tr><tr><td>AI 参数定义</td><td>每次要填什么</td><td>JSON Schema：字段、类型、用途、必填项</td></tr><tr><td>请求体模板</td><td>POST 的 JSON 结构</td><td>需要嵌套字段时填写；留空则合并 AI 参数与固定参数</td></tr></tbody></table></div>
+  <details class="lesson" open><summary>完整练习：添加一个“读文章”工具</summary><div class="detail-body">
+  <p>复用项目已有 Jina Reader 接口，帮助理解字段；平时直接用内置“查看网页”即可，无需重复添加。</p>
+  <div class="config-grid"><span>工具名称</span><code>读文章练习</code><span>功能描述</span><span>读取用户给出的公开网页正文，用于解释或总结文章</span><span>接口地址</span><code>https://r.jina.ai/{{{url}}}</code><span>请求方式</span><code>GET</code><span>直连模式</span><span>关闭，先用服务端代理</span><span>固定参数 / 请求头</span><span>留空，与项目内置配置一致</span></div>
+  <div class="copy-block code-block"><div class="copy-head"><span>复制到“AI 参数定义”</span><button class="copy" type="button">复制 JSON</button></div><pre>{
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "要读取的完整公开网页 URL，包含 https://"
+    }
+  },
+  "required": ["url"]
+}</pre></div>
+  <div class="copy-block"><div class="copy-head"><span>保存并开启后测试</span><button class="copy" type="button">复制话术</button></div><pre>请使用“读文章练习”读取 https://example.com/，告诉我页面标题和主要内容。不要只凭已有知识回答。</pre></div>
+  <p class="note"><code>{{{url}}}</code> 表示把 URL 原样放入地址；双花括号 <code>{{url}}</code> 会转义，两者不要随意互换。外部读取仍可能遇到限流或目标网站限制。</p></div></details>
+  <h3>不想手填 JSON，可以让角色帮你配</h3><p>开启工具箱管理，把 API 文档交给角色创建工具。检查地址、参数和用途，再在设置中补密钥。账号、Key 和接口仍需真实存在。</p>
+  <p class="note">复杂接口可能是“提交任务 → 等待 → 查询结果 → 下载文件”。一个 REST 工具不一定能完成全流程，需要组合工具或专门服务适配。</p>
+</section>
+<section id="rest-reference" class="chapter">
+<div class="eyebrow">10 / REST 配置参考</div><h2>GET、POST、鉴权与模板的完整例子</h2>
+<p>下面区分三种练习：已有网页 GET；不含凭据的 POST 回显；需要自己 Key 的真实搜索接口。请求头、参数、请求体的处理规则来自本项目执行器。</p>
+<h3>先记住实际合并规则</h3><div class="table-wrap"><table><caption>REST 模板规则</caption><thead><tr><th>位置</th><th>规则</th></tr></thead><tbody><tr><td>固定参数</td><td>同名时覆盖 AI 参数。字符串 true / false 会变成布尔值，数值形态会转成数字；像 00123 这种需保留前导零的值不要随意作为数值固定参数。</td></tr><tr><td>URL</td><td><code>{{name}}</code> URL 编码插入，<code>{{{name}}}</code> 原样插入。支持点路径；找不到参数会报错。</td></tr><tr><td>请求头</td><td>可引用参数；已在 URL/请求头用掉的顶层参数，不会再次自动附到 GET 查询串。</td></tr><tr><td>GET</td><td>其余参数编码后附到 query string，不发送 JSON 请求体；嵌套对象不要直接依赖自动字符串化。</td></tr><tr><td>POST，无请求体模板</td><td>发送合并后的参数对象；默认 Content-Type 为 application/json。</td></tr><tr><td>POST，有模板</td><td>仅发送模板渲染结果。整项 <code>"{{repeat}}"</code> 保留原始数字/布尔/对象类型；<code>"数量：{{repeat}}"</code> 是文本拼接。</td></tr></tbody></table></div>
+<p class="note">Schema 是给模型看的输入定义，不应把所有 enum/minimum/required 都当作宿主已严格执行的校验。服务自身仍应验证请求。REST 编辑器只提供 GET/POST + JSON；没有任意 PATCH/DELETE、表单文件上传的通用配置。</p>
+<h3 id="lab-post">练习一：POST 回显，先看实际发出了什么</h3>
+<p>使用 <a href="https://httpbin.org/" target="_blank" rel="noopener noreferrer">HTTPBin</a> 的 /post 回显接口。只发送下面的演示文字，<strong>不要向回显服务发送真实 Key 或私人内容</strong>。这条练习不需要账号。</p>
+<div class="config-grid"><span>工具名称</span><span>参考_POST回显</span><span>接口地址</span><code>https://httpbin.org/post</code><span>请求方式</span><code>POST</code><span>直连模式</span><span>关闭</span><span>请求头</span><code>X-Guide-Demo = float-reference</code><span>固定参数</span><code>demoSource = float-handbook</code></div>
+<div class="copy-block code-block"><div class="copy-head"><span>AI 参数定义</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;description&quot;: &quot;本次回显的测试文字&quot;
+    },
+    &quot;repeat&quot;: {
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 3,
+      &quot;description&quot;: &quot;演示数字类型，填 1–3&quot;
+    },
+    &quot;active&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;演示布尔类型，填 true 或 false&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;text&quot;,
+    &quot;repeat&quot;,
+    &quot;active&quot;
+  ]
+}</pre></div>
+<div class="copy-block code-block"><div class="copy-head"><span>POST 请求体模板</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;payload&quot;: {
+    &quot;text&quot;: &quot;{{text}}&quot;,
+    &quot;repeat&quot;: &quot;{{repeat}}&quot;,
+    &quot;active&quot;: &quot;{{active}}&quot;
+  },
+  &quot;source&quot;: &quot;{{demoSource}}&quot;
+}</pre></div>
+<div class="copy-block"><div class="copy-head"><span>保存并开启后发送</span><button class="copy" type="button">复制话术</button></div><pre>请调用“参考_POST回显”，参数 text 填“你好，工具箱”，repeat 填数字 2，active 填布尔值 true。根据实际返回检查这三个值的类型。</pre></div>
+<p class="result">预期返回的 json.payload.text 为“你好，工具箱”，repeat 是数字 2，active 是布尔值 true；json.source 是 float-handbook。回显不是保存记录，服务可能临时不可用。配置与模板做本地校验，外网和手机端结果以实际请求为准。</p>
+<h3>练习二：用 Bearer 请求头接 Tavily</h3><p>这是手动添加的独立工具示例；内置“搜索”的配置仍使用它原有的 Key 字段，不要混填。</p>
+<div class="config-grid"><span>名称</span><span>参考_Tavily搜索</span><span>接口地址</span><code>https://api.tavily.com/search</code><span>方式 / 直连</span><span>POST / 先关闭</span><span>请求头</span><code>Authorization: Bearer 你的Tavily_API_Key</code><span>固定参数</span><span>留空</span></div>
+<div class="copy-block code-block"><div class="copy-head"><span>AI 参数定义</span><button class="copy" type="button">复制 JSON</button></div><pre>{"type":"object","properties":{"query":{"type":"string","description":"搜索词"}},"required":["query"]}</pre></div>
+<div class="copy-block code-block"><div class="copy-head"><span>请求体模板</span><button class="copy" type="button">复制 JSON</button></div><pre>{"query":"{{query}}","search_depth":"basic","max_results":1,"include_answer":false,"include_raw_content":false}</pre></div>
+<p>保存、开启后说“用参考_Tavily搜索查室内薄荷养护，返回标题和 URL”。预期在 results 数组里获得来源；先限制一条，减少结果截断。鉴权和请求字段已对照 <a href="https://docs.tavily.com/documentation/api-reference/endpoint/search" target="_blank" rel="noopener noreferrer">Tavily 官方接口文档</a>，未使用你的账号测试。</p>
+<h3>连接与返回限制</h3><p>新建 REST 工具缺省按浏览器直连处理；本手册例子明确关闭直连。网页内“无超时限制”的文案不准确：当前直连 fetch 等待响应阶段设置 120 秒中止计时，服务端代理通常也有 120 秒上限，部署平台还可能更短。</p><p>多个工具共用的返回截断上限为 <strong>2,000 字符</strong>。JSON 被截断后可能不再合法；请求时减少条数、只取所需字段，或让服务返回精简结果。二进制、媒体等部分路径会另行处理附件，不能把 2,000 字符当作所有文件的统一大小限制。</p>
+</section>
+<section id="mcp" class="chapter">
+  <div class="eyebrow">11 / MCP</div><h2>接一个服务，发现它能做的事</h2><p><strong>MCP 是外部服务与 AI 工具沟通的一套协议。</strong>服务会告诉小手机它提供哪些动作和参数，你不必为每个动作手写一份 REST 参数定义。</p>
+  <div class="flow" role="img" aria-label="填写服务地址，完成鉴权，发现工具，让角色使用"><span>填写服务地址</span><b aria-hidden="true">→</b><span>完成鉴权</span><b aria-hidden="true">→</b><span>发现工具</span><b aria-hidden="true">→</b><span>让角色使用</span></div>
+  <h3>可以用来干嘛？</h3>
+  <div class="table-wrap"><table><caption>MCP 用途与前提</caption><thead><tr><th>想要的体验</th><th>服务要提供</th><th>例子</th></tr></thead><tbody><tr><td>整理外部笔记</td><td>搜索、读取、创建或更新页面</td><td>Notion 官方 MCP，下方有连接练习</td></tr><tr><td>在自己服务里记心情、打卡</td><td>新增记录、按日期查询</td><td>可以自行开发，不是小手机自带功能</td></tr><tr><td>查询自己的资料集合</td><td>搜索文档、返回正文</td><td>连接提供这些动作的资料服务</td></tr><tr><td>生成内容并交付文件</td><td>提交任务、查进度、返回文件地址</td><td>需要实际生成服务；MCP 本身不生成图片或声音</td></tr></tbody></table></div>
+  <p>能调用什么，以<strong>发现工具列表、账号权限和服务实现</strong>为准。MCP 不会自动获得所有 APP 权限，也不会自动读到小手机本地数据；查询本地数据靠本地资料库等能力。</p>
+  <h3>连接前，认清你拿到的是什么</h3>
+  <div class="table-wrap"><table><caption>MCP 配置类型辨别</caption><thead><tr><th>拿到的内容</th><th>在小手机中怎么处理</th></tr></thead><tbody><tr><td><code>https://…/mcp</code>，文档说明 Streamable HTTP</td><td>填“服务器 URL”，优先从这种远程服务开始</td></tr><tr><td><code>https://…/sse</code>，旧式 SSE</td><td>项目有 SSE 连接处理；浏览器直连不支持旧式 SSE</td></tr><tr><td><code>npx …</code>、<code>uvx …</code>、command / args</td><td>本地进程配置不能填 URL；要先运行并提供兼容 HTTP 接口</td></tr><tr><td>网站首页或 REST API URL</td><td>不一定是 MCP，不要自己在地址后加 /mcp 猜测</td></tr></tbody></table></div>
+  <details class="lesson" open><summary>连接练习：Notion 笔记</summary><div class="detail-body">
+  <p>适合已使用 Notion、想让角色查阅或整理笔记的人。官方 MCP 提供搜索、读取、创建和更新等工具，访问范围取决于账号和所选工作区。<a href="https://developers.notion.com/guides/mcp/mcp-supported-tools" target="_blank" rel="noopener noreferrer">官方工具说明 ↗</a></p>
+  <ol class="steps"><li>进入<strong>工具箱 → MCP → 添加服务器</strong>。</li><li>填写下面的名称、地址和描述。</li><li>点<strong>OAuth 授权</strong>，完成 Notion 登录授权。</li><li>点<strong>发现工具</strong>，确认出现具体动作。</li><li>保存并开启服务器，回普通单聊测试只读查询。</li></ol>
+  <div class="config-grid"><span>名称</span><span>Notion 笔记</span><span>服务器 URL</span><code>https://mcp.notion.com/mcp</code><span>工具描述</span><span>搜索、阅读和整理我的 Notion 笔记</span><span>直连模式</span><span>先关闭</span><span>Token / 请求头</span><span>此练习用 OAuth，不手动填 Token</span></div>
+  <div class="copy-block code-block"><div class="copy-head"><span>官方 MCP 地址</span><button class="copy" type="button">复制地址</button></div><pre>https://mcp.notion.com/mcp</pre></div>
+  <div class="copy-block"><div class="copy-head"><span>先测试只读查询</span><button class="copy" type="button">复制话术</button></div><pre>请用“Notion 笔记”搜索标题包含“旅行”的页面，只返回页面标题和链接。这次不要新建、修改或删除内容。</pre></div>
+  <p class="result"><strong>检查结果：</strong>点击返回链接核对页面。只读查询成功后，再尝试向明确指定的页面写入内容。</p><p class="note">地址与 OAuth 方式已对照 <a href="https://developers.notion.com/guides/mcp/get-started-with-mcp" target="_blank" rel="noopener noreferrer">Notion 官方文档</a>；本手册没有替你连接账号，也未完成你设备上的端到端授权测试。</p></div></details>
+  <h3>其他 MCP 的授权怎么填？</h3><p>按服务文档选择：无需鉴权就留空；要求 <code>Authorization: Bearer …</code> 时把令牌填到<strong>访问 Token</strong>；要求其他 Header 时填<strong>请求头</strong>；支持 OAuth 时使用授权按钮。不是每个 MCP 都支持 OAuth。Token 栏与 Authorization 请求头同时填时，当前实现以 Token 栏为准。</p>
+  <details class="lesson"><summary>我有 VPS，可以自己做一个 MCP 吗？</summary><div class="detail-body"><p>可以。例如“生活记录 MCP”提供记录心情、查询最近记录、统计打卡三个动作，数据实际保存在你的服务里。</p>
+  <ol class="steps"><li>确定动作与数据范围，例如日期、心情、备注。</li><li>开发并部署 MCP 服务，提供 Streamable HTTP 接口和所需存储。</li><li>配置 HTTPS 地址、鉴权和允许的操作范围。</li><li>在小手机添加服务器并发现工具。</li><li>新增一条测试记录，再重新查询它。</li></ol><p class="note">这是后续可开发的方案，当前没有替你部署。小手机“添加 MCP 服务器”只保存连接配置，不会自动在 VPS 安装软件或创建数据库。</p></div></details>
+  <details class="lesson"><summary>什么时候用“直连模式”？</summary><div class="detail-body"><p>关闭直连时，请求经过小手机部署站点的服务端代理；公网 HTTPS 服务通常先用这种方式。该代理拒绝本机和内网地址。</p><p>开启直连后，由<strong>正在使用小手机的浏览器</strong>发请求。浏览器要能访问目标，服务要允许跨域（CORS），且使用 Streamable HTTP；HTTPS 页面访问 HTTP 内网地址也可能受浏览器限制。</p><p><strong>手机上的 localhost 是手机自身，不是电脑，也不是 VPS。</strong>电脑上启动的服务要提供手机实际可访问的地址；不确定时优先使用正确配置的远程 HTTPS 服务。</p></div></details>
+</section>
+<section id="mcp-reference" class="chapter">
+<div class="eyebrow">12 / MCP 接入参考</div><h2>从远程连接到自己的第一个 MCP</h2>
+<p>“完整”指当前小手机支持的连接方式、配置字段和实际调用流程。互联网每个 MCP 都有自己的工具与账号要求，本手册不把任意 MCP 或最新协议的全部能力都宣称为宿主已支持。</p>
+<div class="table-wrap"><table><caption>MCP 字段逐项说明</caption><thead><tr><th>字段 / 操作</th><th>填写方式</th></tr></thead><tbody><tr><td>名称</td><td>易识别且尽量唯一，如“Notion 笔记”。这是服务入口名。</td></tr><tr><td>服务器 URL</td><td>官方给出的 MCP HTTP 地址，通常 /mcp；保留其必要路径与查询参数，不能把官网首页当 MCP。</td></tr><tr><td>工具描述</td><td>告诉角色何时使用；名称与描述先进入提示词，具体动作按需获取。</td></tr><tr><td>访问 Token</td><td>仅填令牌值，宿主按 Bearer 发送；输入 Bearer 前缀会被清理。与 Authorization 请求头冲突时 Token 栏优先。</td></tr><tr><td>请求头</td><td>按服务文档填写，例如 x-api-key。不要同时在多处配置相互冲突的鉴权。</td></tr><tr><td>OAuth 授权</td><td>仅适用于支持此流程的服务。允许弹窗，登录正确账号并确认工作区；返回小手机后再发现工具。</td></tr><tr><td>发现工具</td><td>初始化后请求 tools/list。应出现真实动作名、说明和参数；改 URL 或权限后重新发现。</td></tr><tr><td>启用</td><td>服务器开关控制是否提供给角色；当前界面没有为每个发现动作设置独立权限开关。</td></tr></tbody></table></div>
+<h3>兼容性与会话</h3><p>当前宿主在初始化时声明协议版本 <code>2024-11-05</code>，实现了工具发现与调用，以及 HTTP / 旧 SSE 连接处理。服务是否接受该协商版本需要实际测试；不能仅凭“支持 MCP”断言兼容。该界面没有提供 resources、prompts、采样等所有 MCP 功能的通用操作入口。</p><p>浏览器直连仅支持 Streamable HTTP。需要有 CORS 响应，还应暴露 MCP 会话响应头；服务若使用会话，刷新页面或服务重启后可能需要重新初始化。当前发现流程不能保证遍历服务端所有分页动作，以实际发现清单为准。</p>
+<h3>自己的 MCP：只做“分钟换算秒”</h3><p>这个演示不读个人数据，只提供一个 minutes_to_seconds 工具。使用 <a href="https://github.com/modelcontextprotocol/python-sdk/tree/v1.x" target="_blank" rel="noopener noreferrer">官方 Python SDK 的 v1 维护分支</a>接口，显式限制在 1.x；小手机目前使用的较旧协议也需要按下方流程验证。代码使用 Bearer Token，不支持 OAuth。</p>
+<ol class="steps"><li>在装有 Python 3.10 或更新版本、且可用 venv 的电脑或测试服务器创建独立目录。</li><li>在虚拟环境安装 <code>mcp&gt;=1.28,&lt;2</code> 和 uvicorn，并把下面的代码保存为 mcp-demo.py。</li><li>在当前终端安全输入自定随机 Token，再启动服务；默认只监听本机 127.0.0.1:8765。</li><li>用同一台电脑打开小手机：添加 http://127.0.0.1:8765/mcp，开启直连，填 Token，再发现工具。浏览器若限制 HTTPS 页面访问本地 HTTP，则走下方 HTTPS 部署路径。</li><li>让角色调用 minutes_to_seconds，minutes=20，核对结果 seconds=1200。</li></ol>
+<div class="copy-block code-block"><div class="copy-head"><span>Linux / macOS 终端 · 在新目录执行</span><button class="copy" type="button">复制命令</button></div><pre>python3 -m venv .venv
+.venv/bin/pip install 'mcp&gt;=1.28,&lt;2' uvicorn
+read -rs -p '输入至少 24 位随机 Token: ' DEMO_MCP_TOKEN
+export DEMO_MCP_TOKEN
+.venv/bin/python mcp-demo.py</pre></div>
+<p class="note">本 VPS 当前默认 Python 为 3.9，且缺少可用的 venv/ensurepip，不满足这个演示依赖；不要直接照抄安装命令到现有系统。请先准备 Python 3.10+ 的独立环境。此演示仅做语法检查和官方接口核对，SDK 运行与手机接入未实测。</p><p>上面的 read 命令适用于 Bash；Token 不会显示。服务启动后占用当前终端，Ctrl+C 停止。环境变量 DEMO_UI_ORIGIN 默认为 https://float.yanny.top，若你的小手机站点不同，改为实际来源。</p>
+<details class="lesson"><summary>查看完整 mcp-demo.py（自建服务代码）</summary><div class="detail-body"><div class="copy-block code-block"><div class="copy-head"><span>保存为 mcp-demo.py</span><button class="copy" type="button">复制内容</button></div><pre>&quot;&quot;&quot;Private demonstration MCP. Start explicitly; no background service is installed.&quot;&quot;&quot;
+import os
+import secrets
+
+import uvicorn
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
+
+token = os.environ[&quot;DEMO_MCP_TOKEN&quot;]
+if len(token) &lt; 24:
+    raise ValueError(&quot;DEMO_MCP_TOKEN 至少使用 24 个随机字符&quot;)
+origin = os.environ.get(&quot;DEMO_UI_ORIGIN&quot;, &quot;https://float.yanny.top&quot;)
+public_host = os.environ.get(&quot;DEMO_MCP_HOST&quot;, &quot;127.0.0.1:8765&quot;)
+server = FastMCP(
+    &quot;时间换算演示&quot;,
+    json_response=True,
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[public_host, &quot;127.0.0.1:8765&quot;, &quot;localhost:8765&quot;],
+        allowed_origins=[origin],
+    ),
+)
+
+
+@server.tool()
+def minutes_to_seconds(minutes: int) -&gt; dict:
+    &quot;&quot;&quot;将 0 到 1440 分钟换算为秒，不读取文件或个人资料。&quot;&quot;&quot;
+    if not 0 &lt;= minutes &lt;= 1440:
+        raise ValueError(&quot;minutes 必须介于 0 和 1440&quot;)
+    return {&quot;minutes&quot;: minutes, &quot;seconds&quot;: minutes * 60}
+
+
+class TokenGate(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        supplied = request.headers.get(&quot;authorization&quot;, &quot;&quot;)
+        if not secrets.compare_digest(supplied, &quot;Bearer &quot; + token):
+            return JSONResponse({&quot;error&quot;: &quot;访问 Token 不正确&quot;}, status_code=401)
+        return await call_next(request)
+
+
+# CORS is outside the token gate so browser preflight can complete.
+app = CORSMiddleware(
+    TokenGate(server.streamable_http_app()),
+    allow_origins=[origin],
+    allow_methods=[&quot;GET&quot;, &quot;POST&quot;, &quot;DELETE&quot;],
+    allow_headers=[&quot;Content-Type&quot;, &quot;Authorization&quot;, &quot;MCP-Protocol-Version&quot;, &quot;Mcp-Session-Id&quot;],
+    expose_headers=[&quot;Mcp-Session-Id&quot;],
+)
+
+if __name__ == &quot;__main__&quot;:
+    uvicorn.run(app, host=os.environ.get(&quot;DEMO_MCP_BIND&quot;, &quot;127.0.0.1&quot;), port=8765)
+</pre></div></div></details>
+<h3>手机访问 / 部署到 VPS 时怎么接</h3><p>手机上的 localhost 是手机自己。要从手机连接电脑或 VPS，请使用它实际可达的服务地址。公网方式需要 HTTPS、Bearer 验证和准确的 Host/Origin 配置；不用把所有主机或来源都放开。</p>
+<div class="table-wrap"><table><caption>演示服务的部署配置</caption><thead><tr><th>变量</th><th>设置</th></tr></thead><tbody><tr><td>DEMO_MCP_TOKEN</td><td>自定随机令牌，服务与小手机 Token 栏一致；放私有环境文件或服务秘密配置。</td></tr><tr><td>DEMO_UI_ORIGIN</td><td>实际小手机来源，例如 https://float.yanny.top，不带末尾 /。</td></tr><tr><td>DEMO_MCP_HOST</td><td>对外 MCP 主机名，例如 mcp-demo.yanny.top；不是完整 URL。</td></tr><tr><td>DEMO_MCP_BIND</td><td>默认 127.0.0.1。本 VPS 的 Caddy 在 Docker 中，若走 host.docker.internal，可选实际宿主桥接地址 172.17.0.1，并确认该地址存在。</td></tr></tbody></table></div>
+<p>在本 VPS 上的完整接入顺序：先配置进程托管与私有环境文件，确认后端已监听；再创建橙云子域并添加 Caddy HTTPS 反代；验证远程 /mcp；最后在小手机填 HTTPS URL、关闭直连、填 Token 和发现工具。下面只是拟添加的站点片段，不要覆盖整份 Caddyfile。<strong>本次没有部署这个演示服务或创建 DNS。</strong></p>
+<div class="copy-block code-block"><div class="copy-head"><span>本 VPS 的 Caddy 示例 · 后端与 DNS 就绪后才适用</span><button class="copy" type="button">复制配置</button></div><pre>mcp-demo.yanny.top {
+    import cloudflare_origin_tls
+    reverse_proxy host.docker.internal:8765
+}</pre></div>
+<p class="note">用该片段时，服务的 DEMO_MCP_BIND、DEMO_MCP_HOST 与实际连接必须一致。后端负责 Token 验证；不要把 Token 写在 URL 或 Caddy 访问日志中。需要保持运行时由 systemd 等托管，不要把终端前台运行误当永久部署。</p>
+<h3>以后如何扩展成自己的生活记录服务</h3><p>换算工具的函数体现了基本结构：描述输入 → 验证 → 执行业务 → 返回小而清楚的结果。要做记心情/查打卡，增加相应工具函数和持久存储，并明确日期、账号范围和重复提交的处理；只改工具名不会自动获得数据库或手机系统权限。更换外部 API 也同理。</p>
+</section>
+<section id="compose" class="chapter">
+  <div class="eyebrow">13 / 整理与组合</div><h2>套件放一起，组合按顺序做</h2>
+  <div class="table-wrap"><table><caption>三个概念的区别</caption><thead><tr><th>类型</th><th>作用</th><th>例子</th></tr></thead><tbody><tr><td>套件</td><td>把多个工具归类，提供服务入口</td><td>“资料助手”里放搜索和读网页</td></tr><tr><td>组合工具</td><td>按步骤执行，传递输入和结果</td><td>搜索 → 提取 URL → 读取网页</td></tr><tr><td>Custom APP Tools</td><td>APP 注册并执行共享动作</td><td>APP 注册了“添加记录”，角色才有此动作</td></tr></tbody></table></div>
+  <h3>如何建立一个套件</h3><p>点对应区域的<strong>添加套件</strong>，填名称与描述，再添加子工具；也可在单个工具编辑页选择“所属套件”。相关套件和子工具需要启用。套件不会自动把里面的动作全部执行一遍。</p>
+  <h3>如何建立一个组合工具</h3><ol class="steps"><li>分别测试组成流程的基础工具。</li><li>在组合工具区域添加工具，定义用户要输入的参数。</li><li>按顺序添加步骤，选择各步骤调用的工具。</li><li>把输入或前一步结果传给下一步，设置最终输出。</li><li>用已知输入运行，核对每一步结果。</li></ol>
+  <details class="lesson"><summary>进阶：参数传递长什么样？</summary><div class="detail-body"><p><code>{{input.query}}</code> 表示用户输入的 query；<code>{{steps.search.data}}</code> 表示名为 search 的步骤输出；<code>{{last.data}}</code> 表示最后一步输出。</p><p>搜索返回可能是 JSON 字符串，不能把整段当网页地址。要先提取实际 URL，必要时用脚本步骤处理。按实际返回结构配置，不要猜字段名。</p><div class="copy-block"><div class="copy-head"><span>让角色根据实际返回配置</span><button class="copy" type="button">复制话术</button></div><pre>先查看现有搜索工具和网页读取工具的定义及返回结构。用工具箱管理创建“搜索并读一篇文章”的组合工具：接收关键词，搜索，提取一个有效网页 URL，再读取正文。无法确定字段时先告诉我，不要猜。</pre></div></div></details>
+  <h3>自定义 APP 的工具在哪里改？</h3><p>工具箱可显示和启停共享的 APP 工具，逻辑由 APP 定义。不是每个 APP 都有聊天工具；未显示时先查 APP 是否声明了共享动作，而不是重复安装 MCP。</p>
+  <h3>导入与导出</h3><p>工具箱右上角菜单可导入、导出工具 JSON，方便转移配置。它不是任意 MCP 软件的安装器，外部服务和账号仍需可用。</p>
+  <p class="notice"><strong>分享前检查导出文件。</strong>当前导出复制工具和 MCP 配置，可能包含固定参数、请求头、访问 Token 等凭据。分享时制作去掉密钥的副本，不要直接发送正在使用的完整导出。</p>
+</section>
+<section id="composite-reference" class="chapter">
+<div class="eyebrow">14 / 组合工具参考</div><h2>一份可以逐格照填的组合流程</h2>
+<p>先配好并单独测试“参考_POST回显”。这个组合的完整路径是：输入 → POST 回显 → JS 提取结果 → 返回精简 JSON。</p>
+<ol class="steps"><li>在组合工具区创建“参考_回显并整理”，AI 参数定义使用上面 POST 练习的同一份 Schema。</li><li>添加第一步：类别 REST，动作名称“参考_POST回显”，保存为 echo；填写下面的参数模板。</li><li>添加第二步：类别脚本，保存为 cleaned，参数模板填 {}；粘贴下面的脚本。</li><li>最终输出模板填 <code>{{steps.cleaned.data}}</code>，保存并开启组合及依赖工具。</li><li>发送测试话术，核对返回字段和类型。</li></ol>
+<div class="copy-block code-block"><div class="copy-head"><span>第一步：参数模板</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;text&quot;: &quot;{{input.text}}&quot;,
+  &quot;repeat&quot;: &quot;{{input.repeat}}&quot;,
+  &quot;active&quot;: &quot;{{input.active}}&quot;
+}</pre></div>
+<div class="copy-block code-block"><div class="copy-head"><span>第二步：脚本内容</span><button class="copy" type="button">复制内容</button></div><pre>const response = steps.echo.json;
+if (!response || typeof response !== 'object' || !response.json) {
+  throw new Error('没有完整的回显 JSON；请检查上一步返回、网络状态和截断。');
+}
+const body = response.json;
+return {
+  message: body.payload.text,
+  count: body.payload.repeat,
+  active: body.payload.active,
+  source: body.source
+};</pre></div>
+<div class="copy-block"><div class="copy-head"><span>测试完整流程</span><button class="copy" type="button">复制话术</button></div><pre>请运行“参考_回显并整理”，text 用“你好，工具箱”，repeat 用数字 2，active 用 true。把真实返回结果给我。</pre></div>
+<div class="copy-block code-block"><div class="copy-head"><span>预期结果 · 键顺序可以不同</span><button class="copy" type="button">复制 JSON</button></div><pre>{"message":"你好，工具箱","count":2,"active":true,"source":"float-handbook"}</pre></div>
+<h3>不想逐格填：导入演示配置</h3><p>下面的文件包含以上两个工具，不含密钥，导入后均为停用。工具箱右上角 → 导入工具 → 选择 JSON → 检查后逐个开启。导入会生成新 ID、处理重名并重映射组合依赖；反复导入会得到副本，不是更新已有工具。</p>
+<a class="download-link" download="float-toolbox-reference-demo.json" href="data:application/json;charset=utf-8,%7B%0A%20%20%22format%22%3A%20%22ai-phone-toolbox%22%2C%0A%20%20%22version%22%3A%201%2C%0A%20%20%22exportedAt%22%3A%20%222026-09-08T00%3A00%3A00.000Z%22%2C%0A%20%20%22restPackages%22%3A%20%5B%5D%2C%0A%20%20%22compositePackages%22%3A%20%5B%5D%2C%0A%20%20%22mcpServers%22%3A%20%5B%5D%2C%0A%20%20%22restTools%22%3A%20%5B%0A%20%20%20%20%7B%0A%20%20%20%20%20%20%22id%22%3A%20%22reference_demo_echo_20260908%22%2C%0A%20%20%20%20%20%20%22name%22%3A%20%22%E5%8F%82%E8%80%83_POST%E5%9B%9E%E6%98%BE%22%2C%0A%20%20%20%20%20%20%22description%22%3A%20%22%E6%8A%8A%E6%B5%8B%E8%AF%95%E6%96%87%E5%AD%97%E3%80%81%E6%95%B0%E5%AD%97%E5%92%8C%E5%B8%83%E5%B0%94%E5%80%BC%E5%8F%91%E9%80%81%E5%88%B0%E5%9B%9E%E6%98%BE%E6%9C%8D%E5%8A%A1%EF%BC%8C%E7%94%A8%E6%9D%A5%E6%A3%80%E6%9F%A5%20REST%20%E5%8F%82%E6%95%B0%E9%85%8D%E7%BD%AE%22%2C%0A%20%20%20%20%20%20%22endpoint%22%3A%20%22https%3A%2F%2Fhttpbin.org%2Fpost%22%2C%0A%20%20%20%20%20%20%22method%22%3A%20%22POST%22%2C%0A%20%20%20%20%20%20%22headers%22%3A%20%7B%0A%20%20%20%20%20%20%20%20%22X-Guide-Demo%22%3A%20%22float-reference%22%0A%20%20%20%20%20%20%7D%2C%0A%20%20%20%20%20%20%22fixedParams%22%3A%20%7B%0A%20%20%20%20%20%20%20%20%22demoSource%22%3A%20%22float-handbook%22%0A%20%20%20%20%20%20%7D%2C%0A%20%20%20%20%20%20%22bodyTemplate%22%3A%20%22%7B%5Cn%20%20%5C%22payload%5C%22%3A%20%7B%5Cn%20%20%20%20%5C%22text%5C%22%3A%20%5C%22%7B%7Btext%7D%7D%5C%22%2C%5Cn%20%20%20%20%5C%22repeat%5C%22%3A%20%5C%22%7B%7Brepeat%7D%7D%5C%22%2C%5Cn%20%20%20%20%5C%22active%5C%22%3A%20%5C%22%7B%7Bactive%7D%7D%5C%22%5Cn%20%20%7D%2C%5Cn%20%20%5C%22source%5C%22%3A%20%5C%22%7B%7BdemoSource%7D%7D%5C%22%5Cn%7D%22%2C%0A%20%20%20%20%20%20%22parameterSchema%22%3A%20%22%7B%5Cn%20%20%5C%22type%5C%22%3A%20%5C%22object%5C%22%2C%5Cn%20%20%5C%22properties%5C%22%3A%20%7B%5Cn%20%20%20%20%5C%22text%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22type%5C%22%3A%20%5C%22string%5C%22%2C%5Cn%20%20%20%20%20%20%5C%22description%5C%22%3A%20%5C%22%E6%9C%AC%E6%AC%A1%E5%9B%9E%E6%98%BE%E7%9A%84%E6%B5%8B%E8%AF%95%E6%96%87%E5%AD%97%5C%22%5Cn%20%20%20%20%7D%2C%5Cn%20%20%20%20%5C%22repeat%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22type%5C%22%3A%20%5C%22integer%5C%22%2C%5Cn%20%20%20%20%20%20%5C%22minimum%5C%22%3A%201%2C%5Cn%20%20%20%20%20%20%5C%22maximum%5C%22%3A%203%2C%5Cn%20%20%20%20%20%20%5C%22description%5C%22%3A%20%5C%22%E6%BC%94%E7%A4%BA%E6%95%B0%E5%AD%97%E7%B1%BB%E5%9E%8B%EF%BC%8C%E5%A1%AB%201%E2%80%933%5C%22%5Cn%20%20%20%20%7D%2C%5Cn%20%20%20%20%5C%22active%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22type%5C%22%3A%20%5C%22boolean%5C%22%2C%5Cn%20%20%20%20%20%20%5C%22description%5C%22%3A%20%5C%22%E6%BC%94%E7%A4%BA%E5%B8%83%E5%B0%94%E7%B1%BB%E5%9E%8B%EF%BC%8C%E5%A1%AB%20true%20%E6%88%96%20false%5C%22%5Cn%20%20%20%20%7D%5Cn%20%20%7D%2C%5Cn%20%20%5C%22required%5C%22%3A%20%5B%5Cn%20%20%20%20%5C%22text%5C%22%2C%5Cn%20%20%20%20%5C%22repeat%5C%22%2C%5Cn%20%20%20%20%5C%22active%5C%22%5Cn%20%20%5D%5Cn%7D%22%2C%0A%20%20%20%20%20%20%22directFetch%22%3A%20false%2C%0A%20%20%20%20%20%20%22enabled%22%3A%20false%2C%0A%20%20%20%20%20%20%22createdBy%22%3A%20%22user%22%2C%0A%20%20%20%20%20%20%22createdAt%22%3A%200%2C%0A%20%20%20%20%20%20%22updatedAt%22%3A%200%0A%20%20%20%20%7D%0A%20%20%5D%2C%0A%20%20%22compositeTools%22%3A%20%5B%0A%20%20%20%20%7B%0A%20%20%20%20%20%20%22id%22%3A%20%22reference_demo_composite_20260908%22%2C%0A%20%20%20%20%20%20%22name%22%3A%20%22%E5%8F%82%E8%80%83_%E5%9B%9E%E6%98%BE%E5%B9%B6%E6%95%B4%E7%90%86%22%2C%0A%20%20%20%20%20%20%22description%22%3A%20%22%E5%85%88%E8%B0%83%E7%94%A8%20POST%20%E5%9B%9E%E6%98%BE%EF%BC%8C%E5%86%8D%E4%BB%8E%E7%BB%93%E6%9E%9C%E9%87%8C%E6%8F%90%E5%8F%96%E5%8E%9F%E5%A7%8B%E7%B1%BB%E5%9E%8B%E7%9A%84%E6%95%B0%E6%8D%AE%22%2C%0A%20%20%20%20%20%20%22parameterSchema%22%3A%20%22%7B%5Cn%20%20%5C%22type%5C%22%3A%20%5C%22object%5C%22%2C%5Cn%20%20%5C%22properties%5C%22%3A%20%7B%5Cn%20%20%20%20%5C%22text%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22type%5C%22%3A%20%5C%22string%5C%22%2C%5Cn%20%20%20%20%20%20%5C%22description%5C%22%3A%20%5C%22%E6%9C%AC%E6%AC%A1%E5%9B%9E%E6%98%BE%E7%9A%84%E6%B5%8B%E8%AF%95%E6%96%87%E5%AD%97%5C%22%5Cn%20%20%20%20%7D%2C%5Cn%20%20%20%20%5C%22repeat%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22type%5C%22%3A%20%5C%22integer%5C%22%2C%5Cn%20%20%20%20%20%20%5C%22minimum%5C%22%3A%201%2C%5Cn%20%20%20%20%20%20%5C%22maximum%5C%22%3A%203%2C%5Cn%20%20%20%20%20%20%5C%22description%5C%22%3A%20%5C%22%E6%BC%94%E7%A4%BA%E6%95%B0%E5%AD%97%E7%B1%BB%E5%9E%8B%EF%BC%8C%E5%A1%AB%201%E2%80%933%5C%22%5Cn%20%20%20%20%7D%2C%5Cn%20%20%20%20%5C%22active%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22type%5C%22%3A%20%5C%22boolean%5C%22%2C%5Cn%20%20%20%20%20%20%5C%22description%5C%22%3A%20%5C%22%E6%BC%94%E7%A4%BA%E5%B8%83%E5%B0%94%E7%B1%BB%E5%9E%8B%EF%BC%8C%E5%A1%AB%20true%20%E6%88%96%20false%5C%22%5Cn%20%20%20%20%7D%5Cn%20%20%7D%2C%5Cn%20%20%5C%22required%5C%22%3A%20%5B%5Cn%20%20%20%20%5C%22text%5C%22%2C%5Cn%20%20%20%20%5C%22repeat%5C%22%2C%5Cn%20%20%20%20%5C%22active%5C%22%5Cn%20%20%5D%5Cn%7D%22%2C%0A%20%20%20%20%20%20%22enabled%22%3A%20false%2C%0A%20%20%20%20%20%20%22createdBy%22%3A%20%22user%22%2C%0A%20%20%20%20%20%20%22createdAt%22%3A%200%2C%0A%20%20%20%20%20%20%22updatedAt%22%3A%200%2C%0A%20%20%20%20%20%20%22steps%22%3A%20%5B%0A%20%20%20%20%20%20%20%20%7B%0A%20%20%20%20%20%20%20%20%20%20%22id%22%3A%20%22echo_step%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22name%22%3A%20%22%E5%8F%91%E9%80%81%E5%9B%9E%E6%98%BE%E8%AF%B7%E6%B1%82%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22toolType%22%3A%20%22rest%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22toolName%22%3A%20%22%E5%8F%82%E8%80%83_POST%E5%9B%9E%E6%98%BE%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22toolId%22%3A%20%22reference_demo_echo_20260908%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22saveAs%22%3A%20%22echo%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22argsTemplate%22%3A%20%22%7B%5Cn%20%20%5C%22text%5C%22%3A%20%5C%22%7B%7Binput.text%7D%7D%5C%22%2C%5Cn%20%20%5C%22repeat%5C%22%3A%20%5C%22%7B%7Binput.repeat%7D%7D%5C%22%2C%5Cn%20%20%5C%22active%5C%22%3A%20%5C%22%7B%7Binput.active%7D%7D%5C%22%5Cn%7D%22%0A%20%20%20%20%20%20%20%20%7D%2C%0A%20%20%20%20%20%20%20%20%7B%0A%20%20%20%20%20%20%20%20%20%20%22id%22%3A%20%22extract_step%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22name%22%3A%20%22%E6%95%B4%E7%90%86%E5%9B%9E%E6%98%BE%E7%BB%93%E6%9E%9C%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22toolType%22%3A%20%22script%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22saveAs%22%3A%20%22cleaned%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22argsTemplate%22%3A%20%22%7B%7D%22%2C%0A%20%20%20%20%20%20%20%20%20%20%22script%22%3A%20%22const%20response%20%3D%20steps.echo.json%3B%5Cnif%20(!response%20%7C%7C%20typeof%20response%20!%3D%3D%20'object'%20%7C%7C%20!response.json)%20%7B%5Cn%20%20throw%20new%20Error('%E6%B2%A1%E6%9C%89%E5%AE%8C%E6%95%B4%E7%9A%84%E5%9B%9E%E6%98%BE%20JSON%EF%BC%9B%E8%AF%B7%E6%A3%80%E6%9F%A5%E4%B8%8A%E4%B8%80%E6%AD%A5%E8%BF%94%E5%9B%9E%E3%80%81%E7%BD%91%E7%BB%9C%E7%8A%B6%E6%80%81%E5%92%8C%E6%88%AA%E6%96%AD%E3%80%82')%3B%5Cn%7D%5Cnconst%20body%20%3D%20response.json%3B%5Cnreturn%20%7B%5Cn%20%20message%3A%20body.payload.text%2C%5Cn%20%20count%3A%20body.payload.repeat%2C%5Cn%20%20active%3A%20body.payload.active%2C%5Cn%20%20source%3A%20body.source%5Cn%7D%3B%22%0A%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%5D%2C%0A%20%20%20%20%20%20%22outputTemplate%22%3A%20%22%7B%7Bsteps.cleaned.data%7D%7D%22%0A%20%20%20%20%7D%0A%20%20%5D%0A%7D">下载两个演示工具的导入配置（JSON） ↓</a><details class="lesson"><summary>查看导入文件完整内容</summary><div class="detail-body"><div class="copy-block code-block"><div class="copy-head"><span>工具箱导入 JSON</span><button class="copy" type="button">复制内容</button></div><pre>{
+  &quot;format&quot;: &quot;ai-phone-toolbox&quot;,
+  &quot;version&quot;: 1,
+  &quot;exportedAt&quot;: &quot;2026-09-08T00:00:00.000Z&quot;,
+  &quot;restPackages&quot;: [],
+  &quot;compositePackages&quot;: [],
+  &quot;mcpServers&quot;: [],
+  &quot;restTools&quot;: [
+    {
+      &quot;id&quot;: &quot;reference_demo_echo_20260908&quot;,
+      &quot;name&quot;: &quot;参考_POST回显&quot;,
+      &quot;description&quot;: &quot;把测试文字、数字和布尔值发送到回显服务，用来检查 REST 参数配置&quot;,
+      &quot;endpoint&quot;: &quot;https://httpbin.org/post&quot;,
+      &quot;method&quot;: &quot;POST&quot;,
+      &quot;headers&quot;: {
+        &quot;X-Guide-Demo&quot;: &quot;float-reference&quot;
+      },
+      &quot;fixedParams&quot;: {
+        &quot;demoSource&quot;: &quot;float-handbook&quot;
+      },
+      &quot;bodyTemplate&quot;: &quot;{\n  \&quot;payload\&quot;: {\n    \&quot;text\&quot;: \&quot;{{text}}\&quot;,\n    \&quot;repeat\&quot;: \&quot;{{repeat}}\&quot;,\n    \&quot;active\&quot;: \&quot;{{active}}\&quot;\n  },\n  \&quot;source\&quot;: \&quot;{{demoSource}}\&quot;\n}&quot;,
+      &quot;parameterSchema&quot;: &quot;{\n  \&quot;type\&quot;: \&quot;object\&quot;,\n  \&quot;properties\&quot;: {\n    \&quot;text\&quot;: {\n      \&quot;type\&quot;: \&quot;string\&quot;,\n      \&quot;description\&quot;: \&quot;本次回显的测试文字\&quot;\n    },\n    \&quot;repeat\&quot;: {\n      \&quot;type\&quot;: \&quot;integer\&quot;,\n      \&quot;minimum\&quot;: 1,\n      \&quot;maximum\&quot;: 3,\n      \&quot;description\&quot;: \&quot;演示数字类型，填 1–3\&quot;\n    },\n    \&quot;active\&quot;: {\n      \&quot;type\&quot;: \&quot;boolean\&quot;,\n      \&quot;description\&quot;: \&quot;演示布尔类型，填 true 或 false\&quot;\n    }\n  },\n  \&quot;required\&quot;: [\n    \&quot;text\&quot;,\n    \&quot;repeat\&quot;,\n    \&quot;active\&quot;\n  ]\n}&quot;,
+      &quot;directFetch&quot;: false,
+      &quot;enabled&quot;: false,
+      &quot;createdBy&quot;: &quot;user&quot;,
+      &quot;createdAt&quot;: 0,
+      &quot;updatedAt&quot;: 0
+    }
+  ],
+  &quot;compositeTools&quot;: [
+    {
+      &quot;id&quot;: &quot;reference_demo_composite_20260908&quot;,
+      &quot;name&quot;: &quot;参考_回显并整理&quot;,
+      &quot;description&quot;: &quot;先调用 POST 回显，再从结果里提取原始类型的数据&quot;,
+      &quot;parameterSchema&quot;: &quot;{\n  \&quot;type\&quot;: \&quot;object\&quot;,\n  \&quot;properties\&quot;: {\n    \&quot;text\&quot;: {\n      \&quot;type\&quot;: \&quot;string\&quot;,\n      \&quot;description\&quot;: \&quot;本次回显的测试文字\&quot;\n    },\n    \&quot;repeat\&quot;: {\n      \&quot;type\&quot;: \&quot;integer\&quot;,\n      \&quot;minimum\&quot;: 1,\n      \&quot;maximum\&quot;: 3,\n      \&quot;description\&quot;: \&quot;演示数字类型，填 1–3\&quot;\n    },\n    \&quot;active\&quot;: {\n      \&quot;type\&quot;: \&quot;boolean\&quot;,\n      \&quot;description\&quot;: \&quot;演示布尔类型，填 true 或 false\&quot;\n    }\n  },\n  \&quot;required\&quot;: [\n    \&quot;text\&quot;,\n    \&quot;repeat\&quot;,\n    \&quot;active\&quot;\n  ]\n}&quot;,
+      &quot;enabled&quot;: false,
+      &quot;createdBy&quot;: &quot;user&quot;,
+      &quot;createdAt&quot;: 0,
+      &quot;updatedAt&quot;: 0,
+      &quot;steps&quot;: [
+        {
+          &quot;id&quot;: &quot;echo_step&quot;,
+          &quot;name&quot;: &quot;发送回显请求&quot;,
+          &quot;toolType&quot;: &quot;rest&quot;,
+          &quot;toolName&quot;: &quot;参考_POST回显&quot;,
+          &quot;toolId&quot;: &quot;reference_demo_echo_20260908&quot;,
+          &quot;saveAs&quot;: &quot;echo&quot;,
+          &quot;argsTemplate&quot;: &quot;{\n  \&quot;text\&quot;: \&quot;{{input.text}}\&quot;,\n  \&quot;repeat\&quot;: \&quot;{{input.repeat}}\&quot;,\n  \&quot;active\&quot;: \&quot;{{input.active}}\&quot;\n}&quot;
+        },
+        {
+          &quot;id&quot;: &quot;extract_step&quot;,
+          &quot;name&quot;: &quot;整理回显结果&quot;,
+          &quot;toolType&quot;: &quot;script&quot;,
+          &quot;saveAs&quot;: &quot;cleaned&quot;,
+          &quot;argsTemplate&quot;: &quot;{}&quot;,
+          &quot;script&quot;: &quot;const response = steps.echo.json;\nif (!response || typeof response !== 'object' || !response.json) {\n  throw new Error('没有完整的回显 JSON；请检查上一步返回、网络状态和截断。');\n}\nconst body = response.json;\nreturn {\n  message: body.payload.text,\n  count: body.payload.repeat,\n  active: body.payload.active,\n  source: body.source\n};&quot;
+        }
+      ],
+      &quot;outputTemplate&quot;: &quot;{{steps.cleaned.data}}&quot;
+    }
+  ]
+}</pre></div></div></details>
+<h3>每个组合字段的含义</h3><div class="table-wrap"><table><caption>组合步骤与变量</caption><thead><tr><th>字段 / 变量</th><th>说明</th></tr></thead><tbody><tr><td>类别 toolType</td><td>auto / rest / internal / mcp / composite / script；能确定类型时直接选。</td></tr><tr><td>动作名称 toolName</td><td>填写具体动作，不填 MCP 服务名或套件名。非脚本步骤必须有名称。</td></tr><tr><td>toolId / serverId</td><td>分别用于精确选择 REST/组合工具，或 MCP 服务器；重名时尤其有用。</td></tr><tr><td>保存为 saveAs</td><td>推荐唯一的英文字段，如 echo。留空回退步骤 ID，再回退 stepN；重名会覆盖之前保存的结果。</td></tr><tr><td>参数模板 argsTemplate</td><td>编辑器里是合法 JSON 对象文本。完整占位符保留类型，混合文字是字符串；缺失路径在组合渲染中返回空字符串。</td></tr><tr><td>input / args</td><td>input 是组合最初输入；脚本里的 args 是该步骤参数模板渲染后的值。</td></tr><tr><td>steps / last</td><td>步骤结果含 name、success、data、json、error、userNotice；json 是 data 可解析时的对象，否则 undefined。</td></tr><tr><td>context</td><td>脚本的 context 是工具/步骤 ID、名称等元信息，不是完整聊天记录。</td></tr><tr><td>最终输出</td><td>可用 {{last.data}} 或 {{steps.echo.json.someField}}；留空时返回各步骤摘要。输出仍可能截断。</td></tr></tbody></table></div>
+<h3>停止、嵌套和脚本边界</h3><p>步骤按顺序执行；任一步失败立即停止，不回滚已经完成的外部写入。一次组合调用内部的步骤不等于模型轮数。最多允许顶层组合再调用一层子组合，继续嵌套会报“层级过深”。不能靠循环嵌套制造无限工作流。</p><p>脚本支持 await / return，并运行在浏览器环境，可访问 window、document、localStorage、fetch 等；<strong>它不是隔离沙箱</strong>，也没有承诺自动中止所有脚本的统一超时。只导入你信任的脚本；纯数据整理通常只需要 input、steps 和 return。</p>
+<h3>把 MCP 放进组合</h3><p>先在 MCP 页面发现工具，再在组合步骤选 MCP，动作名填清单中的原始动作名，必要时填服务器 ID。不要把服务名称当动作。参数模板按该动作的 inputSchema 写；前一步返回的文本未必是 JSON，先核对结果再引用 .json。</p>
+<h3>把“搜索 → 读网页”做成组合</h3><p>按 REST 搜索 → 脚本提取 URL → REST 查看网页的顺序，第二步只在搜索结果 JSON 完整时提取 results[0].url；第三步传 {"url":"{{steps.pick.json.url}}"}。如果搜索结果在 2,000 字符处截断，先缩减源结果，不要盲目 JSON.parse 或假设 URL 仍完整。上面的回显练习用于先掌握不会依赖复杂返回的基础流程。</p>
+</section>
+<section id="recipes" class="chapter">
+  <div class="eyebrow">15 / 使用场景</div><h2>从一个动作，玩到一串事情</h2><p>以下是可以组合出来的用法，不代表已替你开启或连接。先准备对应工具，再把话术发给角色。</p>
+  <article class="recipe"><div class="recipe-top"><span class="small-label">本地资料库 + 日历管理</span><span class="recipe-index">A</span></div><h3>找回约定，再排进日程</h3><div class="copy-block"><div class="copy-head"><span>先查，确认后再写</span><button class="copy" type="button">复制话术</button></div><pre>用本地资料库查我们之前提过的“看电影”，再查看你本周日程。先给我两个时间建议，等我选好后再添加日程。</pre></div><p class="result">先核对引用；选好时间后，再核对当前角色日程。</p></article>
+  <article class="recipe"><div class="recipe-top"><span class="small-label">搜索 + 查看网页</span><span class="recipe-index">B</span></div><h3>一起研究一个新兴趣</h3><div class="copy-block"><div class="copy-head"><span>带来源的入门建议</span><button class="copy" type="button">复制话术</button></div><pre>我想开始养薄荷。请搜索资料，再读取两篇有用的网页，告诉我第一周该做什么，每条建议附来源。工具失败时不要假装读过。</pre></div><p class="result">点开来源核对；连续读多篇时，可能涉及多轮调用。</p></article>
+  <article class="recipe"><div class="recipe-top"><span class="small-label">音乐 + 稍后主动联系</span><span class="recipe-index">C</span></div><h3>陪你完成一段专注时间</h3><div class="copy-block"><div class="copy-head"><span>在普通单聊使用</span><button class="copy" type="button">复制话术</button></div><pre>我准备专注 20 分钟。请用音乐工具播放一首合适的歌，再用稍后主动联系约定 20 分钟后问问我的进度。</pre></div><p class="result">确认音乐播放且预约成功；需要准点响铃时另设系统计时器。</p></article>
+  <article class="recipe"><div class="recipe-top"><span class="small-label">Notion MCP</span><span class="recipe-index">D</span></div><h3>把计划收进外部笔记</h3><div class="copy-block"><div class="copy-head"><span>先确认目标页面</span><button class="copy" type="button">复制话术</button></div><pre>用 Notion 搜索我的“旅行计划”页面，把候选标题和链接给我。先不要修改；我指定目标页面后，再把刚才确认的计划追加进去。</pre></div><p class="result">确认目标后再追加，回 Notion 核对。提示词里的等待要求不是技术权限隔离。</p></article>
+</section>
+<section id="fix" class="chapter">
+  <div class="eyebrow">16 / 排查</div><h2>没有成功，先找卡在哪一步</h2><p>按“角色拿到工具了吗 → 发起调用了吗 → 服务返回了吗 → 目标变化了吗”的顺序看，不用先改一堆设置。</p>
+  <div class="table-wrap"><table><caption>常见问题与下一步</caption><thead><tr><th>现象</th><th>常见原因</th><th>先做这一件事</th></tr></thead><tbody>
+  <tr><td>角色说不会用，或只口头答应</td><td>工具关闭、预设缺入口、模型没调用</td><td>检查开关和预设的“聊天工具箱”条目，再明确工具名重试</td></tr>
+  <tr><td>单聊能用，线下模式不能用</td><td>普通工具流程不用于线下模式</td><td>回普通单聊测试</td></tr>
+  <tr><td>本地资料库查不到</td><td>关键词、路径不合适，或此设备没数据</td><td>先列目录，再缩小到 /chat 等范围搜索</td></tr>
+  <tr><td>MCP 没动作 / 动作未找到</td><td>未发现工具、列表过期或调用了服务器名</td><td>重新“发现工具”，检查具体动作清单</td></tr>
+  <tr><td>401 鉴权失败</td><td>应用登录过期、Token 错误或需要授权</td><td>读完整报错，先区分小手机登录与 MCP 鉴权，再处理对应一方</td></tr>
+  <tr><td>403 / 权限不足</td><td>账号无权访问对象或服务拒绝</td><td>到服务里核对账号能否访问目标</td></tr>
+  <tr><td>不允许代理访问本机或内网</td><td>服务端代理阻止私有地址</td><td>核对设备与地址，使用符合要求的直连或远程 HTTPS 服务</td></tr>
+  <tr><td>直连失败 / CORS 错误</td><td>不可达、不允许跨域或用了旧 SSE</td><td>检查可达性、CORS 和 Streamable HTTP</td></tr>
+  <tr><td>429、超时、服务不可用</td><td>限流、额度不足、网络或服务故障</td><td>核对服务状态与额度；不要靠提高轮数反复冲请求</td></tr>
+  <tr><td>多步任务做到一半结束</td><td>达到轮数上限或某一步失败</td><td>看最后一步结果，只是轮数不足时再调高上限</td></tr>
+  <tr><td>约好稍后联系，但没收到</td><td>静默、预约被替换、推送或安静时段</td><td>确认预约成功，再查推送配置与安静时段</td></tr>
+  <tr><td>读不了某个网页</td><td>登录、反爬、限流或无法提取正文</td><td>换公开可访问链接，确认工具本身是否正常</td></tr>
+  </tbody></table></div>
+  <h3>工具轮数上限怎么选？</h3><p>顶部可设 <strong>3 / 5 / 8 / 12 / 20</strong>，默认 5。限制一条消息最多进行几轮调用，每轮对应一次模型请求，同轮可以有多条动作。基础查询先保留 5，确认需要更多步骤后再提高。更多轮可能增加等待时间和模型用量，不会解决错误的接口配置。</p>
+  <div class="copy-block"><div class="copy-head"><span>排查时发给角色</span><button class="copy" type="button">复制话术</button></div><pre>刚才的任务没有完成。请告诉我实际调用的工具名、哪一步失败，以及工具返回的错误；不要输出密钥或 Token。如果没有发起调用，也请明确说明。</pre></div><p class="note">以实际工具返回、请求记录和目标服务结果为准，角色对自己行为的描述也可能不准确。</p>
+</section>
+<section id="reference" class="chapter">
+  <div class="eyebrow">17 / 速查与依据</div><h2>不需要一次记住这些词</h2>
+  <dl class="glossary"><div><dt>API Key / Token</dt><dd>服务用来识别和授权请求的凭据，填到对应配置栏。</dd></div><div><dt>OAuth</dt><dd>通过服务商登录页面授权账号访问的一种方式。</dd></div><div><dt>JSON Schema</dt><dd>描述参数格式：叫什么、什么类型、是否必填。</dd></div><div><dt>MCP 服务 / 客户端</dt><dd>外部服务提供工具；小手机作为客户端连接并调用。</dd></div><div><dt>CORS / 跨域</dt><dd>浏览器是否允许网页请求另一个来源的规则，需要目标服务配合。</dd></div><div><dt>Streamable HTTP / stdio</dt><dd>MCP 的不同通信方式；小手机接入优先用 HTTP 地址，stdio 是本地进程通信。</dd></div></dl>
+  <h3>覆盖与验证范围</h3><p>本版覆盖当前工具箱的静态能力与连接机制：10 项能力、41 项固定动作（含 1 个有条件出现的入口）、6 个内置组合、角色电脑 5 种 op、动态现实桥动作规则、REST / MCP / 组合 / APP 配置。第三方服务按其实际发现清单决定动作；不宣称穷举互联网全部 MCP。</p><p>已核对源码、动作 Schema、JSON 示例、演示参数模板和生成网页。账号授权、iPhone 快捷指令、推送与外部服务需要在你的设备上实测。手册不保存任何账号凭据；操作例子不是已执行记录。</p><h3>这份手册依据什么？</h3><p>依据 2026-09-08 核对的项目源码，说明实现与默认值；没有读取你的浏览器配置，也不代表完成了第三方服务连接测试。更新后的界面或服务可能有差异。</p>
+  <div class="sources"><a href="https://github.com/yanny0616-glitch/ai-virtual-phone/blob/bfb7554608e7c028a9233fbeb5f2303f14165f5d/lib/builtin-phone-workflows.ts" target="_blank" rel="noopener noreferrer">六项内置查手机组合 ↗</a><a href="https://github.com/yanny0616-glitch/ai-virtual-phone/blob/bfb7554608e7c028a9233fbeb5f2303f14165f5d/lib/chat-engine.ts" target="_blank" rel="noopener noreferrer">聊天工具启用与上下文条件 ↗</a><a href="https://github.com/yanny0616-glitch/ai-virtual-phone/blob/bfb7554608e7c028a9233fbeb5f2303f14165f5d/components/reality-bridge-app.tsx" target="_blank" rel="noopener noreferrer">现实桥向导与回传模式 ↗</a><a href="https://github.com/yanny0616-glitch/ai-virtual-phone/blob/bfb7554608e7c028a9233fbeb5f2303f14165f5d/lib/local-data-fs.ts" target="_blank" rel="noopener noreferrer">本地资料库分页与扫描限制 ↗</a><a href="https://github.com/yanny0616-glitch/ai-virtual-phone/blob/bfb7554608e7c028a9233fbeb5f2303f14165f5d/lib/internal-capability-storage.ts" target="_blank" rel="noopener noreferrer">内置能力、默认状态与动作定义 ↗</a><a href="https://github.com/yanny0616-glitch/ai-virtual-phone/blob/bfb7554608e7c028a9233fbeb5f2303f14165f5d/components/settings/toolbox-settings.tsx" target="_blank" rel="noopener noreferrer">编辑界面、导入与导出 ↗</a><a href="https://github.com/yanny0616-glitch/ai-virtual-phone/blob/bfb7554608e7c028a9233fbeb5f2303f14165f5d/lib/tool-executor.ts" target="_blank" rel="noopener noreferrer">工具执行与 MCP 连接实现 ↗</a><a href="https://github.com/yanny0616-glitch/ai-virtual-phone/blob/bfb7554608e7c028a9233fbeb5f2303f14165f5d/lib/tool-storage.ts" target="_blank" rel="noopener noreferrer">网页、天气、搜索的内置配置 ↗</a><a href="https://developers.notion.com/guides/mcp/get-started-with-mcp" target="_blank" rel="noopener noreferrer">Notion 官方连接文档 ↗</a><a href="https://developers.notion.com/guides/mcp/mcp-supported-tools" target="_blank" rel="noopener noreferrer">Notion 官方工具清单 ↗</a><a href="https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" target="_blank" rel="noopener noreferrer">MCP 通信方式说明 ↗</a></div>
+  <div class="finish"><div><span class="small-label">现在就试一次</span><h3>先成功调用一个工具。</h3><p>不必配齐所有服务。回到开头，查一条聊天记录。</p></div><a class="button" href="#start">回到 2 分钟练习 ↑</a></div>
+</section>
+<footer><span>Float · 工具箱与 MCP 使用手册</span><a href="#start">回到顶部 ↑</a></footer>
+</main></div><div id="announcement" role="status" aria-live="polite" class="sr-only"></div>
+<script>
+const status = document.querySelector('#announcement');
+document.querySelectorAll('.copy').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const pre = button.closest('.copy-block').querySelector('pre');
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard-unavailable');
+      await navigator.clipboard.writeText(pre.textContent.trim());
+      button.textContent = '已复制 ✓';
+      status.textContent = '已复制，可以粘贴到小手机。';
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      button.textContent = '请长按正文复制';
+      status.textContent = '自动复制不可用，已选中内容，请手动复制。';
+    }
+  });
+});
+const links = [...document.querySelectorAll('.sidebar nav a')];
+const sections = [...document.querySelectorAll('main > section')];
+function updateCurrentSection() {
+  const current = sections.filter((section) => section.getBoundingClientRect().top <= 150).at(-1) || sections[0];
+  for (const link of links) {
+    if (link.hash === `#${current.id}`) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  }
+}
+let framePending = false;
+window.addEventListener('scroll', () => {
+  if (framePending) return;
+  framePending = true;
+  requestAnimationFrame(() => { updateCurrentSection(); framePending = false; });
+}, { passive: true });
+updateCurrentSection();
+function revealAnchor() {
+  if (!location.hash) return;
+  let id;
+  try { id = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+  const target = document.getElementById(id);
+  if (!target) return;
+  let item = target;
+  while (item) {
+    if (item.tagName === 'DETAILS') item.open = true;
+    item = item.parentElement;
+  }
+  requestAnimationFrame(() => target.scrollIntoView({ block:'start' }));
+}
+window.addEventListener('hashchange', revealAnchor);
+revealAnchor();
+
+</script>
+</body></html>
