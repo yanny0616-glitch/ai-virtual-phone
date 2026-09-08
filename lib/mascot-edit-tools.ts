@@ -26,6 +26,7 @@ export const EDIT_GUIDE = `===== 共同编辑流程 =====
 - scope=desktop 返回准确图标名称/ID、位置、Dock、文件夹及组件实例配置、模板目录。DIY 源码用读取DIY组件，可分段（nextOffset=null 才读完）。内置组件源码不开放，只能改实例配置/位置。
 - 移动已有组件：widget.update.id 取 widgets[].id，patch 只改 page/row/col；不要用 widget.place 重建已有组件。新增现有款：widget.place.type 取 builtins[].type 或 templates[].id，不能填中文名称或桌面实例 ID。
 - 新建搭配卡并先看效果：在同一准备方案中使用 template.create + place，例如 {"action":"template.create","patch":"{\\"name\\":\\"搭配卡\\",\\"size\\":\\"2x2\\",\\"mode\\":\\"code\\",\\"htmlString\\":\\"<p>今日小记</p>\\"}","place":{"page":2,"row":1,"col":1}}。位置应按已读取的占位选择。模板 ID 由宿主生成，不能自造 ID 再接 widget.place；多张卡每张一个 template.create + place，保留原组件时不删除或重建它们。准备后调用预览修改；用户要求先预览时不应用，不能为拿模板 ID 提前应用。
+- 只改样式/源码或移动组件时不要把读取的 config 整份回填；宿主会保留最新组件配置，后台刷新不会单独使这类方案失效。只有确实要修改配置时才传 patch.config；涉及配置写入或删除组件时仍检查完整版本。源码、位置、模板等结构变化必须重读。
 - “找不到组件类型”是动作参数错误，应按报错中的类型和动作序号纠正，不要只反复读取 desktop。新建模板用 template.create + place；内容版本真正变化时才按版本冲突提示重新读取。
 - template.update 更新所有同款。长代码可用 patch.htmlEdits=[{find,replace}] 精确替换唯一原文，未命中或多处命中会拒绝。只改一张用 widget.update 的 templatePatch 复制模板并替换该实例。单改 config 用 patch.config 合并；需要换模板可用 patch.type。改尺寸放不下会拒绝整个方案，不会把原卡偷偷移走。
 - desktop.arrange 传最终布局；支持交换、跨页、文件夹及 Dock 整理。保留全部图标、文件夹至少两个成员、Dock 最多四个、不容许重叠。placements 只传要移动的组件。空页可以保留。

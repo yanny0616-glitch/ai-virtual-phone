@@ -259,3 +259,76 @@ const appearanceRead=store.readEditObject('appearance');
 await store.prepareEdit([{action:'appearance.update',patch:{globalCustomCSS:'.new{}'}}],[appearanceRead.read],'只改 CSS');
 await assert.rejects(store.prepareEdit([{action:'appearance.update',patch:{wallpaperAssetId:'missing-new'}}],[appearanceRead.read],'缺失素材'),/找不到外观素材/);
 console.log('PASS asset validation: unchanged missing assets do not block unrelated edits; new missing assets rejected before draft persistence.');
+
+// Real read -> background config save -> prepare -> more background saves ->
+// apply/undo. Use the actual store and routing; never suppress real conflicts.
+const baselineCache=new Map(cache);
+function restoreBaseline(){cache.clear();for(const [key,value] of baselineCache)cache.set(key,value);}
+function updateLiveConfig(id,patch){const widgets=stored(K.widgets,[]);const widget=widgets.find(w=>w.id===id);widget.config={...widget.config,...patch};cache.set(K.widgets,JSON.stringify(widgets));}
+async function readLiveContext(){const ctx={pageContext:{}};await registry.executeMascotToolCall({name:'读取编辑对象',args:{scope:'desktop'}},ctx);await registry.executeMascotToolCall({name:'读取DIY组件',args:{widgetId:'w1'}},ctx);return ctx;}
+const stylePatch={htmlEdits:[{find:'原卡',replace:'奶油绿天气卡'}]};
+for(const operation of [
+  {action:'template.update',id:'diy-a',patch:stylePatch},
+  {action:'widget.update',id:'w1',templatePatch:stylePatch},
+  {action:'widget.update',id:'w1',patch:{row:3}},
+]){
+  restoreBaseline();const liveCtx=await readLiveContext();
+  const initialDesktop=plain(store.readEditState().desktop);
+  updateLiveConfig('w1',{weatherUpdatedAt:100,weather:{temperature:25}});
+  const prepared=await registry.executeMascotToolCall({name:'准备修改',args:{title:'天气自动更新期间编辑',operations:[operation]}},liveCtx);
+  assert.equal(prepared.success,true,prepared.error);const id=JSON.parse(prepared.data).id;
+  assert.equal(store.readEditJournal().find(p=>p.id===id).preserveWidgetConfig,true);
+  assert.equal(store.readEditState().templates[0].htmlString,initial().templates[0].htmlString,'prepare must not apply style');
+  updateLiveConfig('w1',{weatherUpdatedAt:200,weather:{temperature:26},image:'new-user-photo'});
+  updateLiveConfig('w2',{otherCache:'updated'});
+  const applied=await registry.executeMascotToolCall({name:'应用修改',args:{id}},liveCtx);
+  assert.equal(applied.success,true,applied.error);
+  assert.equal(store.readEditState().desktop.widgets[0].config.weatherUpdatedAt,200);
+  assert.equal(store.readEditState().desktop.widgets[0].config.image,'new-user-photo');
+  assert.equal(store.readEditState().desktop.widgets[1].config.otherCache,'updated');
+  if(operation.action==='template.update')assert.match(store.readEditState().templates[0].htmlString,/奶油绿天气卡/);
+  if(operation.templatePatch)assert.notEqual(store.readEditState().desktop.widgets[0].type,'diy-a');
+  updateLiveConfig('w1',{weatherUpdatedAt:300});
+  const reverted=await registry.executeMascotToolCall({name:'撤销修改',args:{id}},liveCtx);
+  assert.equal(reverted.success,true,reverted.error);
+  assert.equal(store.readEditState().desktop.widgets[0].type,initialDesktop.widgets[0].type);
+  assert.equal(store.readEditState().desktop.widgets[0].row,initialDesktop.widgets[0].row);
+  assert.equal(store.readEditState().desktop.widgets[0].config.weatherUpdatedAt,300,'undo preserves newest runtime config');
+  assert.equal(store.readEditState().templates[0].htmlString,initial().templates[0].htmlString);
+}
+for(const unsafeOp of [
+  {action:'widget.update',id:'w1',patch:{config:{city:'北京'}}},
+  {action:'widget.remove',id:'w1'},
+  {action:'template.remove',id:'diy-a'},
+]){
+  restoreBaseline();const liveCtx=await readLiveContext();updateLiveConfig('w1',{weatherUpdatedAt:999});
+  const failed=await registry.executeMascotToolCall({name:'准备修改',args:{title:'不能覆盖配置',operations:[unsafeOp]}},liveCtx);
+  assert.equal(failed.success,false);assert.match(failed.error,/组件配置.*不能覆盖/);
+}
+for(const mutate of [
+  ()=>{const templates=stored(K.templates,[]);templates[0].htmlString='<p>用户后改源码</p>';cache.set(K.templates,JSON.stringify(templates));},
+  ()=>{const layout=stored(K.layout,{});layout.page1[0].row=6;cache.set(K.layout,JSON.stringify(layout));},
+]){
+  for(const afterPrepare of [false,true]){
+    restoreBaseline();const liveCtx=await readLiveContext();
+    const request={name:'准备修改',args:{title:'保护源码和布局',operations:[{action:'widget.update',id:'w1',templatePatch:stylePatch}]}};
+    const prepared=afterPrepare?await registry.executeMascotToolCall(request,liveCtx):null;
+    mutate();
+    const failed=await registry.executeMascotToolCall(afterPrepare?{name:'应用修改',args:{id:JSON.parse(prepared.data).id}}:request,liveCtx);
+    assert.equal(failed.success,false);assert.match(failed.error,/变化/);
+  }
+}
+restoreBaseline();
+const newCtx=await readLiveContext();
+const newDraft=await registry.executeMascotToolCall({name:'准备修改',args:{title:'新增卡片撤销保护',operations:[{action:'template.create',patch:{name:'卡片',size:'2x2',mode:'code',htmlString:'<p>卡</p>'},place:{page:2}}]}},newCtx);
+const newId=JSON.parse(newDraft.data).id;assert.equal((await registry.executeMascotToolCall({name:'应用修改',args:{id:newId}},newCtx)).success,true);
+const newWidget=store.readEditState().desktop.widgets.at(-1);updateLiveConfig(newWidget.id,{image:'new-upload-after-apply'});
+const failedUndo=await registry.executeMascotToolCall({name:'撤销修改',args:{id:newId}},newCtx);
+assert.equal(failedUndo.success,false);assert.match(failedUndo.error,/配置.*不能移除/);
+restoreBaseline();
+const legacyRead=store.readEditObject('desktop').read;delete legacyRead.structureRevision;
+const oldDraft=await store.prepareEdit([{action:'widget.update',id:'w1',patch:{row:3}}],[legacyRead],'旧版读取兼容');
+assert.equal(oldDraft.preserveWidgetConfig,undefined);updateLiveConfig('w1',{weatherUpdatedAt:123});
+await assert.rejects(store.commitEdit(oldDraft.id),/变化/);
+restoreBaseline();
+console.log('PASS live config: template style/single-instance copy/move survive background saves through read, prepare, apply and undo; newest config preserved; config edits, deletion, layout/source conflicts, new-widget undo and old drafts stay protected.');

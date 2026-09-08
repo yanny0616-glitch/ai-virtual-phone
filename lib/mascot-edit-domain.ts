@@ -13,10 +13,10 @@ export type EditState = {
   appearance: ThemeProfile;
 };
 export type EditScope = 'characters' | 'character' | 'desktop' | 'appearance';
-export type EditRead = { scope: EditScope; id?: string; revision: string };
+export type EditRead = { scope: EditScope; id?: string; revision: string; structureRevision?: string };
 export type EditOperation = Record<string, unknown> & { action: string };
 export type EditDelta = { scope: 'character' | 'template' | 'desktop' | 'appearance'; id?: string; before: unknown; after: unknown };
-export type EditPlan = { id: string; title: string; createdAt: string; status: 'draft' | 'applied' | 'undone'; reads: EditRead[]; deltas: EditDelta[]; appliedAt?: string; undoneAt?: string };
+export type EditPlan = { id: string; title: string; createdAt: string; status: 'draft' | 'applied' | 'undone'; reads: EditRead[]; deltas: EditDelta[]; preserveWidgetConfig?: boolean; appliedAt?: string; undoneAt?: string };
 export const cloneEdit = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 export function stableEdit(value: unknown): string {
   if (value === undefined) return 'null';
@@ -36,6 +36,22 @@ export function editScopeValue(state: EditState, scope: EditScope, id?: string):
   if (scope === 'desktop') return { ...state.desktop, templates: state.templates };
   if (scope === 'appearance') return state.appearance;
   throw Error('未知读取范围');
+}
+function desktopWithoutConfig(desktop: EditState['desktop']): EditState['desktop'] {
+  return { ...desktop, widgets: desktop.widgets.map(widget => { const copy = { ...widget }; delete copy.config; return copy; }) };
+}
+export function desktopStructureRevision(state: EditState): string {
+  return editRevision({ ...desktopWithoutConfig(state.desktop), templates: state.templates });
+}
+export function createDesktopEditRead(state: EditState): EditRead {
+  return { scope: 'desktop', revision: editRevision(editScopeValue(state, 'desktop')), structureRevision: desktopStructureRevision(state) };
+}
+function preservesWidgetConfig(operations: EditOperation[]): boolean {
+  return operations.every(op => {
+    if (['desktop.arrange', 'template.create', 'template.update', 'widget.place'].includes(op.action)) return true;
+    if (op.action === 'widget.update') return !op.patch || !own(object(op.patch), 'config');
+    return requiredEditScope(op).scope !== 'desktop';
+  });
 }
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 function object(value: unknown): Record<string, unknown> {
@@ -285,10 +301,19 @@ export function requiredEditScope(op: EditOperation): { scope: EditScope; id?: s
 }
 export function planEdits(state: EditState, operations: EditOperation[], reads: EditRead[], env: { now: string; uid: () => string; knownIcons: string[] }, title: string): EditPlan {
   if (!operations.length || operations.length > 50) throw Error('每个方案需要 1–50 个动作');
+  const preserveWidgetConfig = reads.some(read => read.scope === 'desktop' && read.structureRevision) && preservesWidgetConfig(operations);
   for (const op of operations) {
     const needed = requiredEditScope(op);
     const read = reads.find(r => r.scope === needed.scope && r.id === needed.id);
-    if (!read || read.revision !== editRevision(editScopeValue(state, read.scope, read.id))) throw Error(`请先重新读取 ${needed.scope}${needed.id ? ':' + needed.id : ''}，内容未读取或已变化`);
+    const label = `${needed.scope}${needed.id ? ':' + needed.id : ''}`;
+    if (!read) throw Error(`请先重新读取 ${label}：本轮没有该对象的读取记录`);
+    const current = editRevision(editScopeValue(state, read.scope, read.id));
+    if (read.revision !== current && !(read.scope === 'desktop' && preserveWidgetConfig && read.structureRevision === desktopStructureRevision(state))) {
+      const detail = read.scope === 'desktop' && read.structureRevision === desktopStructureRevision(state)
+        ? '组件配置在读取后发生变化；本方案会修改配置或删除组件，不能覆盖最新数据'
+        : '对象内容在读取后发生变化（桌面包含布局、模板源码和组件结构）';
+      throw Error(`请先重新读取 ${label}：${detail}`);
+    }
   }
   const next = cloneEdit(state);
   for (const [index, op] of operations.entries()) {
@@ -305,15 +330,28 @@ export function planEdits(state: EditState, operations: EditOperation[], reads: 
   }
   for (const scope of ['desktop', 'appearance'] as const) if (stableEdit(state[scope]) !== stableEdit(next[scope])) deltas.push({ scope, before: state[scope], after: next[scope] });
   if (!deltas.length) throw Error('没有实际变化');
-  return cloneEdit({ id: `edit-${env.uid()}`, title: title.trim().slice(0, 100) || '小卷修改', createdAt: env.now, status: 'draft', reads, deltas });
+  return cloneEdit({ id: `edit-${env.uid()}`, title: title.trim().slice(0, 100) || '小卷修改', createdAt: env.now, status: 'draft', reads, deltas, ...(preserveWidgetConfig ? { preserveWidgetConfig: true } : {}) });
 }
-export function applyEditDeltas(state: EditState, deltas: EditDelta[], undo = false): EditState {
+export function applyEditDeltas(state: EditState, deltas: EditDelta[], undo = false, preserveWidgetConfig = false): EditState {
   const next = cloneEdit(state);
   // Validate every target before applying anything. Other characters/templates survive unchanged.
   for (const d of deltas) {
     const rows = d.scope === 'character' ? next.characters : next.templates;
     const current = d.scope === 'character' || d.scope === 'template' ? rows.find(r => r.id === d.id) ?? null : next[d.scope];
-    if (stableEdit(current) !== stableEdit(undo ? d.after : d.before)) throw Error(`「${d.id || d.scope}」在此方案之后已被修改，请重新读取；不会覆盖后续修改`);
+    const expected = undo ? d.after : d.before;
+    const same = d.scope === 'desktop' && preserveWidgetConfig
+      ? stableEdit(desktopWithoutConfig(current as EditState['desktop'])) === stableEdit(desktopWithoutConfig(expected as EditState['desktop']))
+      : stableEdit(current) === stableEdit(expected);
+    if (!same) throw Error(`「${d.id || d.scope}」在此方案之后已被修改，请重新读取；不会覆盖后续修改`);
+    if (d.scope === 'desktop' && preserveWidgetConfig) {
+      const target = (undo ? d.before : d.after) as EditState['desktop'];
+      const previous = expected as EditState['desktop'];
+      for (const widget of next.desktop.widgets) {
+        if (!target.widgets.some(w => w.id === widget.id) && stableEdit(widget.config) !== stableEdit(previous.widgets.find(w => w.id === widget.id)?.config)) {
+          throw Error(`组件 ${widget.id} 的配置在此方案之后已被修改，不能移除并丢失最新数据`);
+        }
+      }
+    }
   }
   for (const d of deltas) {
     const value = cloneEdit(undo ? d.before : d.after);
@@ -324,7 +362,18 @@ export function applyEditDeltas(state: EditState, deltas: EditDelta[], undo = fa
       if (value === null) { if (index >= 0) rows.splice(index, 1); }
       else if (index >= 0) rows[index] = value as Character | DIYWidgetTemplate;
       else rows.push(value as Character | DIYWidgetTemplate);
-    } else Object.assign(next, { [d.scope]: value });
+    } else {
+      if (d.scope === 'desktop' && preserveWidgetConfig) {
+        const desktop = value as EditState['desktop'];
+        for (const widget of desktop.widgets) {
+          const current = next.desktop.widgets.find(w => w.id === widget.id);
+          if (!current) continue;
+          if (own(current, 'config')) widget.config = cloneEdit(current.config);
+          else delete widget.config;
+        }
+      }
+      Object.assign(next, { [d.scope]: value });
+    }
   }
   return next;
 }

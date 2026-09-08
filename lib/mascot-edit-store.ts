@@ -8,7 +8,7 @@ import { normalizeThemeProfile } from './theme-types';
 import { ICONS } from './desktop-config';
 import { loadInstalledCustomApps } from './custom-app-storage';
 import { WIDGET_CATALOG } from './widget-types';
-import { applyEditDeltas, editRevision, editScopeValue, planEdits, stableEdit, validateEditDesktop, type EditState, type EditScope, type EditPlan, type EditRead, type EditOperation } from './mascot-edit-domain';
+import { applyEditDeltas, createDesktopEditRead, desktopStructureRevision, editRevision, editScopeValue, planEdits, stableEdit, validateEditDesktop, type EditState, type EditScope, type EditPlan, type EditRead, type EditOperation } from './mascot-edit-domain';
 
 const JOURNAL_KEY = 'ai_phone_mascot_edits_v1';
 const CHARACTERS_KEY = 'ai_phone_characters_v1';
@@ -48,7 +48,7 @@ export function readEditObject(scope: EditScope, id?: string) {
   if (scope !== 'character') id = undefined;
   const state = readEditState(); const value = editScopeValue(state, scope, id);
   if (scope === 'character' && !value) throw Error('找不到该角色 ID');
-  const read: EditRead = { scope, ...(id ? { id } : {}), revision: editRevision(value) };
+  const read: EditRead = scope === 'desktop' ? createDesktopEditRead(state) : { scope, ...(id ? { id } : {}), revision: editRevision(value) };
   if (scope === 'characters') return { read, characters: state.characters.map(c => ({ id: c.id, name: c.name, tags: c.tags ?? [], timeZone: c.timeZone, revision: editRevision(c) })), fields: CHARACTER_EDIT_FIELDS };
   if (scope === 'character') return { read, character: value, fields: CHARACTER_EDIT_FIELDS };
   if (scope === 'appearance') return { read, appearance: value, assetIds: collectThemeAssetIds(state.appearance), fields: APPEARANCE_EDIT_FIELDS };
@@ -66,7 +66,7 @@ export function readDiyEditObject(args: { templateId?: string; widgetId?: string
   const offset = args.offset ?? 0, limit = args.limit ?? 30_000;
   if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 60_000) throw Error('offset 需要非负整数，limit 为 1–60000');
   const html = template.htmlString ?? '';
-  return { read: { scope: 'desktop', revision: editRevision(editScopeValue(state, 'desktop')) }, template: { ...template, htmlString: html.slice(offset, offset + limit) }, offset, totalLength: html.length, nextOffset: offset + limit < html.length ? offset + limit : null, instances: state.desktop.widgets.filter(w => w.type === template.id), selectedInstance: instance ?? null };
+  return { read: createDesktopEditRead(state), template: { ...template, htmlString: html.slice(offset, offset + limit) }, offset, totalLength: html.length, nextOffset: offset + limit < html.length ? offset + limit : null, instances: state.desktop.widgets.filter(w => w.type === template.id), selectedInstance: instance ?? null };
 }
 async function validateChangedAssets(plan: EditPlan) {
   const assets = new Set<string>();
@@ -114,9 +114,12 @@ export async function commitEdit(id: string, undo = false): Promise<EditPlan> {
     if (plan.status !== (undo ? 'applied' : 'draft')) throw Error('方案状态不允许此操作');
     const current = readEditState();
     if (!undo) for (const read of plan.reads) {
-      if (read.revision !== editRevision(editScopeValue(current, read.scope, read.id))) throw Error('预览之后原内容已变化，请重新读取并准备方案');
+      const preserveConfig = read.scope === 'desktop' && plan.preserveWidgetConfig && read.structureRevision;
+      const expected = preserveConfig ? read.structureRevision : read.revision;
+      const actual = preserveConfig ? desktopStructureRevision(current) : editRevision(editScopeValue(current, read.scope, read.id));
+      if (expected !== actual) throw Error('预览之后原内容已变化，请重新读取并准备方案');
     }
-    const next = applyEditDeltas(current, plan.deltas, undo);
+    const next = applyEditDeltas(current, plan.deltas, undo, plan.preserveWidgetConfig === true);
     if (plan.deltas.some(d => d.scope === 'desktop' || d.scope === 'template')) validateEditDesktop(next, editIconCatalog().map(i => i.id));
     const before = rawState(current), after = rawState(next);
     const changes = Object.keys(after).filter(key => before[key] !== after[key]).map(key => ({ key, expected: kvGet(key), value: after[key] }));
