@@ -219,7 +219,16 @@ function applyOperation(state: EditState, op: EditOperation, env: { now: string;
     case 'widget.place': {
       const type = requiredText(op.type, '组件类型');
       const template = state.templates.find(t => t.id === type); const built = WIDGET_CATALOG.find(t => t.type === type);
-      if (!template && !built) throw Error('找不到组件类型');
+      if (!template && !built) {
+        const instance = state.desktop.widgets.find(w => w.id === type);
+        const matches = [...state.templates.map(t => ({ name: t.name, type: t.id })), ...WIDGET_CATALOG].filter(t => t.name === type);
+        const hint = instance
+          ? `传入的是桌面实例 ID。移动已有组件请用 widget.update 的 id=${JSON.stringify(instance.id)}；新增同款的 type=${JSON.stringify(instance.type)}。`
+          : matches.length
+            ? `传入的是显示名称。请根据目标从以下准确类型中选择：${matches.map(t => JSON.stringify(t.type)).join('、')}。`
+            : 'type 必须取自读取结果的 builtins[].type 或 templates[].id，不能自行编造。若要新建搭配卡，用 template.create 的 patch 创建模板，并在同一动作的 place 填位置；宿主生成 ID，不要再用猜测的 ID 调用 widget.place。';
+        throw Error(`找不到组件类型 ${JSON.stringify(type)}。${hint}这是类型参数错误，不是读取版本过期；请纠正动作后重新准备。`);
+      }
       const w: WidgetInstance = { id: `widget-${uid()}`, type, size: (template ?? built)!.size, page: op.page === undefined ? 1 : integer(op.page, 1, 50, '页码'), row: 1, col: 1 };
       if (op.row !== undefined || op.col !== undefined) { w.row = integer(op.row, 1, GRID_ROWS, '行'); w.col = integer(op.col, 1, GRID_COLS, '列'); state.desktop.widgets.push(w); }
       else {
@@ -282,7 +291,10 @@ export function planEdits(state: EditState, operations: EditOperation[], reads: 
     if (!read || read.revision !== editRevision(editScopeValue(state, read.scope, read.id))) throw Error(`请先重新读取 ${needed.scope}${needed.id ? ':' + needed.id : ''}，内容未读取或已变化`);
   }
   const next = cloneEdit(state);
-  for (const op of operations) applyOperation(next, op, env);
+  for (const [index, op] of operations.entries()) {
+    try { applyOperation(next, op, env); }
+    catch (error) { throw Error(`第 ${index + 1} 个动作（${op.action}）：${error instanceof Error ? error.message : String(error)}`); }
+  }
   if (stableEdit(state.desktop) !== stableEdit(next.desktop)) validateEditDesktop(next, env.knownIcons);
   const deltas: EditDelta[] = [];
   for (const [scope, oldRows, newRows] of [['character', state.characters, next.characters], ['template', state.templates, next.templates]] as const) {

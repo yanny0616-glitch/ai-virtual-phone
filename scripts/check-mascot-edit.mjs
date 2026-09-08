@@ -156,6 +156,43 @@ cache.set(K.layout,layoutBeforeLegacy);
 console.log('PASS legacy receipts: unrelated stale desktop does not block role edit; actual role conflict still rejects.');
 // Real registry aliases and tool definitions for both protocols.
 const registry=runtime('lib/mascot-tools.ts');
+// A rejected widget type must identify the failed operation and give a usable
+// correction. Preparing any failed batch must leave desktop and journal intact.
+const cardCtx={pageContext:{}};
+await registry.executeMascotToolCall({name:'读取编辑对象',args:{scope:'desktop'}},cardCtx);
+const beforeCards=plain(store.readEditState());
+const journalBeforeCards=cache.get('ai_phone_mascot_edits_v1');
+for(const [type,expected] of [['w1',/桌面实例 ID.*widget.update/],['天气',/显示名称.*diy-a/],['diy-new-card',/template.create.*place/]]){
+  const rejected=await registry.executeMascotToolCall({name:'准备修改',args:{title:'新增卡片',operations:[
+    {action:'template.create',patch:{name:'搭配卡',size:'2x2',mode:'code',htmlString:'<p>卡片</p>'}},
+    {action:'widget.place',type,page:2},
+  ]}},cardCtx);
+  assert.equal(rejected.success,false);
+  assert.match(rejected.error,/第 2 个动作（widget.place）/);assert.ok(rejected.error.includes(JSON.stringify(type)));
+  assert.match(rejected.error,expected);assert.match(rejected.error,/不是读取版本过期/);
+  assert.equal(cache.get('ai_phone_mascot_edits_v1'),journalBeforeCards);
+  assert.deepEqual(plain(store.readEditState()),beforeCards,'invalid batch must not create a template or alter desktop');
+}
+const guideMatch=tools.EDIT_GUIDE.match(/例如 (\{[^\n]+?)。位置/);assert.ok(guideMatch);
+const guideCard=JSON.parse(guideMatch[1]);assert.equal(guideCard.action,'template.create');
+assert.equal(JSON.parse(guideCard.patch).size,'2x2');
+const cardOps=[{action:'desktop.arrange',patch:{layout:{...beforeCards.desktop.layout,page3:[],page4:[]}}}];
+for(let page=1;page<=4;page++)cardOps.push({...guideCard,place:{page,row:3,col:1}});
+const cardsDraft=await registry.executeMascotToolCall({name:'准备修改',args:{title:'四页桌面先预览',operations:cardOps}},cardCtx);
+assert.equal(cardsDraft.success,true,cardsDraft.error);
+const cardsId=JSON.parse(cardsDraft.data).id;
+const cardPlan=store.readEditJournal().find(p=>p.id===cardsId);
+const projected=D.applyEditDeltas(beforeCards,cardPlan.deltas);
+assert.deepEqual(plain(projected.desktop.widgets.slice(0,beforeCards.desktop.widgets.length)),beforeCards.desktop.widgets,'keep existing widget IDs, content and placements');
+assert.deepEqual(plain(projected.desktop.layout.page1),beforeCards.desktop.layout.page1);
+const newCards=projected.desktop.widgets.slice(beforeCards.desktop.widgets.length);
+assert.deepEqual(plain(newCards.map(w=>w.page)),[1,2,3,4]);
+assert.ok(newCards.every(w=>projected.templates.some(t=>t.id===w.type)),'use generated template IDs without guessing');
+previewMounted=true;
+try{assert.equal((await registry.executeMascotToolCall({name:'预览修改',args:{id:cardsId}},cardCtx)).success,true);}finally{previewMounted=false;}
+assert.equal(store.readEditJournal().find(p=>p.id===cardsId).status,'draft');
+assert.deepEqual(plain(store.readEditState()),beforeCards,'four-page preview must not apply any edits');
+console.log('PASS widget type recovery: failed action/type, instance/name/unknown hints, atomic failure, actual guide example, four-page draft with new cards and original widgets preserved, preview without apply.');
 const previewCtx={pageContext:{}};
 await registry.executeMascotToolCall({name:'读取角色',args:{id:'a'}},previewCtx);
 const beforePreview=plain(store.readEditState().characters);

@@ -12,11 +12,11 @@ const PREPARE_SCHEMA = obj({
   reads: { type: 'array', description: '兼容旧调用，可省略。宿主使用本轮真实读取时保存的版本记录，不采用模型填入的 reads；不要自行生成版本。修改前仍须调用读取工具。', items: obj({ scope: { type: 'string', enum: ['characters', 'character', 'desktop', 'appearance'] }, id: str('角色 ID'), revision: str('读取结果中的 revision') }, ['scope', 'revision']) },
   operations: { type: 'array', minItems: 1, maxItems: 50, items: obj({
     action: { type: 'string', enum: ['character.create', 'character.update', 'template.create', 'template.update', 'template.remove', 'widget.update', 'widget.place', 'widget.remove', 'desktop.arrange', 'appearance.update'] },
-    id: str('角色、模板或实例的准确 ID'), type: str('widget.place 的内置类型或 DIY 模板 ID'),
+    id: str('更新/删除目标的准确 ID。新建角色/模板的 ID 由宿主生成，不在这里指定'), type: str('仅 widget.place：必须是读取结果 builtins[].type 或 templates[].id，不能填显示名称、widgets[].id 或自造 ID。移动原组件用 widget.update；新建 DIY 用 template.create + place'),
     patch: { type: 'string', description: '字段补丁的 JSON 字符串（完整对象）。character: name/persona/personality/briefPersona/tags/addTags/removeTags/avatar/timeZone/wechatID/embeddedWorldBook。template: name/size/htmlString/htmlEdits/bgAssetId/slots；htmlEdits=[{find,replace}] 按唯一原文替换，与 htmlString 二选一。widget: page/row/col/config/type（换成现有 DIY 模板）。desktop.arrange: layout 完整 pageN 图标位置表、dock 完整 ID 数组、folders 完整成员表、placements 组件位置数组[{id,page,row,col}]；未传部分保留。appearance 的字段以读取结果为准；iconSkins/cssOverrides 按键合并。' },
     templatePatch: { type: 'string', description: 'JSON 对象字符串。仅 widget.update：复制当前 DIY 模板并修改，只替换这个实例，保留其他同款。字段同 template.patch。' },
     page: { type: 'integer', minimum: 1, maximum: 50 }, row: { type: 'integer', minimum: 1, maximum: 6 }, col: { type: 'integer', minimum: 1, maximum: 4 },
-    place: obj({ page: { type: 'integer' }, row: { type: 'integer' }, col: { type: 'integer' } }),
+    place: { ...obj({ page: { type: 'integer', minimum: 1, maximum: 50 }, row: { type: 'integer', minimum: 1, maximum: 6 }, col: { type: 'integer', minimum: 1, maximum: 4 } }), description: '仅 template.create：在创建新模板的同一动作中摆放它，自动使用宿主生成的模板 ID。page 默认 1；row/col 一起填，省略则自动找空位。只在草稿里规划，应用前不改变实际桌面' },
   }, ['action']) },
 }, ['title', 'operations']);
 const ID_SCHEMA = obj({ id: str('修改方案 ID，来自准备修改或修改记录') }, ['id']);
@@ -24,6 +24,9 @@ export const EDIT_GUIDE = `===== 共同编辑流程 =====
 先读取，再准备修改（只存草稿，不写角色/桌面），需要看效果时预览修改，用户已明确要求直接改时可以紧接应用修改。用户说“先看看/先预览”时停在草稿，不应用。应用后返回修改 ID，可用撤销修改恢复。预览窗口也有应用/撤销按钮。
 - scope=characters 列角色并供新建；修改既有角色必须 scope=character + ID，完整字段含 tags、头像、时区、微信号、卡内世界书。按名字出现多个匹配必须让用户选 ID。标签增删用 addTags/removeTags 保留其他标签。配角标签只是分类，本工具不会改变记忆库/拾光/挂念的策略。
 - scope=desktop 返回准确图标名称/ID、位置、Dock、文件夹及组件实例配置、模板目录。DIY 源码用读取DIY组件，可分段（nextOffset=null 才读完）。内置组件源码不开放，只能改实例配置/位置。
+- 移动已有组件：widget.update.id 取 widgets[].id，patch 只改 page/row/col；不要用 widget.place 重建已有组件。新增现有款：widget.place.type 取 builtins[].type 或 templates[].id，不能填中文名称或桌面实例 ID。
+- 新建搭配卡并先看效果：在同一准备方案中使用 template.create + place，例如 {"action":"template.create","patch":"{\\"name\\":\\"搭配卡\\",\\"size\\":\\"2x2\\",\\"mode\\":\\"code\\",\\"htmlString\\":\\"<p>今日小记</p>\\"}","place":{"page":2,"row":1,"col":1}}。位置应按已读取的占位选择。模板 ID 由宿主生成，不能自造 ID 再接 widget.place；多张卡每张一个 template.create + place，保留原组件时不删除或重建它们。准备后调用预览修改；用户要求先预览时不应用，不能为拿模板 ID 提前应用。
+- “找不到组件类型”是动作参数错误，应按报错中的类型和动作序号纠正，不要只反复读取 desktop。新建模板用 template.create + place；内容版本真正变化时才按版本冲突提示重新读取。
 - template.update 更新所有同款。长代码可用 patch.htmlEdits=[{find,replace}] 精确替换唯一原文，未命中或多处命中会拒绝。只改一张用 widget.update 的 templatePatch 复制模板并替换该实例。单改 config 用 patch.config 合并；需要换模板可用 patch.type。改尺寸放不下会拒绝整个方案，不会把原卡偷偷移走。
 - desktop.arrange 传最终布局；支持交换、跨页、文件夹及 Dock 整理。保留全部图标、文件夹至少两个成员、Dock 最多四个、不容许重叠。placements 只传要移动的组件。空页可以保留。
 - appearance.update 只改读取返回的外观字段。图片必须是已有主题 assetId，可先用导入桌面素材把图像套件素材导入；不能把 CSS 素材 ID 当主题 assetId。iconSkins 按图标 ID 映射；值为空字符串移除该皮肤。globalCustomCSS 是完整自定义 CSS，需要保留原规则。

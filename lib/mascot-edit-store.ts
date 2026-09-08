@@ -52,7 +52,7 @@ export function readEditObject(scope: EditScope, id?: string) {
   if (scope === 'characters') return { read, characters: state.characters.map(c => ({ id: c.id, name: c.name, tags: c.tags ?? [], timeZone: c.timeZone, revision: editRevision(c) })), fields: CHARACTER_EDIT_FIELDS };
   if (scope === 'character') return { read, character: value, fields: CHARACTER_EDIT_FIELDS };
   if (scope === 'appearance') return { read, appearance: value, assetIds: collectThemeAssetIds(state.appearance), fields: APPEARANCE_EDIT_FIELDS };
-  return { read, desktop: state.desktop, icons: editIconCatalog(), builtins: WIDGET_CATALOG, templates: state.templates.map(({ htmlString, ...t }) => ({ ...t, codeLength: htmlString?.length ?? 0 })), instructions: '模板源码用「读取DIY组件」读取；布局单位为 6 行×4 列，Dock 最多 4 个，文件夹不可进 Dock。' };
+  return { read, desktop: state.desktop, icons: editIconCatalog(), builtins: WIDGET_CATALOG, templates: state.templates.map(({ htmlString, ...t }) => ({ ...t, codeLength: htmlString?.length ?? 0 })), instructions: '模板源码用「读取DIY组件」读取；布局单位为 6 行×4 列，Dock 最多 4 个，文件夹不可进 Dock。移动已有组件用 widget.update.id=widgets[].id；新增现有款用 widget.place.type=builtins[].type 或 templates[].id，不能填显示名称或实例 ID。新建卡片并摆放用同一动作 template.create 的 patch + place，宿主生成模板 ID，不要猜 ID。所有动作先准备成草稿，先预览时不应用。' };
 }
 export const CHARACTER_EDIT_FIELDS = ['name', 'persona', 'personality', 'briefPersona', 'tags', 'addTags', 'removeTags', 'avatar', 'timeZone', 'wechatID', 'embeddedWorldBook'];
 export const APPEARANCE_EDIT_FIELDS = ['name', 'wallpaperAssetId', 'wallpaperBlur', 'wallpaperOpacity', 'wallpaperScale', 'wallpaperX', 'wallpaperY', 'iconSkins', 'dockSkinAssetId', 'fontAssetId', 'fontFamily', 'hideTopBar', 'cssOverrides', 'globalCustomCSS', 'enableGlobalShadows', 'enableGlobalBorder', 'globalBorderColor'];
