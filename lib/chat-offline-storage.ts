@@ -3,6 +3,8 @@ import { formatChatTimestamp } from "./llm-prompt-assembler";
 import { kvGet, kvRemove, kvSet, registerDynamicPrefix } from "./kv-db";
 
 const CHAT_OFFLINE_TURNS_PREFIX = "ai_phone_chat_offline_turns:";
+export const CHAT_OFFLINE_SUMMARIES_CHANGED_EVENT = "chat-offline-summaries-changed";
+export type ChatOfflineSummaryEntry = { id: string; sessionId: string; content: string; createdAt: string };
 registerDynamicPrefix(CHAT_OFFLINE_TURNS_PREFIX);
 
 export type ChatOfflineTurn = {
@@ -80,15 +82,37 @@ export function loadChatOfflineTurns(sessionId: string): ChatOfflineTurn[] {
 }
 
 export function saveChatOfflineTurns(sessionId: string, turns: ChatOfflineTurn[]): void {
+    const previous = loadChatOfflineSummaryEntries(sessionId);
     const normalized = turns
         .map(normalizeTurn)
         .filter((turn): turn is ChatOfflineTurn => Boolean(turn))
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     kvSet(storageKey(sessionId), JSON.stringify(normalized));
+    emitSummaryChanges(sessionId, previous);
 }
 
 export function clearChatOfflineTurns(sessionId: string): void {
+    const previous = loadChatOfflineSummaryEntries(sessionId);
     kvRemove(storageKey(sessionId));
+    emitSummaryChanges(sessionId, previous);
+}
+
+/** Stored summary only; display regex, user input, narrative and reasoning are excluded. */
+export function loadChatOfflineSummaryEntries(sessionId: string): ChatOfflineSummaryEntry[] {
+    return loadChatOfflineTurns(sessionId).filter(turn => turn.summary.trim()).map(turn => ({
+        id: `offline-summary:${turn.id}`, sessionId, content: turn.summary.trim().slice(0, 500), createdAt: turn.createdAt,
+    }));
+}
+function emitSummaryChanges(sessionId: string, previous: ChatOfflineSummaryEntry[]): void {
+    if (typeof window === "undefined") return;
+    const current = loadChatOfflineSummaryEntries(sessionId);
+    const old = new Map(previous.map(entry => [entry.id, entry]));
+    const ids = new Set(current.map(entry => entry.id));
+    const entries = current.filter(entry => JSON.stringify(entry) !== JSON.stringify(old.get(entry.id)));
+    const deletedIds = previous.filter(entry => !ids.has(entry.id)).map(entry => entry.id);
+    if (entries.length || deletedIds.length) window.dispatchEvent(new CustomEvent(CHAT_OFFLINE_SUMMARIES_CHANGED_EVENT, {
+        detail: { sessionId, entries, deletedIds },
+    }));
 }
 
 export function appendChatOfflineTurn(input: {

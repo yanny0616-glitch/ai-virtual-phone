@@ -31,6 +31,9 @@ import { BottomSheet, ConfirmDialog, TextExpandModal } from "@/components/ui/mod
 import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
 import { completePresetFeatures } from "@/lib/preset-feature-repair";
+import { BUILTIN_PRESET_ID } from "@/lib/builtin-preset";
+import { diffPresetEntries, syncPresetEntries, type PresetEntryDiff } from "@/lib/preset-entry-sync";
+import { PresetSyncDialog } from "./preset-sync-dialog";
 import { useTouchSort } from "@/lib/use-touch-sort";
 
 // ── Tag helpers for backward compat (tags[] > featureTag + followUpOnly) ──
@@ -296,6 +299,10 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
     const [expandTarget, setExpandTarget] = useState<{ identifier: string; field: string } | null>(null);
     const [importError, setImportError] = useState<string | null>(null);
     const [featureNotice, setFeatureNotice] = useState<{ presetId: string; text: string } | null>(null);
+    const [presetSync, setPresetSync] = useState<{
+        targetId: string; sourceId: string; targetName: string; sourceName: string;
+        entries: PresetEntryDiff[]; warnings: string[];
+    } | null>(null);
     const [customApps, setCustomApps] = useState<InstalledCustomApp[]>([]);
     // ── 多选模式（右滑选中 / 批量操作 / 多选拖拽） ──
     const [selectMode, setSelectMode] = useState(false);
@@ -675,6 +682,41 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                 ? `已补齐 ${result.added.length} 个条目：${result.added.map(prompt => prompt.name).join("、")}。`
                 : "功能条目已齐全；已有条目的开关保持不变。",
         });
+    };
+
+    const openPresetSync = (preset: PresetConfig) => {
+        const latest = loadPresets();
+        const target = latest.find(item => item.id === preset.id);
+        const source = latest.find(item => item.id === BUILTIN_PRESET_ID) ?? latest.find(item => item.builtIn);
+        if (!source || !target || source.id === target.id) {
+            setFeatureNotice({ presetId: preset.id, text: "未找到可用于比较的内置预设。" });
+            return;
+        }
+        setPresetSync({ targetId: target.id, sourceId: source.id, targetName: target.name, sourceName: source.name,
+            ...diffPresetEntries(target, source) });
+    };
+
+    const confirmPresetSync = (selected: PresetEntryDiff[]): string | null => {
+        if (!presetSync || !selected.length) return "请先勾选需要同步的条目。";
+        try {
+            const latest = loadPresets();
+            const target = latest.find(item => item.id === presetSync.targetId);
+            const source = latest.find(item => item.id === presetSync.sourceId);
+            if (!target || !source) return "预设已被删除，请关闭弹窗后重新选择。";
+            const currentDiff = diffPresetEntries(target, source).entries;
+            if (selected.some(entry => currentDiff.find(current => current.identifier === entry.identifier)?.reviewKey !== entry.reviewKey)) {
+                return "所选条目在预览后发生了变化，请关闭弹窗后重新比较。";
+            }
+            const result = syncPresetEntries(target, source, selected.map(entry => entry.identifier));
+            const next = latest.map(item => item.id === target.id ? { ...result.preset, updatedAt: Date.now() } : item);
+            savePresets(next);
+            setPresets(next);
+            setFeatureNotice({ presetId: target.id, text: `已同步所选条目：新增 ${result.added.length} 项，更新 ${result.updated.length} 项。已有开关和排序已保留。` });
+            setPresetSync(null);
+            return null;
+        } catch (error) {
+            return `同步未完成：${error instanceof Error ? error.message : String(error)}`;
+        }
     };
 
     const toggleGenerationParameter = (preset: PresetConfig, key: GenerationParameterKey) => {
@@ -1427,13 +1469,13 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                     <div className="flex flex-col gap-2">
                                         <button
                                             type="button"
-                                            onClick={() => completeFeatures(preset)}
+                                            onClick={() => preset.builtIn ? completeFeatures(preset) : openPresetSync(preset)}
                                             className="ui-btn ui-btn-secondary w-full min-h-[44px] focus-visible:outline-2 focus-visible:outline-offset-2"
                                         >
                                             <Plus size={16} aria-hidden="true" />
-                                            一键补齐功能条目
+                                            {preset.builtIn ? "一键补齐功能条目" : "同步内置条目"}
                                         </button>
-                                        <p className="menu-desc ts-12">为当前预设补齐缺少的必要功能入口，保留已有内容、排序和开关。</p>
+                                        <p className="menu-desc ts-12">{preset.builtIn ? "为当前预设补齐缺少的必要功能入口，保留已有内容、排序和开关。" : "先比较内置预设，勾选缺少或有差异的条目后同步；已有开关、排序及额外条目保留。"}</p>
                                         <p role="status" className="menu-desc ts-12">
                                             {featureNotice?.presetId === preset.id ? featureNotice.text : ""}
                                         </p>
@@ -1939,6 +1981,9 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                     })}
                 </>
             )}
+
+            {presetSync && <PresetSyncDialog sourceName={presetSync.sourceName} targetName={presetSync.targetName}
+                entries={presetSync.entries} warnings={presetSync.warnings} onConfirm={confirmPresetSync} onClose={() => setPresetSync(null)} />}
 
             {confirmExportId && (() => {
                 const targetPreset = presets.find(preset => preset.id === confirmExportId);

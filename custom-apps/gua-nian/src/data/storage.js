@@ -3,6 +3,7 @@
     S.settings = (rows && rows[0]) || await AiPhone.db.create("settings", { characterId: "", ...SET_DEF });
     const missing = {};
     for (const k in SET_DEF) if (S.settings[k] == null) missing[k] = SET_DEF[k];
+    if (S.settings.onlineRounds == null && S.settings.judgeLines != null) missing.onlineRounds = GuaNianHistory.guanianRoundLimit(S.settings.judgeLines);
     // 0.9.9 起默认随用随判，它唯一的出念路径是自发起念；老设置里 selfImpulseCap 还是旧默认 2 或干脆关着，不抬上去会一整天没动静
     if (S.settings.impulseMode == null && !(S.settings.selfImpulseCap >= SET_DEF.selfImpulseCap)) missing.selfImpulseCap = SET_DEF.selfImpulseCap;
     // 0.9.1 之前只挂念一个人：单个 characterId / sentinel / genTpl 折进按角色的表

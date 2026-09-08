@@ -8,7 +8,7 @@
 // Token 与取回的 key 经站点代理透传，不存储不记录。
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { Check, CloudUpload, ExternalLink, Link2, Loader2, MessageSquare, Satellite } from "lucide-react";
+import { Check, CloudUpload, ExternalLink, Loader2, MessageSquare, Satellite } from "lucide-react";
 import {
     isCloudBackupConfigured,
     loadCloudBackupConfig,
@@ -147,10 +147,6 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
     const [busy, setBusy] = useState<"organizations" | "deploy" | "connect" | null>(null);
     const [resultDialog, setResultDialog] = useState<{ title: string; text: string } | null>(null);
     const [progress, setProgress] = useState("");
-    const [linkOpen, setLinkOpen] = useState(false);
-    const [linkUrl, setLinkUrl] = useState("");
-    const [linkKey, setLinkKey] = useState("");
-    const [linkBusy, setLinkBusy] = useState(false);
     const [mirrorEnabled, setMirrorEnabled] = useState(false);
     const [mirrorBusy, setMirrorBusy] = useState(false);
     // 换设备重连（上游）：填部署时的项目地址 + service_role key，探测既有云服务并恢复本机状态
@@ -172,49 +168,6 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
         setPushActive(isPersonalPushCloudActive());
         setWeixinDeployed(Boolean(getWeixinCloudDeployedAt()));
         onConfigChanged?.();
-    };
-
-    // 多端同步只写云备份配置，不打 managedProjectRef 标记——带标记会让部署流程原地写入这个项目，
-    // 而手填地址可能是用户自己的业务库，绝不能让建表建桶碰它。
-    const openLinkForm = () => {
-        setResultDialog(null);
-        setLinkUrl(loadCloudBackupConfig().url || "");
-        setLinkKey("");
-        setLinkOpen(true);
-    };
-
-    const runLink = async () => {
-        const url = normalizeBackupUrl(linkUrl);
-        const key = linkKey.trim();
-        if (linkBusy || !url || !key) return;
-        setLinkBusy(true);
-        try {
-            // Publishable / anon key 没有写桶权限，等到 403 才报错用户很难看懂。
-            if (key.startsWith("sb_publishable_")) {
-                throw new Error("这是 Publishable key，没有写入权限。请用同一页的 Secret key（sb_secret_… 开头）。");
-            }
-            const base = loadCloudBackupConfig();
-            const probe = await testCloudBackupConnection({ ...base, url, key });
-            if (!probe.ok) throw new Error(probe.error);
-            saveCloudBackupConfig({
-                ...base,
-                url,
-                key,
-                managedProjectRef: undefined,
-                managedOrganizationSlug: undefined,
-            });
-            setLinkKey("");
-            setLinkOpen(false);
-            setResultDialog({
-                title: "接入成功",
-                text: `本机已连到 ${projectRefFromUrl(url)}。去「设置 → 数据管理 → 云端恢复」拉另一台的备份，恢复完必须彻底重启应用。`,
-            });
-        } catch (err) {
-            setResultDialog({ title: "接入失败", text: err instanceof Error ? err.message : String(err) });
-        } finally {
-            setLinkBusy(false);
-            refreshStatus();
-        }
     };
 
     const openScopeDialog = async () => {
@@ -593,7 +546,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                             if (next) {
                                 setResultDialog({
                                     title: "聊天镜像已开启",
-                                    text: "新消息会自动抄送到你自己的 Supabase，最近的单聊记录正在后台回填。如果之前没部署过最新版离线推送云函数，请先在上方重新部署一次，否则镜像会一直排队。",
+                                    text: "新消息会自动抄送到你自己的 Supabase，最近的单聊记录和线下摘要正在后台回填。如果之前没部署过最新版离线推送云函数，请先在上方重新部署一次，否则镜像会一直排队。",
                                 });
                             }
                         }}
@@ -601,7 +554,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                     <span className="menu-label flex-1">聊天镜像</span>
                 </label>
                 <span className="menu-desc !mt-0">
-                    开启后，新聊天消息（仅单聊）会抄送一份到你自己的 Supabase 项目，保留 60 天，供离线未回应降速、云端复核与挂念面板使用。本地聊天记录不受影响，云端副本可随时清空。
+                    开启后，新聊天消息和线下摘要（仅单聊）会抄送一份到你自己的 Supabase 项目，保留 60 天，供离线未回应降速、云端复核与挂念面板使用。本地聊天记录不受影响，云端副本可随时清空。
                     {!pushActive && "需要先部署离线推送。"}
                 </span>
                 {mirrorEnabled && (
@@ -642,56 +595,6 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                     </div>
                 )}
             </div>
-
-            {/* 多端同步：接入另一台设备已经建好的个人云 */}
-            {!linkOpen ? (
-                <button
-                    type="button"
-                    className="ui-btn ui-btn-outline"
-                    onClick={openLinkForm}
-                    disabled={Boolean(busy)}
-                >
-                    <Link2 size={15} /> 接入已有个人云（多端同步）
-                </button>
-            ) : (
-                <div className="flex flex-col gap-2 rounded-[16px] bg-black/[0.03] px-3.5 py-3">
-                    <span className="menu-label">接入已有个人云</span>
-                    <span className="menu-desc !mt-0">
-                        填另一台设备上那个项目的地址和 Secret key（Supabase Dashboard → 该项目 → Settings → API Keys → Secret keys，`sb_secret_…` 开头；旧项目是 service_role）。<b>不是</b> Publishable key，那个没有写入权限。两台就共用同一份云备份。接入后本机别再点上面的部署，那会另建项目并顶掉这里的配置。
-                    </span>
-                    <Input
-                        value={linkUrl}
-                        onChange={(e) => setLinkUrl(e.target.value)}
-                        placeholder="https://xxxx.supabase.co"
-                        spellCheck={false}
-                    />
-                    <Input
-                        type="password"
-                        value={linkKey}
-                        onChange={(e) => setLinkKey(e.target.value)}
-                        placeholder="sb_secret_… 或 service_role key"
-                        spellCheck={false}
-                    />
-                    <div className="flex gap-2">
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline flex-1"
-                            onClick={() => setLinkOpen(false)}
-                            disabled={linkBusy}
-                        >
-                            取消
-                        </button>
-                        <button
-                            type="button"
-                            className={`ui-btn ui-btn-primary flex-1 ${linkBusy ? "is-busy" : ""}`}
-                            onClick={() => void runLink()}
-                            disabled={linkBusy || !linkUrl.trim() || !linkKey.trim()}
-                        >
-                            {linkBusy ? <><Loader2 size={15} className="animate-spin" /> 验证中…</> : "验证并接入"}
-                        </button>
-                    </div>
-                </div>
-            )}
 
             {/* 结果弹窗（成功/失败统一） */}
             {resultDialog && (

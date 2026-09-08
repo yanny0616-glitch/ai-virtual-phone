@@ -234,16 +234,16 @@
       } catch (e) { /* wakes 保持 null = 读取失败 */ }
       if (!alive()) return;
       // 云端点亮的时刻只存在于云上，本地唤醒表里查不到，不说清楚会被当成「预约没挂上」
-      const cloudArmed = planItems.filter((it) => it.act && it.adj === "cloud" && it.wakeId);
-      const planned = planItems.filter((it) => it.act && it.fireAt > Date.now()).length;
+      const cloudArmed = planItems.filter((it) => it.act && it.adj === "cloud" && it.wakeId && it.fireAt > Date.now());
+      const localPending = planItems.filter((it) => it.act && it.fireAt > Date.now() && !cloudArmed.includes(it)).length;
       let html, sum, tone;
       if (wakes === null) {
         html = '<div class="archive-note">读取系统唤醒列表失败。</div>';
         sum = "读不到"; tone = "bad";
       } else if (!wakes.length) {
-        html = '<div class="archive-note">系统里今天没有挂着的离线唤醒。<br>计划里显示「待发」但这里是空的，说明预约没挂上或已被取消。</div>';
-        const missing = planned - cloudArmed.length > 0;
-        sum = missing ? "0 个 · 计划里还有 " + (planned - cloudArmed.length) + " 个待发" : "0 个 · 今天没有待发";
+        html = '<div class="archive-note">本机今天没有登记的唤醒。云端创建的预约不在这张本机列表中，实际状态请打开时刻详情刷新回执。</div>';
+        const missing = localPending > 0;
+        sum = missing ? "本机 0 个 · " + localPending + " 个待核实" : "本机 0 个" + (cloudArmed.length ? " · 云端记录 " + cloudArmed.length + " 个" : " · 无待发记录");
         tone = missing ? "bad" : "";
       } else {
         const extra = wakes.filter((w) => !planItems.some((it) => it.wakeId === w.id)).length;
@@ -257,9 +257,9 @@
       }
       if (cloudArmed.length) {
         html += '<details class="fold"><summary><span class="t">云端点亮</span><span class="sm">' +
-          cloudArmed.length + " 个 · " + esc(cloudArmed.map((it) => it.time).join("、")) +
+          cloudArmed.length + " 个 · " + esc(cloudArmed.map((it) => wakeTimeLabel(it)).join("、")) +
           '</span><span class="cv">›</span></summary>' +
-          '<div class="archive-note">这几个时刻是云端复核点亮的，预约只挂在云上，本地这张表里查不到，属正常。</div></details>';
+          '<div class="archive-note">这几个时刻记录为云端创建，本机列表里查不到。当前是否仍待执行，以时刻详情里的云端回执为准。</div></details>';
       }
       fill("wakes", html, sum, tone);
     })();
@@ -368,16 +368,20 @@
           return;
         }
         const pend = (pl.items || []).filter((it) => it.fireAt > Date.now()).length;
-        const ran = pl.last_recheck_at
-          ? new Date(pl.last_recheck_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+        const count = pl.recheck_count || 0;
+        const configuredCap = Number((pl.context || {}).gateDailyCap);
+        const cap = Number.isFinite(configuredCap) && configuredCap >= 0 ? configuredCap : 8;
+        const judgedAt = pl.judged_at || (count > 0 ? pl.last_recheck_at : null);
+        const ran = judgedAt
+          ? new Date(judgedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
           : "";
         let rHtml = '<div class="diag-item"><b>寄存</b> ' + (pl.items || []).length + " 个时刻（还没到点 " + pend + " 个）</div>" +
-          '<div class="diag-item"><b>复核</b> ' + (ran ? esc(ran) : "还没跑过") + " · 今天已判 " + (pl.recheck_count || 0) + "/6 次</div>" +
+          '<div class="diag-item"><b>复核</b> ' + (ran ? esc(ran) : count > 0 ? "时间未记录" : "还没判断过") + " · 今天已判 " + count + "/" + cap + " 次</div>" +
           '<div class="diag-item"><b>待取裁决</b> ' + ((pl.decisions || []).length || "无") + "</div>";
-        if (!pend) rHtml += '<div class="archive-note">今天的时刻都过了，云端不会再判。</div>';
+        if (!pend) rHtml += '<div class="archive-note">当前寄存列表没有未来时刻；是否继续复核还取决于起念模式、约定和门禁。</div>';
         fill("recheck", rHtml,
-          ran ? "已判 " + (pl.recheck_count || 0) + "/6 · 上次 " + ran : "已寄存 · 还没跑过",
-          ran ? "ok" : "warn");
+          count > 0 ? "已判 " + count + "/" + cap + (ran ? " · 上次 " + ran : " · 时间未记录") : "已寄存 · 还没判断过",
+          count > 0 ? "ok" : "warn");
       } catch (e) {
         fill("recheck", '<div class="archive-note">云端复核查询失败：' + esc(String(e && e.message || e)) + "</div>", "查询失败", "bad");
       }

@@ -72,7 +72,8 @@
             gateHorizonMin: S.settings.gateHorizonMin,
             gateFreshMin: S.settings.gateFreshMin,
             gateMinMsgs: S.settings.gateMinMsgs,
-            judgeLines: S.settings.judgeLines,
+            onlineRounds: S.settings.onlineRounds,
+            offlineRounds: S.settings.offlineRounds,
             selfImpulseCap: S.settings.selfImpulseCap,
             impulseMode: S.settings.impulseMode,
             selfSilenceMin: S.settings.selfSilenceMin,
@@ -141,6 +142,7 @@
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
       await requireRecheckFeatures(["scheduler-state-v1"]);
+      if (GuaNianHistory.guanianHasWindow(S.settings)) await requireRecheckFeatures(["history-window-v1"]);
       if (cx.plan.cloudStateUrl !== cloudCfg().url || !Number.isFinite(cx.plan.cloudStateVersion)) await pullCloudDecisionsBody(cx, true);
       if (S.settings.threadsOn) await requireRecheckFeatures(["promise-tasks-v2"]);
       if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);

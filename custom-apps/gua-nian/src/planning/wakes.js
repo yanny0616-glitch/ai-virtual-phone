@@ -53,7 +53,7 @@
   // TA一次回复常拆成多条气泡：相邻 3 分钟内归为一轮，不逐条计数；
   // 且一轮要晾满 30 分钟才算「没回」——TA刚回复完、你还没来得及回的不算。
   function unansweredStreak(msgs) {
-    return GuaNianScoring.countUnansweredRounds(msgs, Date.now());
+    return GuaNianScoring.countUnansweredRounds(msgs.filter(m => m.media_type !== "offline_summary"), Date.now());
   }
 
   // 临时起念不是日程排出来的，是复核时顺着聊天临时起的，重排不该把它推倒。
@@ -168,7 +168,7 @@
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
       const streak0 = unansweredStreak(chat);
-      const lines = chatExcerpt(chat, S.settings.judgeLines);
+      const lines = chatExcerpt(chat);
       if (lines.length) await log(cx, "已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
       const outlook = dayOutlook(cx);
       if (!outlook.length) {

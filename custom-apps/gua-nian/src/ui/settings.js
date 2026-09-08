@@ -45,8 +45,9 @@
     { id: "chat", name: "聊天", groups: [
       { title: "动态复核", adv: true, fields: [
         { type: "stepper", key: "recheckMin", min: 0, max: 120, step: 5, label: "在页时每隔", unit: "分钟 · 0 关" },
-        { type: "stepper", key: "judgeLines", min: 6, max: 40, step: 2, label: "判断时回看", unit: "句" },
-      ], hint: "打开小手机时、以及之后每隔这么久，按你们最新的聊天重审今天还没到点的时刻。<br>聊崩了会取消，聊出没完的话头会临时加。每次重审调一次模型。<br>「判断时回看」是编排、复核、云端裁决喂给模型的最近几句，每句最多 200 字。调大更懂来龙去脉，也更费 token。保存即生效，云端那份下次上传计划时跟着更新。" },
+        { type: "stepper", key: "onlineRounds", min: 1, max: 100, step: 5, label: "线上回看", unit: "轮 · 同轮气泡合并计数" },
+        { type: "stepper", key: "offlineRounds", min: 1, max: 100, step: 5, label: "线下摘要回看", unit: "轮 · 每轮一条摘要" },
+      ], hint: "打开小手机时、以及之后每隔这么久，按你们最新的聊天重审今天还没到点的时刻。<br>聊崩了会取消，聊出没完的话头会临时加。每次重审调一次模型。<br>线上与线下各自取最近设置的轮数，再按时间合并供判断。线上一轮含用户输入和随后整轮回复；线下只读保存的摘要，不读用户输入、角色正文或思维链，不受显示正则影响，每条摘要最多 500 字。数量越多越费 token。保存并同步成功后供下次判断使用；云端需要开启聊天镜像并更新宿主与云函数。" },
       { title: "聊天改日程", adv: true, fields: [{ type: "toggles", items: [{ key: "chatEditsDay", label: "聊出来的安排落到今天的日程上" }] }],
         hint: "复核时顺带看聊天里有没有说定、取消或临时被叫走的安排，有就直接改今天的日程，一次最多 2 条。<br>只改还没到点的，改动写回系统日程，也记进「诊断」。<br>「动态复核」设成 0 时这条不会发生。" },
       { title: "惦记账本", fields: [
@@ -277,6 +278,7 @@
     if (changed(["userSleepOn", "userSleepStart", "userSleepEnd"])) notes.push(after.userSleepOn
       ? "你的睡眠时段已保存；计划同步成功后，尚未结算的回音会跳过这段时间，已结算记录不重算。"
       : "睡眠时段已关闭；计划同步成功后，尚未结算的回音恢复按发送后 3 小时统计。未回复仍保持中性。");
+    if (changed(["onlineRounds", "offlineRounds"])) notes.push("线上与线下回看轮数已分别保存；现有计划同步成功后，下次云端判断使用新范围。");
     if (changed(["quota", "minGapMin", "bias", "quietStart", "quietEnd", "anchorSleep", "anchorMorning", "chatCandidates", "moodGate"])) {
       notes.push(+after.impulseMode === 1 && after.cloudRecheck && cloudCfg()
         ? "新规则同步成功后用于下一次云端起念。已有预约保持原样；如需一起调整，请到「心动」页重新安排。"

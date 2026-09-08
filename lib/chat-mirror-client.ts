@@ -16,6 +16,7 @@ import {
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { isPersonalPushCloudActive, personalPushFetch } from "./personal-push-cloud";
 import { dbReadChatSession } from "./chat-db";
+import { CHAT_OFFLINE_SUMMARIES_CHANGED_EVENT, loadChatOfflineSummaryEntries, type ChatOfflineSummaryEntry } from "./chat-offline-storage";
 
 const MIRROR_ENABLED_KEY = "chat_mirror_enabled_v1";
 const MIRROR_QUEUE_KEY = "chat_mirror_queue_v1";
@@ -142,6 +143,12 @@ function toMirrorEntry(msg: ChatMessage, deleted?: true): ChatMirrorEntry | null
         responseBatchId: msg.responseBatchId,
         ...(deleted ? { deleted: true as const } : {}),
     };
+}
+
+function toSummaryMirrorEntry(entry: ChatOfflineSummaryEntry): ChatMirrorEntry | null {
+    const characterId = characterIdForSession(entry.sessionId);
+    if (!characterId) return null;
+    return { ...entry, characterId, role: "assistant", mediaType: "offline_summary" };
 }
 
 /** A single mirror row carries the whole committed response, including an
@@ -284,6 +291,7 @@ export function setChatMirrorEnabled(enabled: boolean): void {
 function refreshQueuedMessages(): void {
     if (!isChatStorageHydrated()) { queueNeedsRefresh = true; return; } // 读取失败或尚未加载，不等于消息已删除。
     const sessions = new Map<string, Map<string, ChatMessage>>();
+    const summaries = new Map<string, Map<string, ChatOfflineSummaryEntry>>();
     const queue = loadQueue().map(entry => {
         if (entry.deleted || !entry.sessionId) return entry;
         let messages = sessions.get(entry.sessionId);
@@ -292,7 +300,12 @@ function refreshQueuedMessages(): void {
             sessions.set(entry.sessionId, messages);
         }
         const current = messages.get(entry.id);
-        const latest = current ? toMirrorEntry(current) : null;
+        let latest = current ? toMirrorEntry(current) : null;
+        if (entry.mediaType === "offline_summary") {
+            if (!summaries.has(entry.sessionId)) summaries.set(entry.sessionId, new Map(loadChatOfflineSummaryEntries(entry.sessionId).map(row => [row.id, row])));
+            const summary = summaries.get(entry.sessionId)!.get(entry.id);
+            latest = summary ? toSummaryMirrorEntry(summary) : null;
+        }
         if (latest) {
             const { queueId, ...previous } = entry;
             return { ...latest, queueId: JSON.stringify(previous) === JSON.stringify(latest) ? queueId : crypto.randomUUID() };
@@ -314,11 +327,14 @@ function backfillRecentChat(): void {
         const queue = loadQueue();
         const queued = new Set(queue.map(item => item.id));
         for (const session of sessions) {
-            for (const msg of loadChatMessages(session.id, BACKFILL_PER_SESSION)) {
-                if (queued.has(msg.id)) continue;
+            const entries = [
+                ...loadChatOfflineSummaryEntries(session.id).slice(-BACKFILL_PER_SESSION).map(toSummaryMirrorEntry),
+                ...loadChatMessages(session.id, BACKFILL_PER_SESSION).map(msg => toMirrorEntry(msg)),
+            ];
+            for (const entry of entries) {
+                if (!entry || queued.has(entry.id)) continue;
                 // 历史回填不能挤掉已经排队的删除和新编辑。
                 if (queue.length >= QUEUE_CAP) { saveQueue(queue); return; }
-                const entry = toMirrorEntry(msg);
                 if (entry) {
                     queue.push(entry);
                     queued.add(entry.id);
@@ -403,13 +419,24 @@ export function installChatMirror(): void {
         const messages = (event as CustomEvent<{ messages?: ChatMessage[] }>).detail?.messages;
         if (Array.isArray(messages)) mirrorMessages(messages, true, true);
     });
+    window.addEventListener(CHAT_OFFLINE_SUMMARIES_CHANGED_EVENT, event => {
+        if (!isChatMirrorEnabled() && kvGet(MIRROR_TRACKING_KEY) !== "1") return;
+        const detail = (event as CustomEvent<{ sessionId: string; entries: ChatOfflineSummaryEntry[]; deletedIds: string[] }>).detail;
+        if (!detail) return;
+        for (const summary of detail.entries || []) {
+            const entry = toSummaryMirrorEntry(summary);
+            if (entry) enqueue(entry);
+        }
+        mirrorDeletedIds(detail.deletedIds || [], detail.sessionId);
+    });
     if (retryTimer === null) {
         retryTimer = window.setInterval(() => {
             if (getChatMirrorQueueSize() > 0) void flushQueue();
         }, RETRY_INTERVAL_MS);
     }
-    if (isChatMirrorEnabled() && getChatMirrorQueueSize() > 0) {
+    if (isChatMirrorEnabled()) {
         refreshQueuedMessages();
+        backfillRecentChat();
         scheduleFlush();
     }
 }

@@ -30,7 +30,8 @@
     anchorMorning: false,// 早安锚点
     chatCandidates: true,// 复核时允许因聊天临时起念
     recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开 app 也检查，但仍遵守上次尝试的间隔）
-    judgeLines: 24,      // 编排/复核/云端裁决喂给模型的最近几句聊天
+    onlineRounds: 40,    // 线上按用户输入及整轮回复计数
+    offlineRounds: 40,   // 线下每轮只取已保存的摘要
     moodGate: true,      // 精力低/心情差时更克制
     injectChat: true,    // 把TA此刻的状态注入聊天提示词（需 chat.context 权限）
     chatEditsDay: true,  // 复核时允许按聊天内容改今天的日程（只动还没到的）

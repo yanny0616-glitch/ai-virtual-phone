@@ -1,10 +1,10 @@
-  async function applyThreads(cx, parsed, nowMs, by, planItems) {
+  async function applyThreads(cx, parsed, nowMs, by, planItems, messages = null) {
     if (!S.settings.threadsOn || !parsed) return 0;
     let list = (cx.threads || []).map(t => ({ ...t }));
     const notes = [];
     const promises = (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2).filter(k => k && (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
     const before = list;
-    list = GuaNianPromises.updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs) })), nowMs, by);
+    list = GuaNianPromises.updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs) })), nowMs, by, messages);
     for (const t of list.filter(t => t.kind === "promise")) {
       const old = before.find(x => x.id === t.id);
       if (old && (old.due !== t.due || Number(old.revision || 1) !== Number(t.revision || 1) || (!old.done && t.done))) await dropThreadSlots(cx, t.id, "约定已改期或了结", planItems);

@@ -48,14 +48,14 @@
       const d = new Date(value);
       return Number.isFinite(d.getTime()) ? d.toLocaleString() : "未知";
     };
-    box.innerHTML = '<details class="card"' + (cx._cloudHistoryOpen ? ' open' : '') + '><summary>云端发送记录 · ' + esc(cx.character.name) + '</summary>'
+    box.innerHTML = '<details class="card fold"' + (cx._cloudHistoryOpen ? ' open' : '') + '><summary><span class="t">云端发送记录</span><span class="sm">' + esc(cx.character.name) + '</span><span class="cv" aria-hidden="true">›</span></summary>'
       + '<div class="archive-note">最近 50 条挂念成文，包含已收取、当前计划未关联的消息。云端已清理的记录无法恢复；收取时间不代表已读。</div>'
       + '<button class="tgl" id="cloud-history-refresh"' + (cx._cloudHistoryLoading ? ' disabled' : '') + '>' + (cx._cloudHistoryLoading ? '查询中…' : '查询发送记录') + '</button>'
       + (state && state.error ? '<div class="d-why">' + esc(state.error) + '</div>' : '')
       + (state ? (state.entries || []).map(entry => {
         const wakeId = String(entry.trigger_key || '').replace(/^timedwake:/, '');
         const linked = ((cx.plan || {}).items || []).some(w => w.wakeId === wakeId);
-        return '<details class="diag-item"><summary>' + esc(stamp(entry.created_at)) + ' · ' + (linked ? '当前计划内' : '当前计划未关联') + '</summary>'
+        return '<details class="diag-item skip-fold"><summary>' + esc(stamp(entry.created_at)) + ' · ' + (linked ? '当前计划内' : '当前计划未关联') + '</summary>'
           + '<div class="archive-note">任务：' + esc(entry.job_id || '未知') + '<br>触发来源：' + esc(entry.trigger_key || '未知')
           + '<br>客户端收取：' + esc(entry.consumed_at ? stamp(entry.consumed_at) : '未确认') + '</div>'
           + '<div class="d-why" style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(entry.raw_text || '') + '</div></details>';

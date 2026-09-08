@@ -854,7 +854,7 @@ Deno.serve(async (req: Request) => {
     return new Response("forbidden", { status: 403 });
   }
 
-  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2", "chat-silence-v1", "guanian-history-v1", "promise-tasks-v2", "scheduler-state-v1"] });
+  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2", "chat-silence-v1", "guanian-history-v1", "promise-tasks-v2", "scheduler-state-v1", "history-window-v1"] });
   if (!jobId) return new Response("bad request", { status: 400 });
 
   const claim = await rest(`push_jobs?id=eq.${encodeURIComponent(jobId)}&status=eq.pending&kind=neq.bridge_scan&execute_at=lte.${encodeURIComponent(new Date().toISOString())}`, {
@@ -1078,13 +1078,17 @@ Deno.serve(async (req: Request) => {
     if (isGuanianWake && !guanianPlan.item) {
       await finish("done", "guanian skip: 未找到有效计划，旧预约已停止"); return;
     }
+    if (guanianHasWindow(guanianPlan.row?.context) && payload.merge?.sessionId) {
+      try { cloudHistory = await readGuanianCloudHistory(rest, job.user_id, String(payload.merge.sessionId), guanianPlan.row?.context); }
+      catch { await retry("hold: 线上轮次或线下摘要读取失败，稍后核对"); return; }
+    }
     const planTz = guanianContextTimezone((guanianPlan.row?.context || {}) as Record<string, unknown>, Date.now());
     const historyTz = guanianTimezone(planTz, payload.merge?.tzOffsetMin, (payload.merge?.quietWin as { tzOffsetMin?: number } | undefined)?.tzOffsetMin);
     if (guanianPlan.row && historyTz === null) { await retry("时区资料缺失：请打开挂念重新同步计划", undefined, true); return; }
     if (guanianPlan.row?.context?.day && historyTz !== null) (guanianPlan.row.context.day as GuanianDay).tz = historyTz;
     if (cloudHistory && !payload.generatedResponse) appendUserNote(payload.request.body, payload.request.providerKind,
       `[最新云端聊天事实，非用户消息；${historyTz === null ? "当地时区未知，下方仅以 UTC 标示，不得推断当地钟点" : `统一时区 UTC${historyTz >= 0 ? "+" : ""}${historyTz / 60}，当前当地时间 ${new Date(Date.now() + historyTz * 60000).toISOString().slice(0,16)}`}。以下时间是生成时间，不代表用户已读；与旧快照冲突时以这里为准。]\n`
-      + guanianHistoryText(cloudHistory, historyTz ?? 0));
+      + guanianHistoryText(cloudHistory, historyTz ?? 0, 80, guanianPlan.row?.context));
     // decisions 是读-改-写，手里这份是任务开头读到的，push-recheck 可能同时在写。
     // 落库前重取一次，把丢记录的窗口从整个任务时长缩到一次请求。
     const appendDecision = async (entry: Record<string, unknown>): Promise<void> => {
@@ -1283,6 +1287,7 @@ Deno.serve(async (req: Request) => {
         const tz = historyTz;
         appendUserNote(payload.request.body, payload.request.providerKind,
           `[挂念发送前的事实核对，不是用户消息]\n当前当地时间：${new Date(Date.now() + tz * 60000).toISOString().slice(0,16)}\n原念头：${topic.intent || "按上文预约意图"}\n最新聊天见上方唯一一份「最新云端聊天事实」，不可编造。\n`
+          + "用户已拒绝或取消的事情，不因角色坚持而继续提醒、劝说或跟进；角色替用户安排不等于用户同意。最新聊天中没有用户重新明确答应，就按事情已发生变化作罢。\n"
           + "先核对这个念头是否仍有必要：如果你已经在聊天里问过、说过这件事，用户已经回答或事情已经解决，就不要再发，也不要换个话题凑消息。仅仅出现相关词不等于已经说过，按实际问答与语义判断。具体约定或事件是否过时也按事实判断，不因单纯经过多少分钟而认定失效。\n"
           + "无需再发时，只输出 [挂念作罢：聊天已提过] 或 [挂念作罢：事情已解决或发生变化]，不要输出台词、独白或其他标签；仍有未说过且符合当前事实的内容时，按原格式自然成文。双方最新事实优先于旧预约意图。角色说过到了就是已交代的事实，后续不能无故退回尚未到家；再次外出必须有明确依据。约定到点并不证明已完成；不能替用户宣布完成。");
       }
@@ -1993,6 +1998,37 @@ type GuanianCloudMessage = { id: string; role: string; content: string; message_
 type GuanianCloudOutput = { id: string; trigger_key?: string; raw_text: string; created_at: string; consumed_at?: string; meta?: Record<string, unknown> };
 type GuanianCloudHistory = { messages: GuanianCloudMessage[]; outputs: GuanianCloudOutput[]; lastGeneratedAt: number;
   uncertainLegacy?: { message: GuanianCloudMessage; outputIds: string[]; exactText: boolean }[] };
+type GuanianHistoryWindow = { onlineRounds?: unknown; offlineRounds?: unknown };
+function guanianRoundLimit(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(100, Math.max(1, Math.round(n))) : 40;
+}
+function guanianHasWindow(window?: GuanianHistoryWindow): boolean {
+  return window?.onlineRounds != null || window?.offlineRounds != null;
+}
+function guanianOnlineRounds(messages: GuanianCloudMessage[]): GuanianCloudMessage[][] {
+  const rounds: GuanianCloudMessage[][] = [];
+  for (const m of [...messages].filter(m => m.media_type !== "offline_summary")
+    .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id))) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const current = rounds[rounds.length - 1];
+    const last = current?.[current.length - 1];
+    const batch = m.response_batch_id || (m.id.startsWith("push-outbox:") ? m.id : "");
+    const previousBatch = last?.response_batch_id || (last?.id.startsWith("push-outbox:") ? last.id : "");
+    const separateReply = last?.role === "assistant" && m.role === "assistant"
+      && (batch && previousBatch ? batch !== previousBatch : Date.parse(m.message_at) - Date.parse(last.message_at) > 180000);
+    if (!current || m.role === "user" || separateReply) rounds.push([m]);
+    else current.push(m);
+  }
+  return rounds;
+}
+function selectGuanianHistory(messages: GuanianCloudMessage[], window: GuanianHistoryWindow): GuanianCloudMessage[] {
+  const online = guanianOnlineRounds(messages).slice(-guanianRoundLimit(window.onlineRounds)).flat();
+  const offline = messages.filter(m => m.media_type === "offline_summary" && m.content.trim())
+    .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id))
+    .slice(-guanianRoundLimit(window.offlineRounds));
+  return [...online, ...offline].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
+}
 
 /** Absence, null, booleans and invalid offsets are not UTC. Explicit zero is. */
 function guanianTimezone(...values: unknown[]): number | null {
@@ -2021,16 +2057,34 @@ function guanianContextTimezone(context: Record<string, unknown>, at: number): n
 }
 async function readGuanianCloudHistory(
   rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, sessionId: string,
+  window?: GuanianHistoryWindow,
 ): Promise<GuanianCloudHistory> {
   if (!sessionId) throw new Error("缺少聊天会话，不能核对云端消息");
   const scope = `user_id=eq.${encodeURIComponent(userId)}&session_id=eq.${encodeURIComponent(sessionId)}`;
   const responses = await Promise.all([
-    rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,media_type.neq.response_batch)&order=message_at.desc&limit=200`),
+    rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,and(media_type.neq.response_batch,media_type.neq.offline_summary))&order=message_at.desc,id.desc&limit=200`),
     rest(`push_outbox?${scope}&meta->>pushGenerated=eq.true&select=id,trigger_key,raw_text,created_at,consumed_at,meta&order=created_at.desc&limit=200`),
   ]);
   if (responses.some(r => !r.ok)) throw new Error("云端聊天读取失败，请检查 schema 11 与云函数部署；稍后重试");
   const [mirrors, outputs] = await Promise.all(responses.map(r => r.json())) as [GuanianCloudMessage[], GuanianCloudOutput[]];
   if (!Array.isArray(mirrors) || !Array.isArray(outputs)) throw new Error("云端聊天数据格式错误");
+  if (guanianHasWindow(window)) {
+    // Fetch enough complete online rounds; summary traffic cannot displace them.
+    let pageSize = mirrors.length;
+    while (pageSize === 200 && guanianOnlineRounds(mirrors).length <= guanianRoundLimit(window?.onlineRounds)) {
+      if (mirrors.length >= 5000) throw new Error("最近对话气泡过多，请减少线上回看轮数");
+      const response = await rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,and(media_type.neq.response_batch,media_type.neq.offline_summary))&order=message_at.desc,id.desc&limit=200&offset=${mirrors.length}`);
+      if (!response.ok) throw new Error("线上历史分页读取失败");
+      const page = await response.json() as GuanianCloudMessage[];
+      if (!Array.isArray(page)) throw new Error("线上历史分页格式错误");
+      mirrors.push(...page); pageSize = page.length;
+    }
+    const response = await rest(`push_chat_mirror?${scope}&media_type=eq.offline_summary&select=id,role,content,message_at,media_type&order=message_at.desc,id.desc&limit=${guanianRoundLimit(window?.offlineRounds)}`);
+    if (!response.ok) throw new Error("线下摘要读取失败");
+    const summaries = await response.json() as GuanianCloudMessage[];
+    if (!Array.isArray(summaries)) throw new Error("线下摘要格式错误");
+    mirrors.push(...summaries);
+  }
   const records = new Map<string, GuanianCloudMessage>();
   const cloudIds = new Set(outputs.map(o => `push-outbox:${o.id}`));
   const snapshots = new Map<string, GuanianCloudMessage[]>();
@@ -2063,7 +2117,7 @@ async function readGuanianCloudHistory(
   // complete, unique consecutive sequence at that receipt time; never dedupe by
   // an isolated phrase or by the latest mirror timestamp.
   const compact = (s: string) => s.replace(/\s+/g, "").trim();
-  const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id)
+  const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id && m.media_type !== "offline_summary")
     .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
   const candidates = new Map<string, { groups: GuanianCloudMessage[][]; output: GuanianCloudOutput }>();
   for (const o of outputs) {
@@ -2122,10 +2176,11 @@ async function readGuanianCloudHistory(
   }
   return { messages: [...records.values()].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id)), outputs, lastGeneratedAt, uncertainLegacy };
 }
-function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80): string {
-  const main = history.messages.slice(-limit).map(m => {
+function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80, window?: GuanianHistoryWindow): string {
+  const selected = guanianHasWindow(window) ? selectGuanianHistory(history.messages, window!) : history.messages.filter(m => m.media_type !== "offline_summary").slice(-limit);
+  const main = selected.map(m => {
     const local = new Date(Date.parse(m.message_at) + tz * 60_000).toISOString().slice(0, 16).replace("T", " ");
-    return `[${m.id}] ${local} ${m.role === "user" ? "用户" : "你"}：${m.content.slice(0, 4000)}`;
+    return `[${m.id}] ${local} ${m.media_type === "offline_summary" ? "线下摘要（概述双方互动，非角色原话）" : m.role === "user" ? "用户" : "你"}：${m.content.slice(0, m.media_type === "offline_summary" ? 500 : 4000)}`;
   }).join("\n");
   const uncertain = (history.uncertainLegacy || []).slice(-20);
   if (!uncertain.length) return main;
@@ -2135,7 +2190,7 @@ function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80
 }
 function guanianHistoryRounds(history: GuanianCloudHistory, nowMs: number): number {
   let rounds = 0, last = Infinity;
-  for (const m of [...history.messages].reverse()) {
+  for (const m of [...history.messages].filter(m => m.media_type !== "offline_summary").reverse()) {
     if (m.role === "user") break;
     const at = Date.parse(m.message_at);
     if (last - at > 3 * 60_000 && nowMs - at >= 30 * 60_000) rounds++;
@@ -2164,10 +2219,16 @@ function promiseSubject(value) {
 function promiseSubjectLabel(value) {
   return { user: "用户", character: "角色", both: "双方" }[promiseSubject(value)];
 }
+function promiseAgreementRule() {
+  return "标注为线下摘要的记录是双方互动的概述，不是角色原话；可引用摘要编号核对约定，但必须区分摘要中用户的明确同意或拒绝与角色的要求。不能因为摘要由模型生成，就把其全部内容归为角色承诺。用户自己的事情以用户最新明确意愿为准。角色的要求、劝说、坚持、替用户安排时间不等于用户答应，不能建立或恢复 user/both 约定，也不能改记为角色的跟进承诺来继续催。用户明确拒绝或取消时，已有同一件事必须通过 keep 的 id + status=cancelled 更新，不能只在 why 里写取消而仍保留 pending；没有已有事件则不创建。只有用户后来明确重新同意才能恢复，沉默不是同意。sourceMessageId 必须引用下方真实聊天编号：用户或双方约定的成立、改期、恢复要引用用户本人同意的消息；角色自己的承诺要引用角色本人消息；取消引用明确取消的消息。取消优先于同轮旧的同意或角色坚持，相关普通跟进时刻也应取消，不再为同一件事加 extra。";
+}
 // A cheap wake-up hint, not a parser: the model still checks whether a promise exists.
 function hasPromiseUpdate(messages, threads) {
   return messages.some(m => {
     const text = String(m.content || m.c || "");
+    // Only opens semantic review; never cancels a possibly unrelated event by keyword.
+    if (m.role === "user" && threads.some(t => t.kind === "promise" && !t.done)
+      && /取消|算了|不(?:再|想|用|做|去|需要)|别(?:再|提醒|催|提)/.test(text)) return true;
     return /(?:\d{1,2}[:：]\d{2}|[一二三四五六七八九十两\d]{1,3}[点时]|明天|后天|周[一二三四五六日天])/.test(text)
       && /回|到|约|等|一起|见|答应|记得|提醒|陪|去|再说|联系|找你/.test(text)
       || threads.some(t => t.kind === "promise" && !t.done && text.includes(String(t.text || ""))
@@ -2178,22 +2239,39 @@ function hasPromiseUpdate(messages, threads) {
 function recheckEvidence(messages, threads, since) {
   const fresh = messages.filter(m => Number(m.t ?? Date.parse(m.message_at || "")) > since);
   const users = fresh.filter(m => m.role === "user");
-  const promiseUpdate = hasPromiseUpdate(fresh, threads);
-  return { fresh, users, promiseUpdate, ledgerOnly: users.length === 0 && promiseUpdate };
+  const summaries = fresh.filter(m => m.media_type === "offline_summary");
+  const updates = [...users, ...summaries];
+  const promiseUpdate = hasPromiseUpdate(fresh, threads) || summaries.length > 0;
+  return { fresh, users, updates, promiseUpdate, ledgerOnly: updates.length === 0 && promiseUpdate };
 }
 function ordinaryQuota(items) {
   return items.filter(w => w.kind !== "promise" && w.act).length;
 }
-function updatePromiseThreads(threads, changes, nowMs, by) {
+function updatePromiseThreads(threads, changes, nowMs, by, messages = null) {
   const list = threads.map(t => ({ ...t }));
   for (const k of changes) {
     const id = String(k.id || "").replace(/[\[\]\s]/g, "");
     const text = String(k.text || "").trim().slice(0, 60);
     const subject = promiseSubject(k.subject);
     const old = id ? list.find(t => t.id === id && t.kind === "promise")
-      : list.find(t => !t.done && t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
+      : list.find(t => t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
     // Explicit unknown IDs cannot silently create a second event.
     if (id && !old) continue;
+    // Model-produced changes need real speaker evidence. Manual edits use their own UI path.
+    if (Array.isArray(messages)) {
+      const source = messages.find(m => String(m.id || "") === String(k.sourceMessageId || "") && m.id);
+      if (!source) continue;
+      const closing = k.status === "completed" || k.status === "cancelled";
+      const owner = old ? promiseSubject(old.subject) : subject;
+      const nextOwner = k.subject ? subject : owner;
+      const summaryEvidence = source.media_type === "offline_summary";
+      if (!closing && (owner !== "character" || nextOwner !== "character") && source.role !== "user" && !summaryEvidence) continue;
+      if (!closing && owner === "character" && nextOwner === "character" && source.role !== "assistant" && !summaryEvidence) continue;
+      if (closing && owner !== "character" && source.role !== "user" && !summaryEvidence) continue;
+      // A previously closed event cannot be revived from the same old agreement.
+      const sourceAt = Number(source.t ?? Date.parse(source.message_at || ""));
+      if (!closing && old?.done && !(sourceAt > Number(old.at || 0))) continue;
+    }
     if (k.status === "completed" || k.status === "cancelled") {
       if (old) Object.assign(old, { status: k.status, done: true, at: nowMs, by });
       continue;

@@ -5,24 +5,27 @@ import { stripTypeScriptTypes } from 'node:module';
 const now=Date.parse('2026-09-07T04:00:00Z');
 class Clock extends Date{constructor(...a){super(...(a.length?a:[now]));}static now(){return now;}}
 const code=stripTypeScriptTypes(fs.readFileSync(new URL('../supabase/functions/push-recheck/index.ts',import.meta.url),'utf8'));
-for(const mode of ['new','reschedule','cancel','already-recorded','legacy-session','legacy-no-template','history-failed']){
+for(const mode of ['new','reschedule','cancel','already-recorded','legacy-session','legacy-no-template','history-failed','user-cancel','character-pressure','summary-only']){
  let handler,modelCalls=0,armCalls=[];const models=[];
  const t={id:'p1',kind:'promise',text:'回家一趟',subject:'character',due:Date.parse('2026-09-07T07:30Z'),since:now-60000,at:now-60000,revision:1,done:false};
  const plan={state_version:1,plan_date:'2026-09-07',session_id:mode.startsWith('legacy-')?'':'s',updated_at:'v1',judged_chat_at:['already-recorded','legacy-session','legacy-no-template'].includes(mode)?now:0,
   context:{threads:mode==='new'?[]:[t],day:{tz:480,energy:70,schedule:[]},quota:0,gateDailyCap:8,gateGapMin:0,gateFreshMin:0,gateHorizonMin:0,gateMinMsgs:1,judgeTemplate:'judge',sentinelWakeId:'sentinel',wakePrefix:'app_',momentsOn:0},items:[],decisions:[]};
  const outbox=[{id:'first',trigger_key:'timedwake:earlier',created_at:new Date(now-120000).toISOString(),raw_text:'三点半回家一趟'}];
  const response=mode==='reschedule'?{id:'p1',kind:'promise',text:'回家一趟',subject:'character',when:'2026-09-07 18:30'}:mode==='cancel'?{id:'p1',kind:'promise',status:'cancelled'}:{kind:'promise',text:'回家一趟',subject:'character',when:'2026-09-07 15:30',sourceMessageId:'push-outbox:first'};
+ response.sourceMessageId = mode==='summary-only' ? 'offline-summary:turn' : mode==='user-cancel' ? 'refusal' : 'push-outbox:first';
+ if(mode==='user-cancel'||mode==='character-pressure'||mode==='summary-only'){t.subject='user';t.text='检查时间她自己约，我不插手但要跟进';plan.context.gateMinMsgs=10;plan.judged_chat_at=now-180000;Object.assign(response,{id:'p1',kind:'promise',subject:'user',status:mode==='user-cancel'||mode==='summary-only'?'cancelled':'pending',when:'2026-09-11 19:00'});outbox[0].raw_text='周五19:00你必须去检查，我还是要跟进';}
+ if(mode==='summary-only'){plan.context.onlineRounds=1;plan.context.offlineRounds=2;}
  const rest=async(url,init={})=>{
   if(url==='https://model.test'){modelCalls++;models.push(JSON.parse(init.body));return Response.json({choices:[{message:{content:JSON.stringify({decisions:[],extra:[],keep:[response],settle:[]})}}]});}
   const u=new URL(url),tab=u.pathname.split('/').slice(-1)[0];const body=init.body?JSON.parse(init.body):null;
   if(tab==='push_server_config')return Response.json([{cron_secret:'secret',payload_key:'key'}]);
-  if(tab==='push_chat_mirror')return Response.json([]);
+  if(tab==='push_chat_mirror')return Response.json(mode==='summary-only'&&url.includes('media_type=eq.offline_summary')?[{id:'offline-summary:turn',role:'assistant',media_type:'offline_summary',content:'用户明确说不做检查，角色仍劝她去。用户没有重新同意。',message_at:new Date(now-150000).toISOString()}]:mode==='user-cancel'?[{id:'refusal',role:'user',content:'不做检查了',message_at:new Date(now-150000).toISOString()}]:[]);
   if(tab==='push_outbox')return mode==='history-failed'?new Response('',{status:503}):Response.json(outbox);
   if(tab==='push_recheck_plans'){if(init.method==='PATCH')Object.assign(plan,body);return Response.json([plan]);}
   if(tab==='push_jobs' && mode==='legacy-no-template')return Response.json([]);
   if(tab==='push_jobs')return Response.json([{trigger_key:'timedwake:sentinel',payload:'template',status:'pending'},{trigger_key:'judge',payload:'template',status:'pending'}]);
   if(tab==='push_recheck_judge')return Response.json({claimed:true});
-  if(tab==='push_cancel_stale_promises')return Response.json(0);
+  if(tab==='push_cancel_stale_promises'){for(const w of plan.items){const event=plan.context.threads.find(t=>t.id===w.from);if(event?.done)w.act=false;}return Response.json(0);}
   if(tab==='push_arm_promise'){
    armCalls.push(body);
    const old=plan.items.filter(w=>w.from===body.p_thread_id&&w.act);for(const w of old)w.act=false;
@@ -39,6 +42,9 @@ for(const mode of ['new','reschedule','cancel','already-recorded','legacy-sessio
  const result=await handler(new Request('https://test',{method:'POST',body:JSON.stringify({token:'secret',userId:'u',characterId:'c',planDate:'2026-09-07'})}));
  if(['history-failed','legacy-no-template'].includes(mode)){assert.equal(result.status,503);assert.equal(modelCalls,0);assert.equal(armCalls.length,0);}
  else if(['already-recorded','legacy-session'].includes(mode)){assert.equal(modelCalls,0);assert.equal(armCalls.length,1);assert.equal(armCalls[0].p_item.fireAt,t.due);assert.ok(plan.decisions.some(d=>d.kind==='promise'&&d.wakeId===armCalls[0].p_item.wakeId),'RPC promise decision survives gate write');}
+ else if(mode==='summary-only'){assert.equal(modelCalls,1);assert.equal(plan.context.threads[0].status,'cancelled');assert.ok(plan.items.every(w=>!w.act));assert.match(JSON.stringify(models[0]),/线下摘要（概述双方互动，非角色原话）/);}
+ else if(mode==='user-cancel'){assert.equal(modelCalls,1);assert.equal(plan.context.threads[0].status,'cancelled');assert.ok(plan.items.every(w=>!w.act));assert.match(JSON.stringify(models[0]),/角色的要求、劝说、坚持/);}
+ else if(mode==='character-pressure'){assert.equal(modelCalls,1);assert.equal(plan.context.threads[0].due,t.due);assert.equal(plan.context.threads[0].revision,1);}
  else {
   assert.equal(modelCalls,1,mode);assert.match(JSON.stringify(models[0]),/三点半回家一趟/);
   if(mode==='cancel'){assert.equal(plan.context.threads[0].status,'cancelled');}

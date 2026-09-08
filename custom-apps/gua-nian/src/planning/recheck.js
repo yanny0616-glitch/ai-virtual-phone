@@ -40,7 +40,7 @@
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
       const evidence = GuaNianPromises.recheckEvidence(chat, cx.threads || [], since);
-      const fresh = evidence.users;
+      const fresh = evidence.updates;
       const promiseUpdate = S.settings.threadsOn && evidence.promiseUpdate;
       const ledgerOnly = !!promiseUpdate && !fresh.length;
       canJudge = !ledgerOnly && cx.plan.items.some(w => w.kind !== "promise" && w.fireAt > nowMs + 2 * 60000);
@@ -96,7 +96,7 @@
         cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
           { recheckAttemptAt: nowMs });
         await log(cx, "本机复核开始（" + trigger + "）：读取 " + fresh.length + " 条新聊天消息（含角色承诺）");
-        const lines = chatExcerpt(chat, S.settings.judgeLines);
+        const lines = chatExcerpt(chat);
         const remaining = items.filter((w) => w.kind !== "promise" && w.fireAt > nowMs + 2 * 60000);
         const usedQuota = GuaNianPromises.ordinaryQuota(items);
         const canPost = !ledgerOnly && moCanPost(cx);
@@ -239,7 +239,7 @@
           } catch (e) { await log(cx, "复核临时起念预约失败：" + (e && e.message || e)); }
         }
         await applyChatSchedEdits(cx, parsed.sched, nowMs);
-        await applyThreads(cx, parsed, nowMs, "app", items);
+        await applyThreads(cx, parsed, nowMs, "app", items, chat);
         const postHint = canPost && parsed.post && typeof parsed.post === "object" ? String(parsed.post.hint || "") : "";
         if (postHint) await postMoment(cx, postHint, nowMs, "app");
       }

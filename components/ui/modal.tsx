@@ -52,6 +52,8 @@ export type ContentDialogProps = {
   title: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  confirmDisabled?: boolean;
+  dialogClassName?: string;
   onConfirm: () => void;
   onCancel: () => void;
   children: ReactNode;
@@ -61,13 +63,15 @@ export function ContentDialog({
   title,
   confirmLabel = "\u4FDD\u5B58",
   cancelLabel = "\u53D6\u6D88",
+  confirmDisabled = false,
+  dialogClassName = "",
   onConfirm,
   onCancel,
   children,
 }: ContentDialogProps) {
   return (
     <div className="modal-overlay" data-ui="modal" onClick={onCancel}>
-      <div className="modal-dialog" data-ui="modal-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal-dialog ${dialogClassName}`} data-ui="modal-dialog" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header" data-ui="modal-header">
           <h3 className="modal-title">{title}</h3>
         </div>
@@ -76,7 +80,7 @@ export function ContentDialog({
         </div>
         <div className="modal-footer" data-ui="modal-footer">
           {cancelLabel && <button className="ui-btn ui-btn-outline" onClick={onCancel}>{cancelLabel}</button>}
-          {confirmLabel && <button className="ui-btn ui-btn-primary" onClick={onConfirm}>{confirmLabel}</button>}
+          {confirmLabel && <button className="ui-btn ui-btn-primary" disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</button>}
         </div>
       </div>
     </div>

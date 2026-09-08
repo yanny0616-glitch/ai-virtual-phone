@@ -14,6 +14,7 @@ const domainModules = [
   ["GuaNianTime", "domain/time.mjs"],
   ["GuaNianScoring", "domain/scoring.mjs"],
   ["GuaNianPromises", "domain/promises.mjs"],
+  ["GuaNianHistory", "../../../lib/guanian-cloud-history.ts"],
 ];
 
 function compileDomainModules() {

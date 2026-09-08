@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { fixture, at } from './lib/gua-nian-worker-fixture.mjs';
-import { updatePromiseThreads, promiseNeedsTask } from '../custom-apps/gua-nian/src/domain/promises.mjs';
+import { updatePromiseThreads, promiseNeedsTask, recheckEvidence } from '../custom-apps/gua-nian/src/domain/promises.mjs';
 import ts from 'typescript';
 const historyCode=ts.transpileModule(fs.readFileSync(new URL('../lib/guanian-cloud-history.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const hc={exports:{},URL,Date,Map,Set};vm.runInNewContext(historyCode,hc);const {readGuanianCloudHistory,guanianHistoryRounds}=hc.exports;
@@ -18,6 +18,27 @@ await test('角色承诺入账；改期沿用 ID 和版本；另一人的同名�
  list=updatePromiseThreads(list,[{id,status:'cancelled'}],at('13:02'),'cloud');assert.equal(list[0].done,true);assert.equal(list[0].status,'cancelled');
  assert.equal(promiseNeedsTask(list[0],[],at('18:30'),at('23:59')),false);
  list=updatePromiseThreads(list,[{id,status:'pending',due:at('19:00')}],at('13:03'),'cloud');assert.equal(list[0].revision,3);assert.equal(list[0].done,false);
+});
+await test('用户取消线索进入语义复核；角色坚持不能建立、改期或恢复用户约定',async()=>{
+ const now=at('12:00'), due=at('19:00');
+ const t={id:'user-event',kind:'promise',text:'检查时间她自己约，我不插手但要跟进',subject:'user',due,at:now-60000,revision:1};
+ const messages=[{id:'user-no',role:'user',content:'不做检查了',t:now-30000},{id:'pressure',role:'assistant',content:'周五19:00你必须去检查',t:now-10000}];
+ assert.equal(recheckEvidence(messages,[t],now-60000).promiseUpdate,true);
+ assert.equal(recheckEvidence([{id:'n',role:'user',content:'今天午饭好吃',t:now}], [t],now-1).promiseUpdate,false);
+ const change={kind:'promise',text:t.text,subject:'user',due:due+3600000,sourceMessageId:'pressure'};
+ assert.equal(updatePromiseThreads([], [change],now,'cloud',messages).length,0);
+ assert.deepEqual(updatePromiseThreads([t], [{...change,id:t.id}],now,'cloud',messages),[t]);
+ assert.deepEqual(updatePromiseThreads([t], [{...change,id:t.id,subject:'character'}],now,'cloud',messages),[t]);
+ assert.deepEqual(updatePromiseThreads([t], [{...change,id:t.id,sourceMessageId:'invented'}],now,'cloud',messages),[t]);
+ let list=updatePromiseThreads([t],[{id:t.id,status:'cancelled',sourceMessageId:'user-no'}],now,'cloud',messages);
+ assert.equal(list[0].status,'cancelled');assert.equal(promiseNeedsTask(list[0],[],now,due+1),false);
+ list=updatePromiseThreads(list,[change],now+1000,'cloud',messages);assert.equal(list.length,1);assert.equal(list[0].done,true);
+ const oldYes={id:'old-yes',role:'user',content:'好，我会去检查',t:now-120000};
+ list=updatePromiseThreads(list,[{...change,sourceMessageId:'old-yes'}],now+1000,'cloud',[oldYes]);assert.equal(list[0].done,true);
+ const newYes={...oldYes,id:'new-yes',t:now+2000};
+ list=updatePromiseThreads(list,[{...change,sourceMessageId:'new-yes'}],now+3000,'cloud',[newYes]);assert.equal(list[0].done,false);assert.equal(list[0].revision,2);
+ const own={...change,subject:'character',text:'我周五回家',sourceMessageId:'own'};
+ assert.equal(updatePromiseThreads([], [own],now,'cloud',[{id:'own',role:'assistant',content:'我周五回家',t:now}]).length,1,'角色仍能承诺自己的事');
 });
 await test('较新的用户镜像不会吃掉较早 outbox；超过五轮仍读取最近事实；按批次去重',async()=>{
  const outbox=Array.from({length:8},(_,i)=>({id:'o'+i,raw_text:'第'+i+'轮',created_at:new Date(at('09:00')+i*3600000).toISOString(),consumed_at:null}));
@@ -52,6 +73,9 @@ await test('本地两次应用同一约定只挂一条；改期撤旧挂新；�
  vm.runInContext(html.replace(/  init\(\);\s*\}\)\(\);\s*$/,'log=async()=>{}; globalThis.api={S,ctxOf,applyThreads,pullCloudDecisionsBody,todayStr,setCloud:(plan)=>{cloudRecheckOn=()=>true;cloudFetch=async()=>({plan});consumeOutbox=async()=>{};}};\n})();'),c);
  c.api.S.settings={threadsOn:true,threadDays:3};const cx=c.api.ctxOf({id:'c'});const items=[];cx.plan={items};
  const d=new Date(Date.now()+3600000);const when=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+ const pressure={id:'pressure',role:'assistant',t:Date.now(),c:'你必须去检查'};
+ await c.api.applyThreads(cx,{keep:[{kind:'promise',text:'去检查',subject:'user',when,sourceMessageId:'pressure'}],settle:[]},Date.now(),'app',items,[pressure]);
+ assert.equal(wakes,0);assert.equal((cx.threads || []).length,0);
  const parsed={keep:[{kind:'promise',text:'回家',subject:'character',when}],settle:[]};await c.api.applyThreads(cx,parsed,Date.now(),'app',items);assert.equal(wakes,1);const id=cx.threads[0].id;assert.equal(items[0].kind,'promise');
  await c.api.applyThreads(cx,parsed,Date.now(),'app',items);assert.equal(wakes,1);
  await c.api.applyThreads(cx,{keep:[{id,kind:'promise',text:'回家',subject:'character',when:when.slice(0,-2)+String((+when.slice(-2)+5)%60).padStart(2,'0')}],settle:[]},Date.now(),'app',items);assert.equal(wakes,2);assert.deepEqual(cancelled,['w1']);

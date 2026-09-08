@@ -199,7 +199,12 @@
     return '<div class="kv' + (col ? " col" : "") + '"><b>' + esc(label) + '</b><span' + (cls ? ' class="' + cls.replace("col", "").trim() + '"' : "") + ">" + value + "</span></div>";
   }
   function sortedItems(c) {
-    return ((c.plan && c.plan.items) || []).slice().sort((a, b) => a.fireAt - b.fireAt);
+    // Presentation only: retain the complete plan for scheduling, sync and the ledger.
+    const start = new Date(c.now); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    return ((c.plan && c.plan.items) || [])
+      .filter(w => Number(w.fireAt) >= +start && Number(w.fireAt) < +end)
+      .sort((a, b) => a.fireAt - b.fireAt);
   }
 
   function panelState(c) {
@@ -227,8 +232,8 @@
       })() +
       '<div class="kvs link" id="go-heart">' +
       (next
-        ? kv("下一次想起你", esc(next.time) + " · " + esc(fromNow(next.fireAt)), "hi") +
-          kv("那会儿TA想说", "「" + esc(next.intent) + "」", "col")
+        ? kv("下一次想起你", esc(wakeTimeLabel(next)) + " · " + esc(fromNow(next.fireAt)), "hi") +
+          kv("那会儿TA想说", "「" + esc(wakeIntentLabel(next)) + "」", "col")
         : kv("下一次想起你", "今天没有还没到点的时刻了", "dim")) +
       (function () {
         if (!S.settings.threadsOn) return "";
@@ -261,9 +266,9 @@
           ? "今天的念头由TA随时起，早上不预先排。点右上角「♥ 重置今天」把计划寄到云上，云端才接得上手。"
           : "今天还没编排过。点右上角「♥ 重新编排」，看看TA会在哪些时刻想起你。") + "</div>") +
       (wait[0]
-        ? '<div class="quote"><div class="from">' + esc(wait[0].time) + ' · 接下来想找你</div>「' + esc(wait[0].intent) + "」</div>"
+        ? '<div class="quote"><div class="from">' + esc(wakeTimeLabel(wait[0])) + ' · 接下来想找你</div>「' + esc(wakeIntentLabel(wait[0])) + "」</div>"
         : last
-        ? '<div class="quote"><div class="from">' + esc(last.time) + ' · 最近一次想起你</div>「' + esc(last.intent) + "」</div>"
+        ? '<div class="quote"><div class="from">' + esc(wakeTimeLabel(last)) + ' · 最近一次想起你</div>「' + esc(wakeIntentLabel(last)) + "」</div>"
         : '<div class="quote dim">今天还没想起过你</div>') +
       '<div class="stats four" style="margin:12px 0 2px">' +
       stat(fired.length, "已发出") + stat(wait.length, "待处理", 60) +
@@ -320,8 +325,8 @@
     let tl = "", idx = 0, nowInserted = false;
     const nowLine = '<div class="tl-now"><span class="lbl">现在 ' + now + "</span></div>";
     for (const w of items) {
-      if (w.time >= now && !nowInserted) { tl += nowLine; nowInserted = true; }
-      tl += wakeRow(w, w.time < now, w.source, 'style="animation-delay:' + (idx++ * 40) + 'ms"');
+      if (w.fireAt >= c.now && !nowInserted) { tl += nowLine; nowInserted = true; }
+      tl += wakeRow(w, w.fireAt < c.now, w.source, 'style="animation-delay:' + (idx++ * 40) + 'ms"');
     }
     if (items.length && !nowInserted) tl += nowLine;
     return '<div class="card"><div class="sec-head"><span class="t">时 刻</span></div>' +
@@ -405,17 +410,26 @@
     return "";
   }
 
+  function wakeTimeLabel(w) {
+    const date = new Date(Number(w.fireAt));
+    if (!Number.isFinite(date.getTime())) return w.time || "时间未知";
+    return (GuaNianTime.localDateKey(date) === todayStr() ? "" : (date.getMonth() + 1) + "/" + date.getDate() + " ") + fmtHM(w.fireAt);
+  }
+  function wakeIntentLabel(w) {
+    if (w.kind !== "promise") return w.intent || "";
+    return String(w.source || "").replace(/^约定[·：:]/, "") || "按已确认的约定核对进展";
+  }
   function wakeRow(w, past, title, delay, sub) {
     let badge = "", intent = "";
     if (w.act) {
       const fired = w.fireAt < Date.now();
       badge = decStatus(w).badge;
-      intent = '<div class="intent">「' + esc(w.intent) + '」</div>';
+      intent = '<div class="intent">「' + esc(wakeIntentLabel(w)) + '」</div>';
       if (!fired && w.delivery === "local" && w.reason) intent += '<div class="nt">未挂上离线推送：' + esc(w.reason) + "</div>";
     } else {
       badge = '<span class="badge off">作罢</span>';
       intent = '<div class="intent">' + esc(w.why || "TA这会儿不想") + "</div>";
     }
     return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + (sub ? " sub" : "") + '" data-t="' + esc(w.time) + '" data-wake="' + esc(w.wakeId || "") + '" ' + delay + '><span class="dot"></span>' +
-      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
+      '<div class="row1"><span class="tm">' + esc(wakeTimeLabel(w)) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
   }

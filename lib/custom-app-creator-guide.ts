@@ -960,6 +960,8 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "",
   "需 `chat.read`。`getCurrentSession` **只有从聊天卡片 / + 号面板进入时**才返回会话信息，桌面直接打开时为 `null`。所以不要默认能拿到当前会话——桌面入口下，`sessionId`/`characterId` 应由用户在 APP 内自己选择（如先用 `characters.list` 让用户挑角色）。",
   "",
+  "可选独立窗口：`chat.readHistory({ characterId, onlineRounds: 40, offlineRounds: 40 })`，两项各 1–100，替代按消息条数的 limit。线上用户输入与随后同轮气泡归一轮；单聊线下每轮只返回已保存摘要（mediaType=offline_summary），不包含线下输入、正文或思维链，不执行显示正则。返回 historyMode=separate-rounds-v1 表示宿主支持该模式。",
+  "",
   "### 5.18 监听聊天事件",
   "",
   "可监听 manifest `extensions.events` 里声明过的事件。当前支持 `chat.message.created`（响应用户或角色的新消息）和 `bridge.data`（现实桥数据广播，见 5.25）。事件声明里写 `background: true` 时，即使 APP 没打开，宿主也会临时启动隐藏运行环境，执行同一段 `AiPhone.on` handler，执行完成后销毁；隐藏运行环境默认最多保留 5 分钟，确实需要更久时可在事件声明里写 `timeoutMs`，最高 30 分钟。",

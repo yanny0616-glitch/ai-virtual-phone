@@ -36,7 +36,7 @@
       }
       // 缓存的进行中状态在刷新失败时不再当作当前状态。
       if (!receipt.error && j.status === "running") return state("running", "生成中", "wait", "对应预约正在执行，尚未取得发送成功回执。");
-      if (!receipt.error && j.status === "pending") return state("pending", "待发送", "wait", "云端预约仍在等待执行" + (j.executeAt ? "，预约时间 " + fmtHM(Date.parse(j.executeAt)) : "") + "。");
+      if (!receipt.error && j.status === "pending") return state("pending", "待发送", "wait", "云端预约仍在等待执行" + (j.executeAt ? "，预约时间 " + new Date(j.executeAt).toLocaleString("zh-CN", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "") + "。");
     }
     if (!w.act) return state("skipped", "作罢", "off", "没有起念，不会发送。");
     if (w.fireAt > Date.now()) return state("pending", "待发送", w.delivery === "push" ? "wait" : "local",
@@ -49,7 +49,7 @@
 
   function detailHtml(w, plan) {
     const cx = cur();
-    let h = '<div class="d-hd"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" +
+    let h = '<div class="d-hd"><span class="tm">' + esc(wakeTimeLabel(w)) + '</span><span class="tt">' + esc(w.source || "") + "</span>" +
       decStatus(w).badge + adjBadge(w) + "</div>";
 
     // 判断
@@ -60,7 +60,7 @@
         (w.topic ? '<span class="chip">话题 · ' + esc(w.topic) + "</span>" : "") + "</div>";
     }
     h += w.act
-      ? '<div class="d-intent">「' + esc(w.intent || "") + '」</div>' + (w.why ? '<div class="d-why">' + esc(w.why) + "</div>" : "")
+      ? '<div class="d-intent">「' + esc(wakeIntentLabel(w)) + '」</div>' + (w.why ? '<div class="d-why">' + esc(w.why) + "</div>" : "")
       : '<div class="d-intent" style="color:var(--tx3)">' + esc(w.why || "TA这会儿不想") + "</div>";
     h += "</div>";
 

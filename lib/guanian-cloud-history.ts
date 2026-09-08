@@ -3,6 +3,37 @@ export type GuanianCloudMessage = { id: string; role: string; content: string; m
 export type GuanianCloudOutput = { id: string; trigger_key?: string; raw_text: string; created_at: string; consumed_at?: string; meta?: Record<string, unknown> };
 export type GuanianCloudHistory = { messages: GuanianCloudMessage[]; outputs: GuanianCloudOutput[]; lastGeneratedAt: number;
   uncertainLegacy?: { message: GuanianCloudMessage; outputIds: string[]; exactText: boolean }[] };
+export type GuanianHistoryWindow = { onlineRounds?: unknown; offlineRounds?: unknown };
+export function guanianRoundLimit(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(100, Math.max(1, Math.round(n))) : 40;
+}
+export function guanianHasWindow(window?: GuanianHistoryWindow): boolean {
+  return window?.onlineRounds != null || window?.offlineRounds != null;
+}
+export function guanianOnlineRounds(messages: GuanianCloudMessage[]): GuanianCloudMessage[][] {
+  const rounds: GuanianCloudMessage[][] = [];
+  for (const m of [...messages].filter(m => m.media_type !== "offline_summary")
+    .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id))) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const current = rounds[rounds.length - 1];
+    const last = current?.[current.length - 1];
+    const batch = m.response_batch_id || (m.id.startsWith("push-outbox:") ? m.id : "");
+    const previousBatch = last?.response_batch_id || (last?.id.startsWith("push-outbox:") ? last.id : "");
+    const separateReply = last?.role === "assistant" && m.role === "assistant"
+      && (batch && previousBatch ? batch !== previousBatch : Date.parse(m.message_at) - Date.parse(last.message_at) > 180000);
+    if (!current || m.role === "user" || separateReply) rounds.push([m]);
+    else current.push(m);
+  }
+  return rounds;
+}
+export function selectGuanianHistory(messages: GuanianCloudMessage[], window: GuanianHistoryWindow): GuanianCloudMessage[] {
+  const online = guanianOnlineRounds(messages).slice(-guanianRoundLimit(window.onlineRounds)).flat();
+  const offline = messages.filter(m => m.media_type === "offline_summary" && m.content.trim())
+    .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id))
+    .slice(-guanianRoundLimit(window.offlineRounds));
+  return [...online, ...offline].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
+}
 
 /** Absence, null, booleans and invalid offsets are not UTC. Explicit zero is. */
 export function guanianTimezone(...values: unknown[]): number | null {
@@ -31,16 +62,34 @@ export function guanianContextTimezone(context: Record<string, unknown>, at: num
 }
 export async function readGuanianCloudHistory(
   rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, sessionId: string,
+  window?: GuanianHistoryWindow,
 ): Promise<GuanianCloudHistory> {
   if (!sessionId) throw new Error("缺少聊天会话，不能核对云端消息");
   const scope = `user_id=eq.${encodeURIComponent(userId)}&session_id=eq.${encodeURIComponent(sessionId)}`;
   const responses = await Promise.all([
-    rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,media_type.neq.response_batch)&order=message_at.desc&limit=200`),
+    rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,and(media_type.neq.response_batch,media_type.neq.offline_summary))&order=message_at.desc,id.desc&limit=200`),
     rest(`push_outbox?${scope}&meta->>pushGenerated=eq.true&select=id,trigger_key,raw_text,created_at,consumed_at,meta&order=created_at.desc&limit=200`),
   ]);
   if (responses.some(r => !r.ok)) throw new Error("云端聊天读取失败，请检查 schema 11 与云函数部署；稍后重试");
   const [mirrors, outputs] = await Promise.all(responses.map(r => r.json())) as [GuanianCloudMessage[], GuanianCloudOutput[]];
   if (!Array.isArray(mirrors) || !Array.isArray(outputs)) throw new Error("云端聊天数据格式错误");
+  if (guanianHasWindow(window)) {
+    // Fetch enough complete online rounds; summary traffic cannot displace them.
+    let pageSize = mirrors.length;
+    while (pageSize === 200 && guanianOnlineRounds(mirrors).length <= guanianRoundLimit(window?.onlineRounds)) {
+      if (mirrors.length >= 5000) throw new Error("最近对话气泡过多，请减少线上回看轮数");
+      const response = await rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,and(media_type.neq.response_batch,media_type.neq.offline_summary))&order=message_at.desc,id.desc&limit=200&offset=${mirrors.length}`);
+      if (!response.ok) throw new Error("线上历史分页读取失败");
+      const page = await response.json() as GuanianCloudMessage[];
+      if (!Array.isArray(page)) throw new Error("线上历史分页格式错误");
+      mirrors.push(...page); pageSize = page.length;
+    }
+    const response = await rest(`push_chat_mirror?${scope}&media_type=eq.offline_summary&select=id,role,content,message_at,media_type&order=message_at.desc,id.desc&limit=${guanianRoundLimit(window?.offlineRounds)}`);
+    if (!response.ok) throw new Error("线下摘要读取失败");
+    const summaries = await response.json() as GuanianCloudMessage[];
+    if (!Array.isArray(summaries)) throw new Error("线下摘要格式错误");
+    mirrors.push(...summaries);
+  }
   const records = new Map<string, GuanianCloudMessage>();
   const cloudIds = new Set(outputs.map(o => `push-outbox:${o.id}`));
   const snapshots = new Map<string, GuanianCloudMessage[]>();
@@ -73,7 +122,7 @@ export async function readGuanianCloudHistory(
   // complete, unique consecutive sequence at that receipt time; never dedupe by
   // an isolated phrase or by the latest mirror timestamp.
   const compact = (s: string) => s.replace(/\s+/g, "").trim();
-  const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id)
+  const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id && m.media_type !== "offline_summary")
     .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
   const candidates = new Map<string, { groups: GuanianCloudMessage[][]; output: GuanianCloudOutput }>();
   for (const o of outputs) {
@@ -132,10 +181,11 @@ export async function readGuanianCloudHistory(
   }
   return { messages: [...records.values()].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id)), outputs, lastGeneratedAt, uncertainLegacy };
 }
-export function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80): string {
-  const main = history.messages.slice(-limit).map(m => {
+export function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80, window?: GuanianHistoryWindow): string {
+  const selected = guanianHasWindow(window) ? selectGuanianHistory(history.messages, window!) : history.messages.filter(m => m.media_type !== "offline_summary").slice(-limit);
+  const main = selected.map(m => {
     const local = new Date(Date.parse(m.message_at) + tz * 60_000).toISOString().slice(0, 16).replace("T", " ");
-    return `[${m.id}] ${local} ${m.role === "user" ? "用户" : "你"}：${m.content.slice(0, 4000)}`;
+    return `[${m.id}] ${local} ${m.media_type === "offline_summary" ? "线下摘要（概述双方互动，非角色原话）" : m.role === "user" ? "用户" : "你"}：${m.content.slice(0, m.media_type === "offline_summary" ? 500 : 4000)}`;
   }).join("\n");
   const uncertain = (history.uncertainLegacy || []).slice(-20);
   if (!uncertain.length) return main;
@@ -145,7 +195,7 @@ export function guanianHistoryText(history: GuanianCloudHistory, tz: number, lim
 }
 export function guanianHistoryRounds(history: GuanianCloudHistory, nowMs: number): number {
   let rounds = 0, last = Infinity;
-  for (const m of [...history.messages].reverse()) {
+  for (const m of [...history.messages].filter(m => m.media_type !== "offline_summary").reverse()) {
     if (m.role === "user") break;
     const at = Date.parse(m.message_at);
     if (last - at > 3 * 60_000 && nowMs - at >= 30 * 60_000) rounds++;

@@ -67,7 +67,7 @@ function cleanText(value: unknown, max: number): string {
 // 名单外的键一律不落库，App 新增一项要同时加在这里。
 const RECHECK_NUMERIC_CONTEXT_KEYS = [
   "gateDailyCap", "gateGapMin", "gateHorizonMin", "gateFreshMin", "gateMinMsgs",
-  "selfImpulseCap", "selfUsed", "judgeLines",
+  "selfImpulseCap", "selfUsed", "judgeLines", "onlineRounds", "offlineRounds",
   "presendMax", "presendTalkingMin", "presendGapMin",
   "busyHold", "busyBufferMin", "busyMaxHoldMin",
   "sleepMode", "sleepWakeProb",
@@ -1239,7 +1239,7 @@ Deno.serve(async (request: Request) => {
         if (probe.ok) worker = await probe.json().catch(() => null);
       } catch { /* 旧 worker 或网络失败，不执行写入，也不报告支持 */ }
       let capabilities = worker?.ok && Array.isArray(worker.capabilities) ? worker.capabilities : [];
-      let promiseGeneratorReady = false, schedulerGeneratorReady = false;
+      let promiseGeneratorReady = false, schedulerGeneratorReady = false, historyGeneratorReady = false;
       if (capabilities.includes("promise-tasks-v1")) {
         const meta = await rest("ai_phone_cloud_meta?id=eq.personal-cloud&select=schema_version&limit=1");
         const version = meta.ok ? Number((await meta.json())[0]?.schema_version) : 0;
@@ -1248,6 +1248,7 @@ Deno.serve(async (request: Request) => {
         const features = generator?.ok ? await generator.json().catch(() => null) : null;
         promiseGeneratorReady = features?.capabilities?.includes("promise-tasks-v2") === true;
         schedulerGeneratorReady = features?.capabilities?.includes("scheduler-state-v1") === true;
+        historyGeneratorReady = features?.capabilities?.includes("history-window-v1") === true;
         if (version < 11 || !features?.capabilities?.includes("guanian-history-v1")) capabilities = capabilities.filter(c => c !== "promise-tasks-v1");
       }
       if (capabilities.includes("promise-tasks-v2")) {
@@ -1259,6 +1260,7 @@ Deno.serve(async (request: Request) => {
         const ready = await rest("rpc/push_scheduler_storage_ready", { method: "POST", body: "{}" });
         if (!schedulerGeneratorReady || !ready.ok || await ready.json() !== true || !meta.ok || Number((await meta.json())[0]?.schema_version) < 12) capabilities = capabilities.filter(c => c !== "scheduler-state-v1");
       }
+      if (!historyGeneratorReady) capabilities = capabilities.filter(c => c !== "history-window-v1");
       if (action === "recheck-capabilities" && request.method === "GET") return json({ ok: true, capabilities });
       if (action === "generation-stop" && request.method === "POST") {
         if (!capabilities.includes("generation-stop-v1")) return json({ ok: false, error: "请更新网关和 push-recheck，再重试停用自动生成。" }, 409);

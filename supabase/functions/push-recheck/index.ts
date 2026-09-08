@@ -54,6 +54,8 @@ type PlanContext = {
   chatCandidates?: string;
   bias?: string;
   wakePrefix?: string;
+  onlineRounds?: number;
+  offlineRounds?: number;
   gateDailyCap?: number;
   gateGapMin?: number;
   gateHorizonMin?: number;
@@ -324,7 +326,7 @@ function threadLines(context: PlanContext, nowMs: number, tz: number): string[] 
     return `[${t.id}] ${THREAD_KIND[t.kind] || "话头"}·${t.text}${notes.length ? "（" + notes.join("，") + "）" : ""}`;
   });
 }
-const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。";
+const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。" + promiseAgreementRule();
 // 用户一句话把约定 / 话头了结：只认稳的词，宁可漏（漏的下一轮模型 settle 兜底）也不误伤。
 // 约定认「做完」和「作废」，话头只认「作废」，日子不碰（到日子自己过期）
 const DONE_WORDS = ["好了", "搞定", "解决了", "完成了", "弄完了", "做完了", "办好了", "交了", "买到了", "看完了", "结束了"];
@@ -356,6 +358,7 @@ function settleByWords(threads: Thread[], msgs: string[], nowMs: number): { id: 
     if (match.length !== 1) continue;
     const t = match[0];
     t.done = true; t.at = nowMs; t.by = "words";
+    if (t.kind === "promise") t.status = drop ? "cancelled" : "completed";
     out.push({ id: t.id, text: t.text, how: drop ? "作废" : "完成", said: drop || done || "" });
   }
   return out;
@@ -379,11 +382,11 @@ function parseWhen(when: unknown, nowMs: number, tz: number): number {
   return 0;
 }
 // 复核回来的 keep / settle 并进账本；返回 null 表示没动
-function applyThreads(context: PlanContext, keep: Keep[], settle: string[], nowMs: number, tz: number, log: (s: string) => void): Thread[] | null {
+function applyThreads(context: PlanContext, keep: Keep[], settle: string[], nowMs: number, tz: number, log: (s: string) => void, messages = null): Thread[] | null {
   let list: Thread[] = (Array.isArray(context.threads) ? context.threads : []).map(t => ({ ...t }));
   const promises = keep.filter(k => k && (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
   const before = JSON.stringify(list);
-  list = updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs, tz) })), nowMs, "cloud");
+  list = updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs, tz) })), nowMs, "cloud", messages);
   const notes: string[] = before === JSON.stringify(list) ? [] : ["更新约定"];
   for (const id of settle.slice(0, 6)) {
     const t = list.find(x => x.id === String(id).replace(/[\[\]]/g, "").trim());
@@ -1130,19 +1133,27 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
       // 与 App orchestrate 同步：随用随判早上不预排念头，白天由复核随时起
       log("随用随判：早上不排念头（没调模型）");
     } else {
+      const { chat, lines } = await (async () => {
+        if (guanianHasWindow(context)) {
+          const history = await readGuanianCloudHistory(rest, userId, plan.session_id, context);
+          const selected = selectGuanianHistory(history.messages, context);
+          return { chat: selected.filter(m => m.media_type !== "offline_summary").map(m => ({ role: m.role, t: Date.parse(m.message_at), c: m.content })),
+            lines: guanianHistoryText(history, tz, 80, context).split("\n").filter(Boolean) };
+        }
       const mirrorResponse = await rest(
         `push_chat_mirror?user_id=eq.${encodeURIComponent(userId)}`
         + `&character_id=eq.${encodeURIComponent(characterId)}`
         + `&or=(media_type.is.null,media_type.neq.response_batch)&select=role,content,message_at&order=message_at.desc&limit=${judgeLinesOf(context.judgeLines) + 20}`,
       );
       const mirrorRows = mirrorResponse.ok ? (await mirrorResponse.json() as { role: string; content: string; message_at: string }[]).reverse() : [];
-      const chat = mirrorRows
+        const chat = mirrorRows
         .filter(m => m.role === "user" || m.role === "assistant")
         .map(m => ({ role: m.role, t: Date.parse(m.message_at) || 0, c: String(m.content || "").replace(/\s+/g, " ").trim() }))
         .filter(m => m.c)
         .sort((a, b) => a.t - b.t);
+        return { chat, lines: chatExcerpt(chat, judgeLinesOf(context.judgeLines)) };
+      })();
       const streak0 = unansweredStreak(chat, nowMs);
-      const lines = chatExcerpt(chat, judgeLinesOf(context.judgeLines));
       chatUsed = lines.length;
       if (lines.length) log("已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
       if (!await active()) return;
@@ -1308,7 +1319,7 @@ Deno.serve(async (req: Request) => {
   const cronSecret = secretRows[0]?.cron_secret || "";
   const payloadKey = secretRows[0]?.payload_key || "";
   if (!cronSecret || String(token) !== cronSecret) return new Response("forbidden", { status: 403 });
-  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1", "promise-tasks-v1", "promise-tasks-v2", "scheduler-state-v1"] });
+  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1", "promise-tasks-v1", "promise-tasks-v2", "scheduler-state-v1", "history-window-v1"] });
   if (!userId || !characterId || !planDate) return new Response("bad request", { status: 400 });
   if (!payloadKey) return new Response("payload_key missing", { status: 200 });
 
@@ -1447,7 +1458,7 @@ Deno.serve(async (req: Request) => {
         }
       }
     }
-    cloudHistory = await readGuanianCloudHistory(rest, userId, sessionId);
+    cloudHistory = await readGuanianCloudHistory(rest, userId, sessionId, context);
   }
   catch { return failPlan("云端历史或会话模板读取失败，请检查数据库和模板"); }
   const items = Array.isArray(plan.items) ? plan.items : [];
@@ -1590,7 +1601,7 @@ Deno.serve(async (req: Request) => {
 
     // 没新消息就没有新信息，再判一次只是烧额度。首次复核回看 6 小时，
     // 别把开机前的对话全算成"新"。
-    const freshRows = evidence.users;
+    const freshRows = evidence.updates;
     if (Array.isArray(context.threads) && freshRows.length) {
       wordSettled = settleByWords(context.threads, freshRows.filter(r => r.role === "user").map(r => String(r.content || "")), nowMs);
     }
@@ -1845,7 +1856,7 @@ Deno.serve(async (req: Request) => {
         || list.some(other => other.kind !== "promise" && other.act && other !== self && Math.abs((other.generatedAt || other.fireAt) - fireAt) < gap);
     };
     const characterName = template.notify?.title || "TA";
-    const chatLines = guanianHistoryText(cloudHistory, offsetMin, judgeLinesOf(context.judgeLines));
+    const chatLines = guanianHistoryText(cloudHistory, offsetMin, judgeLinesOf(context.judgeLines), context);
     const planLines = pending
       .map(item => `- ${item.time}｜${item.source}｜${item.act ? "已点亮" : "未点亮"}｜意图：${item.intent || "（无）"}｜理由：${item.why || "（无）"}`)
       .join("\n");
@@ -1955,7 +1966,7 @@ Deno.serve(async (req: Request) => {
     const decisions = judge ? judged.decisions : [];
     const extra = canImpulse ? judged.extra : [];
     // 账本改动（自发起念那轮不让模型记账，只标「这个由头提过了」）
-    let threadsNext: Thread[] | null = threadsOn && !selfReason ? applyThreads(context, judged.keep, judged.settle, nowMs, offsetMin, (s) => console.log("[push-recheck] " + s)) : null;
+    let threadsNext: Thread[] | null = threadsOn && !selfReason ? applyThreads(context, judged.keep, judged.settle, nowMs, offsetMin, (s) => console.log("[push-recheck] " + s), cloudHistory.messages) : null;
     if (threadNudged) {
       const base = threadsNext || (Array.isArray(context.threads) ? context.threads.map(t => ({ ...t })) : []);
       const t = base.find(x => x.id === threadNudged!.id);
@@ -2170,6 +2181,37 @@ type GuanianCloudMessage = { id: string; role: string; content: string; message_
 type GuanianCloudOutput = { id: string; trigger_key?: string; raw_text: string; created_at: string; consumed_at?: string; meta?: Record<string, unknown> };
 type GuanianCloudHistory = { messages: GuanianCloudMessage[]; outputs: GuanianCloudOutput[]; lastGeneratedAt: number;
   uncertainLegacy?: { message: GuanianCloudMessage; outputIds: string[]; exactText: boolean }[] };
+type GuanianHistoryWindow = { onlineRounds?: unknown; offlineRounds?: unknown };
+function guanianRoundLimit(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(100, Math.max(1, Math.round(n))) : 40;
+}
+function guanianHasWindow(window?: GuanianHistoryWindow): boolean {
+  return window?.onlineRounds != null || window?.offlineRounds != null;
+}
+function guanianOnlineRounds(messages: GuanianCloudMessage[]): GuanianCloudMessage[][] {
+  const rounds: GuanianCloudMessage[][] = [];
+  for (const m of [...messages].filter(m => m.media_type !== "offline_summary")
+    .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id))) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const current = rounds[rounds.length - 1];
+    const last = current?.[current.length - 1];
+    const batch = m.response_batch_id || (m.id.startsWith("push-outbox:") ? m.id : "");
+    const previousBatch = last?.response_batch_id || (last?.id.startsWith("push-outbox:") ? last.id : "");
+    const separateReply = last?.role === "assistant" && m.role === "assistant"
+      && (batch && previousBatch ? batch !== previousBatch : Date.parse(m.message_at) - Date.parse(last.message_at) > 180000);
+    if (!current || m.role === "user" || separateReply) rounds.push([m]);
+    else current.push(m);
+  }
+  return rounds;
+}
+function selectGuanianHistory(messages: GuanianCloudMessage[], window: GuanianHistoryWindow): GuanianCloudMessage[] {
+  const online = guanianOnlineRounds(messages).slice(-guanianRoundLimit(window.onlineRounds)).flat();
+  const offline = messages.filter(m => m.media_type === "offline_summary" && m.content.trim())
+    .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id))
+    .slice(-guanianRoundLimit(window.offlineRounds));
+  return [...online, ...offline].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
+}
 
 /** Absence, null, booleans and invalid offsets are not UTC. Explicit zero is. */
 function guanianTimezone(...values: unknown[]): number | null {
@@ -2198,16 +2240,34 @@ function guanianContextTimezone(context: Record<string, unknown>, at: number): n
 }
 async function readGuanianCloudHistory(
   rest: (path: string, init?: RequestInit) => Promise<Response>, userId: string, sessionId: string,
+  window?: GuanianHistoryWindow,
 ): Promise<GuanianCloudHistory> {
   if (!sessionId) throw new Error("缺少聊天会话，不能核对云端消息");
   const scope = `user_id=eq.${encodeURIComponent(userId)}&session_id=eq.${encodeURIComponent(sessionId)}`;
   const responses = await Promise.all([
-    rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,media_type.neq.response_batch)&order=message_at.desc&limit=200`),
+    rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,and(media_type.neq.response_batch,media_type.neq.offline_summary))&order=message_at.desc,id.desc&limit=200`),
     rest(`push_outbox?${scope}&meta->>pushGenerated=eq.true&select=id,trigger_key,raw_text,created_at,consumed_at,meta&order=created_at.desc&limit=200`),
   ]);
   if (responses.some(r => !r.ok)) throw new Error("云端聊天读取失败，请检查 schema 11 与云函数部署；稍后重试");
   const [mirrors, outputs] = await Promise.all(responses.map(r => r.json())) as [GuanianCloudMessage[], GuanianCloudOutput[]];
   if (!Array.isArray(mirrors) || !Array.isArray(outputs)) throw new Error("云端聊天数据格式错误");
+  if (guanianHasWindow(window)) {
+    // Fetch enough complete online rounds; summary traffic cannot displace them.
+    let pageSize = mirrors.length;
+    while (pageSize === 200 && guanianOnlineRounds(mirrors).length <= guanianRoundLimit(window?.onlineRounds)) {
+      if (mirrors.length >= 5000) throw new Error("最近对话气泡过多，请减少线上回看轮数");
+      const response = await rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,and(media_type.neq.response_batch,media_type.neq.offline_summary))&order=message_at.desc,id.desc&limit=200&offset=${mirrors.length}`);
+      if (!response.ok) throw new Error("线上历史分页读取失败");
+      const page = await response.json() as GuanianCloudMessage[];
+      if (!Array.isArray(page)) throw new Error("线上历史分页格式错误");
+      mirrors.push(...page); pageSize = page.length;
+    }
+    const response = await rest(`push_chat_mirror?${scope}&media_type=eq.offline_summary&select=id,role,content,message_at,media_type&order=message_at.desc,id.desc&limit=${guanianRoundLimit(window?.offlineRounds)}`);
+    if (!response.ok) throw new Error("线下摘要读取失败");
+    const summaries = await response.json() as GuanianCloudMessage[];
+    if (!Array.isArray(summaries)) throw new Error("线下摘要格式错误");
+    mirrors.push(...summaries);
+  }
   const records = new Map<string, GuanianCloudMessage>();
   const cloudIds = new Set(outputs.map(o => `push-outbox:${o.id}`));
   const snapshots = new Map<string, GuanianCloudMessage[]>();
@@ -2240,7 +2300,7 @@ async function readGuanianCloudHistory(
   // complete, unique consecutive sequence at that receipt time; never dedupe by
   // an isolated phrase or by the latest mirror timestamp.
   const compact = (s: string) => s.replace(/\s+/g, "").trim();
-  const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id)
+  const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id && m.media_type !== "offline_summary")
     .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
   const candidates = new Map<string, { groups: GuanianCloudMessage[][]; output: GuanianCloudOutput }>();
   for (const o of outputs) {
@@ -2299,10 +2359,11 @@ async function readGuanianCloudHistory(
   }
   return { messages: [...records.values()].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id)), outputs, lastGeneratedAt, uncertainLegacy };
 }
-function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80): string {
-  const main = history.messages.slice(-limit).map(m => {
+function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80, window?: GuanianHistoryWindow): string {
+  const selected = guanianHasWindow(window) ? selectGuanianHistory(history.messages, window!) : history.messages.filter(m => m.media_type !== "offline_summary").slice(-limit);
+  const main = selected.map(m => {
     const local = new Date(Date.parse(m.message_at) + tz * 60_000).toISOString().slice(0, 16).replace("T", " ");
-    return `[${m.id}] ${local} ${m.role === "user" ? "用户" : "你"}：${m.content.slice(0, 4000)}`;
+    return `[${m.id}] ${local} ${m.media_type === "offline_summary" ? "线下摘要（概述双方互动，非角色原话）" : m.role === "user" ? "用户" : "你"}：${m.content.slice(0, m.media_type === "offline_summary" ? 500 : 4000)}`;
   }).join("\n");
   const uncertain = (history.uncertainLegacy || []).slice(-20);
   if (!uncertain.length) return main;
@@ -2312,7 +2373,7 @@ function guanianHistoryText(history: GuanianCloudHistory, tz: number, limit = 80
 }
 function guanianHistoryRounds(history: GuanianCloudHistory, nowMs: number): number {
   let rounds = 0, last = Infinity;
-  for (const m of [...history.messages].reverse()) {
+  for (const m of [...history.messages].filter(m => m.media_type !== "offline_summary").reverse()) {
     if (m.role === "user") break;
     const at = Date.parse(m.message_at);
     if (last - at > 3 * 60_000 && nowMs - at >= 30 * 60_000) rounds++;
@@ -2341,10 +2402,16 @@ function promiseSubject(value) {
 function promiseSubjectLabel(value) {
   return { user: "用户", character: "角色", both: "双方" }[promiseSubject(value)];
 }
+function promiseAgreementRule() {
+  return "标注为线下摘要的记录是双方互动的概述，不是角色原话；可引用摘要编号核对约定，但必须区分摘要中用户的明确同意或拒绝与角色的要求。不能因为摘要由模型生成，就把其全部内容归为角色承诺。用户自己的事情以用户最新明确意愿为准。角色的要求、劝说、坚持、替用户安排时间不等于用户答应，不能建立或恢复 user/both 约定，也不能改记为角色的跟进承诺来继续催。用户明确拒绝或取消时，已有同一件事必须通过 keep 的 id + status=cancelled 更新，不能只在 why 里写取消而仍保留 pending；没有已有事件则不创建。只有用户后来明确重新同意才能恢复，沉默不是同意。sourceMessageId 必须引用下方真实聊天编号：用户或双方约定的成立、改期、恢复要引用用户本人同意的消息；角色自己的承诺要引用角色本人消息；取消引用明确取消的消息。取消优先于同轮旧的同意或角色坚持，相关普通跟进时刻也应取消，不再为同一件事加 extra。";
+}
 // A cheap wake-up hint, not a parser: the model still checks whether a promise exists.
 function hasPromiseUpdate(messages, threads) {
   return messages.some(m => {
     const text = String(m.content || m.c || "");
+    // Only opens semantic review; never cancels a possibly unrelated event by keyword.
+    if (m.role === "user" && threads.some(t => t.kind === "promise" && !t.done)
+      && /取消|算了|不(?:再|想|用|做|去|需要)|别(?:再|提醒|催|提)/.test(text)) return true;
     return /(?:\d{1,2}[:：]\d{2}|[一二三四五六七八九十两\d]{1,3}[点时]|明天|后天|周[一二三四五六日天])/.test(text)
       && /回|到|约|等|一起|见|答应|记得|提醒|陪|去|再说|联系|找你/.test(text)
       || threads.some(t => t.kind === "promise" && !t.done && text.includes(String(t.text || ""))
@@ -2355,22 +2422,39 @@ function hasPromiseUpdate(messages, threads) {
 function recheckEvidence(messages, threads, since) {
   const fresh = messages.filter(m => Number(m.t ?? Date.parse(m.message_at || "")) > since);
   const users = fresh.filter(m => m.role === "user");
-  const promiseUpdate = hasPromiseUpdate(fresh, threads);
-  return { fresh, users, promiseUpdate, ledgerOnly: users.length === 0 && promiseUpdate };
+  const summaries = fresh.filter(m => m.media_type === "offline_summary");
+  const updates = [...users, ...summaries];
+  const promiseUpdate = hasPromiseUpdate(fresh, threads) || summaries.length > 0;
+  return { fresh, users, updates, promiseUpdate, ledgerOnly: updates.length === 0 && promiseUpdate };
 }
 function ordinaryQuota(items) {
   return items.filter(w => w.kind !== "promise" && w.act).length;
 }
-function updatePromiseThreads(threads, changes, nowMs, by) {
+function updatePromiseThreads(threads, changes, nowMs, by, messages = null) {
   const list = threads.map(t => ({ ...t }));
   for (const k of changes) {
     const id = String(k.id || "").replace(/[\[\]\s]/g, "");
     const text = String(k.text || "").trim().slice(0, 60);
     const subject = promiseSubject(k.subject);
     const old = id ? list.find(t => t.id === id && t.kind === "promise")
-      : list.find(t => !t.done && t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
+      : list.find(t => t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
     // Explicit unknown IDs cannot silently create a second event.
     if (id && !old) continue;
+    // Model-produced changes need real speaker evidence. Manual edits use their own UI path.
+    if (Array.isArray(messages)) {
+      const source = messages.find(m => String(m.id || "") === String(k.sourceMessageId || "") && m.id);
+      if (!source) continue;
+      const closing = k.status === "completed" || k.status === "cancelled";
+      const owner = old ? promiseSubject(old.subject) : subject;
+      const nextOwner = k.subject ? subject : owner;
+      const summaryEvidence = source.media_type === "offline_summary";
+      if (!closing && (owner !== "character" || nextOwner !== "character") && source.role !== "user" && !summaryEvidence) continue;
+      if (!closing && owner === "character" && nextOwner === "character" && source.role !== "assistant" && !summaryEvidence) continue;
+      if (closing && owner !== "character" && source.role !== "user" && !summaryEvidence) continue;
+      // A previously closed event cannot be revived from the same old agreement.
+      const sourceAt = Number(source.t ?? Date.parse(source.message_at || ""));
+      if (!closing && old?.done && !(sourceAt > Number(old.at || 0))) continue;
+    }
     if (k.status === "completed" || k.status === "cancelled") {
       if (old) Object.assign(old, { status: k.status, done: true, at: nowMs, by });
       continue;

@@ -1,4 +1,6 @@
 "use client";
+import { loadChatOfflineSummaryEntries } from "./chat-offline-storage";
+import { selectGuanianHistory, type GuanianCloudMessage } from "./guanian-cloud-history";
 
 import type { CustomAppPermission, CustomAppPromptProfile, InstalledCustomApp } from "./custom-app-types";
 import {
@@ -1913,12 +1915,23 @@ export function readCustomAppChatHistory(record: Record<string, unknown>): {
   characterId: string;
   isGroup: boolean;
   messages: Record<string, unknown>[];
+  historyMode?: string;
 } {
   const session = findReadableSession(record);
   if (!session) throw new Error("chat.readHistory 找不到会话。");
   const limit = Math.max(1, Math.min(200, Number(record.limit ?? 50) || 50));
   const before = cleanText(record.before, 80);
   let messages = loadChatMessages(session.id);
+  if (record.onlineRounds != null || record.offlineRounds != null) {
+    const online: GuanianCloudMessage[] = messages.filter(m => !m.isRetracted && (m.role === "user" || m.role === "assistant"))
+      .map(m => ({ id: m.id, role: m.role, content: m.content, message_at: m.createdAt, response_batch_id: m.responseBatchId, media_type: m.mediaType }));
+    const offline: GuanianCloudMessage[] = session.isGroup ? [] : loadChatOfflineSummaryEntries(session.id)
+      .map(entry => ({ id: entry.id, role: "assistant", content: entry.content, message_at: entry.createdAt, media_type: "offline_summary" }));
+    const selected = selectGuanianHistory([...online, ...offline], record);
+    return { sessionId: session.id, characterId: session.contactId, isGroup: session.isGroup === true, historyMode: "separate-rounds-v1",
+      messages: selected.map(m => ({ id: m.id, sessionId: session.id, role: m.role, content: m.content,
+        createdAt: m.message_at, mediaType: m.media_type, responseBatchId: m.response_batch_id })) };
+  }
   if (before) {
     const index = messages.findIndex(message => message.id === before);
     if (index >= 0) messages = messages.slice(0, index);

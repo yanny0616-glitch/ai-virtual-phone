@@ -1,8 +1,8 @@
   function decRow(w) {
     const st = decStatus(w);
     return '<div class="dec ' + st.cls + '" data-t="' + esc(w.time) + '" data-wake="' + esc(w.wakeId || "") + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
-      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + adjBadge(w) + "</div>" +
-      '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
+      '<div class="row1"><span class="tm">' + esc(wakeTimeLabel(w)) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + adjBadge(w) + "</div>" +
+      '<div class="why">' + esc(w.act ? "「" + wakeIntentLabel(w) + "」" : (w.why || "TA这会儿不想")) + "</div>" +
       "</div>";
   }
 

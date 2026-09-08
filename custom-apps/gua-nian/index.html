@@ -707,6 +707,7 @@ const exports = Object.create(null);
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.promiseSubject = promiseSubject;
 exports.promiseSubjectLabel = promiseSubjectLabel;
+exports.promiseAgreementRule = promiseAgreementRule;
 exports.hasPromiseUpdate = hasPromiseUpdate;
 exports.recheckEvidence = recheckEvidence;
 exports.ordinaryQuota = ordinaryQuota;
@@ -720,10 +721,17 @@ function promiseSubject(value) {
 function promiseSubjectLabel(value) {
     return { user: "用户", character: "角色", both: "双方" }[promiseSubject(value)];
 }
+function promiseAgreementRule() {
+    return "标注为线下摘要的记录是双方互动的概述，不是角色原话；可引用摘要编号核对约定，但必须区分摘要中用户的明确同意或拒绝与角色的要求。不能因为摘要由模型生成，就把其全部内容归为角色承诺。用户自己的事情以用户最新明确意愿为准。角色的要求、劝说、坚持、替用户安排时间不等于用户答应，不能建立或恢复 user/both 约定，也不能改记为角色的跟进承诺来继续催。用户明确拒绝或取消时，已有同一件事必须通过 keep 的 id + status=cancelled 更新，不能只在 why 里写取消而仍保留 pending；没有已有事件则不创建。只有用户后来明确重新同意才能恢复，沉默不是同意。sourceMessageId 必须引用下方真实聊天编号：用户或双方约定的成立、改期、恢复要引用用户本人同意的消息；角色自己的承诺要引用角色本人消息；取消引用明确取消的消息。取消优先于同轮旧的同意或角色坚持，相关普通跟进时刻也应取消，不再为同一件事加 extra。";
+}
 // A cheap wake-up hint, not a parser: the model still checks whether a promise exists.
 function hasPromiseUpdate(messages, threads) {
     return messages.some(m => {
         const text = String(m.content || m.c || "");
+        // Only opens semantic review; never cancels a possibly unrelated event by keyword.
+        if (m.role === "user" && threads.some(t => t.kind === "promise" && !t.done)
+            && /取消|算了|不(?:再|想|用|做|去|需要)|别(?:再|提醒|催|提)/.test(text))
+            return true;
         return /(?:\d{1,2}[:：]\d{2}|[一二三四五六七八九十两\d]{1,3}[点时]|明天|后天|周[一二三四五六日天])/.test(text)
             && /回|到|约|等|一起|见|答应|记得|提醒|陪|去|再说|联系|找你/.test(text)
             || threads.some(t => t.kind === "promise" && !t.done && text.includes(String(t.text || ""))
@@ -734,23 +742,45 @@ function hasPromiseUpdate(messages, threads) {
 function recheckEvidence(messages, threads, since) {
     const fresh = messages.filter(m => Number(m.t ?? Date.parse(m.message_at || "")) > since);
     const users = fresh.filter(m => m.role === "user");
-    const promiseUpdate = hasPromiseUpdate(fresh, threads);
-    return { fresh, users, promiseUpdate, ledgerOnly: users.length === 0 && promiseUpdate };
+    const summaries = fresh.filter(m => m.media_type === "offline_summary");
+    const updates = [...users, ...summaries];
+    const promiseUpdate = hasPromiseUpdate(fresh, threads) || summaries.length > 0;
+    return { fresh, users, updates, promiseUpdate, ledgerOnly: updates.length === 0 && promiseUpdate };
 }
 function ordinaryQuota(items) {
     return items.filter(w => w.kind !== "promise" && w.act).length;
 }
-function updatePromiseThreads(threads, changes, nowMs, by) {
+function updatePromiseThreads(threads, changes, nowMs, by, messages = null) {
     const list = threads.map(t => ({ ...t }));
     for (const k of changes) {
         const id = String(k.id || "").replace(/[\[\]\s]/g, "");
         const text = String(k.text || "").trim().slice(0, 60);
         const subject = promiseSubject(k.subject);
         const old = id ? list.find(t => t.id === id && t.kind === "promise")
-            : list.find(t => !t.done && t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
+            : list.find(t => t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
         // Explicit unknown IDs cannot silently create a second event.
         if (id && !old)
             continue;
+        // Model-produced changes need real speaker evidence. Manual edits use their own UI path.
+        if (Array.isArray(messages)) {
+            const source = messages.find(m => String(m.id || "") === String(k.sourceMessageId || "") && m.id);
+            if (!source)
+                continue;
+            const closing = k.status === "completed" || k.status === "cancelled";
+            const owner = old ? promiseSubject(old.subject) : subject;
+            const nextOwner = k.subject ? subject : owner;
+            const summaryEvidence = source.media_type === "offline_summary";
+            if (!closing && (owner !== "character" || nextOwner !== "character") && source.role !== "user" && !summaryEvidence)
+                continue;
+            if (!closing && owner === "character" && nextOwner === "character" && source.role !== "assistant" && !summaryEvidence)
+                continue;
+            if (closing && owner !== "character" && source.role !== "user" && !summaryEvidence)
+                continue;
+            // A previously closed event cannot be revived from the same old agreement.
+            const sourceAt = Number(source.t ?? Date.parse(source.message_at || ""));
+            if (!closing && old?.done && !(sourceAt > Number(old.at || 0)))
+                continue;
+        }
         if (k.status === "completed" || k.status === "cancelled") {
             if (old)
                 Object.assign(old, { status: k.status, done: true, at: nowMs, by });
@@ -792,6 +822,267 @@ function promiseIntent(t, localDue) {
     return `核对约定 [${t.id}]：${promiseSubjectLabel(t.subject)}约好在 ${localDue} ${t.text}。`
         + "这是明确约定，到点核对最新时间、双方对话和当前行程。角色自己的承诺应交代进展；用户的事情只能询问，不能替用户宣称完成。"
         + "时间到了不等于事情已完成；有事实支持才能说到了或做完了，延误就按现在的情况说明，不能照搬旧时间。已改期、取消、完成且交代过则作罢。";
+}
+
+return Object.freeze(exports);
+})();
+  const GuaNianHistory = (() => {
+const exports = Object.create(null);
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.guanianRoundLimit = guanianRoundLimit;
+exports.guanianHasWindow = guanianHasWindow;
+exports.guanianOnlineRounds = guanianOnlineRounds;
+exports.selectGuanianHistory = selectGuanianHistory;
+exports.guanianTimezone = guanianTimezone;
+exports.guanianContextTimezone = guanianContextTimezone;
+exports.readGuanianCloudHistory = readGuanianCloudHistory;
+exports.guanianHistoryText = guanianHistoryText;
+exports.guanianHistoryRounds = guanianHistoryRounds;
+exports.guanianLastProactiveAt = guanianLastProactiveAt;
+function guanianRoundLimit(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.min(100, Math.max(1, Math.round(n))) : 40;
+}
+function guanianHasWindow(window) {
+    return window?.onlineRounds != null || window?.offlineRounds != null;
+}
+function guanianOnlineRounds(messages) {
+    const rounds = [];
+    for (const m of [...messages].filter(m => m.media_type !== "offline_summary")
+        .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id))) {
+        if (m.role !== "user" && m.role !== "assistant")
+            continue;
+        const current = rounds[rounds.length - 1];
+        const last = current?.[current.length - 1];
+        const batch = m.response_batch_id || (m.id.startsWith("push-outbox:") ? m.id : "");
+        const previousBatch = last?.response_batch_id || (last?.id.startsWith("push-outbox:") ? last.id : "");
+        const separateReply = last?.role === "assistant" && m.role === "assistant"
+            && (batch && previousBatch ? batch !== previousBatch : Date.parse(m.message_at) - Date.parse(last.message_at) > 180000);
+        if (!current || m.role === "user" || separateReply)
+            rounds.push([m]);
+        else
+            current.push(m);
+    }
+    return rounds;
+}
+function selectGuanianHistory(messages, window) {
+    const online = guanianOnlineRounds(messages).slice(-guanianRoundLimit(window.onlineRounds)).flat();
+    const offline = messages.filter(m => m.media_type === "offline_summary" && m.content.trim())
+        .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id))
+        .slice(-guanianRoundLimit(window.offlineRounds));
+    return [...online, ...offline].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
+}
+/** Absence, null, booleans and invalid offsets are not UTC. Explicit zero is. */
+function guanianTimezone(...values) {
+    for (const value of values) {
+        if (typeof value !== "number" && !(typeof value === "string" && value.trim()))
+            continue;
+        const n = Number(value);
+        if (Number.isInteger(n) && n >= -840 && n <= 840)
+            return n;
+    }
+    return null;
+}
+function guanianContextTimezone(context, at) {
+    const day = context.day;
+    const kit = context.genKit;
+    const explicit = guanianTimezone(day?.tz, kit?.tz, context.tzOffsetMin);
+    if (explicit !== null)
+        return explicit;
+    // Old gateways defaulted missing userSleepTz to zero. Only the actual IANA
+    // zone is trustworthy in such a legacy row; never use that defaulted zero.
+    if (typeof context.userSleepTimeZone === "string" && context.userSleepTimeZone) {
+        try {
+            const parts = new Intl.DateTimeFormat("en-CA", { timeZone: context.userSleepTimeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at);
+            const get = (type) => Number(parts.find(part => part.type === type)?.value);
+            return guanianTimezone((Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute")) - Math.floor(at / 60000) * 60000) / 60000);
+        }
+        catch { /* Invalid zone: require a new phone snapshot. */ }
+    }
+    return null;
+}
+async function readGuanianCloudHistory(rest, userId, sessionId, window) {
+    if (!sessionId)
+        throw new Error("缺少聊天会话，不能核对云端消息");
+    const scope = `user_id=eq.${encodeURIComponent(userId)}&session_id=eq.${encodeURIComponent(sessionId)}`;
+    const responses = await Promise.all([
+        rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,and(media_type.neq.response_batch,media_type.neq.offline_summary))&order=message_at.desc,id.desc&limit=200`),
+        rest(`push_outbox?${scope}&meta->>pushGenerated=eq.true&select=id,trigger_key,raw_text,created_at,consumed_at,meta&order=created_at.desc&limit=200`),
+    ]);
+    if (responses.some(r => !r.ok))
+        throw new Error("云端聊天读取失败，请检查 schema 11 与云函数部署；稍后重试");
+    const [mirrors, outputs] = await Promise.all(responses.map(r => r.json()));
+    if (!Array.isArray(mirrors) || !Array.isArray(outputs))
+        throw new Error("云端聊天数据格式错误");
+    if (guanianHasWindow(window)) {
+        // Fetch enough complete online rounds; summary traffic cannot displace them.
+        let pageSize = mirrors.length;
+        while (pageSize === 200 && guanianOnlineRounds(mirrors).length <= guanianRoundLimit(window?.onlineRounds)) {
+            if (mirrors.length >= 5000)
+                throw new Error("最近对话气泡过多，请减少线上回看轮数");
+            const response = await rest(`push_chat_mirror?${scope}&select=id,role,content,message_at,response_batch_id,media_type&or=(media_type.is.null,and(media_type.neq.response_batch,media_type.neq.offline_summary))&order=message_at.desc,id.desc&limit=200&offset=${mirrors.length}`);
+            if (!response.ok)
+                throw new Error("线上历史分页读取失败");
+            const page = await response.json();
+            if (!Array.isArray(page))
+                throw new Error("线上历史分页格式错误");
+            mirrors.push(...page);
+            pageSize = page.length;
+        }
+        const response = await rest(`push_chat_mirror?${scope}&media_type=eq.offline_summary&select=id,role,content,message_at,media_type&order=message_at.desc,id.desc&limit=${guanianRoundLimit(window?.offlineRounds)}`);
+        if (!response.ok)
+            throw new Error("线下摘要读取失败");
+        const summaries = await response.json();
+        if (!Array.isArray(summaries))
+            throw new Error("线下摘要格式错误");
+        mirrors.push(...summaries);
+    }
+    const records = new Map();
+    const cloudIds = new Set(outputs.map(o => `push-outbox:${o.id}`));
+    const snapshots = new Map();
+    // Fetch snapshots by batch, independently of the recent 200-bubble window.
+    // Each row is an atomic full replacement; an empty list is a deletion.
+    const batchIds = [...cloudIds];
+    for (let start = 0; start < batchIds.length; start += 50) {
+        const ids = batchIds.slice(start, start + 50).map(id => JSON.stringify(id)).join(",");
+        const response = await rest(`push_chat_mirror?${scope}&media_type=eq.response_batch&response_batch_id=in.(${encodeURIComponent(ids)})&select=id,content,response_batch_id,media_type&limit=50`);
+        if (!response.ok)
+            throw new Error("整轮聊天镜像读取失败，保留任务等待重试");
+        for (const row of await response.json()) {
+            if (row.media_type !== "response_batch" || !row.response_batch_id || !cloudIds.has(row.response_batch_id))
+                continue;
+            const value = JSON.parse(row.content);
+            if (value.v !== 1 || !Array.isArray(value.messages) || value.messages.some(m => typeof m.id !== "string" || typeof m.content !== "string" || !Number.isFinite(Date.parse(m.message_at)))) {
+                throw new Error("整轮聊天镜像格式异常，请重新同步镜像");
+            }
+            snapshots.set(row.response_batch_id, value.messages);
+        }
+    }
+    for (const m of mirrors) {
+        if (!m || !["user", "assistant"].includes(m.role) || !Number.isFinite(Date.parse(m.message_at)))
+            continue;
+        if (m.media_type === "response_batch")
+            continue;
+        // A single mirrored bubble never proves a full response. Use the atomic
+        // batch snapshot when available, otherwise retain the original whole reply.
+        if (m.response_batch_id && cloudIds.has(m.response_batch_id))
+            continue;
+        records.set(`mirror:${m.id}`, m);
+    }
+    // Pre-batch hosts stamped imported bubbles with consumption time. Match only a
+    // complete, unique consecutive sequence at that receipt time; never dedupe by
+    // an isolated phrase or by the latest mirror timestamp.
+    const compact = (s) => s.replace(/\s+/g, "").trim();
+    const legacy = mirrors.filter(m => records.has(`mirror:${m.id}`) && !m.response_batch_id && m.media_type !== "offline_summary")
+        .sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id));
+    const candidates = new Map();
+    for (const o of outputs) {
+        const receivedAt = Date.parse(o.consumed_at || "");
+        if (!Number.isFinite(receivedAt))
+            continue;
+        const raw = String(o.raw_text || "");
+        const forms = new Set([compact(raw), compact(raw.split(/\[(?:内心|心声)\]/)[0])].filter(Boolean));
+        const matches = [];
+        for (let start = 0; start < legacy.length; start++) {
+            const group = [];
+            let text = "";
+            for (const m of legacy.slice(start, start + 40)) {
+                if (m.role !== "assistant" || !records.has(`mirror:${m.id}`) || Math.abs(Date.parse(m.message_at) - receivedAt) > 120_000)
+                    break;
+                group.push(m);
+                text += compact(m.content);
+                if (forms.has(text))
+                    matches.push([...group]);
+                if (![...forms].some(f => f.startsWith(text)))
+                    break;
+            }
+        }
+        candidates.set(o.id, { groups: matches, output: o });
+    }
+    // Resolve across ALL outputs before removing anything. Two identical outputs
+    // may otherwise both claim the same mirror sequence in iteration order.
+    const owners = new Map();
+    for (const [id, candidate] of candidates)
+        for (const group of candidate.groups)
+            for (const m of group) {
+                if (!owners.has(m.id))
+                    owners.set(m.id, new Set());
+                owners.get(m.id).add(id);
+            }
+    const uncertainLegacy = [];
+    for (const candidate of candidates.values()) {
+        if (candidate.groups.length === 1 && candidate.groups[0].every(m => owners.get(m.id)?.size === 1)) {
+            for (const m of candidate.groups[0])
+                records.delete(`mirror:${m.id}`);
+        }
+    }
+    for (const m of legacy) {
+        if (m.role !== "assistant" || !records.has(`mirror:${m.id}`))
+            continue;
+        const exact = [...(owners.get(m.id) || [])];
+        // Receipt-time proximity is not identity. Unrelated old-format utterances
+        // stay in the factual history and can open the promise-update gate.
+        const possible = exact;
+        if (!possible.length)
+            continue;
+        // Insufficient old metadata cannot establish a separate utterance. Keep
+        // the evidence in an explicitly uncertain appendix, never as a fresh turn
+        // or as evidence for automatic unanswered-round cancellation.
+        uncertainLegacy.push({ message: m, outputIds: possible, exactText: exact.length > 0 });
+        records.delete(`mirror:${m.id}`);
+    }
+    let lastGeneratedAt = 0;
+    for (const o of outputs) {
+        const at = Date.parse(o.created_at);
+        if (!Number.isFinite(at))
+            continue;
+        lastGeneratedAt = Math.max(lastGeneratedAt, at);
+        const id = `push-outbox:${o.id}`;
+        const snapshot = snapshots.get(id);
+        if (snapshot && !snapshot.length)
+            continue; // Explicit whole-batch deletion.
+        records.set(id, { id, role: "assistant", content: snapshot
+                ? snapshot.map(m => m.content).join("\n") : String(o.raw_text || ""), message_at: o.created_at });
+    }
+    return { messages: [...records.values()].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id)), outputs, lastGeneratedAt, uncertainLegacy };
+}
+function guanianHistoryText(history, tz, limit = 80, window) {
+    const selected = guanianHasWindow(window) ? selectGuanianHistory(history.messages, window) : history.messages.filter(m => m.media_type !== "offline_summary").slice(-limit);
+    const main = selected.map(m => {
+        const local = new Date(Date.parse(m.message_at) + tz * 60_000).toISOString().slice(0, 16).replace("T", " ");
+        return `[${m.id}] ${local} ${m.media_type === "offline_summary" ? "线下摘要（概述双方互动，非角色原话）" : m.role === "user" ? "用户" : "你"}：${m.content.slice(0, m.media_type === "offline_summary" ? 500 : 4000)}`;
+    }).join("\n");
+    const uncertain = (history.uncertainLegacy || []).slice(-20);
+    if (!uncertain.length)
+        return main;
+    return main + "\n[旧镜像待核对资料：可能是补收副本，不能当作新发言、新承诺或新增未回应轮次；不推断用户已读。原始记录未删除。]\n"
+        + uncertain.map(({ message: m, outputIds, exactText }) => `[mirror:${m.id}] 记录时间 ${m.message_at}；可能对应 ${outputIds.map(id => "push-outbox:" + id).join(",")}；`
+            + (exactText ? "正文已见对应云端输出，不重复列出。" : "待核对原文：" + m.content.slice(0, 4000))).join("\n");
+}
+function guanianHistoryRounds(history, nowMs) {
+    let rounds = 0, last = Infinity;
+    for (const m of [...history.messages].filter(m => m.media_type !== "offline_summary").reverse()) {
+        if (m.role === "user")
+            break;
+        const at = Date.parse(m.message_at);
+        if (last - at > 3 * 60_000 && nowMs - at >= 30 * 60_000)
+            rounds++;
+        last = at;
+    }
+    return rounds;
+}
+/** Explicit timed wakes drive proactive spacing; passive replies never consume it. */
+function guanianLastProactiveAt(history) {
+    return history.outputs.reduce((at, o) => {
+        if (!o.trigger_key?.startsWith("timedwake:"))
+            return at;
+        const event = o.meta?.guanianPromise;
+        const context = o.meta?.guanianContext;
+        if (event?.id || context?.revision)
+            return at;
+        return Math.max(at, Date.parse(o.created_at) || 0);
+    }, 0);
 }
 
 return Object.freeze(exports);
@@ -1145,11 +1436,12 @@ return Object.freeze(exports);
   // 读最近的聊天记录（chat.read 权限）；未授权/无会话时返回空数组，不打断主流程
   async function readRecentChat(cx, limit) {
     try {
-      const r = await AiPhone.chat.readHistory({ characterId: cx.character.id, limit: limit || 60 });
+      const r = await AiPhone.chat.readHistory({ characterId: cx.character.id, onlineRounds: S.settings.onlineRounds, offlineRounds: S.settings.offlineRounds });
+      if (r && r.historyMode !== "separate-rounds-v1") throw new Error("宿主版本尚不支持分别读取线上轮次与线下摘要，请更新小手机。");
       if (r && r.sessionId) cx._session = r.sessionId; // 云端预约记录只认会话 id，撤孤儿预约时靠它认人
       return (r && r.messages || [])
         .filter((m) => !m.isRetracted && (m.role === "user" || m.role === "assistant"))
-        .map((m) => ({ id: m.id, role: m.role, t: new Date(m.createdAt).getTime() || 0, c: String(m.content || "").replace(/\s+/g, " ").trim() }))
+        .map((m) => ({ id: m.id, role: m.role, media_type: m.mediaType, response_batch_id: m.responseBatchId, t: new Date(m.createdAt).getTime() || 0, c: String(m.content || "").replace(/\s+/g, " ").trim() }))
         .filter((m) => m.c);
     } catch (e) {
       await log(cx, "读聊天记录失败（不影响编排，只是少了聊天上下文）：" + (e && e.message || e));
@@ -1157,9 +1449,10 @@ return Object.freeze(exports);
     }
   }
   // 把最近聊天压成给模型看的几行摘录
-  function chatExcerpt(msgs, maxLines) {
-    return msgs.slice(-(maxLines || 24)).map((m) =>
-      "[" + (m.id || "") + "] " + new Date(m.t).toLocaleString() + " " + (m.role === "user" ? "我：" : "TA：") + (m.c.length > 200 ? m.c.slice(0, 200) + "…" : m.c));
+  function chatExcerpt(msgs) {
+    const messages = msgs.map(m => ({ id: m.id || "", role: m.role, content: m.c || "", message_at: new Date(m.t).toISOString(),
+      media_type: m.media_type, response_batch_id: m.response_batch_id }));
+    return GuaNianHistory.guanianHistoryText({ messages }, -new Date().getTimezoneOffset(), 80, S.settings).split("\n").filter(Boolean);
   }
   /* ================= 数据 ================= */
   async function upsert(coll, match, data) {
@@ -1193,7 +1486,8 @@ return Object.freeze(exports);
     anchorMorning: false,// 早安锚点
     chatCandidates: true,// 复核时允许因聊天临时起念
     recheckMin: 15,      // 动态复核间隔（分钟，0=关闭；打开 app 也检查，但仍遵守上次尝试的间隔）
-    judgeLines: 24,      // 编排/复核/云端裁决喂给模型的最近几句聊天
+    onlineRounds: 40,    // 线上按用户输入及整轮回复计数
+    offlineRounds: 40,   // 线下每轮只取已保存的摘要
     moodGate: true,      // 精力低/心情差时更克制
     injectChat: true,    // 把TA此刻的状态注入聊天提示词（需 chat.context 权限）
     chatEditsDay: true,  // 复核时允许按聊天内容改今天的日程（只动还没到的）
@@ -1406,14 +1700,14 @@ return Object.freeze(exports);
       const d = new Date(value);
       return Number.isFinite(d.getTime()) ? d.toLocaleString() : "未知";
     };
-    box.innerHTML = '<details class="card"' + (cx._cloudHistoryOpen ? ' open' : '') + '><summary>云端发送记录 · ' + esc(cx.character.name) + '</summary>'
+    box.innerHTML = '<details class="card fold"' + (cx._cloudHistoryOpen ? ' open' : '') + '><summary><span class="t">云端发送记录</span><span class="sm">' + esc(cx.character.name) + '</span><span class="cv" aria-hidden="true">›</span></summary>'
       + '<div class="archive-note">最近 50 条挂念成文，包含已收取、当前计划未关联的消息。云端已清理的记录无法恢复；收取时间不代表已读。</div>'
       + '<button class="tgl" id="cloud-history-refresh"' + (cx._cloudHistoryLoading ? ' disabled' : '') + '>' + (cx._cloudHistoryLoading ? '查询中…' : '查询发送记录') + '</button>'
       + (state && state.error ? '<div class="d-why">' + esc(state.error) + '</div>' : '')
       + (state ? (state.entries || []).map(entry => {
         const wakeId = String(entry.trigger_key || '').replace(/^timedwake:/, '');
         const linked = ((cx.plan || {}).items || []).some(w => w.wakeId === wakeId);
-        return '<details class="diag-item"><summary>' + esc(stamp(entry.created_at)) + ' · ' + (linked ? '当前计划内' : '当前计划未关联') + '</summary>'
+        return '<details class="diag-item skip-fold"><summary>' + esc(stamp(entry.created_at)) + ' · ' + (linked ? '当前计划内' : '当前计划未关联') + '</summary>'
           + '<div class="archive-note">任务：' + esc(entry.job_id || '未知') + '<br>触发来源：' + esc(entry.trigger_key || '未知')
           + '<br>客户端收取：' + esc(entry.consumed_at ? stamp(entry.consumed_at) : '未确认') + '</div>'
           + '<div class="d-why" style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(entry.raw_text || '') + '</div></details>';
@@ -1509,7 +1803,8 @@ return Object.freeze(exports);
             gateHorizonMin: S.settings.gateHorizonMin,
             gateFreshMin: S.settings.gateFreshMin,
             gateMinMsgs: S.settings.gateMinMsgs,
-            judgeLines: S.settings.judgeLines,
+            onlineRounds: S.settings.onlineRounds,
+            offlineRounds: S.settings.offlineRounds,
             selfImpulseCap: S.settings.selfImpulseCap,
             impulseMode: S.settings.impulseMode,
             selfSilenceMin: S.settings.selfSilenceMin,
@@ -1578,6 +1873,7 @@ return Object.freeze(exports);
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
       await requireRecheckFeatures(["scheduler-state-v1"]);
+      if (GuaNianHistory.guanianHasWindow(S.settings)) await requireRecheckFeatures(["history-window-v1"]);
       if (cx.plan.cloudStateUrl !== cloudCfg().url || !Number.isFinite(cx.plan.cloudStateVersion)) await pullCloudDecisionsBody(cx, true);
       if (S.settings.threadsOn) await requireRecheckFeatures(["promise-tasks-v2"]);
       if (S.settings.userSleepOn) await requireRecheckFeatures(["user-sleep-feedback-v1"]);
@@ -2091,6 +2387,7 @@ return Object.freeze(exports);
     S.settings = (rows && rows[0]) || await AiPhone.db.create("settings", { characterId: "", ...SET_DEF });
     const missing = {};
     for (const k in SET_DEF) if (S.settings[k] == null) missing[k] = SET_DEF[k];
+    if (S.settings.onlineRounds == null && S.settings.judgeLines != null) missing.onlineRounds = GuaNianHistory.guanianRoundLimit(S.settings.judgeLines);
     // 0.9.9 起默认随用随判，它唯一的出念路径是自发起念；老设置里 selfImpulseCap 还是旧默认 2 或干脆关着，不抬上去会一整天没动静
     if (S.settings.impulseMode == null && !(S.settings.selfImpulseCap >= SET_DEF.selfImpulseCap)) missing.selfImpulseCap = SET_DEF.selfImpulseCap;
     // 0.9.1 之前只挂念一个人：单个 characterId / sentinel / genTpl 折进按角色的表
@@ -2265,7 +2562,7 @@ return Object.freeze(exports);
       return "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + (t.kind === "promise" ? "·" + GuaNianPromises.promiseSubjectLabel(t.subject) : "") + "·" + t.text + (notes.length ? "（" + notes.join("，") + "）" : "");
     });
   }
-  const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。";
+  const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。" + GuaNianPromises.promiseAgreementRule();
   // 时刻上的 from 指向账本某条：模型给的 id 可能带方括号或是编的，这里核一遍
   function threadIdOf(cx, raw) {
     const id = String(raw || "").replace(/[\[\]\s]/g, "");
@@ -2537,13 +2834,13 @@ return Object.freeze(exports);
         { postedIds: posted.slice(-60), outbox: left });
     } finally { cx._outboxBusy = false; }
   }
-  async function applyThreads(cx, parsed, nowMs, by, planItems) {
+  async function applyThreads(cx, parsed, nowMs, by, planItems, messages = null) {
     if (!S.settings.threadsOn || !parsed) return 0;
     let list = (cx.threads || []).map(t => ({ ...t }));
     const notes = [];
     const promises = (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2).filter(k => k && (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
     const before = list;
-    list = GuaNianPromises.updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs) })), nowMs, by);
+    list = GuaNianPromises.updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs) })), nowMs, by, messages);
     for (const t of list.filter(t => t.kind === "promise")) {
       const old = before.find(x => x.id === t.id);
       if (old && (old.due !== t.due || Number(old.revision || 1) !== Number(t.revision || 1) || (!old.done && t.done))) await dropThreadSlots(cx, t.id, "约定已改期或了结", planItems);
@@ -2782,7 +3079,7 @@ return Object.freeze(exports);
   // TA一次回复常拆成多条气泡：相邻 3 分钟内归为一轮，不逐条计数；
   // 且一轮要晾满 30 分钟才算「没回」——TA刚回复完、你还没来得及回的不算。
   function unansweredStreak(msgs) {
-    return GuaNianScoring.countUnansweredRounds(msgs, Date.now());
+    return GuaNianScoring.countUnansweredRounds(msgs.filter(m => m.media_type !== "offline_summary"), Date.now());
   }
 
   // 临时起念不是日程排出来的，是复核时顺着聊天临时起的，重排不该把它推倒。
@@ -2897,7 +3194,7 @@ return Object.freeze(exports);
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
       const streak0 = unansweredStreak(chat);
-      const lines = chatExcerpt(chat, S.settings.judgeLines);
+      const lines = chatExcerpt(chat);
       if (lines.length) await log(cx, "已读入最近 " + lines.length + " 句聊天作为判断上下文" + (streak0 ? "（当前连续 " + streak0 + " 轮未回）" : ""));
       const outlook = dayOutlook(cx);
       if (!outlook.length) {
@@ -3020,7 +3317,7 @@ return Object.freeze(exports);
       const chat = await readRecentChat(cx, 60);
       chat.sort((a, b) => a.t - b.t);
       const evidence = GuaNianPromises.recheckEvidence(chat, cx.threads || [], since);
-      const fresh = evidence.users;
+      const fresh = evidence.updates;
       const promiseUpdate = S.settings.threadsOn && evidence.promiseUpdate;
       const ledgerOnly = !!promiseUpdate && !fresh.length;
       canJudge = !ledgerOnly && cx.plan.items.some(w => w.kind !== "promise" && w.fireAt > nowMs + 2 * 60000);
@@ -3076,7 +3373,7 @@ return Object.freeze(exports);
         cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
           { recheckAttemptAt: nowMs });
         await log(cx, "本机复核开始（" + trigger + "）：读取 " + fresh.length + " 条新聊天消息（含角色承诺）");
-        const lines = chatExcerpt(chat, S.settings.judgeLines);
+        const lines = chatExcerpt(chat);
         const remaining = items.filter((w) => w.kind !== "promise" && w.fireAt > nowMs + 2 * 60000);
         const usedQuota = GuaNianPromises.ordinaryQuota(items);
         const canPost = !ledgerOnly && moCanPost(cx);
@@ -3219,7 +3516,7 @@ return Object.freeze(exports);
           } catch (e) { await log(cx, "复核临时起念预约失败：" + (e && e.message || e)); }
         }
         await applyChatSchedEdits(cx, parsed.sched, nowMs);
-        await applyThreads(cx, parsed, nowMs, "app", items);
+        await applyThreads(cx, parsed, nowMs, "app", items, chat);
         const postHint = canPost && parsed.post && typeof parsed.post === "object" ? String(parsed.post.hint || "") : "";
         if (postHint) await postMoment(cx, postHint, nowMs, "app");
       }
@@ -3461,18 +3758,18 @@ return Object.freeze(exports);
     const rows = cloudCfg() ? allCx().map((cx) => ({ cx, state: planSyncState(cx) })).filter((x) => x.state) : [];
     const genRows = cloudCfg() ? allCx().map(cx => ({ cx, state: generationStopState(cx) })).filter(x => x.state && x.state.status !== "synced") : [];
     box.hidden = !rows.length && !genRows.length;
-    let html = '<details class="card"' + (wasOpen ? ' open' : '') + '><summary>云端同步 · ' + new Set(rows.concat(genRows).map(x => x.cx.character.id)).size + ' 个角色' + (rows.some(x => x.state.status !== "synced") || genRows.length ? ' · 有未完成项' : ' · 已同步') + '</summary>' + rows.map(({ cx, state }) => {
+    let html = '<details class="card fold"' + (wasOpen ? ' open' : '') + '><summary><span class="t">云端同步</span><span class="sm">' + new Set(rows.concat(genRows).map(x => x.cx.character.id)).size + ' 个角色' + (rows.some(x => x.state.status !== "synced") || genRows.length ? ' · 有未完成项' : ' · 已同步') + '</span><span class="cv" aria-hidden="true">›</span></summary>' + rows.map(({ cx, state }) => {
       const busy = cx._syncRetrying || state.status === "syncing" && (!!cx._uploadQ || cx._controlActive);
       const ok = state.status === "synced";
       const title = ok ? (state.operation === "control" ? "云端控制已确认" : "计划已同步云端") : busy ? "正在同步计划…" : "云端同步未完成";
       const message = state.status === "syncing" && !busy ? "上次同步未确认完成，请重试。" : state.message;
-      return '<div class="card"><div class="sec-head"><span class="t">' + esc(cx.character.name) +
-        '</span><span class="badge ' + (ok ? "ok" : "warn") + '">' + title + '</span></div>' +
+      return '<div class="diag-item"><div><b>' + esc(cx.character.name) +
+        '</b> <span class="badge ' + (ok ? "ok" : "warn") + '">' + title + '</span></div>' +
         '<div class="d-why">' + esc(message) + (ok ? ' · ' + esc(fmtHM(state.at)) : ' 本地数据已保留。') + '</div>' +
         (state.status !== "readonly" ? '<button class="tgl" data-sync-retry="' + esc(cx.character.id) + '"' +
           (busy || cx.busy || cx._planLock ? ' disabled' : '') + '>' + (ok ? '重试云端任务' : '重试同步') + '</button>' : '') + '</div>';
     }).join("");
-    html += genRows.map(({ cx, state }) => '<div class="card"><div class="d-why">' + esc(cx.character.name) + ' · ' + esc(state.message) + '</div><button class="tgl" data-gen-retry="' + esc(cx.character.id) + '"' + (cx._genStopping ? ' disabled' : '') + '>重试停用自动生成</button></div>').join("");
+    html += genRows.map(({ cx, state }) => '<div class="diag-item"><div class="d-why">' + esc(cx.character.name) + ' · ' + esc(state.message) + '</div><button class="tgl" data-gen-retry="' + esc(cx.character.id) + '"' + (cx._genStopping ? ' disabled' : '') + '>重试停用自动生成</button></div>').join("");
     box.innerHTML = html + "</details>";
     box.querySelectorAll("[data-gen-retry]").forEach(button => {
       button.onclick = () => stopCloudGeneration(S.byId[button.dataset.genRetry]).catch(() => toast("停用未确认，请重试"));
@@ -3685,7 +3982,12 @@ return Object.freeze(exports);
     return '<div class="kv' + (col ? " col" : "") + '"><b>' + esc(label) + '</b><span' + (cls ? ' class="' + cls.replace("col", "").trim() + '"' : "") + ">" + value + "</span></div>";
   }
   function sortedItems(c) {
-    return ((c.plan && c.plan.items) || []).slice().sort((a, b) => a.fireAt - b.fireAt);
+    // Presentation only: retain the complete plan for scheduling, sync and the ledger.
+    const start = new Date(c.now); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    return ((c.plan && c.plan.items) || [])
+      .filter(w => Number(w.fireAt) >= +start && Number(w.fireAt) < +end)
+      .sort((a, b) => a.fireAt - b.fireAt);
   }
 
   function panelState(c) {
@@ -3713,8 +4015,8 @@ return Object.freeze(exports);
       })() +
       '<div class="kvs link" id="go-heart">' +
       (next
-        ? kv("下一次想起你", esc(next.time) + " · " + esc(fromNow(next.fireAt)), "hi") +
-          kv("那会儿TA想说", "「" + esc(next.intent) + "」", "col")
+        ? kv("下一次想起你", esc(wakeTimeLabel(next)) + " · " + esc(fromNow(next.fireAt)), "hi") +
+          kv("那会儿TA想说", "「" + esc(wakeIntentLabel(next)) + "」", "col")
         : kv("下一次想起你", "今天没有还没到点的时刻了", "dim")) +
       (function () {
         if (!S.settings.threadsOn) return "";
@@ -3747,9 +4049,9 @@ return Object.freeze(exports);
           ? "今天的念头由TA随时起，早上不预先排。点右上角「♥ 重置今天」把计划寄到云上，云端才接得上手。"
           : "今天还没编排过。点右上角「♥ 重新编排」，看看TA会在哪些时刻想起你。") + "</div>") +
       (wait[0]
-        ? '<div class="quote"><div class="from">' + esc(wait[0].time) + ' · 接下来想找你</div>「' + esc(wait[0].intent) + "」</div>"
+        ? '<div class="quote"><div class="from">' + esc(wakeTimeLabel(wait[0])) + ' · 接下来想找你</div>「' + esc(wakeIntentLabel(wait[0])) + "」</div>"
         : last
-        ? '<div class="quote"><div class="from">' + esc(last.time) + ' · 最近一次想起你</div>「' + esc(last.intent) + "」</div>"
+        ? '<div class="quote"><div class="from">' + esc(wakeTimeLabel(last)) + ' · 最近一次想起你</div>「' + esc(wakeIntentLabel(last)) + "」</div>"
         : '<div class="quote dim">今天还没想起过你</div>') +
       '<div class="stats four" style="margin:12px 0 2px">' +
       stat(fired.length, "已发出") + stat(wait.length, "待处理", 60) +
@@ -3806,8 +4108,8 @@ return Object.freeze(exports);
     let tl = "", idx = 0, nowInserted = false;
     const nowLine = '<div class="tl-now"><span class="lbl">现在 ' + now + "</span></div>";
     for (const w of items) {
-      if (w.time >= now && !nowInserted) { tl += nowLine; nowInserted = true; }
-      tl += wakeRow(w, w.time < now, w.source, 'style="animation-delay:' + (idx++ * 40) + 'ms"');
+      if (w.fireAt >= c.now && !nowInserted) { tl += nowLine; nowInserted = true; }
+      tl += wakeRow(w, w.fireAt < c.now, w.source, 'style="animation-delay:' + (idx++ * 40) + 'ms"');
     }
     if (items.length && !nowInserted) tl += nowLine;
     return '<div class="card"><div class="sec-head"><span class="t">时 刻</span></div>' +
@@ -3891,19 +4193,28 @@ return Object.freeze(exports);
     return "";
   }
 
+  function wakeTimeLabel(w) {
+    const date = new Date(Number(w.fireAt));
+    if (!Number.isFinite(date.getTime())) return w.time || "时间未知";
+    return (GuaNianTime.localDateKey(date) === todayStr() ? "" : (date.getMonth() + 1) + "/" + date.getDate() + " ") + fmtHM(w.fireAt);
+  }
+  function wakeIntentLabel(w) {
+    if (w.kind !== "promise") return w.intent || "";
+    return String(w.source || "").replace(/^约定[·：:]/, "") || "按已确认的约定核对进展";
+  }
   function wakeRow(w, past, title, delay, sub) {
     let badge = "", intent = "";
     if (w.act) {
       const fired = w.fireAt < Date.now();
       badge = decStatus(w).badge;
-      intent = '<div class="intent">「' + esc(w.intent) + '」</div>';
+      intent = '<div class="intent">「' + esc(wakeIntentLabel(w)) + '」</div>';
       if (!fired && w.delivery === "local" && w.reason) intent += '<div class="nt">未挂上离线推送：' + esc(w.reason) + "</div>";
     } else {
       badge = '<span class="badge off">作罢</span>';
       intent = '<div class="intent">' + esc(w.why || "TA这会儿不想") + "</div>";
     }
     return '<div class="tl-item wake ' + (w.act ? (w.fireAt >= Date.now() ? "armed" : "") : "skipped") + (past ? " past" : "") + (sub ? " sub" : "") + '" data-t="' + esc(w.time) + '" data-wake="' + esc(w.wakeId || "") + '" ' + delay + '><span class="dot"></span>' +
-      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
+      '<div class="row1"><span class="tm">' + esc(wakeTimeLabel(w)) + '</span><span class="tt">' + esc(title || w.source) + "</span>" + badge + adjBadge(w) + "</div>" + intent + "</div>";
   }
   /* ================= 记录页 ================= */
   async function loadArchive() {
@@ -3943,7 +4254,7 @@ return Object.freeze(exports);
       }
       // 缓存的进行中状态在刷新失败时不再当作当前状态。
       if (!receipt.error && j.status === "running") return state("running", "生成中", "wait", "对应预约正在执行，尚未取得发送成功回执。");
-      if (!receipt.error && j.status === "pending") return state("pending", "待发送", "wait", "云端预约仍在等待执行" + (j.executeAt ? "，预约时间 " + fmtHM(Date.parse(j.executeAt)) : "") + "。");
+      if (!receipt.error && j.status === "pending") return state("pending", "待发送", "wait", "云端预约仍在等待执行" + (j.executeAt ? "，预约时间 " + new Date(j.executeAt).toLocaleString("zh-CN", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "") + "。");
     }
     if (!w.act) return state("skipped", "作罢", "off", "没有起念，不会发送。");
     if (w.fireAt > Date.now()) return state("pending", "待发送", w.delivery === "push" ? "wait" : "local",
@@ -3956,7 +4267,7 @@ return Object.freeze(exports);
 
   function detailHtml(w, plan) {
     const cx = cur();
-    let h = '<div class="d-hd"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" +
+    let h = '<div class="d-hd"><span class="tm">' + esc(wakeTimeLabel(w)) + '</span><span class="tt">' + esc(w.source || "") + "</span>" +
       decStatus(w).badge + adjBadge(w) + "</div>";
 
     // 判断
@@ -3967,7 +4278,7 @@ return Object.freeze(exports);
         (w.topic ? '<span class="chip">话题 · ' + esc(w.topic) + "</span>" : "") + "</div>";
     }
     h += w.act
-      ? '<div class="d-intent">「' + esc(w.intent || "") + '」</div>' + (w.why ? '<div class="d-why">' + esc(w.why) + "</div>" : "")
+      ? '<div class="d-intent">「' + esc(wakeIntentLabel(w)) + '」</div>' + (w.why ? '<div class="d-why">' + esc(w.why) + "</div>" : "")
       : '<div class="d-intent" style="color:var(--tx3)">' + esc(w.why || "TA这会儿不想") + "</div>";
     h += "</div>";
 
@@ -4278,8 +4589,8 @@ return Object.freeze(exports);
   function decRow(w) {
     const st = decStatus(w);
     return '<div class="dec ' + st.cls + '" data-t="' + esc(w.time) + '" data-wake="' + esc(w.wakeId || "") + '"><span class="hh ' + (w.act ? "on" : "no") + '">' + st.heart + "</span>" +
-      '<div class="row1"><span class="tm">' + esc(w.time) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + adjBadge(w) + "</div>" +
-      '<div class="why">' + esc(w.act ? "「" + (w.intent || "") + "」" : (w.why || "TA这会儿不想")) + "</div>" +
+      '<div class="row1"><span class="tm">' + esc(wakeTimeLabel(w)) + '</span><span class="tt">' + esc(w.source || "") + "</span>" + st.badge + adjBadge(w) + "</div>" +
+      '<div class="why">' + esc(w.act ? "「" + wakeIntentLabel(w) + "」" : (w.why || "TA这会儿不想")) + "</div>" +
       "</div>";
   }
 
@@ -4631,16 +4942,16 @@ return Object.freeze(exports);
       } catch (e) { /* wakes 保持 null = 读取失败 */ }
       if (!alive()) return;
       // 云端点亮的时刻只存在于云上，本地唤醒表里查不到，不说清楚会被当成「预约没挂上」
-      const cloudArmed = planItems.filter((it) => it.act && it.adj === "cloud" && it.wakeId);
-      const planned = planItems.filter((it) => it.act && it.fireAt > Date.now()).length;
+      const cloudArmed = planItems.filter((it) => it.act && it.adj === "cloud" && it.wakeId && it.fireAt > Date.now());
+      const localPending = planItems.filter((it) => it.act && it.fireAt > Date.now() && !cloudArmed.includes(it)).length;
       let html, sum, tone;
       if (wakes === null) {
         html = '<div class="archive-note">读取系统唤醒列表失败。</div>';
         sum = "读不到"; tone = "bad";
       } else if (!wakes.length) {
-        html = '<div class="archive-note">系统里今天没有挂着的离线唤醒。<br>计划里显示「待发」但这里是空的，说明预约没挂上或已被取消。</div>';
-        const missing = planned - cloudArmed.length > 0;
-        sum = missing ? "0 个 · 计划里还有 " + (planned - cloudArmed.length) + " 个待发" : "0 个 · 今天没有待发";
+        html = '<div class="archive-note">本机今天没有登记的唤醒。云端创建的预约不在这张本机列表中，实际状态请打开时刻详情刷新回执。</div>';
+        const missing = localPending > 0;
+        sum = missing ? "本机 0 个 · " + localPending + " 个待核实" : "本机 0 个" + (cloudArmed.length ? " · 云端记录 " + cloudArmed.length + " 个" : " · 无待发记录");
         tone = missing ? "bad" : "";
       } else {
         const extra = wakes.filter((w) => !planItems.some((it) => it.wakeId === w.id)).length;
@@ -4654,9 +4965,9 @@ return Object.freeze(exports);
       }
       if (cloudArmed.length) {
         html += '<details class="fold"><summary><span class="t">云端点亮</span><span class="sm">' +
-          cloudArmed.length + " 个 · " + esc(cloudArmed.map((it) => it.time).join("、")) +
+          cloudArmed.length + " 个 · " + esc(cloudArmed.map((it) => wakeTimeLabel(it)).join("、")) +
           '</span><span class="cv">›</span></summary>' +
-          '<div class="archive-note">这几个时刻是云端复核点亮的，预约只挂在云上，本地这张表里查不到，属正常。</div></details>';
+          '<div class="archive-note">这几个时刻记录为云端创建，本机列表里查不到。当前是否仍待执行，以时刻详情里的云端回执为准。</div></details>';
       }
       fill("wakes", html, sum, tone);
     })();
@@ -4765,16 +5076,20 @@ return Object.freeze(exports);
           return;
         }
         const pend = (pl.items || []).filter((it) => it.fireAt > Date.now()).length;
-        const ran = pl.last_recheck_at
-          ? new Date(pl.last_recheck_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+        const count = pl.recheck_count || 0;
+        const configuredCap = Number((pl.context || {}).gateDailyCap);
+        const cap = Number.isFinite(configuredCap) && configuredCap >= 0 ? configuredCap : 8;
+        const judgedAt = pl.judged_at || (count > 0 ? pl.last_recheck_at : null);
+        const ran = judgedAt
+          ? new Date(judgedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
           : "";
         let rHtml = '<div class="diag-item"><b>寄存</b> ' + (pl.items || []).length + " 个时刻（还没到点 " + pend + " 个）</div>" +
-          '<div class="diag-item"><b>复核</b> ' + (ran ? esc(ran) : "还没跑过") + " · 今天已判 " + (pl.recheck_count || 0) + "/6 次</div>" +
+          '<div class="diag-item"><b>复核</b> ' + (ran ? esc(ran) : count > 0 ? "时间未记录" : "还没判断过") + " · 今天已判 " + count + "/" + cap + " 次</div>" +
           '<div class="diag-item"><b>待取裁决</b> ' + ((pl.decisions || []).length || "无") + "</div>";
-        if (!pend) rHtml += '<div class="archive-note">今天的时刻都过了，云端不会再判。</div>';
+        if (!pend) rHtml += '<div class="archive-note">当前寄存列表没有未来时刻；是否继续复核还取决于起念模式、约定和门禁。</div>';
         fill("recheck", rHtml,
-          ran ? "已判 " + (pl.recheck_count || 0) + "/6 · 上次 " + ran : "已寄存 · 还没跑过",
-          ran ? "ok" : "warn");
+          count > 0 ? "已判 " + count + "/" + cap + (ran ? " · 上次 " + ran : " · 时间未记录") : "已寄存 · 还没判断过",
+          count > 0 ? "ok" : "warn");
       } catch (e) {
         fill("recheck", '<div class="archive-note">云端复核查询失败：' + esc(String(e && e.message || e)) + "</div>", "查询失败", "bad");
       }
@@ -4834,8 +5149,9 @@ return Object.freeze(exports);
     { id: "chat", name: "聊天", groups: [
       { title: "动态复核", adv: true, fields: [
         { type: "stepper", key: "recheckMin", min: 0, max: 120, step: 5, label: "在页时每隔", unit: "分钟 · 0 关" },
-        { type: "stepper", key: "judgeLines", min: 6, max: 40, step: 2, label: "判断时回看", unit: "句" },
-      ], hint: "打开小手机时、以及之后每隔这么久，按你们最新的聊天重审今天还没到点的时刻。<br>聊崩了会取消，聊出没完的话头会临时加。每次重审调一次模型。<br>「判断时回看」是编排、复核、云端裁决喂给模型的最近几句，每句最多 200 字。调大更懂来龙去脉，也更费 token。保存即生效，云端那份下次上传计划时跟着更新。" },
+        { type: "stepper", key: "onlineRounds", min: 1, max: 100, step: 5, label: "线上回看", unit: "轮 · 同轮气泡合并计数" },
+        { type: "stepper", key: "offlineRounds", min: 1, max: 100, step: 5, label: "线下摘要回看", unit: "轮 · 每轮一条摘要" },
+      ], hint: "打开小手机时、以及之后每隔这么久，按你们最新的聊天重审今天还没到点的时刻。<br>聊崩了会取消，聊出没完的话头会临时加。每次重审调一次模型。<br>线上与线下各自取最近设置的轮数，再按时间合并供判断。线上一轮含用户输入和随后整轮回复；线下只读保存的摘要，不读用户输入、角色正文或思维链，不受显示正则影响，每条摘要最多 500 字。数量越多越费 token。保存并同步成功后供下次判断使用；云端需要开启聊天镜像并更新宿主与云函数。" },
       { title: "聊天改日程", adv: true, fields: [{ type: "toggles", items: [{ key: "chatEditsDay", label: "聊出来的安排落到今天的日程上" }] }],
         hint: "复核时顺带看聊天里有没有说定、取消或临时被叫走的安排，有就直接改今天的日程，一次最多 2 条。<br>只改还没到点的，改动写回系统日程，也记进「诊断」。<br>「动态复核」设成 0 时这条不会发生。" },
       { title: "惦记账本", fields: [
@@ -5066,6 +5382,7 @@ return Object.freeze(exports);
     if (changed(["userSleepOn", "userSleepStart", "userSleepEnd"])) notes.push(after.userSleepOn
       ? "你的睡眠时段已保存；计划同步成功后，尚未结算的回音会跳过这段时间，已结算记录不重算。"
       : "睡眠时段已关闭；计划同步成功后，尚未结算的回音恢复按发送后 3 小时统计。未回复仍保持中性。");
+    if (changed(["onlineRounds", "offlineRounds"])) notes.push("线上与线下回看轮数已分别保存；现有计划同步成功后，下次云端判断使用新范围。");
     if (changed(["quota", "minGapMin", "bias", "quietStart", "quietEnd", "anchorSleep", "anchorMorning", "chatCandidates", "moodGate"])) {
       notes.push(+after.impulseMode === 1 && after.cloudRecheck && cloudCfg()
         ? "新规则同步成功后用于下一次云端起念。已有预约保持原样；如需一起调整，请到「心动」页重新安排。"
