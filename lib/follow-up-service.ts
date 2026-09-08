@@ -47,6 +47,7 @@ import {
     isPendingChatGeneratedImageMessage,
 } from "./generated-image-retry";
 import {
+    isGuanianTemplateWake,
     loadTimedWakeSchedules,
     removeTimedWakeSchedule,
     type TimedWakeSchedule,
@@ -652,6 +653,11 @@ async function fireTimedWake(sched: TimedWakeSchedule) {
     removeTimedWakeSchedule(sched.id);
     // 本地接手触发：撤销服务端兜底预约（生成中被杀由发送保险单接管）
     cancelBailoutKey(`timedwake:${sched.id}`);
+
+    if (isGuanianTemplateWake(sched)) {
+        timedWakeFiringSet.delete(sched.id);
+        return; // 未开始聊天生成，不清除同会话其他任务的生成/取消状态。
+    }
 
     try {
         const sessions = loadChatSessions();

@@ -65,3 +65,11 @@ function isTimedWakeSchedule(value: unknown): value is TimedWakeSchedule {
         && typeof item.delayMinutes === "number"
         && typeof item.intent === "string";
 }
+
+/** 仅供挂念云端复核借用的模板，兼容升级前已落在本机的哨兵预约。 */
+export function isGuanianTemplateWake(schedule: Pick<TimedWakeSchedule, "id" | "intent">): boolean {
+    return /^timed_wake_capp_(?:app_)?gua\.nian_/.test(schedule.id)
+        && (/_sentinel_\d+_[a-z0-9]+$/i.test(schedule.id)
+            || schedule.intent === "已经两天没在挂念里排过日程了，忽然想起用户，随口问候一句就好"
+            || schedule.intent === "挂念后台复核模板，仅供后台调用，不生成聊天消息");
+}

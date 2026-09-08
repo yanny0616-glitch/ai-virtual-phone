@@ -25,7 +25,7 @@ export function fixture() {
       }
       return Response.json([h.job]);
     }
-    if (t === 'push_recheck_plans') { if(h.planReadFails && !init.method) return new Response('',{status:503}); if (init.method === 'PATCH') Object.assign(h.plan, body); return Response.json([h.plan]); }
+    if (t === 'push_recheck_plans') { if(h.planReadFails && !init.method) return new Response('',{status:503}); if (init.method === 'PATCH') Object.assign(h.plan, body); return Response.json(h.planRows || [h.plan]); }
     if (t === 'push_subscriptions') return Response.json([{ endpoint: 'shell:test' }]);
     if (t === 'push_chat_mirror') return h.mirrorFails ? new Response('', {status:503}) : Response.json(h.mirrors);
     if (t === 'push_outbox') { if(init.method === 'POST' && h.outboxWriteFails) return new Response('',{status:503}); if(init.method === 'POST') h.outbox.push(...body.map(o=>({...o,created_at:o.created_at||new Clock().toISOString()}))); if(h.outboxFails) return new Response('',{status:503}); return Response.json(init.method === 'POST' ? [] : h.outbox.filter(o => !u.searchParams.has('job_id') || o.job_id === u.searchParams.get('job_id').slice(3)));  }

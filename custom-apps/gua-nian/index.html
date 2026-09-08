@@ -569,7 +569,6 @@
     <button class="tab" data-tab="back">后 台</button>
   </div>
 
-  <div id="cloud-sync" role="status" aria-live="polite" hidden></div>
   <div id="settings-effects" role="status" aria-live="polite" hidden></div>
   <div id="view"></div>
 
@@ -1396,6 +1395,46 @@ return Object.freeze(exports);
     cx._receiptQ = p.catch(() => {});
     return p;
   }
+
+  // 手动查询实际成文记录：不需要当前计划仍保留 wakeId，也不确认领取或改写聊天。
+  function renderCloudHistory() {
+    const box = $("#cloud-history"), cx = cur();
+    if (!box || !cx.character || !cloudCfg()) return;
+    const source = cloudCfg().url;
+    const state = cx._cloudHistory && cx._cloudHistory.source === source ? cx._cloudHistory : null;
+    const stamp = (value) => {
+      const d = new Date(value);
+      return Number.isFinite(d.getTime()) ? d.toLocaleString() : "未知";
+    };
+    box.innerHTML = '<details class="card"' + (cx._cloudHistoryOpen ? ' open' : '') + '><summary>云端发送记录 · ' + esc(cx.character.name) + '</summary>'
+      + '<div class="archive-note">最近 50 条挂念成文，包含已收取、当前计划未关联的消息。云端已清理的记录无法恢复；收取时间不代表已读。</div>'
+      + '<button class="tgl" id="cloud-history-refresh"' + (cx._cloudHistoryLoading ? ' disabled' : '') + '>' + (cx._cloudHistoryLoading ? '查询中…' : '查询发送记录') + '</button>'
+      + (state && state.error ? '<div class="d-why">' + esc(state.error) + '</div>' : '')
+      + (state ? (state.entries || []).map(entry => {
+        const wakeId = String(entry.trigger_key || '').replace(/^timedwake:/, '');
+        const linked = ((cx.plan || {}).items || []).some(w => w.wakeId === wakeId);
+        return '<details class="diag-item"><summary>' + esc(stamp(entry.created_at)) + ' · ' + (linked ? '当前计划内' : '当前计划未关联') + '</summary>'
+          + '<div class="archive-note">任务：' + esc(entry.job_id || '未知') + '<br>触发来源：' + esc(entry.trigger_key || '未知')
+          + '<br>客户端收取：' + esc(entry.consumed_at ? stamp(entry.consumed_at) : '未确认') + '</div>'
+          + '<div class="d-why" style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(entry.raw_text || '') + '</div></details>';
+      }).join('') + (!state.error && !state.entries.length ? '<div class="archive-note">云端现存记录中未查到消息。</div>' : '') : '') + '</details>';
+    box.querySelector('details').ontoggle = (event) => { cx._cloudHistoryOpen = event.target.open; };
+    $("#cloud-history-refresh").onclick = async () => {
+      cx._cloudHistoryOpen = true; cx._cloudHistoryLoading = true; renderCloudHistory();
+      let entries = state && state.entries || [], error = '';
+      try {
+        const chat = await AiPhone.chat.readHistory({ characterId: cx.character.id, limit: 1 });
+        if (!chat || !chat.sessionId) throw new Error('未找到该角色的聊天会话');
+        const r = await cloudFetchBounded('guanian-history', { method: 'GET' }, { sessionId: chat.sessionId });
+        if (r.sessionId !== chat.sessionId || !Array.isArray(r.entries)) throw new Error('请更新个人云网关后再查询');
+        entries = r.entries;
+      } catch (e) { error = String(e && e.message || e) + '；请确认个人云已更新，重试查询。'; }
+      finally {
+        cx._cloudHistory = { source, entries, error }; cx._cloudHistoryLoading = false;
+        if (cur() === cx && S.tab === 'back' && (cloudCfg() || {}).url === source) renderCloudHistory();
+      }
+    };
+  }
   /* ---- 云端动态复核：把计划寄存到云上，浏览器关着时由 push-recheck 重判 ---- */
   function cloudRecheckOn() {
     return !!(cloudCfg() && S.settings && S.settings.cloudRecheck);
@@ -1447,7 +1486,7 @@ return Object.freeze(exports);
     const anyId = (sentinelOf(cx) && sentinelOf(cx).wakeId) || (any && any.wakeId) || "";
     const template = ((S.settings.judgeTemplates || {})[cx.character.id] || {}).id || "";
     const appId = /^capptpl:([^:]+):/.exec(template);
-    const wakePrefix = /\d+_[a-z0-9]+$/i.test(anyId) ? String(anyId).replace(/\d+_[a-z0-9]+$/i, "")
+    const wakePrefix = /\d+_[a-z0-9]+$/i.test(anyId) ? String(anyId).replace(/(?:sentinel_)?\d+_[a-z0-9]+$/i, "")
       : appId ? "timed_wake_capp_" + appId[1] + "_" : "";
     return {
             ...userSleepContext(),
@@ -2795,7 +2834,7 @@ return Object.freeze(exports);
   // 哨兵预约：云端复核和自发起念都要借一条已挂预约里冻着的模型凭据当模板，
   // TA早上一个时刻都没点亮的日子云端就整天没法动。所以每次编排都挂一条 48 小时后的
   // 预约专门当模板：云端到点认出它直接作废；cron 只派 36 小时内更新过的计划，所以
-  // 48 小时够覆盖。真到点了只可能是两天没打开挂念，intent 里写的就是这个由头。
+  // 48 小时够覆盖。它只提供模板，不是问候由头；宿主给新哨兵独立编号，到点禁止成文。
   function sentinelOf(cx) { return cx.character ? (S.settings.sentinels || {})[cx.character.id] || null : null; }
   // 不再挂念的人：今天的预约、48 小时哨兵、云端计划行全撤，否则两天后TA还会按哨兵的由头来找你
   async function unfreezeGenTemplates(cx) {
@@ -2822,7 +2861,7 @@ return Object.freeze(exports);
     try {
       const res = await AiPhone.push.wake({
         characterId: cx.character.id, fireAt: Date.now() + 48 * 3600000, source: "tool",
-        intent: "已经两天没在挂念里排过日程了，忽然想起用户，随口问候一句就好",
+        intent: "挂念后台复核模板，仅供后台调用，不生成聊天消息",
       });
       next = { wakeId: res.id, armed: !!res.armed };
       if (!res.armed) await log(cx, "哨兵预约只在本地挂上（" + (res.reason || "服务端未挂载") + "），云端复核这两天没有模板可借");
@@ -3418,10 +3457,11 @@ return Object.freeze(exports);
   function renderCloudSync() {
     const box = $("#cloud-sync");
     if (!box) return;
+    const wasOpen = !!box.querySelector("details[open]");
     const rows = cloudCfg() ? allCx().map((cx) => ({ cx, state: planSyncState(cx) })).filter((x) => x.state) : [];
     const genRows = cloudCfg() ? allCx().map(cx => ({ cx, state: generationStopState(cx) })).filter(x => x.state && x.state.status !== "synced") : [];
     box.hidden = !rows.length && !genRows.length;
-    box.innerHTML = rows.map(({ cx, state }) => {
+    let html = '<details class="card"' + (wasOpen ? ' open' : '') + '><summary>云端同步 · ' + new Set(rows.concat(genRows).map(x => x.cx.character.id)).size + ' 个角色' + (rows.some(x => x.state.status !== "synced") || genRows.length ? ' · 有未完成项' : ' · 已同步') + '</summary>' + rows.map(({ cx, state }) => {
       const busy = cx._syncRetrying || state.status === "syncing" && (!!cx._uploadQ || cx._controlActive);
       const ok = state.status === "synced";
       const title = ok ? (state.operation === "control" ? "云端控制已确认" : "计划已同步云端") : busy ? "正在同步计划…" : "云端同步未完成";
@@ -3432,7 +3472,8 @@ return Object.freeze(exports);
         (state.status !== "readonly" ? '<button class="tgl" data-sync-retry="' + esc(cx.character.id) + '"' +
           (busy || cx.busy || cx._planLock ? ' disabled' : '') + '>' + (ok ? '重试云端任务' : '重试同步') + '</button>' : '') + '</div>';
     }).join("");
-    box.innerHTML += genRows.map(({ cx, state }) => '<div class="card"><div class="d-why">' + esc(cx.character.name) + ' · ' + esc(state.message) + '</div><button class="tgl" data-gen-retry="' + esc(cx.character.id) + '"' + (cx._genStopping ? ' disabled' : '') + '>重试停用自动生成</button></div>').join("");
+    html += genRows.map(({ cx, state }) => '<div class="card"><div class="d-why">' + esc(cx.character.name) + ' · ' + esc(state.message) + '</div><button class="tgl" data-gen-retry="' + esc(cx.character.id) + '"' + (cx._genStopping ? ' disabled' : '') + '>重试停用自动生成</button></div>').join("");
+    box.innerHTML = html + "</details>";
     box.querySelectorAll("[data-gen-retry]").forEach(button => {
       button.onclick = () => stopCloudGeneration(S.byId[button.dataset.genRetry]).catch(() => toast("停用未确认，请重试"));
     });
@@ -3445,7 +3486,6 @@ return Object.freeze(exports);
   }
   /* ================= 渲染 ================= */
   function render() {
-    renderCloudSync();
     renderSettingsEffects();
     const cx = cur();
     $("#hdr-date").textContent = todayStr().slice(5).replace("-", " / ") + " · 周" + "日一二三四五六"[new Date().getDay()];
@@ -3538,7 +3578,9 @@ return Object.freeze(exports);
     v.innerHTML = '<div class="stabs" style="margin-top:2px">'
       + '<button class="stab' + (S.sub === "diag" ? " on" : "") + '" data-sub="diag">诊断</button>'
       + '<button class="stab' + (S.sub === "usage" ? " on" : "") + '" data-sub="usage">用量</button>'
-      + '</div><div id="subview"></div>';
+      + '</div><div id="cloud-sync" role="status" aria-live="polite" hidden></div><div id="cloud-history"></div><div id="subview"></div>';
+    renderCloudSync();
+    renderCloudHistory();
     v.querySelectorAll(".stab").forEach((b) => { b.onclick = () => { if (S.sub !== b.dataset.sub) { S.sub = b.dataset.sub; renderBack(); } }; });
     if (S.sub === "usage") renderUsage(); else renderDiag();
   }

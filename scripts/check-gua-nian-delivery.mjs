@@ -13,6 +13,7 @@ function app() {
   const elements = new Map();
   const el = (id) => {
     if (!elements.has(id)) elements.set(id, { innerHTML: "", textContent: "", hidden: false, disabled: false,
+      querySelector() { return null; },
       querySelectorAll(selector) {
         if (selector !== "[data-sync-retry]") return [];
         return [...this.innerHTML.matchAll(/data-sync-retry="([^"]+)"([^>]*)/g)].map((m) => ({ dataset: { syncRetry: m[1] }, disabled: m[2].includes("disabled") }));

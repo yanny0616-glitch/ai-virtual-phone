@@ -672,7 +672,7 @@ Deno.serve(async (request: Request) => {
           ...(schemaVersion >= 5 ? ["recheck-plan"] : []),
           ...(schemaVersion >= 6 ? ["usage"] : []),
           // 部署了本版网关即支持（纯代码能力，不依赖 schema）
-          "job-status",
+          "job-status", "guanian-history-read",
         ],
       });
     }
@@ -989,6 +989,19 @@ Deno.serve(async (request: Request) => {
         ));
         return json({ ok: true });
       }
+    }
+
+    // 诊断历史独立于待领取 outbox；已领取的消息也可查，不改变 consumed_at。
+    if (action === "guanian-history" && request.method === "GET") {
+      const sessionId = cleanText(url.searchParams.get("sessionId"), 160);
+      if (!/^[A-Za-z0-9_-]{1,160}$/.test(sessionId)) return json({ ok: false, error: "缺少有效会话编号。" }, 400);
+      const response = await rest(`push_outbox?user_id=eq.${OWNER_ID}&session_id=eq.${encodeURIComponent(sessionId)}`
+        + "&trigger_key=like.timedwake:timed_wake_capp_*gua.nian_*"
+        + "&select=id,job_id,session_id,trigger_key,raw_text,created_at,consumed_at&order=created_at.desc&limit=50");
+      if (!response.ok) return json({ ok: false, error: "读取云端发送记录失败，请重试。" }, 503);
+      const rows = await response.json() as { id: string; job_id: string; session_id: string; trigger_key: string; raw_text: string; created_at: string; consumed_at: string | null }[];
+      const entries = rows.filter(row => row.session_id === sessionId && /^timedwake:timed_wake_capp_(?:app_)?gua\.nian_/.test(row.trigger_key));
+      return json({ ok: true, sessionId, entries });
     }
 
     if (action === "outbox") {

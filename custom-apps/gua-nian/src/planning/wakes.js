@@ -105,7 +105,7 @@
   // 哨兵预约：云端复核和自发起念都要借一条已挂预约里冻着的模型凭据当模板，
   // TA早上一个时刻都没点亮的日子云端就整天没法动。所以每次编排都挂一条 48 小时后的
   // 预约专门当模板：云端到点认出它直接作废；cron 只派 36 小时内更新过的计划，所以
-  // 48 小时够覆盖。真到点了只可能是两天没打开挂念，intent 里写的就是这个由头。
+  // 48 小时够覆盖。它只提供模板，不是问候由头；宿主给新哨兵独立编号，到点禁止成文。
   function sentinelOf(cx) { return cx.character ? (S.settings.sentinels || {})[cx.character.id] || null : null; }
   // 不再挂念的人：今天的预约、48 小时哨兵、云端计划行全撤，否则两天后TA还会按哨兵的由头来找你
   async function unfreezeGenTemplates(cx) {
@@ -132,7 +132,7 @@
     try {
       const res = await AiPhone.push.wake({
         characterId: cx.character.id, fireAt: Date.now() + 48 * 3600000, source: "tool",
-        intent: "已经两天没在挂念里排过日程了，忽然想起用户，随口问候一句就好",
+        intent: "挂念后台复核模板，仅供后台调用，不生成聊天消息",
       });
       next = { wakeId: res.id, armed: !!res.armed };
       if (!res.armed) await log(cx, "哨兵预约只在本地挂上（" + (res.reason || "服务端未挂载") + "），云端复核这两天没有模板可借");

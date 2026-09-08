@@ -607,7 +607,7 @@ type RecheckPlanRow = {
   items?: { kind?: string; promiseRevision?: number; time?: string; wakeId?: string; act?: boolean; intent?: string; fireAt?: number; origFireAt?: number; from?: string }[];
 };
 
-/** 挂念寄存的计划：靠 trigger_key 里的 wakeId 回查。取两天：跨零点触发时最新的那份可能已经是明天的计划。 */
+/** 挂念寄存的计划：靠 trigger_key 里的 wakeId 回查最近 32 份计划，包括历史哨兵；最新一份可能已是次日。 */
 async function loadRecheckPlan(
   rest: (path: string, init?: RequestInit) => Promise<Response>,
   userId: string,
@@ -622,6 +622,8 @@ async function loadRecheckPlan(
   );
   if (!response.ok) throw new Error("约定计划读取失败");
   const rows = await response.json() as RecheckPlanRow[];
+  const sentinel = rows.find(row => row.context?.sentinelWakeId === wakeId);
+  if (sentinel) return { row: sentinel, item: null };
   for (const row of rows) {
     const hit = (row.items || []).find(item => item.wakeId === wakeId);
     if (hit) {
@@ -1067,6 +1069,15 @@ Deno.serve(async (req: Request) => {
     let guanianPlan: Awaited<ReturnType<typeof loadRecheckPlan>>;
     try { guanianPlan = await loadRecheckPlan(rest, job.user_id, guanianCharacterId, guanianWakeId); }
     catch { await retry("hold: 约定计划读取失败"); return; }
+    // 挂念任务必须仍属于有效计划。不能把丢失关联的旧预约当成普通定时消息放行。
+    const isGuanianWake = /^timed_wake_capp_(?:app_)?gua\.nian_/.test(guanianWakeId);
+    if (guanianWakeId && (guanianPlan.row?.context?.sentinelWakeId === guanianWakeId
+      || isGuanianWake && /_sentinel_\d+_[a-z0-9]+$/i.test(guanianWakeId))) {
+      await finish("done", "guanian skip: 后台模板预约，不生成聊天消息"); return;
+    }
+    if (isGuanianWake && !guanianPlan.item) {
+      await finish("done", "guanian skip: 未找到有效计划，旧预约已停止"); return;
+    }
     const planTz = guanianContextTimezone((guanianPlan.row?.context || {}) as Record<string, unknown>, Date.now());
     const historyTz = guanianTimezone(planTz, payload.merge?.tzOffsetMin, (payload.merge?.quietWin as { tzOffsetMin?: number } | undefined)?.tzOffsetMin);
     if (guanianPlan.row && historyTz === null) { await retry("时区资料缺失：请打开挂念重新同步计划", undefined, true); return; }
@@ -1178,10 +1189,6 @@ Deno.serve(async (req: Request) => {
     // 计划里没寄 day 的老版本 App 照旧。
     // 挂念的哨兵预约只是给云端复核当凭据模板的，到点不生成。真到了这一步说明挂念两天没编排过，
     // 计划早已过了 cron 的派发窗口，作废就好。
-    if (guanianWakeId && guanianPlan.row?.context?.sentinelWakeId === guanianWakeId) {
-      await finish("done", "guanian sentinel");
-      return;
-    }
     if (!payload.generatedResponse && guanianPlan.item && guanianPlan.row?.context?.day && typeof guanianPlan.row.context.day === "object") {
       // 编排时排开了睡眠窗，但聊天改日程或别的路径挂上的时刻可能落在TA睡着之后：睡着的人不发消息。
       const ctxQuiet = guanianPlan.row.context as { quietStart?: unknown; quietEnd?: unknown };

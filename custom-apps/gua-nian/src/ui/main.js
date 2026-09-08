@@ -1,6 +1,5 @@
   /* ================= 渲染 ================= */
   function render() {
-    renderCloudSync();
     renderSettingsEffects();
     const cx = cur();
     $("#hdr-date").textContent = todayStr().slice(5).replace("-", " / ") + " · 周" + "日一二三四五六"[new Date().getDay()];
@@ -93,7 +92,9 @@
     v.innerHTML = '<div class="stabs" style="margin-top:2px">'
       + '<button class="stab' + (S.sub === "diag" ? " on" : "") + '" data-sub="diag">诊断</button>'
       + '<button class="stab' + (S.sub === "usage" ? " on" : "") + '" data-sub="usage">用量</button>'
-      + '</div><div id="subview"></div>';
+      + '</div><div id="cloud-sync" role="status" aria-live="polite" hidden></div><div id="cloud-history"></div><div id="subview"></div>';
+    renderCloudSync();
+    renderCloudHistory();
     v.querySelectorAll(".stab").forEach((b) => { b.onclick = () => { if (S.sub !== b.dataset.sub) { S.sub = b.dataset.sub; renderBack(); } }; });
     if (S.sub === "usage") renderUsage(); else renderDiag();
   }

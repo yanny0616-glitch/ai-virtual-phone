@@ -49,7 +49,7 @@
     const anyId = (sentinelOf(cx) && sentinelOf(cx).wakeId) || (any && any.wakeId) || "";
     const template = ((S.settings.judgeTemplates || {})[cx.character.id] || {}).id || "";
     const appId = /^capptpl:([^:]+):/.exec(template);
-    const wakePrefix = /\d+_[a-z0-9]+$/i.test(anyId) ? String(anyId).replace(/\d+_[a-z0-9]+$/i, "")
+    const wakePrefix = /\d+_[a-z0-9]+$/i.test(anyId) ? String(anyId).replace(/(?:sentinel_)?\d+_[a-z0-9]+$/i, "")
       : appId ? "timed_wake_capp_" + appId[1] + "_" : "";
     return {
             ...userSleepContext(),

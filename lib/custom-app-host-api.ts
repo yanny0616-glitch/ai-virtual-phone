@@ -92,7 +92,7 @@ import {
   readBridgeStateSnapshot,
   sanitizeBridgeDataKey,
 } from "./reality-bridge/storage";
-import { loadTimedWakeSchedules, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
+import { isGuanianTemplateWake, loadTimedWakeSchedules, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
 import { armTemplateBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "./push-bailout-client";
 
 const CUSTOM_APP_NOTIFICATIONS_KEY = "ai_phone_custom_app_notifications_v1";
@@ -2459,6 +2459,7 @@ export async function scheduleCustomAppTimedWake(
     source: record.source === "user" ? "user" : "tool",
     ...(cooldownRounds > 0 ? { cooldownRounds } : {}),
   };
+  if (isGuanianTemplateWake(schedule)) schedule.id = schedule.id.replace(prefix, prefix + "sentinel_");
   saveTimedWakeSchedule(schedule);
   const armResult = await armTimedWakeBailout(schedule);
   emitHostStateUpdated();
