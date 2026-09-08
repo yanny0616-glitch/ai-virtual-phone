@@ -11,7 +11,7 @@ import { findMixConnector, getMixMaterial, getMixSession, isMixBuiltinId, listMi
 import { applyMixMacros, MIX_DEFAULT_USER_NAME } from "@/lib/mixology/assembler";
 import { buildMixConditionContext, pickActiveMixMaterials } from "@/lib/mixology/state";
 import { scopeMixCss } from "@/lib/mixology/css-scope";
-import { MIX_KIND_LABELS, MIX_SLOT_ORDER, mixEncoreRenderHtml, mixPanelLayoutOf, mixPanelSlotOf, mixSlotEntries, mixTurnEncoreBlocks, mixTurnTicketBlocks, type MixCharacterCard, type MixFilterRule, type MixMaterial, type MixMaterialKind, type MixMechanismMaterial, type MixPanelLayout, type MixSession, type MixSlotEntry, type MixState, type MixTicketMaterial, type MixTurn } from "@/lib/mixology/types";
+import { MIX_KIND_LABELS, MIX_SLOT_ORDER, mixEncoreRenderHtml, mixPanelLayoutOf, mixPanelSlotOf, mixSlotEntries, mixTurnEncoreBlocks, mixTurnTicketBlocks, type MixCharacterCard, type MixFilterRule, type MixMaterial, type MixMaterialKind, type MixMechanismMaterial, type MixPanelLayout, type MixSession, type MixSlotEntry, type MixState, type MixTicketMaterial, type MixTurn, type MixDialogueButton } from "@/lib/mixology/types";
 import { applyMixFilterRules, mixStreamText } from "@/lib/mixology/prose";
 import { MixProseView } from "./prose-view";
 import { MixRichText } from "./rich-text";
@@ -376,11 +376,26 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
      * 点击把这句话递进它的界面（sendMixDialogue），界面用 mix.mark 回报状态改图标。
      * 按钮位（header/inputbar-*）的面板关着时收不到，先替玩家打开再递。
      */
+    // 代码里登记的对白按钮（mix.dialogueButton）：materialId → 图标/提示。进局先拿上一次记住的，
+    // 代码跑起来重新登记后覆盖；按钮位面板关着代码没跑时，靠记住的那份先把按钮画出来
+    const [runtimeButtons, setRuntimeButtons] = useState<Record<string, MixDialogueButton>>(() => ({ ...(getMixSession(sessionId)?.dialogueButtons ?? {}) }));
+    const handleDialogueButton = useCallback((materialId: string, button: MixDialogueButton | null) => {
+        setRuntimeButtons((prev) => {
+            const same = button ? prev[materialId]?.icon === button.icon && (prev[materialId]?.title ?? "") === (button.title ?? "") : !prev[materialId];
+            if (same) return prev;
+            const next = { ...prev };
+            if (button) next[materialId] = button; else delete next[materialId];
+            const current = getMixSession(sessionId);
+            if (current) saveMixSession({ ...current, dialogueButtons: Object.keys(next).length ? next : undefined });
+            return next;
+        });
+    }, [sessionId]);
     const dialogueActions = useMemo(
         () => activeMechanisms
-            .filter((material) => material.dialogueButton?.icon && (material.trusted ? material.script?.trim() : material.panelHtml?.trim()))
-            .map((material) => ({ key: material.id, icon: material.dialogueButton!.icon, title: material.dialogueButton!.title || material.name })),
-        [activeMechanisms],
+            .map((material) => ({ material, button: runtimeButtons[material.id] ?? material.dialogueButton }))
+            .filter(({ material, button }) => button?.icon && (material.trusted ? material.script?.trim() : material.panelHtml?.trim()))
+            .map(({ material, button }) => ({ key: material.id, icon: button!.icon, title: button!.title || material.name })),
+        [activeMechanisms, runtimeButtons],
     );
     const [dialogueStates, setDialogueStates] = useState<Record<string, string>>({});
     const handlePanelMark = useCallback((materialId: string, id: string, state: string) => {
@@ -659,6 +674,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
         say: (text) => { const t = text.trim().slice(0, 2000); if (t) handlePanelSay(t); },
         toast: (text) => { const t = text.trim().slice(0, 120); if (t) onToast(t); },
         mark: (materialId, id, state) => handlePanelMark(materialId, id, state),
+        dialogueButton: (materialId, button) => handleDialogueButton(materialId, button),
         call: async (materialId, name, params) => {
             const material = getMixMaterial(materialId);
             const declared = material?.kind === "mechanism" ? material.connectors ?? [] : [];
@@ -685,7 +701,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
         stop: () => stopMixAudio(),
         charName: () => getMixSession(sessionId)?.charName ?? "",
         userName: () => getMixSession(sessionId)?.userName || MIX_DEFAULT_USER_NAME,
-    }), [sessionId, handlePanelStore, handlePanelState, handlePanelSay, handlePanelMark, onToast]);
+    }), [sessionId, handlePanelStore, handlePanelState, handlePanelSay, handlePanelMark, onToast, handleDialogueButton]);
 
     // 进对局建实例（材料改过会重建），离开时收掉
     useEffect(() => {
@@ -1098,6 +1114,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onSay={handlePanelSay}
                             connectors={material.connectors}
                             onMark={handlePanelMark}
+                            onDialogueButton={handleDialogueButton}
                             onToast={onToast}
                         />
                     ))}
@@ -1132,6 +1149,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onSay={handlePanelSay}
                             connectors={material.connectors}
                             onMark={handlePanelMark}
+                            onDialogueButton={handleDialogueButton}
                             onToast={onToast}
                         />
                     </div>
@@ -1209,6 +1227,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onSay={handlePanelSay}
                             connectors={material.connectors}
                             onMark={handlePanelMark}
+                            onDialogueButton={handleDialogueButton}
                             onToast={onToast}
                         />
                     </div>
@@ -1235,6 +1254,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onSay={handlePanelSay}
                             connectors={material.connectors}
                             onMark={handlePanelMark}
+                            onDialogueButton={handleDialogueButton}
                             onToast={onToast}
                         />
                     ))}
@@ -1263,6 +1283,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onSay={handlePanelSay}
                             connectors={material.connectors}
                             onMark={handlePanelMark}
+                            onDialogueButton={handleDialogueButton}
                             onToast={onToast}
                             onBox={handlePanelBox}
                         />
@@ -1285,6 +1306,7 @@ export function MixologyGame({ sessionId, onBack, onToast }: GameProps) {
                             onSay={handlePanelSay}
                             connectors={material.connectors}
                             onMark={handlePanelMark}
+                            onDialogueButton={handleDialogueButton}
                             onToast={onToast}
                         />
                     ))}
