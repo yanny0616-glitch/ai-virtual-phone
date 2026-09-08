@@ -632,7 +632,7 @@ const LIST_WIDGET_CATALOG_SCHEMA = {
 const READ_DESKTOP_LAYOUT_SCHEMA = {
     type: "object",
     properties: {
-        page: { type: "number", description: "桌面页码（1 起），默认 1" },
+        page: { type: "integer", minimum: 1, maximum: 50, description: "桌面页码（1 起），默认 1" },
     },
     additionalProperties: false,
 };
@@ -644,7 +644,7 @@ const CREATE_DIY_WIDGET_SCHEMA = {
         size: { type: "string", enum: WIDGET_SIZE_ENUM, description: "尺寸，行x列" },
         htmlString: { type: "string", description: "完整自包含 HTML 文档（内联全部 CSS/JS）" },
         autoPlace: { type: "boolean", description: "创建后自动摆上桌面空位，默认 true" },
-        page: { type: "number", description: "自动摆放的目标页码（1 起），默认 1" },
+        page: { type: "integer", minimum: 1, maximum: 50, description: "自动摆放的目标页码（1 起），默认 1" },
     },
     required: ["name", "size", "htmlString"],
     additionalProperties: false,
@@ -655,7 +655,7 @@ const UPDATE_DIY_WIDGET_SCHEMA = {
     properties: {
         templateId: { type: "string", description: "DIY 模板 id（diy- 开头）" },
         name: { type: "string", description: "新组件名" },
-        size: { type: "string", enum: WIDGET_SIZE_ENUM, description: "新尺寸；桌面实例位置放不下新尺寸时该实例会被移下桌面" },
+        size: { type: "string", enum: WIDGET_SIZE_ENUM, description: "新尺寸；桌面实例放不下时拒绝修改并保留原布局" },
         htmlString: { type: "string", description: "新的完整 HTML 文档；桌面实例会实时热更新" },
     },
     required: ["templateId"],
@@ -676,9 +676,9 @@ const PLACE_WIDGET_SCHEMA = {
     type: "object",
     properties: {
         type: { type: "string", description: "组件类型：DIY 模板 id（diy- 开头）或内置组件类型名（见组件目录）" },
-        page: { type: "number", description: "目标页码（1 起），默认 1" },
-        row: { type: "number", description: "起始行（1-6）；和 col 一起传则精确摆放，否则自动找空位" },
-        col: { type: "number", description: "起始列（1-4）" },
+        page: { type: "integer", minimum: 1, maximum: 50, description: "目标页码（1 起），默认 1" },
+        row: { type: "integer", minimum: 1, maximum: 6, description: "起始行（1-6）；和 col 一起传则精确摆放，否则自动找空位" },
+        col: { type: "integer", minimum: 1, maximum: 4, description: "起始列（1-4）" },
     },
     required: ["type"],
     additionalProperties: false,
@@ -1174,7 +1174,7 @@ export function buildMascotPackageSchemaPrompt(packageLabel: string, protocol: "
         }
         // 文本协议下展示 [执行动作:...] 语法；原生协议下 LLM 已经能直接看 tool schema，不需要这一行
         if (protocol === "text") {
-            lines.push(`  调用：[执行动作:${tool.name}(${formatExampleArgs(tool.parameterSchema)})]`);
+            lines.push(`  调用格式（按任务填写必填字段，并按需补充上方可选参数）：[执行动作:${tool.name}(${formatExampleArgs(tool.parameterSchema)})]`);
         }
         lines.push("");
     }
@@ -1186,18 +1186,33 @@ export function buildMascotPackageSchemaPrompt(packageLabel: string, protocol: "
 }
 
 function formatExampleArgs(schema: Record<string, unknown>): string {
-    const props = schema.properties as Record<string, Record<string, unknown>> | undefined;
-    if (!props || Object.keys(props).length === 0) return "{}";
-    const example: Record<string, unknown> = {};
-    for (const [k, def] of Object.entries(props)) {
-        if (def.enum && Array.isArray(def.enum)) example[k] = def.enum[0];
-        else if (def.type === "string") example[k] = "...";
-        else if (def.type === "number") example[k] = 0;
-        else if (def.type === "boolean") example[k] = true;
-        else if (def.type === "array") example[k] = [];
-        else example[k] = null;
-    }
-    return JSON.stringify(example);
+    const exampleValue = (def: Record<string, unknown>): unknown => {
+        if (def.const !== undefined) return def.const;
+        if (def.default !== undefined) return def.default;
+        if (Array.isArray(def.enum) && def.enum.length) return def.enum[0];
+        if (def.type === "object") {
+            const props = (def.properties ?? {}) as Record<string, Record<string, unknown>>;
+            const required = (def.required ?? []) as string[];
+            // Optional placeholders can accidentally select an ID, enable preview,
+            // or override automatic placement. Show only required fields.
+            return Object.fromEntries(required.filter(key => props[key]).map(key => [key, exampleValue(props[key])]));
+        }
+        if (def.type === "array") {
+            const count = typeof def.minItems === "number" ? def.minItems : 0;
+            return Array.from({ length: count }, () => exampleValue((def.items ?? {}) as Record<string, unknown>));
+        }
+        if (def.type === "number" || def.type === "integer") {
+            const min = typeof def.minimum === "number" ? def.minimum : -Infinity;
+            const max = typeof def.maximum === "number" ? def.maximum : Infinity;
+            const lower = def.type === "integer" ? Math.ceil(min) : min;
+            const upper = def.type === "integer" ? Math.floor(max) : max;
+            return Math.min(upper, Math.max(lower, 1));
+        }
+        if (def.type === "boolean") return true;
+        if (def.type === "string") return "...";
+        return null;
+    };
+    return JSON.stringify(exampleValue(schema));
 }
 
 function numberOption(value: unknown, fallback: number): number {

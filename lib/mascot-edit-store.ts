@@ -43,6 +43,9 @@ function trimJournal(rows: EditPlan[]) {
   return result;
 }
 export function readEditObject(scope: EditScope, id?: string) {
+  // Only a single-character scope is keyed. Providers may fill optional IDs
+  // for desktop/appearance reads; those must not change the receipt identity.
+  if (scope !== 'character') id = undefined;
   const state = readEditState(); const value = editScopeValue(state, scope, id);
   if (scope === 'character' && !value) throw Error('找不到该角色 ID');
   const read: EditRead = { scope, ...(id ? { id } : {}), revision: editRevision(value) };

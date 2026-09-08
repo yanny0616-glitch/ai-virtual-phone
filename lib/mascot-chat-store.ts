@@ -10,13 +10,13 @@ import {
     clearExpandedPackages,
     executeMascotToolCall,
     findPackageByLabel,
-    getMascotNativeLoaderName,
     loadExpandedPackages,
     saveExpandedPackages,
     touchExpandedPackage,
     type MascotToolContext,
 } from "./mascot-tools";
 import { isMascotPanelOpen } from "./mascot-state";
+import type { ToolResult } from "./tool-executor";
 
 const MASCOT_DB_NAME = "AiPhoneMascotDB";
 const MASCOT_DB_VERSION = 2;
@@ -527,6 +527,10 @@ export async function generateMascotReply({
         characterBackupIds: new Set<string>(),
     };
 
+    let receivedFinalReply = false;
+    const publishInterruption = () => {
+        publishMessages([...workingMessages, { role: "user", text: "[用户中止了操作]", hidden: false, createdAt: new Date().toISOString() }]);
+    };
     try {
         for (let round = 0; round < MAX_ROUNDS; round += 1) {
             if (abortRequested) break;
@@ -610,6 +614,15 @@ export async function generateMascotReply({
 
             if (response.toolFetches.length > 0) {
                 for (const fetch of response.toolFetches) {
+                    if (abortRequested) {
+                        workingMessages = normalizeMessages([...workingMessages, {
+                            role: "tool", text: "用户已中止，未展开此工具集", toolSuccess: false,
+                            toolCallId: fetch.nativeCall?.id, toolName: fetch.nativeCall?.name || fetch.name,
+                            toolDisplayName: `展开${fetch.name}`,
+                        }]);
+                        publishMessages(workingMessages);
+                        continue;
+                    }
                     const pkg = findPackageByLabel(fetch.name);
                     if (!pkg) continue;
                     expandedPackageIds = touchExpandedPackage(expandedPackageIds, pkg.id);
@@ -617,16 +630,15 @@ export async function generateMascotReply({
 
                     const guideContent = `「${pkg.label}」已展开，详细动作如下：\n${buildMascotPackageSchemaPrompt(pkg.label, response.protocol)}`;
 
-                    if (response.protocol === "native") {
-                        const loaderName = getMascotNativeLoaderName(pkg.id);
-                        const loaderCall = response.nativeToolCalls?.find((call) => call.name === loaderName);
+                    if (fetch.nativeCall) {
+                        const loaderCall = fetch.nativeCall;
                         workingMessages = normalizeMessages([...workingMessages, {
                             role: "tool",
                             text: guideContent,
                             hidden: false,
                             displayText: `展开「${pkg.label}」工具集`,
-                            toolCallId: loaderCall?.id || "",
-                            toolName: loaderCall?.name || loaderName,
+                            toolCallId: loaderCall.id,
+                            toolName: loaderCall.name,
                             toolDisplayName: `展开${pkg.label}`,
                             toolSuccess: true,
                             createdAt: new Date().toISOString(),
@@ -645,15 +657,13 @@ export async function generateMascotReply({
                     }
                     publishMessages(workingMessages);
                 }
-                continue;
             }
 
             if (response.toolCalls.length > 0) {
-                for (let i = 0; i < response.toolCalls.length; i += 1) {
-                    const call = response.toolCalls[i];
-                    const nativeCall = response.protocol === "native"
-                        ? response.nativeToolCalls?.[i]
-                        : undefined;
+                for (const call of response.toolCalls) {
+                    // Identity travels with each call: loaders and text directives
+                    // do not share the native action array indexes.
+                    const nativeCall = call.nativeCall;
                     const displayName = call.name;
                     const protocolName = nativeCall?.name || call.name;
 
@@ -669,11 +679,16 @@ export async function generateMascotReply({
                     workingMessages = normalizeMessages([...workingMessages, runningMessage]);
                     const runningIdx = workingMessages.length - 1;
                     publishMessages(workingMessages);
-                    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+                    if (!abortRequested) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
                     // 复用同一上下文，确保多轮工具调用共享角色备份状态。
                     toolCtx.history = workingMessages;
-                    const result = await executeMascotToolCall(call, toolCtx);
+                    // Check after yielding too: stop may be clicked while the
+                    // running indicator paints. Finish an already-started tool,
+                    // but return cancellation results for every unstarted call.
+                    const result: ToolResult = abortRequested
+                        ? { name: call.name, success: false, error: "用户已中止，此动作未执行" }
+                        : await executeMascotToolCall(call, toolCtx);
                     if (result.success) mascotFillField({ field: call.name, value: result.data || "" });
 
                     const resultText = result.success ? (result.data || "完成") : (result.error || "未知错误");
@@ -696,17 +711,31 @@ export async function generateMascotReply({
                 continue;
             }
 
+            if (response.toolFetches.length > 0) continue;
+            receivedFinalReply = true;
             break;
         }
 
         if (abortRequested) {
-            publishMessages([...workingMessages, { role: "user", text: "[用户中止了操作]", hidden: false, createdAt: new Date().toISOString() }]);
+            publishInterruption();
+        }
+        const limitMessage = `已达到本次 ${MAX_ROUNDS} 轮处理上限，任务可能尚未完成。请查看工具结果和修改记录，确认进度后再让我继续。`;
+        if (!abortRequested && !receivedFinalReply) {
+            publishMessages([...workingMessages, { role: "mascot", text: limitMessage, createdAt: new Date().toISOString() }]);
         }
         if (!isMascotPanelOpen() && typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent("global-notice", { detail: abortRequested ? "操作已中止" : "AI助手已完成操作 ✓" }));
+            const detail = abortRequested ? "操作已中止"
+                : !receivedFinalReply ? "AI助手已达处理上限，请查看进度"
+                : "AI助手已回复，请查看结果";
+            window.dispatchEvent(new CustomEvent("global-notice", { detail }));
         }
     } catch (err) {
-        if ((err as Error).name !== "AbortError" && !abortRequested) {
+        if (abortRequested || (err as Error).name === "AbortError") {
+            publishInterruption();
+            if (!isMascotPanelOpen() && typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent("global-notice", { detail: "操作已中止" }));
+            }
+        } else {
             publishMessages([...workingMessages, { role: "mascot", text: `出错了...${(err as Error).message}`, createdAt: new Date().toISOString() }]);
             if (!isMascotPanelOpen() && typeof window !== "undefined") {
                 window.dispatchEvent(new CustomEvent("global-notice", { detail: "AI助手生成失败了..." }));

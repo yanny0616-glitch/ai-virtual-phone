@@ -56,15 +56,18 @@ export type MascotMsg = {
     toolSuccess?: boolean;
 };
 
+type MascotToolFetch = ToolFetch & { nativeCall?: LlmToolCall };
+type MascotToolCall = ToolCall & { nativeCall?: LlmToolCall };
+
 export type MascotToolResponse = {
     /** 显示给用户的回复（剥离工具标签后） */
     reply: string[];
     /** 原始 assistant 文本（含工具标签，用于下一轮历史） */
     rawAssistant: string;
     /** 文本协议：要展开的套件名（label） */
-    toolFetches: ToolFetch[];
+    toolFetches: MascotToolFetch[];
     /** 要执行的工具调用 */
-    toolCalls: ToolCall[];
+    toolCalls: MascotToolCall[];
     /** 原生协议下，原始的 LlmToolCall（包含 id，用于回传） */
     nativeToolCalls?: LlmToolCall[];
     /** LLM 返回的 reasoning 文本（Gemini 多轮工具调用需要把这段也存到历史） */
@@ -497,20 +500,43 @@ function buildMascotTextResponse(raw: string): Pick<MascotToolResponse, "reply" 
 function mapMascotNativeCalls(
     nativeCalls: LlmToolCall[],
     nameMap: Map<string, string>,
-): { toolFetches: ToolFetch[]; toolCalls: ToolCall[] } {
-    const toolFetches: ToolFetch[] = [];
-    const toolCalls: ToolCall[] = [];
+): { toolFetches: MascotToolFetch[]; toolCalls: MascotToolCall[] } {
+    const toolFetches: MascotToolFetch[] = [];
+    const toolCalls: MascotToolCall[] = [];
     for (const nc of nativeCalls) {
         const displayName = nameMap.get(nc.name) || nc.name;
         if (displayName.startsWith("_loader:")) {
             const pkgId = displayName.slice("_loader:".length);
             const pkg = MASCOT_TOOL_PACKAGES.find((p) => p.id === pkgId);
-            if (pkg) toolFetches.push({ name: pkg.label });
+            if (pkg) toolFetches.push({ name: pkg.label, nativeCall: nc });
         } else {
-            toolCalls.push({ name: displayName, args: nc.args });
+            toolCalls.push({ name: displayName, args: nc.args, nativeCall: nc });
         }
     }
     return { toolFetches, toolCalls };
+}
+
+function mergeMascotToolRequests(
+    native: Pick<MascotToolResponse, "toolFetches" | "toolCalls">,
+    text: Pick<MascotToolResponse, "toolFetches" | "toolCalls">,
+): Pick<MascotToolResponse, "toolFetches" | "toolCalls"> {
+    const canonical = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(canonical);
+        if (value && typeof value === "object") {
+            return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+                .map(([key, item]) => [key, canonical(item)]));
+        }
+        return value;
+    };
+    const key = (call: ToolCall) => JSON.stringify([call.name, canonical(call.args)]);
+    const nativeActions = new Set(native.toolCalls.map(key));
+    const nativeFetches = new Set(native.toolFetches.map(fetch => fetch.name));
+    // Remove only text echoes of native calls in this response. Distinct args,
+    // repeated native IDs and text-only sequences keep their original order.
+    return {
+        toolFetches: [...native.toolFetches, ...text.toolFetches.filter(fetch => !nativeFetches.has(fetch.name))],
+        toolCalls: [...native.toolCalls, ...text.toolCalls.filter(call => !nativeActions.has(key(call)))],
+    };
 }
 
 // ── 文本协议：发送请求 ────────────────────────────────
@@ -677,8 +703,7 @@ async function callMascotNative(
         return {
             reply,
             rawAssistant: result.content || "",
-            toolFetches: [...nativeToolFetches, ...parsedText.toolFetches],
-            toolCalls: [...nativeToolCalls, ...parsedText.toolCalls],
+            ...mergeMascotToolRequests({ toolFetches: nativeToolFetches, toolCalls: nativeToolCalls }, parsedText),
             nativeToolCalls: result.toolCalls,
             reasoning: result.reasoning,
             openRouterReasoningDetails: result.openRouterReasoningDetails,
