@@ -31,7 +31,7 @@ for (const [file, name] of Object.entries(mappings)) {
   await fs.writeFile(path.join(out, name + '.js'), ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText);
 }
 await fs.writeFile(path.join(out, 'assets.js'), 'export const getThemeAssetMap=async()=>({}); export const collectThemeAssetIds=()=>[];');
-await fs.writeFile(path.join(out, 'store.js'), `export const MASCOT_EDIT_PREVIEW_EVENT='mascot-edit-preview',MASCOT_EDIT_HISTORY_EVENT='mascot-edit-history';export const readEditState=()=>window.fixture;export const readEditJournal=()=>window.plans;export const editIconCatalog=()=>[];export const changedEditFields=(a,b)=>[...new Set([...Object.keys(a||{}),...Object.keys(b||{})])].filter(k=>JSON.stringify(a?.[k])!==JSON.stringify(b?.[k]));export const commitEdit=async(id,undo)=>{window.commitCalls++;const p=window.plans.find(p=>p.id===id);p.status=undo?'undone':'applied';return {...p};};`);
+await fs.writeFile(path.join(out, 'store.js'), `export const MASCOT_EDIT_PREVIEW_EVENT='mascot-edit-preview',MASCOT_EDIT_HISTORY_EVENT='mascot-edit-history';export const readEditState=()=>window.fixture;export const readEditJournal=()=>window.plans;export const editIconCatalog=()=>[{id:'music',name:'音乐'},{id:'settings',name:'设置'},{id:'chat',name:'聊天'},{id:'theme',name:'主题'},{id:'contacts',name:'角色'},{id:'calendar',name:'日历'}];export const changedEditFields=(a,b)=>[...new Set([...Object.keys(a||{}),...Object.keys(b||{})])].filter(k=>JSON.stringify(a?.[k])!==JSON.stringify(b?.[k]));export const commitEdit=async(id,undo)=>{window.commitCalls++;const p=window.plans.find(p=>p.id===id);p.status=undo?'undone':'applied';return {...p};};`);
 await fs.writeFile(path.join(out, 'player.js'), 'export const getMusicControlBridge=()=>window.player;');
 await fs.writeFile(path.join(out, 'entry.js'), `
 import React from 'react';
@@ -44,7 +44,8 @@ import { hydrateKvDb, kvGet, kvSetAsync, kvCompareAndSetBatch } from './kv.js';
 const pause=ms=>new Promise(r=>setTimeout(r,ms||40));
 const wait=async(test,message)=>{for(let i=0;i<100;i++){if(test())return;await pause();}throw Error(message);};
 const check=(ok,message)=>{if(!ok)throw Error(message);};
-const fixture=window.fixture={characters:[],templates:[],desktop:{layout:{page1:[],page2:[]},dock:[],folders:{},widgets:[]},appearance:{iconSkins:{},iconSchemes:[],cssOverrides:{}}};
+const fixture=window.fixture={characters:[],templates:[{id:'diy-x',name:'搭配卡',size:'2x2',mode:'code',htmlString:''},{id:'diy-y',name:'今日一句',size:'1x4',mode:'code',htmlString:''}],desktop:{layout:{page1:[],page2:[]},dock:[],folders:{},widgets:[]},appearance:{iconSkins:{},iconSchemes:[],cssOverrides:{}}};
+window.desktopPlan={id:'edit-desk',title:'四页 INS 布局',status:'draft',createdAt:'2026-09-08T06:00:00Z',reads:[],deltas:[{scope:'desktop',before:{layout:{page1:[{id:'music',row:3,col:1},{id:'settings',row:3,col:2},{id:'chat',row:3,col:3},{id:'theme',row:3,col:4},{id:'contacts',row:6,col:3}],page2:[{id:'calendar',row:1,col:1}]},dock:['chat','contacts'],folders:{},widgets:[{id:'w1',type:'clock',size:'2x4',page:1,row:1,col:1},{id:'w2',type:'photo',size:'2x2',page:1,row:4,col:1},{id:'w3',type:'diy-x',size:'2x2',page:1,row:4,col:3},{id:'w4',type:'note',size:'1x1',page:1,row:6,col:1}]},after:{layout:{page1:[{id:'music',row:4,col:1},{id:'settings',row:4,col:2},{id:'chat',row:4,col:3},{id:'theme',row:4,col:4}],page2:[{id:'calendar',row:1,col:1},{id:'contacts',row:3,col:1}],page3:[]},dock:['chat','contacts','music'],folders:{},widgets:[{id:'w5',type:'diy-y',size:'1x4',page:1,row:1,col:1},{id:'w1',type:'clock',size:'2x4',page:1,row:2,col:1},{id:'w2',type:'photo',size:'2x2',page:1,row:5,col:1},{id:'w6',type:'diy-y',size:'2x2',page:1,row:5,col:3}]}}]};
 window.commitCalls=0;window.plans=[{id:'edit-test',title:'标签修改',status:'draft',createdAt:'2026-09-07T16:00:00Z',reads:[],deltas:[{scope:'character',id:'c1',before:{name:'测试',tags:[]},after:{name:'测试',tags:['配角']}}]}];
 window.player={state:{currentTrack:{id:'track1',title:'歌曲一',artist:'歌手',coverUrl:''},isPlaying:false,currentTime:10,duration:100},getState(){return this.state},pause(){this.state.isPlaying=false},resume(){this.state.isPlaying=true},next(){this.state.currentTrack={...this.state.currentTrack,id:'track2',title:'歌曲二'}},prev(){this.state.currentTrack={...this.state.currentTrack,id:'track1',title:'歌曲一'}},seek(t){this.state.currentTime=t},openPlayer(){this.opened=true}};
 const report=state=>parent.postMessage({testState:state},'*');
@@ -62,11 +63,20 @@ const request={templateId:'diy-test',name:'天气测试',size:'2x4',htmlString:h
   document.querySelector('button').click();await pause();check(!document.querySelector('iframe'),'close failed');
   requestDiyWidgetPreview({...request,htmlString:'<h1>Updated</h1>'});await pause();check(document.querySelector('iframe').srcdoc.includes('Updated'),'reopen stale');
   requestStatusBarPreview({displayName:'状态',renderHtml:'test',previewRaw:'test'});await pause();check(document.querySelector('[data-status-preview]')&&!document.querySelector('iframe'),'status switch failed');
-  const detail={plan:window.plans[0],handled:false};window.dispatchEvent(new CustomEvent('mascot-edit-preview',{detail}));await pause();check(detail.handled&&document.querySelector('dialog[open]'),'edit dialog missing');
+  const detail={plan:window.plans[0],handled:false};window.dispatchEvent(new CustomEvent('mascot-edit-preview',{detail}));await pause();check(detail.handled&&document.querySelector('[role="dialog"]'),'edit dialog missing');
   check(document.body.textContent.includes('配角'),'tag diff missing');
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',cancelable:true}));await pause();
+  window.dispatchEvent(new CustomEvent('mascot-edit-preview',{detail:{plan:window.desktopPlan,handled:false}}));await pause();
+  const text=document.body.textContent;check(document.querySelectorAll('.mascot-review-phone').length===2,'before/after phones missing');
+  check(text.includes('新增 2 项')&&text.includes('移动 7 项')&&text.includes('移除 2 项')&&text.includes('新建第 3 页')&&text.includes('Dock'),'desktop diff summary wrong: '+text.slice(0,200));
+  check(document.querySelector('.mascot-review-widget[data-mark="added"]')&&document.querySelector('.mascot-review-icon[data-mark="moved"]'),'diff marks missing');
+  check(text.includes('今日一句')&&text.includes('角色')&&!text.includes('diy-y'),'names not resolved');
+  if(location.hash==='#shot'){return;}
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',cancelable:true}));await pause();
+  window.dispatchEvent(new CustomEvent('mascot-edit-preview',{detail:{plan:window.plans[0],handled:false}}));await pause();
   [...document.querySelectorAll('button')].find(b=>b.textContent.includes('应用这份修改')).click();await pause();check(window.commitCalls===1&&document.body.textContent.includes('撤销这次修改'),'apply UI failed');
   [...document.querySelectorAll('button')].find(b=>b.textContent.includes('撤销这次修改')).click();await pause();check(window.commitCalls===2&&document.body.textContent.includes('已撤销'),'undo UI failed');
-  document.querySelector('dialog').dispatchEvent(new Event('cancel',{cancelable:true}));await pause();check(!document.querySelector('dialog'),'Escape/cancel failed');
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',cancelable:true}));await pause();check(!document.querySelector('[role="dialog"]'),'Escape/cancel failed');
   window.dispatchEvent(new CustomEvent('mascot-edit-history'));await pause();check(document.body.textContent.includes('标签修改'),'history missing');
   root.unmount();await pause();check(!requestDiyWidgetPreview(request),'listener leaked');
   // Real desktop iframe with the same client/host bridge, using a controlled player only.
