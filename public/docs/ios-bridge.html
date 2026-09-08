@@ -1,378 +1,480 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>现实桥使用手册 · iOS 桥接</title>
-<style>
-:root{--bg:#fafaf8;--fg:#1f2328;--muted:#656d76;--line:#e5e7eb;--card:#fff;--code:#f3f4f6;--accent:#0f766e;--accent-soft:#e6f4f1;--warn:#fff7e6;--warn-line:#f5c36a;--tip:#eef4ff;--tip-line:#9db7f5}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--fg:#e6e8eb;--muted:#9aa4b2;--line:#2a2f3a;--card:#171a21;--code:#1e222b;--accent:#5eead4;--accent-soft:#12312d;--warn:#3a2c10;--warn-line:#8a6a2a;--tip:#15213a;--tip-line:#3a5390}}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth;scroll-padding-top:16px}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-a{color:var(--accent)}
-.wrap{display:grid;grid-template-columns:250px minmax(0,1fr);gap:0;max-width:1180px;margin:0 auto}
-nav{position:sticky;top:0;height:100vh;overflow:auto;padding:24px 16px;border-right:1px solid var(--line);font-size:13.5px}
-nav h3{margin:0 0 10px;font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
-nav a{display:block;color:var(--fg);text-decoration:none;padding:4px 8px;border-radius:6px}
-nav a:hover{background:var(--accent-soft)}
-nav a.sub{padding-left:20px;color:var(--muted);font-size:13px}
-main{padding:28px 36px 100px;min-width:0}
-h1{font-size:28px;margin:0 0 6px}
-h2{font-size:22px;margin:56px 0 12px;padding-top:12px;border-top:2px solid var(--line)}
-h3{font-size:17px;margin:32px 0 8px}
-h4{font-size:15px;margin:22px 0 6px}
-p{margin:8px 0}
-.lead{color:var(--muted);font-size:15px}
-table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
-th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
-th{background:var(--code)}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:var(--code);padding:1px 5px;border-radius:4px}
-pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:13px;line-height:1.55;margin:10px 0}
-pre code{background:none;padding:0}
-pre button.copy{position:absolute;top:6px;right:6px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:6px;padding:2px 8px;cursor:pointer}
-.box{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0;background:var(--card)}
-.warn{background:var(--warn);border-color:var(--warn-line)}
-.tip{background:var(--tip);border-color:var(--tip-line)}
-.box b:first-child{display:block;margin-bottom:4px}
-.ex{border-left:4px solid var(--accent);padding:10px 16px;margin:18px 0;background:var(--card);border-radius:0 10px 10px 0}
-.ex h4{margin:0 0 6px;font-size:15px}
-.ex .meta{font-size:13px;color:var(--muted);margin-bottom:6px}
-.steps{counter-reset:s;padding-left:0;list-style:none;margin:8px 0}
-.steps li{position:relative;padding-left:32px;margin:6px 0}
-.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:3px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;text-align:center;line-height:22px;font-weight:600}
-.pill{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);margin-right:4px}
-.kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font-size:12.5px;background:var(--card)}
-ul,ol{padding-left:22px}
-li{margin:3px 0}
-.toc-toggle{display:none}
-@media (max-width:860px){
-  .wrap{grid-template-columns:1fr}
-  nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);display:none}
-  nav.open{display:block}
-  .toc-toggle{display:block;position:sticky;top:0;z-index:5;background:var(--bg);border:0;border-bottom:1px solid var(--line);width:100%;text-align:left;padding:10px 16px;font-size:14px;color:var(--accent)}
-  main{padding:20px 16px 80px}
-  h2{margin-top:40px}
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15283f">
+  <meta name="robots" content="noindex">
+  <meta name="description" content="Float 小手机现实桥中文手册：收件箱联动、状态快照、快捷动作、屏幕速聊，27 个可照抄的 iPhone 快捷指令场景。">
+  <title>现实桥 iOS 桥接使用手册 · Float</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MCA0MCI+PHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiByeD0iMTAiIGZpbGw9IiMxNTI4M2YiLz48cGF0aCBkPSJNMTIgMTBoMTh2NUgxOHY1aDEwdjVIMTh2OWgtNnoiIGZpbGw9IiNmZmYiLz48L3N2Zz4K">
+  <style>
+@layer base, layout, content, responsive;
+@layer base {
+  :root { color-scheme:light; --ink:#15283f; --muted:#546479; --blue:#145de2; --line:#dce3eb; --paper:#fff; --wash:#f4f7fb; --nav:#10243b; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; font-size:16px; }
+  * { box-sizing:border-box; } html { scroll-behavior:smooth; scroll-padding-top:100px; }
+  body { margin:0; background:var(--paper); color:var(--ink); line-height:1.85; }
+  a { color:var(--blue); text-underline-offset:4px; text-decoration-thickness:1px; } a:hover { text-decoration:underline; }
+  a:focus-visible,button:focus-visible,summary:focus-visible { outline:3px solid #f39f28; outline-offset:4px; }
+  button { font:inherit; cursor:pointer; } h1,h2,h3,p { margin-top:0; } h1,h2,h3 { letter-spacing:-.035em; line-height:1.3; }
+  h1 { font-size:clamp(2.6rem,5vw,4.3rem); font-weight:750; margin-bottom:24px; } h1 span { color:var(--blue); }
+  h2 { font-size:clamp(1.6rem,3vw,2.15rem); margin-bottom:20px; } h3 { font-size:1.2rem; margin:32px 0 14px; }
+  p { margin-bottom:18px; } strong { font-weight:650; } code,pre { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+  code { font-size:.9em; overflow-wrap:anywhere; background:#eaf0f8; padding:.13em .35em; border-radius:4px; }
+  ::selection { background:#c6dcff; color:#10243b; }
+  .sr-only,.skip:not(:focus) { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .skip:focus { position:fixed; z-index:99; top:8px; left:12px; padding:10px 20px; background:#fff; }
 }
+@layer layout {
+  .topbar { height:76px; padding:0 36px; position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; gap:20px; background:var(--nav); color:#fff; border-bottom:1px solid #29405a; }
+  .brand { display:flex; align-items:center; gap:13px; color:#fff; text-decoration:none; font-size:1.28rem; font-weight:700; letter-spacing:-.03em; }
+  .brand-mark { width:34px; height:34px; display:grid; place-items:center; border:1px solid #7592b5; border-radius:9px; font-size:1.25rem; font-weight:800; }
+  .brand-sub { margin-left:14px; font-size:.9rem; color:#becddd; font-weight:400; letter-spacing:.03em; }
+  .edition { font:500 .875rem ui-monospace,monospace; color:#c7d6e7; }
+  .layout { display:grid; grid-template-columns:270px minmax(0,1fr); max-width:1512px; margin:auto; }
+  .sidebar { position:sticky; top:76px; height:calc(100dvh - 76px); overflow:auto; padding:36px 24px 24px; border-right:1px solid var(--line); background:var(--wash); }
+  .nav-label { color:#617086; font-size:.75rem; letter-spacing:.13em; margin:25px 12px 10px; } .nav-label:first-child { margin-top:0; }
+  .sidebar nav a { display:flex; gap:12px; align-items:center; min-height:44px; padding:8px 12px; color:#394d66; text-decoration:none; font-size:.9rem; border-radius:7px; }
+  .sidebar nav a span { font:500 .75rem ui-monospace,monospace; color:#687c94; } .sidebar nav a:hover { background:#e7eef8; }
+  .sidebar nav a[aria-current] { background:#e1ecff; color:#164eba; font-weight:650; } .sidebar nav a[aria-current] span { color:var(--blue); }
+  .sidebar-note { border-top:1px solid var(--line); margin:32px 12px 0; padding-top:24px; font-size:.875rem; } .sidebar-note p { color:var(--muted); margin:6px 0 12px; } .sidebar-note a { text-decoration:none; }
+  main { min-width:0; max-width:1016px; padding:0 64px; } .chapter { padding:64px 0; border-bottom:1px solid var(--line); scroll-margin-top:22px; } .chapter.first { padding-top:56px; }
+  footer { display:flex; justify-content:space-between; gap:20px; padding:32px 0 48px; font-size:.875rem; color:var(--muted); }
+}
+@layer content {
+  .eyebrow { color:var(--blue); font-size:.8rem; font-weight:650; letter-spacing:.13em; margin-bottom:18px; }
+  .lead { color:#4b6078; font-size:1.1rem; max-width:650px; line-height:1.9; } .meta { display:flex; flex-wrap:wrap; gap:8px 20px; font-size:.8rem; color:var(--muted); margin:24px 0 34px; }
+  .first-task { border:1px solid #b8cff5; border-top:4px solid var(--blue); padding:28px 30px; border-radius:0 0 12px 12px; background:linear-gradient(125deg,#f1f6ff 0%,#fff 65%); margin-bottom:22px; }
+  .task-heading { display:flex; gap:18px; align-items:center; margin-bottom:16px; } .number { color:var(--blue); font:500 2.4rem ui-monospace,monospace; letter-spacing:-.07em; }
+  .small-label { color:var(--muted); font-size:.875rem; } .task-heading h2 { font-size:1.4rem; margin:5px 0 0; }
+  .steps { padding-left:1.7em; margin:20px 0 24px; } .steps li { padding-left:.3em; margin:10px 0; } .steps li::marker { color:var(--blue); font-weight:700; }
+  .copy-block { margin:22px 0; border:1px solid #d2dce9; border-radius:9px; overflow:hidden; background:var(--wash); }
+  .copy-head { min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid #dce5f0; padding:3px 10px 3px 17px; color:#4a607c; font-size:.875rem; }
+  .copy { flex-shrink:0; min-height:40px; padding:7px 10px; color:#164fae; border:0; border-radius:5px; background:transparent; font-size:.875rem; font-weight:600; } .copy:hover { background:#e0eaff; }
+  .copy-block pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:17px 20px 19px; margin:0; line-height:1.85; font-family:inherit; font-size:1rem; } .code-block pre { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.9rem; }
+  .result { border-left:3px solid #267458; padding-left:14px; margin-bottom:14px; color:#264f42; } .note { font-size:.9rem; color:var(--muted); line-height:1.85; }
+  .notice { background:#eef4ff; border-left:3px solid var(--blue); padding:18px 22px; margin:24px 0; font-size:.96rem; } .notice p { margin:8px 0 0; }
+  .table-wrap { width:100%; overflow-x:auto; margin:24px 0 30px; border:1px solid var(--line); border-radius:9px; } table { width:100%; border-collapse:collapse; text-align:left; font-size:.94rem; min-width:530px; }
+  caption { text-align:left; padding:12px 18px; font-size:.8rem; color:var(--muted); background:#fbfcfe; border-bottom:1px solid var(--line); } th { background:#edf2f8; color:#344b67; font-size:.875rem; font-weight:650; }
+  td,th { padding:15px 18px; border-bottom:1px solid var(--line); vertical-align:top; } tr:last-child td { border-bottom:0; } td:first-child { min-width:135px; }
+  .flow { display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--nav); padding:24px 20px; margin:30px 0; border-radius:9px; color:#e9f1fd; font-size:.9rem; } .flow span { text-align:center; } .flow b { font-weight:400; color:#8bbaff; }
+  .capability { border-bottom:1px solid var(--line); } .capability:first-of-type { border-top:1px solid var(--line); } summary { cursor:pointer; }
+  .capability summary { display:flex; align-items:center; gap:15px; padding:22px 0; list-style:none; } summary::-webkit-details-marker { display:none; }
+  .capability summary::after,.lesson summary::after { content:'+'; font:400 1.5rem ui-monospace,monospace; color:var(--blue); margin-left:6px; } details[open]>summary::after { content:'−'; }
+  .cap-no { flex-shrink:0; font:.85rem ui-monospace,monospace; color:#587495; } .capability summary>span:nth-child(2) { flex:1; } .capability summary strong { display:block; font-size:1.1rem; } .capability summary small { display:block; font-size:.875rem; color:var(--muted); margin-top:2px; }
+  .badge { font-size:.75rem; border-radius:5px; padding:3px 8px; background:#e2edff; color:#2255a5; white-space:nowrap; } .badge.neutral { background:#edf1f5; color:#536276; }
+  .detail-body { padding:0 0 10px 35px; } .detail-body>p { margin:0 0 15px; }
+  .lesson { border:1px solid var(--line); border-radius:9px; margin:26px 0; } .lesson summary { display:flex; justify-content:space-between; align-items:center; gap:15px; list-style:none; padding:18px 22px; font-weight:650; } .lesson[open] summary { border-bottom:1px solid var(--line); margin-bottom:20px; } .lesson .detail-body { padding:0 22px 8px; }
+  .config-grid { display:grid; grid-template-columns:140px minmax(0,1fr); gap:12px 16px; margin:22px 0; font-size:.94rem; } .config-grid>span:nth-child(odd) { color:var(--muted); } .config-grid code { align-self:start; }
+  .recipe { padding:28px 0 18px; border-top:1px solid var(--line); } .recipe-top { display:flex; align-items:center; justify-content:space-between; gap:12px; } .recipe-index { font:500 1.8rem ui-monospace,monospace; color:#7694bc; } .recipe h3 { margin-top:10px; }
+  .glossary { margin:26px 0; } .glossary div { display:grid; grid-template-columns:180px minmax(0,1fr); gap:20px; border-bottom:1px solid var(--line); padding:17px 0; } dt { font-weight:650; } dd { margin:0; color:#4e6178; }
+  .sources { display:grid; gap:12px; font-size:.9rem; margin:24px 0; } .finish { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-top:48px; background:var(--nav); color:#fff; border-radius:10px; padding:28px; }
+  .finish .small-label { color:#afc6e1; } .finish h3 { margin:6px 0 10px; } .finish p { font-size:.9rem; margin:0; color:#cad8e9; } .button { flex-shrink:0; display:inline-flex; gap:14px; align-items:center; padding:12px 17px; min-height:48px; border-radius:6px; background:#fff; color:#12458e; text-decoration:none; font-size:.9rem; font-weight:600; }
+}
+@layer responsive {
+  .jump-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:24px 0; }
+  .jump-grid a { display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:48px; padding:10px 14px; border:1px solid var(--line); border-radius:7px; text-decoration:none; font-size:.94rem; }
+  .jump-grid a:hover { background:#e9f1ff; }
+  .jump-grid a span { color:var(--muted); font-size:.8rem; }
+  .action-group { margin:40px 0; scroll-margin-top:100px; }
+  .action-group>h3 { padding-bottom:14px; border-bottom:3px solid var(--ink); }
+  .action-group h3 .badge { font-weight:400; margin-left:12px; }
+  .action-entry { border-bottom:1px solid var(--line); scroll-margin-top:100px; }
+  .action-entry>summary { list-style:none; padding:18px 0; display:flex; justify-content:space-between; align-items:center; gap:16px; }
+  .action-entry>summary::after { content:'+'; color:var(--blue); font:1.4rem ui-monospace,monospace; }
+  .action-entry[open]>summary::after { content:'−'; }
+  .action-entry summary strong,.action-entry summary small { display:block; }
+  .action-entry summary small { color:var(--muted); font-size:.875rem; font-weight:400; margin-top:5px; }
+  .action-entry .detail-body { padding-left:0; }
+  .schema-raw { margin:20px 0; background:#f8faff; padding:12px 16px; border-radius:7px; }
+  .schema-raw>summary { font-size:.9rem; color:var(--blue); min-height:32px; }
+  .download-link { display:inline-block; padding:14px 18px; min-height:48px; color:white; background:var(--blue); border-radius:7px; text-decoration:none; }
+  #start h1 { font-size:clamp(2rem,4vw,3.2rem); }
+  .sidebar { padding-top:24px; }
+  .sidebar nav a { min-height:40px; }
+  @media(min-width:1450px) { main { padding-right:48px; padding-left:80px; } }
+  @media(max-width:1100px) { .layout { grid-template-columns:232px minmax(0,1fr); } main { padding:0 36px; } .sidebar { padding:30px 14px 20px; } .finish { flex-direction:column; align-items:flex-start; } }
+  @media(max-width:800px) {
+    html { scroll-padding-top:86px; } .topbar { height:64px; padding:0 20px; } .brand-sub { margin-left:8px; } .edition-date { display:none; } .layout { display:block; }
+    .sidebar { position:static; height:auto; padding:14px 16px; border-right:0; border-bottom:1px solid var(--line); } .sidebar nav { display:flex; gap:6px; overflow-x:auto; padding:2px 0 6px; }
+    .sidebar nav a { flex-shrink:0; font-size:.875rem; padding:8px 11px; border:1px solid var(--line); background:#fff; } .sidebar nav a span,.nav-label,.sidebar-note { display:none; }
+    main { padding:0 24px; max-width:760px; margin:auto; } .chapter { padding:44px 0; } .chapter.first { padding-top:34px; } h1 { font-size:2.7rem; } .lead { font-size:1rem; }
+    .first-task { padding:22px 20px; } .task-heading { gap:13px; } .task-heading h2 { font-size:1.22rem; } .detail-body { padding-left:0; }
+    .capability summary { gap:10px; } .capability summary strong { font-size:1rem; } .capability summary small { font-size:.875rem; } .badge { padding:2px 6px; }
+    .config-grid { grid-template-columns:108px minmax(0,1fr); gap:12px; } .flow { padding:20px 14px; font-size:.875rem; flex-wrap:wrap; justify-content:center; gap:12px; } .glossary div { grid-template-columns:1fr; gap:5px; } footer { flex-direction:column; gap:6px; }
+  }
+  @media(max-width:420px) {
+    .jump-grid { grid-template-columns:1fr; }
+    .edition { font-size:.75rem; } .brand { gap:8px; font-size:1.1rem; } .brand-sub { font-size:.8rem; } main { padding:0 18px; } .first-task { padding:20px 16px; }
+    .copy-head { gap:8px; padding-left:12px; } .copy-block pre { padding:14px; } .cap-no { display:none; } .capability summary { flex-wrap:wrap; }
+    .config-grid { grid-template-columns:1fr; gap:5px; } .config-grid>span:nth-child(odd) { margin-top:10px; font-size:.875rem; } .lesson summary { padding:16px; } .lesson .detail-body { padding:0 16px 6px; }
+  }
+  @media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
+  @media print { .topbar,.sidebar,.copy,.skip,.finish,footer { display:none!important; } .layout { display:block; } main { max-width:none; padding:0; } body { font-size:11pt; color:#000; } .chapter { padding:24px 0; } h1 { font-size:30pt; } h2 { font-size:22pt; } .table-wrap { overflow:visible; } table { min-width:0; } .copy-block,.notice,.first-task { background:#fff; } h2,h3,summary { break-after:avoid; } .copy-block,tr { break-inside:avoid; } .flow { background:#fff; color:#000; border:1px solid #999; } }
+}
+
 </style>
 </head>
 <body>
-<button class="toc-toggle" onclick="document.querySelector('nav').classList.toggle('open')">☰ 目录</button>
-<div class="wrap">
-<nav>
-<h3>目录</h3>
-<a href="#overview">0. 一图看懂五条通道</a>
-<a href="#prep">1. 准备工作</a>
-<a href="#prep-addr" class="sub">地址与令牌一览</a>
-<a href="#inbox">2. 收件箱 · 自动联动</a>
-<a href="#inbox-shortcut" class="sub">上传快捷指令模板</a>
-<a href="#inbox-rules" class="sub">规则：匹配 / 冷却 / 加工 / 动作</a>
-<a href="#inbox-examples" class="sub">场景例子 ×10</a>
-<a href="#inbox-wake" class="sub">离线增强（唤醒）</a>
-<a href="#state">3. 状态快照 · 主动查询</a>
-<a href="#state-examples" class="sub">场景例子 ×7</a>
-<a href="#actions">4. 快捷动作 · 角色操作 iPhone</a>
-<a href="#actions-build" class="sub">快捷指令怎么搭</a>
-<a href="#actions-examples" class="sub">场景例子 ×10</a>
-<a href="#actions-offline" class="sub">离线时角色怎么触发</a>
-<a href="#screen">5. 屏幕速聊</a>
-<a href="#outbox">6. 发件箱 · 自定义 APP</a>
-<a href="#combo">7. 组合玩法</a>
-<a href="#debug">8. 排错与坑</a>
-</nav>
-<main>
+<a class="skip" href="#content">跳到正文</a>
+<header class="topbar"><a class="brand" href="#start"><span class="brand-mark" aria-hidden="true">F</span><span>Float <span class="brand-sub">使用手册</span></span></a><span class="edition">现实桥 / iOS <span class="edition-date">· 2026.09</span></span></header>
+<div class="layout">
+<aside class="sidebar"><nav aria-label="手册目录"><p class="nav-label">现实桥 · 13 章</p>
+<a href="#start"><span>01</span> 一图看懂</a>
+<a href="#prep"><span>02</span> 准备工作</a>
+<a href="#inbox"><span>03</span> 收件箱与联动</a>
+<a href="#inbox-recipes"><span>04</span> 联动场景 ×10</a>
+<a href="#wake"><span>05</span> 离线增强</a>
+<a href="#state"><span>06</span> 状态快照</a>
+<a href="#state-recipes"><span>07</span> 快照场景 ×7</a>
+<a href="#actions"><span>08</span> 快捷动作</a>
+<a href="#action-recipes"><span>09</span> 动作场景 ×10</a>
+<a href="#screen"><span>10</span> 屏幕速聊</a>
+<a href="#outbox"><span>11</span> 发件箱与 APP</a>
+<a href="#combo"><span>12</span> 组合玩法</a>
+<a href="#fix"><span>13</span> 排错与上限</a></nav><div class="sidebar-note"><strong>先跑通一条。</strong><p>第 01 章的「第一条联动」两分钟能做完，之后再挑场景照抄。</p><a href="#start">从第一条联动开始 →</a></div></aside>
+<main id="content">
 
-<h1>现实桥使用手册</h1>
-<p class="lead">iPhone 快捷指令 ↔ 小手机 的双向桥。本页按「能做什么、照着抄怎么配」写，面向自己用。所有地址里的 <code>&lt;你的项目&gt;</code> 指个人云 Supabase 项目域名，真实值在 APP 里点一下就能复制。</p>
+<section id="start" class="chapter first">
+  <div class="eyebrow">01 / 一图看懂</div><h1>现实桥<br><span>iOS 桥接使用手册</span></h1>
+  <p class="lead">iPhone 快捷指令与小手机之间的双向桥。本页按「能做什么、照着抄怎么配」写，27 个场景全部基于当前源码里的接口和向导文案。</p>
+  <div class="meta"><span>适用于 Float 小手机</span><span>核对：2026-09-08</span><span>地址里的 &lt;你的项目&gt; 指个人云 Supabase 域名</span></div>
+  <div class="jump-grid start-links"><a href="#inbox-recipes">现实发生的事让 TA 知道 →</a><a href="#state-recipes">让 TA 随时看你的电量步数 →</a><a href="#action-recipes">让 TA 操作你的 iPhone →</a><a href="#screen">截屏跟 TA 聊 →</a></div>
+  <div class="table-wrap"><table><caption>五条通道 · 一句话分工</caption><thead><tr><th>通道</th><th>方向</th><th>谁触发</th><th>典型用途</th><th>APP 里的位置</th></tr></thead><tbody>
+  <tr><td><strong>A 收件箱 + 自动联动</strong></td><td>iPhone → 小手机</td><td>iOS 自动化（到家、收短信、充电、闹钟…）</td><td>现实里发生了事 → 角色知道 / 回话 / 记住 / 记日历</td><td>现实桥 → 自动联动</td></tr>
+  <tr><td><strong>B 状态快照 + 主动查询</strong></td><td>iPhone → 小手机</td><td>定时自动化覆盖上传</td><td>角色聊天时随时查你的电量、步数、睡眠、位置</td><td>现实桥 → 主动查询</td></tr>
+  <tr><td><strong>C 快捷动作</strong></td><td>小手机 → iPhone</td><td>角色，或 A 通道的规则</td><td>角色替你写备忘录、开灯、放歌、拍照回传、截屏看你在干嘛</td><td>现实桥 → 快捷动作</td></tr>
+  <tr><td><strong>D 屏幕速聊</strong></td><td>双向</td><td>你双击辅助触控</td><td>截当前屏幕，角色在系统弹窗里跟你聊，写回聊天记录</td><td>现实桥 → 屏幕速聊</td></tr>
+  <tr><td><strong>E 发件箱</strong></td><td>小手机 → iPhone</td><td>自定义 APP</td><td>APP 把信号丢给 iPhone 上的「检查回传」快捷指令执行</td><td>无界面，SDK 调用</td></tr>
+  </tbody></table></div>
+  <div class="flow"><span><b>iPhone 自动化</b><br>POST 一个 JSON</span><span>→</span><span><b>你的 Supabase Storage</b><br>bridge-inbox / bridge-state</span><span>→</span><span><b>小手机</b><br>每 20 秒拉取，按规则执行</span><span>→</span><span><b>角色</b><br>回话 / 记忆 / 日历 / 反向触发快捷指令</span></div>
+  <div class="first-task"><div class="task-heading"><span class="number">01</span><div><span class="small-label">约 2 分钟 · 只需要云端备份已接通</span><h2>完成你的第一条联动</h2></div></div>
+  <ol class="steps"><li>打开<strong>现实桥 → 自动联动 → 新建</strong>，向导第 2 步点一下上传地址和密钥各复制一份。</li><li>iPhone「快捷指令」→ 新建普通快捷指令，加一个「获取 URL 内容」：URL 粘贴地址并把 <code>[文件名]</code> 换成「当前日期」变量（格式 <code>yyyyMMddHHmmss</code>），方法 POST，头部 <code>Authorization</code> 粘贴密钥，请求体 JSON 加两个文本字段 <code>type</code> = <code>test</code>、<code>payload</code> = <code>你好呀</code>。</li><li>运行它，回到向导第 3 步点「刚发了测试数据？点此刷新」。</li><li>看到「收到 1 条新消息」，信号名按钮里出现 <code>test</code>，就通了。</li></ol>
+  <p class="result"><strong>成功的样子：</strong>现实桥主页「今日收到」变成 1，历史里有一条 type 为 test 的记录，备注「仅存档（无匹配规则）」。</p></div>
+  <p class="note">本页只是说明，不会读取你的配置。所有默认值来自源码，你设备上的设置可能不同。</p>
+</section>
 
-<h2 id="overview">0. 一图看懂五条通道</h2>
-<table>
-<tr><th>通道</th><th>方向</th><th>触发者</th><th>典型用途</th><th>在 APP 里的位置</th></tr>
-<tr><td><b>A 收件箱 + 自动联动</b></td><td>iPhone → 小手机</td><td>iOS 自动化（到家、收短信、充电、闹钟…）</td><td>现实里发生了事 → 角色知道 / 回话 / 记住 / 记日历</td><td>现实桥 → 自动联动</td></tr>
-<tr><td><b>B 状态快照 + 主动查询</b></td><td>iPhone → 小手机</td><td>定时自动化覆盖上传</td><td>角色聊天时随时查你的电量、步数、睡眠、位置…</td><td>现实桥 → 主动查询</td></tr>
-<tr><td><b>C 快捷动作</b></td><td>小手机 → iPhone</td><td>角色（或规则）</td><td>角色替你写备忘录、开灯、放歌、拍照回传、截屏看你在干嘛</td><td>现实桥 → 快捷动作</td></tr>
-<tr><td><b>D 屏幕速聊</b></td><td>双向</td><td>你双击辅助触控</td><td>截当前屏幕，角色在系统弹窗里跟你聊，写回聊天记录</td><td>现实桥 → 屏幕速聊</td></tr>
-<tr><td><b>E 发件箱</b></td><td>小手机 → iPhone</td><td>自定义 APP</td><td>APP 把信号丢给 iPhone 上的「检查回传」快捷指令去执行</td><td>无 UI，SDK 调用</td></tr>
-</table>
-<p>A、B 本质都是「快捷指令往你自己的 Supabase Storage 里 POST 一个 JSON 文件」；C、D 则是个人云的 Edge Function 在中间转。所以准备工作只有两件：配好云端备份的 Supabase、部署个人云。</p>
+<section id="prep" class="chapter">
+  <div class="eyebrow">02 / 准备工作</div><h2>五件事，做一次就够</h2>
+  <ol class="steps">
+  <li><strong>云端备份接通。</strong>设置 → 数据管理 → 云端备份，填 Supabase 项目地址与密钥。现实桥复用这份配置读写 <code>ai-phone-backup</code> 桶，主页顶部显示「云端存储 已连接」即可。</li>
+  <li><strong>个人云部署。</strong>设置 → 云服务部署，勾上离线推送与快捷动作。快捷动作的通知、屏幕速聊、离线唤醒都走这套函数。屏幕速聊要求 Schema v3 以上，旧的会提示重新部署。</li>
+  <li><strong>开离线推送。</strong>聊天信息页打开「离线推送与定时消息」，在用户资料面板点一次「测试推送」，杀掉后台等 6 秒能收到通知才算通。</li>
+  <li><strong>启用「现实桥」内置能力。</strong>工具箱 → 内置能力 → 现实桥，默认关闭。不开的话角色调任何快捷动作或数据项都会报「能力未启用」。</li>
+  <li><strong>小手机装到主屏幕。</strong>Safari 分享 → 添加到主屏幕。通知点击、后台补拉都依赖 PWA 模式。</li>
+  </ol>
+  <h3>地址与令牌一览</h3>
+  <p>全部在现实桥 APP 里点击即复制，这里列形状方便对照。</p>
+  <div class="table-wrap"><table><caption>所有会用到的地址 · 真实值在 APP 里复制</caption><thead><tr><th>用途</th><th>形状</th><th>在哪复制</th></tr></thead><tbody>
+  <tr><td>收件箱上传</td><td><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-inbox/[文件名].json</code></td><td>自动联动向导第 2 步</td></tr>
+  <tr><td>状态快照上传</td><td><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-state/&lt;key&gt;.json</code></td><td>主动查询向导第 3 步，或数据卡片「复制上传地址」</td></tr>
+  <tr><td>Storage 密钥</td><td><code>Bearer &lt;云端备份的 key&gt;</code>，头部名 <code>Authorization</code></td><td>同上，屏幕上打码，点击复制完整值</td></tr>
+  <tr><td>唤醒地址</td><td><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/ai-phone-push?action=bridge-wake&amp;token=&lt;bridgeToken&gt;</code></td><td>自动联动向导第 2 步 → 离线增强</td></tr>
+  <tr><td>屏幕速聊接口</td><td><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/screen-chat</code></td><td>屏幕速聊向导第 3 步</td></tr>
+  <tr><td>bridgeToken</td><td>36 位十六进制。一个账号一个，唤醒与屏幕速聊共用</td><td>屏幕速聊向导第 3 步「问题 2」</td></tr>
+  </tbody></table></div>
+  <div class="notice"><strong>令牌不要外传。</strong><p>唤醒地址和屏幕速聊令牌都是账号级凭证。把快捷指令分享给别人之前，先把这两个字段清空。</p></div>
+</section>
 
-<h2 id="prep">1. 准备工作</h2>
-<ol class="steps">
-<li><b>云端备份接通。</b>设置 → 数据管理 → 云端备份，填 Supabase 项目地址与密钥。现实桥复用这份配置读写 <code>ai-phone-backup</code> 桶。现实桥主页顶部会显示「云端存储 已连接」。</li>
-<li><b>个人云部署。</b>设置 → 云服务部署，勾上离线推送与快捷动作。快捷动作的「通知点击运行」、屏幕速聊、离线唤醒都走这套函数。屏幕速聊要求 Schema v3 以上，旧的会提示重新部署。</li>
-<li><b>开启离线推送。</b>聊天信息页里打开「离线推送与定时消息」，并在用户资料面板点一次「测试推送」确认这台 iPhone 能收到通知。快捷动作的通知就是靠它送到手机的。</li>
-<li><b>启用「现实桥」内置能力。</b>工具箱 → 内置能力 → 现实桥，默认是关的。不开的话角色调用任何快捷动作 / 数据项都会报「能力未启用」。</li>
-<li><b>把小手机装到主屏幕</b>（Safari 分享 → 添加到主屏幕）。通知点击、后台补拉都依赖 PWA 模式。</li>
-</ol>
-
-<h3 id="prep-addr">地址与令牌一览</h3>
-<p>全部在现实桥 APP 里可点击复制，这里列出形状方便对照。</p>
-<table>
-<tr><th>用途</th><th>形状</th><th>在哪复制</th></tr>
-<tr><td>收件箱上传地址</td><td><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-inbox/[文件名].json</code></td><td>自动联动向导第 2 步</td></tr>
-<tr><td>状态快照上传地址</td><td><code>https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-state/&lt;key&gt;.json</code></td><td>主动查询向导第 3 步，或数据卡片上的「复制上传地址」</td></tr>
-<tr><td>Storage 密钥（头部 Authorization）</td><td><code>Bearer &lt;云端备份的 key&gt;</code></td><td>同上，屏幕上打码显示，点击复制完整值</td></tr>
-<tr><td>唤醒地址</td><td><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/ai-phone-push?action=bridge-wake&amp;token=&lt;bridgeToken&gt;</code></td><td>自动联动向导第 2 步 →「离线增强」</td></tr>
-<tr><td>屏幕速聊接口</td><td><code>https://&lt;你的项目&gt;.supabase.co/functions/v1/screen-chat</code></td><td>屏幕速聊向导第 3 步</td></tr>
-<tr><td>bridgeToken（令牌）</td><td>36 位十六进制，一个账号只有一个，唤醒与屏幕速聊共用</td><td>屏幕速聊向导第 3 步「问题 2」</td></tr>
-</table>
-<div class="box warn"><b>令牌不要外传</b>唤醒地址和屏幕速聊令牌都是账号级凭证。共享快捷指令给别人前先把这两个字段清空。</div>
-
-<h2 id="inbox">2. 收件箱 · 自动联动（iPhone → 小手机）</h2>
-<p>现实里发生一件事，iOS 自动化把它写成一条 <code>{type, payload}</code> 丢进收件箱；小手机每 20 秒拉一次（可在桥接设置里调 15～300 秒，前台切回时立刻补拉），按「自动联动」里的规则处理。</p>
-
-<h3 id="inbox-shortcut">上传快捷指令模板</h3>
-<p>所有 A 通道的自动化都长一个样，只有触发条件和 payload 内容不同。搭一次之后可以「复制」自动化改条件。</p>
-<ol class="steps">
-<li>快捷指令 App → 自动化 → 新建，选触发条件（见下面的例子）。</li>
-<li>添加「获取 URL 内容」。URL 粘贴收件箱上传地址，把 <code>[文件名]</code> 删掉，原位置插入「当前日期」变量，点变量把日期格式改成「自定义」填 <code>yyyyMMddHHmmss</code>，后面保留 <code>.json</code>。文件名同时决定顺序和唯一性。</li>
-<li>展开选项：方法 <b>POST</b>，请求体 <b>JSON</b>。头部加一项 <code>Authorization</code> = 复制来的 <code>Bearer …</code>。</li>
-<li>请求体加两个「文本」字段：<code>type</code> 填信号名（英文小写好记，例如 <code>duanxin</code>），<code>payload</code> 填正文，可插入变量。payload 里可以写 <code>{{user}}</code> / <code>{{char}}</code>，送达时替换成名字。</li>
-<li>关闭「运行前询问」，保存，手动运行一次。回到现实桥 → 自动联动向导第 3 步点「刚发了测试数据？点此刷新」，看到「收到 1 条新消息」就通了。</li>
-</ol>
-<pre><code>POST https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-inbox/20260908213000.json
+<section id="inbox" class="chapter">
+  <div class="eyebrow">03 / 收件箱与自动联动</div><h2>现实里发生一件事，角色就知道</h2>
+  <p>iOS 自动化把事件写成一条 <code>{type, payload}</code> 丢进收件箱；小手机每 20 秒拉一次（桥接设置里可调 15～300 秒，切回前台立刻补拉），按「自动联动」里的规则处理。</p>
+  <h3>上传快捷指令模板</h3>
+  <p>所有 A 通道的自动化都长一个样，只有触发条件和 payload 不同。搭好一条后用「复制」改条件即可。</p>
+  <ol class="steps">
+  <li>快捷指令 → 自动化 → 新建，选触发条件。</li>
+  <li>添加「获取 URL 内容」。URL 粘贴上传地址，删掉 <code>[文件名]</code>，原位插入「当前日期」变量，点变量把日期格式改「自定义」填 <code>yyyyMMddHHmmss</code>，后面保留 <code>.json</code>。文件名同时决定顺序和唯一性。</li>
+  <li>展开选项：方法 <strong>POST</strong>，请求体 <strong>JSON</strong>。头部加 <code>Authorization</code> = 复制来的 <code>Bearer …</code>。</li>
+  <li>请求体加两个「文本」字段：<code>type</code> 填信号名（英文小写好记），<code>payload</code> 填正文，可插入变量。payload 里可写 <code>{{user}}</code> / <code>{{char}}</code>，送达时替换成名字。</li>
+  <li>关闭「运行前询问」，保存，手动运行一次，回向导第 3 步点「刚发了测试数据？点此刷新」。</li>
+  </ol>
+  <div class="copy-block code-block"><div class="copy-head"><span>快捷指令实际发出的请求 · 对照用</span><button class="copy" type="button">复制内容</button></div><pre>POST https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-inbox/20260908213000.json
 Authorization: Bearer &lt;key&gt;
 Content-Type: application/json
 
-{"type":"duanxin","payload":"招商银行：您尾号1234于09月08日消费58.00元"}</code></pre>
-<p>字段规则：<code>type</code> 必填，最长 60 字；<code>payload</code> 字符串或任意 JSON（自动转字符串），最长 8000 字；可选 <code>createdAt</code>。</p>
+{"type":"duanxin","payload":"招商银行：您尾号1234于09月08日消费58.00元"}</pre></div>
+  <p class="note">type 必填，最长 60 字。payload 字符串或任意 JSON（自动转字符串），最长 8000 字。可选 createdAt。</p>
+  <h3>规则的四块</h3>
+  <p>一条规则 = 哪个信号 + 多久触发一次 + 先怎么加工 + 做哪些事。向导五步对应这四块加命名。</p>
+  <div class="table-wrap"><table><caption>规则选项 · 全部来自向导</caption><thead><tr><th>块</th><th>选项</th><th>说明</th></tr></thead><tbody>
+  <tr><td>匹配</td><td>信号名 / <code>*</code></td><td>严格等于 type，不支持前缀或正则。<code>*</code> 表示全部。向导把最近收到的 8 个信号名做成按钮。</td></tr>
+  <tr><td>冷却</td><td>0 / 5 / 15 / 30 / 60 / 180 / 720 / 1440 分钟</td><td>按规则计时，不看内容。间隔内再收到只进「历史」不执行。适合「低电量」这类会反复触发的信号。</td></tr>
+  <tr><td>加工 · 原样</td><td></td><td>payload 直接用。</td></tr>
+  <tr><td>加工 · 套句式</td><td><code>{payload}</code> <code>{type}</code></td><td>例：<code>我今天走了 {payload} 步</code>。</td></tr>
+  <tr><td>加工 · AI 加工</td><td>提示词</td><td>用辅助模型（记忆总结那个）改写后再执行动作。例：「把这条银行短信浓缩成『花了多少钱、在哪花的』一句话」。</td></tr>
+  <tr><td>写入聊天</td><td>角色 / 显示身份 / 记忆身份 / 让 TA 回话</td><td>显示身份：我说的 / TA 说的 / 旁白小字。记忆身份可另选（显示为旁白但 TA 记成「发生的事件」）。勾「让 TA 回话」角色会接着回复。</td></tr>
+  <tr><td>写入记忆</td><td>长期 / 核心</td><td>直接进记忆库，重要度 0.6。</td></tr>
+  <tr><td>写入时间线</td><td></td><td>角色时间线上多一条「现实桥」事件。</td></tr>
+  <tr><td>发送卡片</td><td></td><td>聊天里出现一张标题为信号名的卡片，正文是加工结果。</td></tr>
+  <tr><td>写入日历</td><td>过去 / 未来 + 时长</td><td>以触发时刻为锚。「过去 45 分钟」适合跑步结束，「未来 60 分钟」适合到达公司。</td></tr>
+  <tr><td>执行快捷动作</td><td>选一个推送类快捷动作</td><td>收到信号后反过来让 iPhone 干一件事，见第 12 章。</td></tr>
+  </tbody></table></div>
+  <div class="notice"><strong>身份怎么选。</strong><p>想让角色「感知到」而不是「看到你说了什么」：显示为旁白小字 + TA 记成发生的事件 + 让 TA 回话。想模拟你亲口告诉 TA：显示为我说的。</p></div>
+</section>
 
-<h3 id="inbox-rules">规则：匹配 / 冷却 / 加工 / 动作</h3>
-<p>一条规则 = 「哪个信号」+「多久触发一次」+「先怎么加工」+「做哪些事」。向导五步对应这四块加命名。</p>
-<table>
-<tr><th>块</th><th>选项</th><th>说明</th></tr>
-<tr><td>匹配</td><td>信号名 / <code>*</code></td><td>严格等于 type，不支持前缀或正则。<code>*</code> 表示全部。向导会把最近收到的 8 个信号名做成按钮。</td></tr>
-<tr><td>冷却</td><td>0 / 5 / 15 / 30 / 60 / 180 / 720 / 1440 分钟</td><td>按规则计时，不看内容。间隔内再收到只进「历史」不执行。适合「低电量」这类会反复触发的信号。</td></tr>
-<tr><td>加工：原样</td><td></td><td>payload 直接用。</td></tr>
-<tr><td>加工：套句式</td><td><code>{payload}</code> <code>{type}</code></td><td>例：<code>我今天走了 {payload} 步</code>。</td></tr>
-<tr><td>加工：AI 加工</td><td>提示词</td><td>用辅助模型（记忆总结那个）改写后再执行动作。例：「把这条银行短信浓缩成『花了多少钱、在哪花的』一句话」。</td></tr>
-<tr><td>动作：写入聊天</td><td>角色 / 显示身份 / 记忆身份 / 让 TA 回话</td><td>显示身份三选一（我说的 / TA 说的 / 旁白小字）；记忆身份可另选（例如显示为旁白但 TA 记成「发生的事件」）。勾「让 TA 回话」角色会接着回复。</td></tr>
-<tr><td>动作：写入记忆</td><td>长期 / 核心</td><td>直接进角色记忆库，重要度 0.6。</td></tr>
-<tr><td>动作：写入时间线</td><td></td><td>角色时间线上多一条「现实桥」事件。</td></tr>
-<tr><td>动作：发送卡片</td><td></td><td>聊天里出现一张标题为信号名的卡片，正文是加工结果。</td></tr>
-<tr><td>动作：写入日历</td><td>过去 / 未来 + 时长</td><td>以触发时刻为锚，「过去 45 分钟」适合跑步结束，「未来 60 分钟」适合到达公司。</td></tr>
-<tr><td>动作：执行快捷动作</td><td>选一个推送类快捷动作</td><td>收到信号 → 反过来让 iPhone 干一件事，见 <a href="#combo">组合玩法</a>。</td></tr>
-</table>
-<div class="box tip"><b>写入聊天的身份怎么选</b>想让角色「感知到」而不是「看到你说了什么」，用「显示为旁白小字」+「TA 记成：发生的事件」+ 让 TA 回话。想模拟你亲口告诉 TA，用「显示为我说的」。</div>
+<section id="inbox-recipes" class="chapter">
+  <div class="eyebrow">04 / 联动场景</div><h2>10 个照抄就能用的联动</h2>
+  <p>每条都写明自动化条件、信号名、规则怎么勾。点开看细节。</p>
 
-<h3 id="inbox-examples">场景例子</h3>
+  <details class="lesson" open><summary><span>01 · 银行短信 → 一句话账单 + 记忆</span><span class="badge">AI 加工</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>「信息」→ 收到含有「消费」的信息</span><span>type</span><span><code>duanxin</code></span><span>payload</span><span>插入「短信正文」变量</span><span>规则</span><span>AI 加工「把这条银行短信浓缩成『花了多少钱、在哪花的』一句话，不要其他内容」；勾发送卡片 + 写入记忆（长期）</span></div>
+  <p class="result"><strong>效果：</strong>聊天里出现卡片「duanxin：星巴克花了 38 元」，角色以后记得你的消费习惯。想让 TA 当场吐槽，再勾写入聊天（旁白小字 + 让 TA 回话）。</p></div></details>
 
-<div class="ex"><h4>① 银行短信 → 一句话账单 + 记忆</h4>
-<div class="meta"><span class="pill">触发：信息</span><span class="pill">AI 加工</span><span class="pill">卡片 + 记忆</span></div>
-<p>自动化条件：「信息」→ 收到含有「消费」的信息。payload 插入「短信正文」变量，type 填 <code>duanxin</code>。</p>
-<p>规则：匹配 <code>duanxin</code>，AI 加工提示词「把这条银行短信浓缩成『花了多少钱、在哪花的』一句话，不要其他内容」；动作勾「发送卡片」+「写入记忆（长期）」。</p>
-<p>效果：聊天里出现卡片「duanxin：星巴克花了 38 元」，角色以后能记得你的消费习惯。想让 TA 当场吐槽，再勾「写入聊天：旁白小字 + 让 TA 回话」。</p></div>
+  <details class="lesson"><summary><span>02 · 到家 / 离家 → 迎接或叮嘱</span><span class="badge">位置触发</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>两条：「到达」家、「离开」家</span><span>type</span><span><code>daojia</code> / <code>lijia</code></span><span>规则</span><span>套句式「{{user}} 刚到家了」/「{{user}} 出门了」；写入聊天，旁白小字，TA 记成发生的事件，让 TA 回话；冷却 30 分钟</span></div>
+  <p class="note">冷却防止在门口徘徊反复触发。配合第 05 章离线增强，小手机关着也能收到 TA 的迎接通知。</p></div></details>
 
-<div class="ex"><h4>② 到家 / 离家 → 角色迎接或叮嘱</h4>
-<div class="meta"><span class="pill">触发：到达 / 离开</span><span class="pill">套句式</span><span class="pill">写入聊天 + 回话</span></div>
-<p>两条自动化：「到达」家（type <code>daojia</code>，payload 随便写「到家了」）、「离开」家（type <code>lijia</code>）。</p>
-<p>两条规则：<code>daojia</code> 套句式「{{user}} 刚到家了」，写入聊天，显示为旁白小字，TA 记成发生的事件，让 TA 回话。<code>lijia</code> 同理，句式「{{user}} 出门了」。</p>
-<p>加上冷却 30 分钟，避免在门口徘徊反复触发。配合 <a href="#inbox-wake">离线增强</a>，小手机关着也能收到 TA 的迎接通知。</p></div>
+  <details class="lesson"><summary><span>03 · 晚上插电 → 晚安</span><span class="badge">冷却 720</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>「充电器 → 已连接」，动作前加「如果 当前日期 晚于 22:00」再上传</span><span>type</span><span><code>shuiqian</code></span><span>规则</span><span>套句式「{{user}} 把手机插上充电了，准备睡了」；写入聊天让 TA 回话；冷却 720 分钟</span></div>
+  <p class="note">一晚只说一次晚安。</p></div></details>
 
-<div class="ex"><h4>③ 晚上插电 → 晚安</h4>
-<div class="meta"><span class="pill">触发：充电器 + 时间段</span><span class="pill">冷却 720</span></div>
-<p>自动化条件「充电器 → 已连接」，在动作前加「如果 当前日期 晚于 22:00」再上传，type <code>shuiqian</code>。规则：套句式「{{user}} 把手机插上充电了，准备睡了」，写入聊天让 TA 回话，冷却 720 分钟（一晚只说一次晚安）。</p></div>
+  <details class="lesson"><summary><span>04 · 早上关闹钟 → 早安 + 昨晚睡眠</span><span class="badge">健康数据</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>「闹钟 → 已停止」，先「查找健康样本」（睡眠，昨天）</span><span>type</span><span><code>qichuang</code></span><span>payload</span><span>「闹钟关了，昨晚睡了 <em>时长变量</em>」</span><span>规则</span><span>写入聊天让 TA 回话；冷却 180 分钟</span></div></div></details>
 
-<div class="ex"><h4>④ 早上关闹钟 → 早安 + 昨晚睡眠</h4>
-<div class="meta"><span class="pill">触发：闹钟停止</span><span class="pill">健康数据</span></div>
-<p>自动化条件「闹钟 → 已停止」。动作里先「查找健康样本」（睡眠，昨天），把时长塞进 payload：「闹钟关了，昨晚睡了 <i>时长</i>」，type <code>qichuang</code>。规则写入聊天让 TA 回话，冷却 180 分钟。</p></div>
+  <details class="lesson"><summary><span>05 · 跑完步 → 时间线 + 日历「过去 45 分钟」</span><span class="badge">日历 past</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>「体能训练 → 结束」（Apple Watch 或健身 App）</span><span>type</span><span><code>paobu</code></span><span>payload</span><span>「跑步 5.2 公里，用时 32 分钟」（用变量）</span><span>规则</span><span>写入时间线 + 写入日历（过去，45 分钟）+ 写入聊天让 TA 回话</span></div>
+  <p class="note">日历上会出现一段「跑步 5.2 公里…」，起止时间自动算。</p></div></details>
 
-<div class="ex"><h4>⑤ 跑完步 → 时间线 + 日历「过去 45 分钟」</h4>
-<div class="meta"><span class="pill">触发：体能训练结束</span><span class="pill">日历 past</span></div>
-<p>Apple Watch 或健身 App 结束训练时触发（自动化条件「体能训练 → 结束」）。payload：「跑步 5.2 公里，用时 32 分钟」（用变量）。规则动作：写入时间线 + 写入日历（过去，45 分钟）+ 写入聊天让 TA 回话。日历上就会出现一段「跑步 5.2 公里…」。</p></div>
+  <details class="lesson"><summary><span>06 · 低电量 → TA 催你充电</span><span class="badge">冷却 180</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>「电池电量 → 低于 20%」</span><span>type</span><span><code>dianliang</code></span><span>payload</span><span>插入「获取电池电量」变量</span><span>规则</span><span>套句式「{{user}} 的手机只剩 {payload}% 电了」；写入聊天让 TA 回话；冷却 180 分钟</span></div>
+  <p class="note">没有冷却的话 19%、18%……每次掉电都会触发。</p></div></details>
 
-<div class="ex"><h4>⑥ 低电量 → TA 催你充电（不刷屏）</h4>
-<div class="meta"><span class="pill">触发：电池电量 &lt; 20%</span><span class="pill">冷却 180</span></div>
-<p>自动化条件「电池电量 → 低于 20%」，type <code>dianliang</code>，payload 插入「获取电池电量」变量。规则套句式「{{user}} 的手机只剩 {payload}% 电了」，写入聊天让 TA 回话，冷却 180 分钟。没有冷却的话 19%、18%…每次掉电都会触发一次。</p></div>
+  <details class="lesson"><summary><span>07 · 打开某个 App → TA 知道你在干嘛</span><span class="badge">冷却 60</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>「打开 App → 王者荣耀」（可多选几个游戏）</span><span>type</span><span><code>wanyouxi</code></span><span>payload</span><span>「打开了游戏」</span><span>规则</span><span>写入聊天（旁白小字，TA 记成发生的事件），让 TA 回话；冷却 60 分钟</span></div>
+  <p class="note">再建一条「打开 App → 小红书 / 抖音」type <code>shuashipin</code> 一样用。</p></div></details>
 
-<div class="ex"><h4>⑦ 打开某个 App → TA 知道你在干嘛</h4>
-<div class="meta"><span class="pill">触发：打开 App</span><span class="pill">冷却 60</span></div>
-<p>自动化「打开 App → 王者荣耀」（可以多选几个游戏），type <code>wanyouxi</code>，payload「打开了游戏」。规则写入聊天（旁白小字，TA 记成发生的事件），让 TA 回话，冷却 60 分钟。再来一条「打开 App → 小红书 / 抖音」type <code>shuashipin</code> 也一样。</p></div>
+  <details class="lesson"><summary><span>08 · 到公司 → 日历「未来 60 分钟」</span><span class="badge">日历 future</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>「到达」公司地址</span><span>type</span><span><code>shangban</code></span><span>规则</span><span>写入日历（未来，60 分钟）+ 写入时间线，不勾回话</span></div>
+  <p class="note">角色查日历时会知道你这段时间在忙。</p></div></details>
 
-<div class="ex"><h4>⑧ 到公司 → 日历「未来 60 分钟」+ 不打扰</h4>
-<div class="meta"><span class="pill">触发：到达</span><span class="pill">日历 future</span></div>
-<p>到达公司地址触发，type <code>shangban</code>，payload「到公司了」。规则：写入日历（未来，60 分钟）+ 写入时间线，不勾回话。角色查日历时会知道你这段时间在忙。</p></div>
+  <details class="lesson"><summary><span>09 · 语音日记 → 核心记忆</span><span class="badge">轻点背面</span></summary><div class="detail-body">
+  <div class="config-grid"><span>快捷指令</span><span>普通快捷指令（不是自动化）：「听写文本」→ 上传；在设置 → 辅助功能 → 触控 → 轻点背面绑定</span><span>type</span><span><code>riji</code></span><span>payload</span><span>听写结果</span><span>规则</span><span>AI 加工「整理成第一人称的一段日记，保留情绪和事实」；写入记忆（核心）+ 写入聊天（显示为我说的，让 TA 回话）</span></div></div></details>
 
-<div class="ex"><h4>⑨ 语音日记 → 核心记忆</h4>
-<div class="meta"><span class="pill">触发：手动 / 轻点背面</span><span class="pill">听写文本</span><span class="pill">记忆 core</span></div>
-<p>新建一条普通快捷指令（不是自动化）：「听写文本」→ 上传，type <code>riji</code>，payload 插入听写结果。在设置 → 辅助功能 → 触控 → 轻点背面绑定它。规则：AI 加工「整理成第一人称的一段日记，保留情绪和事实」，写入记忆（核心）+ 写入聊天（显示为我说的，让 TA 回话）。</p></div>
+  <details class="lesson"><summary><span>10 · NFC 贴纸 → 任意信号</span><span class="badge">NFC</span></summary><div class="detail-body">
+  <div class="config-grid"><span>自动化</span><span>「NFC → 扫描标签」</span><span>type</span><span>床头 <code>shuijiao</code>、书桌 <code>xuexi</code>、冰箱 <code>chifan</code></span><span>规则</span><span>分开建三条，各自配冷却和回话；或一条 <code>*</code> 套句式「{{user}} 现在：{type}」</span></div></div></details>
+</section>
 
-<div class="ex"><h4>⑩ NFC 贴纸 → 任意信号</h4>
-<div class="meta"><span class="pill">触发：NFC</span><span class="pill">*</span></div>
-<p>自动化条件「NFC → 扫描标签」。床头贴一张 type <code>shuijiao</code>，书桌贴一张 type <code>xuexi</code>，冰箱贴一张 type <code>chifan</code>。一条规则 matchType <code>*</code> 套句式「{{user}} 现在：{type}」也能用，但分开建规则可以各自配冷却和回话。</p></div>
+<section id="wake" class="chapter">
+  <div class="eyebrow">05 / 离线增强</div><h2>小手机关着，规则照样跑</h2>
+  <p>小手机彻底关掉时收件箱没人拉。在上传的「获取 URL 内容」之后再加一个「获取 URL 内容」，GET 唤醒地址，不需要头部和请求体。</p>
+  <div class="copy-block code-block"><div class="copy-head"><span>唤醒请求 · token 换成自己的</span><button class="copy" type="button">复制内容</button></div><pre>GET https://&lt;你的项目&gt;.supabase.co/functions/v1/ai-phone-push?action=bridge-wake&amp;token=&lt;bridgeToken&gt;</pre></div>
+  <p>服务端 45 秒后扫一次收件箱。小手机在线就会先把文件拉走，服务端扫到空文件夹什么也不做；不在线则由服务端执行规则，带「让 TA 回话」的回复通过系统通知推给你。</p>
+  <div class="notice"><strong>服务端只做三类动作。</strong><p>写入聊天、通知、快捷动作。记忆、日历、时间线会在你下次打开小手机时补做。前提是聊天设置已开离线推送。</p></div>
+</section>
 
-<h3 id="inbox-wake">离线增强（唤醒）</h3>
-<p>小手机彻底关掉时，收件箱没人拉，规则不会跑。在上传的「获取 URL 内容」之后再加一个「获取 URL 内容」，GET 唤醒地址，不需要头部和请求体：</p>
-<pre><code>GET https://&lt;你的项目&gt;.supabase.co/functions/v1/ai-phone-push?action=bridge-wake&amp;token=&lt;bridgeToken&gt;</code></pre>
-<p>服务端 45 秒后扫一次收件箱：小手机在线就会先把文件拉走，服务端扫到空文件夹什么也不做；小手机不在线则由服务端执行规则，带「让 TA 回话」的回复通过系统通知推给你。前提是聊天设置开了离线推送。服务端只执行写入聊天、通知、快捷动作三类动作，记忆 / 日历 / 时间线等会在你下次打开小手机时补做。</p>
-
-<h2 id="state">3. 状态快照 · 主动查询（角色随时看）</h2>
-<p>和收件箱不同，这里是「覆盖写」：iPhone 定期把最新状态写到固定文件 <code>bridge-state/&lt;key&gt;.json</code>，角色聊天时调工具读，回复自动带「更新于 N 分钟前」。</p>
-<ol class="steps">
-<li>现实桥 → 主动查询 → 新建数据项。名称是角色看到的工具名（≤20 字，如「查看健康数据」），标识是文件名（小写字母数字下划线，如 <code>health</code>），说明写给角色看（≤200 字）。最多 30 项。</li>
-<li>快捷指令 → 自动化，选触发时机（见例子）。先用系统动作取数据，再「获取 URL 内容」POST 到上传地址，请求体 JSON，内容随意，例如 <code>{"电量":"85%","充电中":"是"}</code>。</li>
-<li>头部两项都要：<code>Authorization</code> = Bearer 密钥，<code>x-upsert</code> = <code>true</code>。少了 x-upsert 第二次上传会 409。</li>
-<li>手动运行一次，回向导第 4 步点「已上传过数据？读取看看」，能看到原文和更新时间就成了。</li>
-</ol>
-<pre><code>POST https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-state/health.json
+<section id="state" class="chapter">
+  <div class="eyebrow">06 / 状态快照与主动查询</div><h2>角色随时看你的手机状态</h2>
+  <p>和收件箱不同，这里是覆盖写：iPhone 定期把最新状态写到固定文件 <code>bridge-state/&lt;key&gt;.json</code>，角色聊天时调工具读，回复自动带「更新于 N 分钟前」。</p>
+  <ol class="steps">
+  <li>现实桥 → 主动查询 → 新建数据项。名称是角色看到的工具名（≤20 字，如「查看健康数据」），标识是文件名（小写字母数字下划线，如 <code>health</code>），说明写给角色看（≤200 字）。最多 30 项。</li>
+  <li>快捷指令 → 自动化，选触发时机。先用系统动作取数据，再「获取 URL 内容」POST 到上传地址，请求体 JSON，内容随意。</li>
+  <li>头部两项都要：<code>Authorization</code> = Bearer 密钥，<code>x-upsert</code> = <code>true</code>。少了 x-upsert 第二次上传会 409。</li>
+  <li>手动运行一次，回向导第 4 步点「已上传过数据？读取看看」，能看到原文和更新时间即可。</li>
+  </ol>
+  <div class="copy-block code-block"><div class="copy-head"><span>快照上传请求 · 注意 x-upsert</span><button class="copy" type="button">复制内容</button></div><pre>POST https://&lt;你的项目&gt;.supabase.co/storage/v1/object/ai-phone-backup/bridge-state/health.json
 Authorization: Bearer &lt;key&gt;
 x-upsert: true
 Content-Type: application/json
 
-{"步数":8342,"静息心率":58,"昨晚睡眠":"7小时12分"}</code></pre>
-<p>角色侧会多出两个工具：每个数据项一个（<code>[执行动作:查看健康数据({})]</code>），加一个「查看全部手机数据」把所有快照一次读完。快照没上传过时角色会得到「手机尚未上传过 health.json」这样的明确提示，不会瞎编。</p>
+{"步数":8342,"静息心率":58,"昨晚睡眠":"7小时12分"}</pre></div>
+  <p>角色侧会多出两个工具：每个数据项一个，加一个「查看全部手机数据」一次读完。没上传过时角色会得到「手机尚未上传过 health.json」的明确提示，不会瞎编。</p>
+  <div class="copy-block code-block"><div class="copy-head"><span>角色调用格式 · 给角色参考</span><button class="copy" type="button">复制格式</button></div><pre>[执行动作:查看健康数据({})]
+[执行动作:查看全部手机数据({})]</pre></div>
+</section>
 
-<h3 id="state-examples">场景例子</h3>
-<div class="ex"><h4>① 电量 <span class="pill">key: battery</span></h4><div class="meta">触发：充电器连接 / 断开 + 每小时</div><p>动作「获取电池电量」+「获取设备详细信息 → 是否在充电」。JSON：<code>{"电量":"电池电量%","充电":"是/否"}</code>。角色说「你手机快没电了吧」时终于有依据。</p></div>
-<div class="ex"><h4>② 健康 <span class="pill">key: health</span></h4><div class="meta">触发：每天 8:00 和 22:00</div><p>「查找健康样本」三次：步数（今天，求和）、静息心率（最新）、睡眠（昨天，时长）。让角色早上问你睡得怎么样、晚上看你走了多少步。</p></div>
-<div class="ex"><h4>③ 位置与天气 <span class="pill">key: where</span></h4><div class="meta">触发：每 2 小时 / 到达常去地点</div><p>「获取当前位置」→「获取当前天气」。JSON：<code>{"城市":"…","区域":"…","天气":"…","气温":"…°C"}</code>。不想给精确地址就只传城市和天气。</p></div>
-<div class="ex"><h4>④ 接下来的日程 <span class="pill">key: agenda</span></h4><div class="meta">触发：每天 7:00 + 日历事件变动无法触发，用每 3 小时</div><p>「查找日历事件」（今天，排序按开始时间）→「获取文本」拼成列表。角色能主动问「下午三点的会开完了吗」。</p></div>
-<div class="ex"><h4>⑤ 正在听的歌 <span class="pill">key: nowplaying</span></h4><div class="meta">触发：打开 音乐 / 网易云 App，或每 30 分钟</div><p>「获取当前播放的歌曲」→ 取名称和艺人。角色能接「你最近一直在循环这首啊」。</p></div>
-<div class="ex"><h4>⑥ 待办 <span class="pill">key: todo</span></h4><div class="meta">触发：每天 9:00 / 21:00</div><p>「查找提醒事项」（未完成，按到期时间）。让角色晚上盘点你今天还有什么没做。</p></div>
-<div class="ex"><h4>⑦ 手机使用状态 <span class="pill">key: phone</span></h4><div class="meta">触发：勿扰 / 睡眠专注模式开启或关闭</div><p>自动化条件「专注模式」。JSON <code>{"专注模式":"睡眠","从":"23:10"}</code>。角色看到「睡眠」就知道别在这时候闹你。</p></div>
+<section id="state-recipes" class="chapter">
+  <div class="eyebrow">07 / 快照场景</div><h2>7 个值得常年挂着的快照</h2>
+  <div class="table-wrap"><table><caption>每行一个数据项 · 触发时机是建议值</caption><thead><tr><th>key</th><th>触发</th><th>取数据</th><th>角色能干嘛</th></tr></thead><tbody>
+  <tr><td><code>battery</code></td><td>充电器连接 / 断开 + 每小时</td><td>「获取电池电量」+「获取设备详细信息 → 是否在充电」<br><code>{"电量":"85%","充电":"是"}</code></td><td>说「你手机快没电了吧」时终于有依据</td></tr>
+  <tr><td><code>health</code></td><td>每天 8:00 和 22:00</td><td>「查找健康样本」×3：步数（今天，求和）、静息心率（最新）、睡眠（昨天，时长）</td><td>早上问你睡得怎么样、晚上看你走了多少步</td></tr>
+  <tr><td><code>where</code></td><td>每 2 小时 / 到达常去地点</td><td>「获取当前位置」→「获取当前天气」<br><code>{"城市":"…","天气":"…","气温":"…°C"}</code></td><td>不想给精确地址就只传城市和天气</td></tr>
+  <tr><td><code>agenda</code></td><td>每天 7:00 + 每 3 小时</td><td>「查找日历事件」（今天，按开始时间）→ 拼成列表</td><td>主动问「下午三点的会开完了吗」</td></tr>
+  <tr><td><code>nowplaying</code></td><td>打开音乐 App 或每 30 分钟</td><td>「获取当前播放的歌曲」→ 名称 + 艺人</td><td>接「你最近一直在循环这首啊」</td></tr>
+  <tr><td><code>todo</code></td><td>每天 9:00 / 21:00</td><td>「查找提醒事项」（未完成，按到期时间）</td><td>晚上盘点你今天还有什么没做</td></tr>
+  <tr><td><code>phone</code></td><td>专注模式开启 / 关闭</td><td><code>{"专注模式":"睡眠","从":"23:10"}</code></td><td>看到「睡眠」就知道别在这时候闹你</td></tr>
+  </tbody></table></div>
+</section>
 
-<h2 id="actions">4. 快捷动作 · 角色操作 iPhone（小手机 → iPhone）</h2>
-<p>你在小手机里登记一个「动作名 + 对应的快捷指令名 + 参数 + 结果模式」，角色就能像用工具一样调用它。两种送达方式：</p>
-<table>
-<tr><th></th><th>通知点击运行（默认，推荐）</th><th>邮件自动运行（实验）</th></tr>
-<tr><td>原理</td><td>个人云推一条系统通知，你点通知 → 跳 <code>shortcuts://</code> 运行</td><td>站点发一封带标记的邮件，iOS「收到邮件时」自动化立即运行</td></tr>
-<tr><td>需要你操作</td><td>点一下通知</td><td>不用，真·自动</td></tr>
-<tr><td>额外条件</td><td>离线推送已开</td><td>站点配 Resend，验证收件邮箱，iCloud / Exchange 邮箱才能秒收</td></tr>
-<tr><td>适合</td><td>需要你在场确认的动作（发消息、拍照、截屏）</td><td>无需确认的（开灯、写备忘录、切歌）</td></tr>
-</table>
-<p><b>结果模式</b>决定角色等不等回音：「不需要结果」发出即算完成；「等文本」快捷指令要把结果 POST 回来；「等图片」可以回传图片（≤8MB，可附 OCR 文字）。等待时长 30 秒～15 分钟，默认 2 分钟。</p>
-<p><b>参数</b>是给角色填的坑，简易模式一行一个（名字 / 文本或数字 / 描述）。角色调用时会自动组成 JSON 送给快捷指令。</p>
+<section id="actions" class="chapter">
+  <div class="eyebrow">08 / 快捷动作</div><h2>角色替你操作 iPhone</h2>
+  <p>登记一个「动作名 + 快捷指令名 + 参数 + 结果模式」，角色就能像用工具一样调用。两种送达方式：</p>
+  <div class="table-wrap"><table><caption>通知点击 vs 邮件自动</caption><thead><tr><th></th><th>通知点击运行（默认）</th><th>邮件自动运行（实验）</th></tr></thead><tbody>
+  <tr><td>原理</td><td>个人云推一条系统通知，你点通知 → 跳 <code>shortcuts://</code> 运行</td><td>站点发一封带标记的邮件，iOS「收到邮件时」自动化立即运行</td></tr>
+  <tr><td>需要你操作</td><td>点一下通知</td><td>不用</td></tr>
+  <tr><td>额外条件</td><td>离线推送已开</td><td>站点配 Resend，验证收件邮箱，iCloud / Exchange 邮箱才能秒收</td></tr>
+  <tr><td>适合</td><td>要你在场确认的动作（发消息、拍照、截屏）</td><td>无需确认的（开灯、写备忘录、切歌）</td></tr>
+  </tbody></table></div>
+  <div class="config-grid"><span>结果模式</span><span>「不需要结果」发出即算完成；「等文本」快捷指令要把结果 POST 回来；「等图片」可回传图片（≤8MB，可附 OCR 文字）。等待 30 秒～15 分钟，默认 2 分钟。</span><span>参数</span><span>给角色填的坑，简易模式一行一个（名字 / 文本或数字 / 描述）。角色调用时自动组成 JSON 送给快捷指令。</span></div>
+  <h3>快捷指令怎么搭</h3>
+  <p>向导第 5 步会按你的选择动态生成清单，通用骨架如下。</p>
+  <ol class="steps">
+  <li>快捷指令标签页新建（不是自动化），名字和登记的「快捷指令名」一字不差。</li>
+  <li><strong>接参数</strong>：「获取文本」（输入：快捷指令输入）→「获取字典值」，字典选「文本」，键名填参数名。每个参数一次。</li>
+  <li>干正事（写备忘录、拍照、调 HomeKit…）。</li>
+  <li><strong>回传文本</strong>：「获取字典值」取 <code>resultUrl</code> →「获取 URL 内容」POST 到它，请求体 JSON，文本字段 <code>text</code> 填结果。</li>
+  <li><strong>回传图片</strong>：同上取 <code>resultUrl</code>。只传图：请求体选「文件」放图片。图 + 文字：先「Base64 编码」，请求体 JSON 放 <code>image</code> 和 <code>ocr</code>。</li>
+  <li>自己手动跑一次，再到向导第 6 步「发送测试通知」走整条链路。参数会自动填「来自小手机的测试」。</li>
+  </ol>
+  <div class="copy-block code-block"><div class="copy-head"><span>快捷指令收到的输入 · 你登记的参数 + 两个固定字段</span><button class="copy" type="button">复制内容</button></div><pre>{"memo":"记得买牛奶","commandId":"cmd_…","resultUrl":"https://&lt;你的项目&gt;.supabase.co/functions/v1/push-shortcut-result?command=cmd_…&amp;ticket=…"}</pre></div>
+  <div class="copy-block code-block"><div class="copy-head"><span>回传文本 · POST 到 resultUrl</span><button class="copy" type="button">复制内容</button></div><pre>{"text":"在杭州西湖区，晴 26°C"}</pre></div>
+  <div class="copy-block code-block"><div class="copy-head"><span>回传图片 + 文字 · POST 到 resultUrl</span><button class="copy" type="button">复制内容</button></div><pre>{"image":"&lt;Base64&gt;","ocr":"屏幕上提取到的文字"}</pre></div>
+  <div class="notice"><strong>邮件模式多一步。</strong><p>自动化 → 新建「电子邮件」自动化：发件人填页面显示的地址，主题「包含」页面显示的 <code>[FloatBridge:shortcut_…]</code> 标记，选「立即运行」，动作 = 运行这条快捷指令并把邮件正文作为输入。邮件正文就是上面那段 JSON。</p></div>
+  <h3>角色怎么触发</h3>
+  <div class="config-grid"><span>在线</span><span>角色在工具循环里发 <code>[执行动作:动作名({...})]</code>，聊天里出现「已发送「X」到 iPhone」，结果回来后接着回。</span><span>离线</span><span>个人云生成回复时，角色在正文里写 <code>【快捷动作：动作名({"参数":"值"})】</code>，标记会被剥掉再执行，一次回复最多执行一个。结果回来 30 秒内你没打开小手机，云端会替角色再生成一句接结果的话推给你。</span><span>限额</span><span>同时最多 10 条待执行，1 分钟最多 6 次，超过报 429。</span></div>
+</section>
 
-<h3 id="actions-build">快捷指令怎么搭</h3>
-<p>向导第 5 步会按你的选择动态生成清单，通用骨架如下：</p>
-<ol class="steps">
-<li>快捷指令标签页新建（不是自动化），名字和登记的「快捷指令名」一字不差。</li>
-<li><b>接参数</b>：「获取文本」（输入：快捷指令输入）→「获取字典值」，字典选「文本」，键名填参数名。每个参数一次。快捷指令拿到的输入是这样的 JSON：
-<pre><code>{"memo":"记得买牛奶","commandId":"cmd_…","resultUrl":"https://&lt;你的项目&gt;.supabase.co/functions/v1/push-shortcut-result?command=cmd_…&amp;ticket=…"}</code></pre></li>
-<li>干正事（写备忘录、拍照、调 HomeKit…）。</li>
-<li><b>回传文本</b>（结果模式为「等文本」时）：「获取字典值」取 <code>resultUrl</code> →「获取 URL 内容」POST 到它，请求体 JSON，文本字段 <code>text</code> 填结果。</li>
-<li><b>回传图片</b>（「等图片」时）：同上取 <code>resultUrl</code>，只传图就请求体选「文件」直接放图片；图 + 文字则先「Base64 编码」，请求体 JSON 放 <code>image</code>（编码结果）和 <code>ocr</code>（文字）。</li>
-<li>自己手动跑一次，再到向导第 6 步「发送测试通知」走整条链路。参数会自动填「来自小手机的测试」。</li>
-</ol>
-<div class="box tip"><b>邮件模式多一步</b>自动化 → 新建「电子邮件」自动化：发件人填页面显示的地址，主题「包含」页面显示的 <code>[FloatBridge:shortcut_…]</code> 标记，选「立即运行」，动作 = 运行这条快捷指令并把邮件正文作为输入。邮件正文就是上面那段 JSON。</div>
+<section id="action-recipes" class="chapter">
+  <div class="eyebrow">09 / 动作场景</div><h2>10 个让角色真的动手的动作</h2>
 
-<h3 id="actions-examples">场景例子</h3>
+  <details class="lesson" open><summary><span>01 · 写备忘录</span><span class="badge">memo · 不需要结果</span></summary><div class="detail-body">
+  <div class="config-grid"><span>登记</span><span>动作名「写进备忘录」，说明「把一段文字保存到 {{user}} 手机的备忘录里」，参数 <code>memo</code>（文本）</span><span>快捷指令</span><span>取 memo →「创建备忘录」</span><span>送达</span><span>邮件自动最顺手，通知点击也行</span></div>
+  <div class="copy-block code-block"><div class="copy-head"><span>角色会发出的调用</span><button class="copy" type="button">复制内容</button></div><pre>[执行动作:写进备忘录({"memo":"明天带身份证"})]</pre></div></div></details>
 
-<div class="ex"><h4>① 写备忘录</h4>
-<div class="meta"><span class="pill">参数 memo</span><span class="pill">不需要结果</span><span class="pill">邮件自动更爽</span></div>
-<p>登记：动作名「写进备忘录」，说明「把一段文字保存到 {{user}} 手机的备忘录里」，参数 <code>memo</code>（文本，要写入的内容）。快捷指令：取 memo →「创建备忘录」。</p>
-<p>聊天里说「帮我记一下明天要带身份证」，角色就会 <code>[执行动作:写进备忘录({"memo":"明天带身份证"})]</code>。</p></div>
+  <details class="lesson"><summary><span>02 · 给某人发短信</span><span class="badge">content · 要你确认</span></summary><div class="detail-body">
+  <div class="config-grid"><span>参数</span><span><code>content</code>（文本）</span><span>快捷指令</span><span>「发送信息」，收件人写死，正文取 content</span><span>送达</span><span>通知点击，点之前还能看一眼</span></div>
+  <p class="note">角色说「我替你跟妈妈说一声晚点回家」就真的发了。</p></div></details>
 
-<div class="ex"><h4>② 给某人发短信 / 微信</h4>
-<div class="meta"><span class="pill">参数 content</span><span class="pill">不需要结果</span><span class="pill">通知点击（要你确认）</span></div>
-<p>参数 <code>content</code>。快捷指令「发送信息」收件人写死成你妈或谁，正文取 content。用通知点击模式，点之前还能看一眼。角色说「我替你跟妈妈说一声晚点回家」就真的发了。</p></div>
+  <details class="lesson"><summary><span>03 · 放一首歌 / 切歌单</span><span class="badge">song · 不需要结果</span></summary><div class="detail-body">
+  <div class="config-grid"><span>参数</span><span><code>song</code>（文本，歌名或歌手）</span><span>快捷指令</span><span>「搜索音乐」→「播放音乐」；也可做无参数版「播放睡前歌单」</span></div></div></details>
 
-<div class="ex"><h4>③ 放一首歌 / 切歌单</h4>
-<div class="meta"><span class="pill">参数 song</span><span class="pill">不需要结果</span></div>
-<p>快捷指令「搜索音乐」（Apple Music）→「播放音乐」。参数 <code>song</code>（文本，歌名或歌手）。也可以做无参数版「播放我的睡前歌单」。角色晚上说「放首歌陪你睡」就会真放。</p></div>
+  <details class="lesson"><summary><span>04 · 前置拍一张回传</span><span class="badge">无参数 · 等图片</span></summary><div class="detail-body">
+  <div class="config-grid"><span>快捷指令</span><span>「拍照」（前置，不预览）→ 取 resultUrl → POST，请求体选「文件」放照片</span><span>等待</span><span>120 秒</span></div>
+  <p class="note">开着图像识别的话角色能看图评价你今天的状态；关着则只知道「已回传图片」。</p></div></details>
 
-<div class="ex"><h4>④ 前置拍一张回传</h4>
-<div class="meta"><span class="pill">无参数</span><span class="pill">等图片</span><span class="pill">等待 120 秒</span></div>
-<p>快捷指令「拍照」（前置，不预览）→ 取 resultUrl → POST，请求体选「文件」放照片。开着图像识别的话角色能看图评价你今天的状态；关着则只知道「已回传图片」。</p></div>
+  <details class="lesson"><summary><span>05 · 截屏看你在干嘛</span><span class="badge">waitSeconds · 等图片 + OCR</span></summary><div class="detail-body">
+  <div class="config-grid"><span>参数</span><span>预置的 <code>waitSeconds</code>（数字，0～10）</span><span>快捷指令</span><span>「等待」waitSeconds 秒 →「截屏」→「从图像中提取文本」→「Base64 编码」→ POST JSON <code>{image, ocr}</code></span></div>
+  <p class="note">等待那几秒是给你切回想被看的界面。</p></div></details>
 
-<div class="ex"><h4>⑤ 截屏看你在干嘛</h4>
-<div class="meta"><span class="pill">参数 waitSeconds</span><span class="pill">等图片 + OCR</span></div>
-<p>参数用预置的 <code>waitSeconds</code>（数字，0～10）。快捷指令：「等待」waitSeconds 秒（给你时间切回想被看的界面）→「截屏」→「从图像中提取文本」→「Base64 编码」→ POST JSON <code>{image, ocr}</code>。角色说「让我看看你在偷偷看什么」时可用。</p></div>
+  <details class="lesson"><summary><span>06 · 现在在哪 / 天气怎样</span><span class="badge">无参数 · 等文本</span></summary><div class="detail-body">
+  <div class="config-grid"><span>快捷指令</span><span>「获取当前位置」→「获取当前天气」→「获取文本」拼一句 → POST <code>{"text":"…"}</code></span></div>
+  <p class="note">和第 06 章快照的区别：这是角色想知道时实时问，快照是定时的。两者都配也行。</p></div></details>
 
-<div class="ex"><h4>⑥ 现在在哪 / 天气怎样（文本回传）</h4>
-<div class="meta"><span class="pill">无参数</span><span class="pill">等文本</span></div>
-<p>「获取当前位置」→「获取当前天气」→「获取文本」拼一句 → POST JSON <code>{"text":"在杭州西湖区，晴 26°C"}</code>。和 B 通道的区别：这是角色想知道时实时问，B 是定时快照。两者都配也行。</p></div>
+  <details class="lesson"><summary><span>07 · 设闹钟</span><span class="badge">time · 不需要结果</span></summary><div class="detail-body">
+  <div class="config-grid"><span>参数</span><span><code>time</code>（文本，例如 07:30）</span><span>快捷指令</span><span>「创建闹钟」取 time</span></div></div></details>
 
-<div class="ex"><h4>⑦ 设闹钟</h4>
-<div class="meta"><span class="pill">参数 time</span><span class="pill">不需要结果</span></div>
-<p>参数 <code>time</code>（文本，例如 07:30）。快捷指令「创建闹钟」取 time。角色说「明天早点起，我给你定 7 点半」就落地了。</p></div>
+  <details class="lesson"><summary><span>08 · 开灯 / 家居场景</span><span class="badge">scene · 邮件自动</span></summary><div class="detail-body">
+  <div class="config-grid"><span>参数</span><span><code>scene</code>（文本，描述里写清可选值：回家 / 睡觉 / 观影）</span><span>快捷指令</span><span>「如果 scene = 回家 → 运行家庭场景 A；否则如果 = 睡觉 → 场景 B…」</span></div></div></details>
 
-<div class="ex"><h4>⑧ 开灯 / 家居场景</h4>
-<div class="meta"><span class="pill">参数 scene</span><span class="pill">不需要结果</span><span class="pill">邮件自动</span></div>
-<p>参数 <code>scene</code>（文本，描述里写清可选值：回家 / 睡觉 / 观影）。快捷指令「如果 scene = 回家 → 运行家庭场景 A；否则如果 = 睡觉 → 场景 B…」。邮件模式下角色一句「我帮你把灯关了」就是真关。</p></div>
+  <details class="lesson"><summary><span>09 · 开启勿扰 / 睡眠专注</span><span class="badge">无参数</span></summary><div class="detail-body">
+  <div class="config-grid"><span>快捷指令</span><span>「设定专注模式 → 睡眠 → 开启 直到 关闭」</span><span>联动</span><span>第 04 章场景 03 的晚安规则勾「执行快捷动作」，插电 → 晚安 → 自动勿扰</span></div></div></details>
 
-<div class="ex"><h4>⑨ 开启勿扰 / 睡眠专注</h4>
-<div class="meta"><span class="pill">无参数</span><span class="pill">不需要结果</span></div>
-<p>快捷指令「设定专注模式 → 睡眠 → 开启 直到 关闭」。搭配 A 通道的晚安规则（例 ③）勾「执行快捷动作」，形成插电 → 晚安 → 自动勿扰。</p></div>
+  <details class="lesson"><summary><span>10 · 读剪贴板回传</span><span class="badge">无参数 · 等文本</span></summary><div class="detail-body">
+  <div class="config-grid"><span>快捷指令</span><span>「获取剪贴板」→ POST text</span></div>
+  <p class="note">「把我刚复制的地址发给你看看」。通知点击模式下快捷指令在前台运行，剪贴板权限会弹一次询问。</p></div></details>
+</section>
 
-<div class="ex"><h4>⑩ 读剪贴板 / 读最新一条短信回传</h4>
-<div class="meta"><span class="pill">无参数</span><span class="pill">等文本</span></div>
-<p>「获取剪贴板」→ POST text。用来「把我刚复制的地址发给你看看」。注意通知点击模式下快捷指令在前台运行，剪贴板权限会弹一次询问。</p></div>
+<section id="screen" class="chapter">
+  <div class="eyebrow">10 / 屏幕速聊</div><h2>双击悬浮球，截屏跟 TA 聊</h2>
+  <p>双击辅助触控 → 截屏 → 角色在系统弹窗里回复 → 可以继续在弹窗里打字聊 15 轮。每一轮都按顺序写回该角色原本的聊天窗口。截图只在 Edge Function 内存里过一遍，不落库。</p>
+  <ol class="steps">
+  <li>现实桥 → 屏幕速聊，开启并选角色。没部署或 Schema 旧会提示先去「云服务部署」。</li>
+  <li>点「一键导入屏幕速聊」，导入 iCloud 上的通用快捷指令。导入问题 1 填接口地址，问题 2 填令牌，都在页面上点击复制。</li>
+  <li>设置 → 辅助功能 → 触控 → 辅助触控 → 轻点两下 → 选「屏幕速聊」。</li>
+  <li>首次运行允许截屏、网络、显示提醒。每轮 3～8 秒。</li>
+  </ol>
+  <div class="copy-block code-block"><div class="copy-head"><span>手工搭时的请求体 · 首轮四个字段，续聊只发 token + text</span><button class="copy" type="button">复制内容</button></div><pre>{"token":"&lt;bridgeToken&gt;","image":"&lt;Base64 JPEG，先缩到宽 960&gt;","imageType":"image/jpeg","ocr":"&lt;从图像中提取文本&gt;"}
 
-<h3 id="actions-offline">离线时角色怎么触发</h3>
-<p>小手机在线：角色在工具循环里发 <code>[执行动作:动作名({...})]</code>，聊天里出现「已发送「X」到 iPhone」，收到结果后接着回。</p>
-<p>小手机被杀、由个人云生成回复时：角色在正文里写 <code>【快捷动作：动作名({"参数":"值"})】</code>，标记会从正文剥掉再执行，一次回复最多执行一个。结果回来后 30 秒内如果你没打开小手机，云端会替角色再生成一句接结果的话推给你。</p>
-<p>限额：同时最多 10 条待执行命令，1 分钟最多 6 次；超过会报 429。</p>
+{"token":"&lt;bridgeToken&gt;","text":"那帮我看看第二个菜"}</pre></div>
+  <p class="note">响应取 <code>reply</code> 用「显示提醒」弹出，失败时读 <code>error</code>。角色的「状态栏 / 内心」标记在弹窗里会被剥掉，只留说的话。</p>
+  <div class="notice"><strong>怎么玩。</strong><p>看到一条好笑的评论、一道题、一张菜单、一段聊天记录，双击悬浮球，角色当场评论、解题、推荐、帮你想回复。</p></div>
+</section>
 
-<h2 id="screen">5. 屏幕速聊</h2>
-<p>双击辅助触控悬浮球 → 截屏 → 角色在系统弹窗里回复 → 可以继续在弹窗里打字聊 15 轮。每一轮都按顺序写回该角色原本的聊天窗口，不另开会话。截图只在 Edge Function 内存里过一遍，不落库。</p>
-<ol class="steps">
-<li>现实桥 → 屏幕速聊，开启并选角色。没部署或 Schema 旧会提示先去「云服务部署」。</li>
-<li>点「一键导入屏幕速聊」，导入 iCloud 上的通用快捷指令。导入问题 1 填接口地址，问题 2 填令牌，两个都在页面上点击复制。</li>
-<li>设置 → 辅助功能 → 触控 → 辅助触控 → 轻点两下 → 选「屏幕速聊」。</li>
-<li>首次运行允许截屏、网络、显示提醒。每轮 3～8 秒。</li>
-</ol>
-<p>手工搭的话请求体是四个文本字段：<code>token</code>、<code>image</code>（Base64 JPEG，先缩到宽 960）、<code>imageType</code> = image/jpeg、<code>ocr</code>（从图像中提取文本，图像识别关着时的兜底）。续聊只发 <code>token</code> + <code>text</code>。响应取 <code>reply</code> 显示提醒，失败时读 <code>error</code>。</p>
-<div class="box tip"><b>怎么玩</b>看到一条好笑的评论、一道题、一张菜单、一段聊天记录，双击悬浮球，角色当场评论 / 解题 / 推荐 / 帮你想回复。角色的正常「状态栏 / 内心」标记在弹窗里会被剥掉，只留说的话。</div>
+<section id="outbox" class="chapter">
+  <div class="eyebrow">11 / 发件箱与自定义 APP</div><h2>写 APP 才用得到</h2>
+  <div class="table-wrap"><table><caption>SDK 四个入口</caption><thead><tr><th>能力</th><th>调用</th><th>权限</th></tr></thead><tbody>
+  <tr><td>收：监听现实信号</td><td><code>AiPhone.on("bridge.data", handler)</code></td><td>manifest <code>extensions.events</code> 声明 <code>bridge.data</code>，可 background</td></tr>
+  <tr><td>发：回传给 iPhone 执行</td><td><code>AiPhone.bridge.send({ type, payload })</code></td><td><code>bridge.send</code></td></tr>
+  <tr><td>查：读手机状态快照</td><td><code>AiPhone.bridge.readState({ key })</code></td><td><code>bridge.read</code></td></tr>
+  <tr><td>唤：触发快捷动作并等结果</td><td><code>AiPhone.tools.invoke("快捷动作名", 参数)</code></td><td><code>chat.tools</code></td></tr>
+  </tbody></table></div>
+  <p><code>bridge.send</code> 把信号追加到 <code>bridge-outbox/queue.json</code>，最多保留 50 条，payload ≤ 2000 字。iPhone 侧做一条「检查回传」快捷指令，GET 这个文件、按 type 分支执行，再 DELETE 或覆盖它。小手机不会替你清空。桥接设置里的「允许自定义 APP 订阅」是 bridge.data 的总开关。</p>
+</section>
 
-<h2 id="outbox">6. 发件箱 · 自定义 APP</h2>
-<p>面向写自定义 APP 的场景，不需要写 APP 可以跳过。</p>
-<ul>
-<li>APP 调 <code>AiPhone.bridge.send({ type, payload })</code>（权限 <code>bridge.send</code>）把一条信号追加到 <code>bridge-outbox/queue.json</code>，最多保留 50 条，payload ≤ 2000 字。</li>
-<li>iPhone 侧做一条「检查回传」快捷指令，GET 这个文件、按 type 分支执行，然后 DELETE 或覆盖它。小手机不会替你清空。</li>
-<li>APP 监听 <code>AiPhone.on("bridge.data", handler)</code>（manifest 里声明 events，可 background）能收到 A 通道每一条数据；桥接设置里的「允许自定义 APP 订阅」是总开关。</li>
-<li><code>AiPhone.bridge.readState({ key })</code>（权限 <code>bridge.read</code>）读 B 通道快照；<code>AiPhone.tools.invoke("动作名", 参数)</code>（权限 <code>chat.tools</code>）触发 C 通道并等结果。</li>
-</ul>
+<section id="combo" class="chapter">
+  <div class="eyebrow">12 / 组合玩法</div><h2>把几条通道串起来</h2>
+  <article class="recipe"><div class="recipe-top"><span class="recipe-index">01</span><span class="badge">A + C</span></div><h3>到家 → 开灯 + 迎接</h3><p>收件箱 <code>daojia</code> 规则勾「执行快捷动作 → 回家场景」+「写入聊天让 TA 回话」。人到门口灯亮、TA 说欢迎回来。邮件模式最丝滑。</p></article>
+  <article class="recipe"><div class="recipe-top"><span class="recipe-index">02</span><span class="badge">A + C</span></div><h3>插电 → 晚安 → 勿扰 → 早安</h3><p>联动场景 03 + 动作场景 09 + 联动场景 04 串起来。晚上插电触发晚安并开睡眠专注，早上关闹钟触发早安并带昨晚睡眠。</p></article>
+  <article class="recipe"><div class="recipe-top"><span class="recipe-index">03</span><span class="badge">B + C</span></div><h3>「你在干嘛」三连</h3><p>快照 nowplaying + where 给角色背景；角色想深挖再调「截屏看看」。TA 会先看快照再决定要不要打扰你。</p></article>
+  <article class="recipe"><div class="recipe-top"><span class="recipe-index">04</span><span class="badge">A + A</span></div><h3>低电量 → 催充电 → 插电 → TA 放心</h3><p>联动场景 06 冷却 180 分钟负责催；再加「充电器连接」自动化 type <code>chongdian</code>，套句式「{{user}} 插上电了」让 TA 回话，冷却 60 分钟。</p></article>
+  <article class="recipe"><div class="recipe-top"><span class="recipe-index">05</span><span class="badge">C + B</span></div><h3>角色替你安排明天</h3><p>晚上聊天时角色调「写进备忘录」+「设闹钟」；第二天早上 agenda 快照让 TA 检查你有没有照做。</p></article>
+</section>
 
-<h2 id="combo">7. 组合玩法</h2>
-<div class="ex"><h4>到家 → 开灯 + 迎接</h4><p>A 通道 <code>daojia</code> 规则勾「执行快捷动作 → 回家场景」（C 通道，邮件模式最丝滑）+「写入聊天让 TA 回话」。人到门口灯亮、TA 说欢迎回来。</p></div>
-<div class="ex"><h4>插电 → 晚安 → 勿扰 → 早安</h4><p>例 ③ + 例 ⑨ + 例 ④ 串起来。晚上插电触发晚安并开启睡眠专注，早上关闹钟触发早安并带昨晚睡眠。</p></div>
-<div class="ex"><h4>「你在干嘛」三连</h4><p>B 通道 nowplaying + where 快照给角色背景；角色想深挖再调 C 通道「截屏看看」。角色会先看快照再决定要不要打扰你。</p></div>
-<div class="ex"><h4>低电量 → 催充电 → 你插电 → TA 放心</h4><p>例 ⑥ 冷却 180 分钟负责催，充电器连接自动化 type <code>chongdian</code> 规则套句式「{{user}} 插上电了」让 TA 回话，冷却 60 分钟。</p></div>
-<div class="ex"><h4>角色替你安排明天</h4><p>晚上聊天时角色调「写进备忘录」+「设闹钟」两个动作；第二天早上 B 通道 agenda 快照让 TA 检查你有没有照做。</p></div>
+<section id="fix" class="chapter">
+  <div class="eyebrow">13 / 排错与上限</div><h2>现象对照表</h2>
+  <div class="table-wrap"><table><caption>先看历史流水（右下角时钟图标），再对照这张表</caption><thead><tr><th>现象</th><th>原因 / 处理</th></tr></thead><tbody>
+  <tr><td>快捷指令上传 401 / 403</td><td>头部名必须是 <code>Authorization</code>，值以 <code>Bearer </code> 开头。若云端备份用的是新式 <code>sb_secret_…</code> 密钥，改成头部 <code>apikey</code> = 密钥原文（不加 Bearer），Bearer 写法对这种密钥会被网关拒绝。</td></tr>
+  <tr><td>快照第二次上传 409</td><td>缺 <code>x-upsert: true</code> 头。</td></tr>
+  <tr><td>收件箱数据丢失或顺序乱</td><td>文件名没用「当前日期 yyyyMMddHHmmss」变量，重名会覆盖。</td></tr>
+  <tr><td>历史里备注「还在触发间隔内」</td><td>冷却在起作用，按规则计时。改小或清 0。</td></tr>
+  <tr><td>历史里是「仅存档（无匹配规则）」</td><td>信号名不一致。匹配是严格相等，大小写、空格都算。</td></tr>
+  <tr><td>角色说「能力未启用」</td><td>工具箱 → 内置能力 → 打开「现实桥」。</td></tr>
+  <tr><td>角色说「现实桥未连接」</td><td>设置 → 数据管理 → 云端备份没配。</td></tr>
+  <tr><td>测试通知「已发送」但没弹</td><td>推送订阅是旧的。聊天设置关掉再打开离线推送，或去「云服务部署」重新部署。前台不弹通知，锁屏或退后台再试。</td></tr>
+  <tr><td>点通知没跳快捷指令</td><td>快捷指令名和登记的不一致，或小手机没装到主屏幕。</td></tr>
+  <tr><td>快捷动作 429</td><td>待执行超过 10 条或 1 分钟超过 6 次。历史 →「最近快捷指令」看堆积的命令，等过期或删掉。</td></tr>
+  <tr><td>屏幕速聊 409「尚未同步」</td><td>在小手机里启用并选角色后等几秒；413 时把截图缩到宽 960 转 JPEG。</td></tr>
+  <tr><td>屏幕速聊 403 令牌无效</td><td>令牌是个人云那份，不是站点的。重新在屏幕速聊向导第 3 步复制。</td></tr>
+  <tr><td>唤醒后没有服务端回复</td><td>聊天设置没开离线推送；或小手机其实在线，服务端主动让位，是正常的。</td></tr>
+  </tbody></table></div>
+  <h3>硬上限速查</h3>
+  <div class="config-grid"><span>type / payload</span><span>60 字 / 8000 字</span><span>规则、数据项、快捷动作</span><span>各 30 条</span><span>轮询间隔</span><span>10～300 秒，默认 20</span><span>快捷动作等待</span><span>30～900 秒，默认 120</span><span>回传图片</span><span>8MB，JPEG / PNG / WebP</span><span>屏幕速聊</span><span>请求 3MB，图 2MB，续聊文本 2000 字</span><span>发件箱</span><span>50 条，每条 2000 字</span><span>历史流水</span><span>200 条，页面显示 20 条</span></div>
+  <div class="finish"><div><span class="small-label">下一步</span><h3>先做第 01 章的那条测试联动</h3><p>通了之后从第 04 章挑一个最想要的场景，改个触发条件就是你的了。</p></div><a class="button" href="#start">回到第一条联动 →</a></div>
+</section>
 
-<h2 id="debug">8. 排错与坑</h2>
-<table>
-<tr><th>现象</th><th>原因 / 处理</th></tr>
-<tr><td>快捷指令上传返回 401 / 403</td><td>头部名必须是 <code>Authorization</code>，值以 <code>Bearer </code> 开头。若云端备份用的是新式 <code>sb_secret_…</code> 密钥，把头部改成 <code>apikey</code> = 密钥原文（不加 Bearer），教程里的 Authorization 写法对这种密钥会被网关拒绝。</td></tr>
-<tr><td>状态快照第二次上传 409</td><td>缺 <code>x-upsert: true</code> 头。</td></tr>
-<tr><td>收件箱数据丢失或顺序乱</td><td>文件名没用「当前日期 yyyyMMddHHmmss」变量，重名会覆盖。</td></tr>
-<tr><td>规则没触发但「历史」里有记录，备注「还在触发间隔内」</td><td>冷却在起作用，按规则计时。改小或清 0。</td></tr>
-<tr><td>历史里是「仅存档（无匹配规则）」</td><td>信号名不一致。匹配是严格相等，大小写、空格都算。</td></tr>
-<tr><td>角色说「能力未启用」</td><td>工具箱 → 内置能力 → 打开「现实桥」。</td></tr>
-<tr><td>角色说「现实桥未连接」</td><td>设置 → 数据管理 → 云端备份没配。</td></tr>
-<tr><td>测试通知「已发送」但手机没弹</td><td>推送订阅是旧的。到聊天设置关掉再打开离线推送，或去「云服务部署」重新部署一次。前台时不弹通知，锁屏或退后台再试。</td></tr>
-<tr><td>点通知没有跳转快捷指令</td><td>快捷指令名和登记的不一致，或小手机没装到主屏幕。</td></tr>
-<tr><td>快捷动作 429</td><td>待执行超过 10 条或 1 分钟超过 6 次。到历史 →「最近快捷指令」看堆积的命令，等过期或删掉。</td></tr>
-<tr><td>屏幕速聊 409「尚未同步」</td><td>在小手机里启用并选角色后等几秒让快照同步上去；或 413 时把截图缩到宽 960 转 JPEG。</td></tr>
-<tr><td>屏幕速聊 403 令牌无效</td><td>令牌是个人云那份，不是站点的。重新在屏幕速聊向导第 3 步复制。</td></tr>
-<tr><td>唤醒后没有服务端回复</td><td>聊天设置没开离线推送，或小手机其实在线（在线时服务端主动让位，是正常的）。</td></tr>
-</table>
-<p>看流水：现实桥右下角时钟图标 → 「最近收到」（每条数据命中了哪些规则、执行了什么、报了什么错）和「最近快捷指令」（推送 / 邮件、状态）。清空只删本地列表。</p>
-
-<h3>硬上限速查</h3>
-<table>
-<tr><th>项目</th><th>上限</th></tr>
-<tr><td>type / payload</td><td>60 字 / 8000 字</td></tr>
-<tr><td>规则、数据项、快捷动作</td><td>各 30 条</td></tr>
-<tr><td>轮询间隔</td><td>10～300 秒，默认 20</td></tr>
-<tr><td>快捷动作等待</td><td>30～900 秒，默认 120</td></tr>
-<tr><td>回传图片</td><td>8MB，JPEG / PNG / WebP</td></tr>
-<tr><td>屏幕速聊请求</td><td>3MB，图 2MB，续聊文本 2000 字</td></tr>
-<tr><td>发件箱</td><td>50 条，每条 2000 字</td></tr>
-<tr><td>历史流水</td><td>200 条，页面显示 20 条</td></tr>
-</table>
-
-</main>
-</div>
+<footer><span>Float · 现实桥 iOS 桥接使用手册</span><a href="#start">回到顶部 ↑</a></footer>
+</main></div><div id="announcement" role="status" aria-live="polite" class="sr-only"></div>
 <script>
-document.querySelectorAll('pre').forEach(function(pre){
-  var b=document.createElement('button');b.className='copy';b.textContent='复制';
-  b.onclick=function(){navigator.clipboard.writeText(pre.querySelector('code').innerText).then(function(){b.textContent='已复制';setTimeout(function(){b.textContent='复制'},1200)})};
-  pre.appendChild(b);
+const status = document.querySelector('#announcement');
+document.querySelectorAll('.copy').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const pre = button.closest('.copy-block').querySelector('pre');
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard-unavailable');
+      await navigator.clipboard.writeText(pre.textContent.trim());
+      button.textContent = '已复制 ✓';
+      status.textContent = '已复制，可以粘贴到小手机。';
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      button.textContent = '请长按正文复制';
+      status.textContent = '自动复制不可用，已选中内容，请手动复制。';
+    }
+  });
 });
-document.querySelectorAll('nav a').forEach(function(a){a.onclick=function(){document.querySelector('nav').classList.remove('open')}});
+const links = [...document.querySelectorAll('.sidebar nav a')];
+const sections = [...document.querySelectorAll('main > section')];
+function updateCurrentSection() {
+  const current = sections.filter((section) => section.getBoundingClientRect().top <= 150).at(-1) || sections[0];
+  for (const link of links) {
+    if (link.hash === `#${current.id}`) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  }
+}
+let framePending = false;
+window.addEventListener('scroll', () => {
+  if (framePending) return;
+  framePending = true;
+  requestAnimationFrame(() => { updateCurrentSection(); framePending = false; });
+}, { passive: true });
+updateCurrentSection();
+function revealAnchor() {
+  if (!location.hash) return;
+  let id;
+  try { id = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+  const target = document.getElementById(id);
+  if (!target) return;
+  let item = target;
+  while (item) {
+    if (item.tagName === 'DETAILS') item.open = true;
+    item = item.parentElement;
+  }
+  requestAnimationFrame(() => target.scrollIntoView({ block:'start' }));
+}
+window.addEventListener('hashchange', revealAnchor);
+revealAnchor();
+
 </script>
 </body>
 </html>
