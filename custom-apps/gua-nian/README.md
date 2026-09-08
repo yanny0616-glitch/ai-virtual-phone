@@ -18,7 +18,7 @@
 
 同步状态只在「后台」的「云端同步」折叠区集中展示全部角色，其他页不显示。后台新增「云端发送记录」，手动查询当前角色最近 50 条现存挂念成文，包含已收取、当前计划未关联的旧消息；可看正文、任务编号、生成和收取时间，不修改聊天、计划或领取状态。
 
-需发布宿主、更新个人云 ai-phone-push 与 push-generate、导入 0.9.28 ZIP。沿用 schema 12，不新增 SQL。本地验证与现存测试限制见 `docs/gua-nian-orphan-wake-repair-2026-09-08.md`。尚未个人云/手机实测。
+需发布宿主、更新个人云 ai-phone-push 与 push-generate、导入 0.9.28 ZIP。沿用 schema 12，不新增 SQL。本地验证与现存测试限制见 `docs/archive/gua-nian/gua-nian-orphan-wake-repair-2026-09-08.md`。尚未个人云/手机实测。
 
 ## 0.9.27：旧历史核对、跨页面收取与时区（本地候选包）
 
