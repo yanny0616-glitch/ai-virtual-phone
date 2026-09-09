@@ -155,6 +155,8 @@ export type GameSave = {
   worldId: string;
   timestamp: string;
 
+  customStatus?: import("./adventure-status").AdventureStatus;
+
   // User (player) state
   currentNodeId: string;
   currentNodeType: "l1" | "l2" | "l3";
@@ -202,6 +204,7 @@ export type MapWorld = {
   renderedMap: import("./map-engine").MapGenerationOutput;
   createdAt: string;
   updatedAt: string;
+  initialCustomStatus?: import("./adventure-status").AdventureStatus;
   status?: "generating" | "failed";
   statusMessage?: string;  // failure reason
   failureRaw?: string;     // raw LLM output on failure, for the failure dialog
@@ -256,6 +259,7 @@ export type EventDialogue = {
 };
 
 export type EventScene = {
+  statusChanges?: unknown;
   background?: string;         // scene description (for atmosphere)
   dialogues: EventDialogue[];
   choices?: EventChoice[];

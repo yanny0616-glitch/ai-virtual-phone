@@ -3,6 +3,7 @@
 
 import type { WorldSkeleton, WorldSkeletonInput, EventScene, GameSave, WorldNPC, QuestLine, EncounterSeed, CharacterAgent, AgentDecision, RichRegion, Declaration, CharStats } from "./map-types";
 import { STAT_LABELS, ALL_STATS } from "./map-types";
+import { adventureStatusContext, adventureStatusInstruction, type AdventureStatus } from "./adventure-status";
 import { simpleLLMCall } from "./api-helpers";
 import { previewMessagesForApi, sendLLMRequest } from "./chat-engine";
 import type { ApiConfig } from "./settings-types";
@@ -356,6 +357,7 @@ export async function generateWorldSkeleton(
   companionDescriptions: string[],
   apiConfig: ApiConfig,
   vars?: Record<string, string>,
+  customStatus?: AdventureStatus,
 ): Promise<WorldSkeleton> {
   // Replace {{variables}} in prompt
   let prompt = getActivePrompt("worldGen", DEFAULT_WORLD_GEN_PROMPT);
@@ -365,7 +367,7 @@ export async function generateWorldSkeleton(
     }
   }
 
-  const userMsg = `世界描述：${userDescription}\n\n同行角色：\n${companionDescriptions.map((d, i) => `${i + 1}. ${d}`).join("\n")}`;
+  const userMsg = `世界描述：${userDescription}\n\n同行角色：\n${companionDescriptions.map((d, i) => `${i + 1}. ${d}`).join("\n")}${adventureStatusContext(customStatus)}`;
 
   const result = await simpleLLMCall(apiConfig, [
     { role: "system", content: prompt },
@@ -565,9 +567,11 @@ export type DMSceneResult = {
   moveTo: string | Record<string, string>;
   worldEvents: string[];
   ending?: boolean;
+  statusChanges?: unknown;
 };
 
 export type DMContext = {
+  customStatus?: AdventureStatus;
   worldLore: string;
   currentLocation: string;
   eventType: string;
@@ -732,12 +736,26 @@ ${ctx.previousDialogue ? `\n对话历史：\n${truncateByTokenBudget(ctx.previou
 ${ctx.declarations?.length ? `\n# 本轮声明\n${ctx.declarations.map(d => `${d.speaker}：\n  说：「${d.speech}」\n  做：${d.action}`).join("\n\n")}` : ""}`;
 }
 
+// Status values and evidence must survive parsing byte-for-byte. Legacy repair
+// rewrites punctuation inside strings; repaired replies may continue the story,
+// but cannot safely change exact-match custom state.
+function parseStatusAwareDMReply(raw: string, enabled: boolean) {
+  if (!enabled) return JSON.parse(extractJSON(raw));
+  try {
+    return JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
+  } catch {
+    const repaired = JSON.parse(extractJSON(raw));
+    repaired.status_changes = null;
+    return repaired;
+  }
+}
+
 export async function dmScene(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneResult> {
-  const userMsg = buildDMUserMsg(ctx);
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus);
   const scenePrompt = getActivePrompt("scene", DEFAULT_DM_SCENE_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [
-    { role: "system", content: renderUserNameMacro(scenePrompt, playerName) },
+    { role: "system", content: renderUserNameMacro(scenePrompt + adventureStatusInstruction(ctx.customStatus), playerName) },
     { role: "user", content: renderUserNameMacro(userMsg, playerName) },
   ];
   dmLog("DM场景·发送", formatDebugMessages(messages, apiConfig));
@@ -753,7 +771,7 @@ export async function dmScene(ctx: DMContext, apiConfig: ApiConfig): Promise<DMS
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let p: any;
   try {
-    p = JSON.parse(extractJSON(result.content));
+    p = parseStatusAwareDMReply(result.content, ctx.customStatus?.enabled === true);
   } catch (e) {
     console.error("[DM] JSON parse failed. Raw:", result.content.slice(0, 500));
     throw new Error(`DM返回格式错误: ${(e as Error).message}\n原文前200字: ${result.content.slice(0, 200)}`);
@@ -778,6 +796,7 @@ export async function dmScene(ctx: DMContext, apiConfig: ApiConfig): Promise<DMS
     moveTo: p.move_to ?? p.moveTo ?? "",
     worldEvents: (p.world_events || p.worldEvents || []).map((event: string) => String(event || "")),
     ending: p.ending || false,
+    statusChanges: p.status_changes,
   };
 }
 
@@ -895,6 +914,7 @@ export async function expandEvent(
     moveTo: dm.moveTo,
     worldEvents: dm.worldEvents,
     ending: dm.ending,
+    statusChanges: dm.statusChanges,
   };
 }
 
@@ -933,7 +953,7 @@ export async function companionDeclare(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string },
+  options?: { instruction?: string; customStatus?: AdventureStatus },
 ): Promise<Declaration> {
   const allChars = loadCharacters();
   const character = allChars.find(c => c.id === characterId);
@@ -992,7 +1012,7 @@ async function buildCompanionDeclarePromptPayload(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string },
+  options?: { instruction?: string; customStatus?: AdventureStatus },
 ) {
   const allChars = loadCharacters();
   const character = allChars.find(c => c.id === characterId);
@@ -1058,6 +1078,9 @@ async function buildCompanionDeclarePromptPayload(
     ),
   });
 
+  const statusContext = adventureStatusContext(options?.customStatus);
+  if (statusContext) llmMessages.push({ role: "system", content: statusContext });
+
   return { character, apiConfig, preset, regexes, llmMessages };
 }
 
@@ -1066,7 +1089,7 @@ export async function previewAdventureCompanionPromptPayload(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string },
+  options?: { instruction?: string; customStatus?: AdventureStatus },
 ): Promise<{ messages: LLMMessage[]; characterName: string; model: string; presetName: string }> {
   const { character, apiConfig, preset, llmMessages } = await buildCompanionDeclarePromptPayload(
     characterId,
@@ -1131,11 +1154,11 @@ export const DEFAULT_DM_RESOLVE_PROMPT = `你是RPG世界的DM。这是裁定阶
 {"narration":"火光在墙上跳了两下，照得每个人的神情都忽明忽暗。\\n\\n队伍各自的行动在同一刻撞在一起，让原本僵持的局势突然松动。\\n\\n门外传来的脚步声，说明新的变化已经逼近。","npc_lines":[{"speaker":"NPC名","text":"台词"}],"situation":"新局势描述","choices":[{"label":"保持警惕前进","stat_check":{"stat":"per"}},{"label":"{{user}}优雅地周旋","stat_check":{"stat":"cha","who":"{{user}}"}},{"label":"直接离开"}],"journal":"日志","gained":["获得物品"],"lost":["失去物品"],"advance":false,"ending":false,"move_to":"节点名 或 {\"{{user}}\":\"节点名\",\"角色名\":\"节点名\"}","world_events":["世界各处事件"]}`;
 
 async function dmResolve(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneResult> {
-  const userMsg = buildDMUserMsg(ctx);
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus);
   const resolvePrompt = getActivePrompt("resolve", DEFAULT_DM_RESOLVE_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [
-    { role: "system", content: renderUserNameMacro(resolvePrompt, playerName) },
+    { role: "system", content: renderUserNameMacro(resolvePrompt + adventureStatusInstruction(ctx.customStatus), playerName) },
     { role: "user", content: renderUserNameMacro(userMsg, playerName) },
   ];
   dmLog("DM裁决·发送", formatDebugMessages(messages, apiConfig));
@@ -1151,7 +1174,7 @@ async function dmResolve(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneR
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let p: any;
   try {
-    p = JSON.parse(extractJSON(result.content));
+    p = parseStatusAwareDMReply(result.content, ctx.customStatus?.enabled === true);
   } catch (e) {
     throw new Error(`DM裁决格式错误: ${(e as Error).message}`);
   }
@@ -1175,6 +1198,7 @@ async function dmResolve(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneR
     moveTo: p.move_to ?? p.moveTo ?? "",
     worldEvents: (p.world_events || p.worldEvents || []).map((event: string) => String(event || "")),
     ending: p.ending || false,
+    statusChanges: p.status_changes,
   };
 }
 
@@ -1209,6 +1233,7 @@ export async function resolveRound(
     moveTo: dm.moveTo,
     worldEvents: dm.worldEvents,
     ending: dm.ending,
+    statusChanges: dm.statusChanges,
   };
 }
 
@@ -1478,7 +1503,7 @@ export type EndingResult = {
 };
 
 export async function generateEnding(ctx: DMContext, apiConfig: ApiConfig): Promise<EndingResult> {
-  const userMsg = buildDMUserMsg(ctx);
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus);
   const endingPrompt = getActivePrompt("ending", DEFAULT_DM_ENDING_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [
@@ -1548,7 +1573,7 @@ export async function generateAdventureSummary(
 
   const result = await simpleLLMCall(apiConfig, [
     { role: "system", content: prompt },
-    { role: "user", content: `世界：${worldName}\n玩家天数：第${save.gameDay}天\n\n日志：\n${journalText}` },
+    { role: "user", content: `世界：${worldName}\n玩家天数：第${save.gameDay}天\n\n日志：\n${journalText}${adventureStatusContext(save.customStatus)}` },
   ], { temperature: 0.5 });
 
   if (!result.content) throw new Error(`总结生成失败: ${result.error || "空内容"}`);

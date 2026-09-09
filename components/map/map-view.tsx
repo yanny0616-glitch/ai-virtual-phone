@@ -16,6 +16,9 @@ import { expandEvent, companionDeclare, resolveRound, rollD100, ROLL_LABELS, for
 import { STAT_LABELS, ALL_STATS } from "@/lib/map-types";
 import MapRenderer from "./map-renderer";
 import MapTextStream from "./map-text-stream";
+import { generateStatusSuggestions } from "@/lib/adventure-status-generator";
+import AdventureStatusPanel from "./adventure-status-panel";
+import { applyAdventureStatusChanges } from "@/lib/adventure-status";
 
 type Props = {
   world: MapWorld;
@@ -130,6 +133,16 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
     saveGame(withExtra);
     onSaveUpdate(withExtra);
   }, [onSaveUpdate]);
+
+  const applySceneStatus = useCallback((base: GameSave, scene: EventScene, expectedRevision?: number): GameSave => {
+    const result = applyAdventureStatusChanges(base.customStatus, scene.statusChanges, {
+      id: crypto.randomUUID(), gameTime: formatGameTime(base.gameDay, base.gameTime),
+      createdAt: new Date().toISOString(), expectedRevision,
+      narrative: scene.dialogues.map(d => d.text).join("\n"),
+    });
+    if (result.warnings.length) pushMessages({ id: mkId(), type: "system", text: result.warnings.join("\n") });
+    return result.state === base.customStatus ? base : { ...base, customStatus: result.state };
+  }, [pushMessages]);
 
   // Inject custom font via FontFace API (avoids CSS string length / quoting issues with data URLs)
   React.useEffect(() => {
@@ -461,17 +474,19 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
             }),
         },
         pacing: save.pacing,
+        customStatus: saveRef.current.customStatus,
       };
 
       const scene = await expandEvent(dmCtx, companionIds, apiConfig);
       const dmScene = scene as EventScene & { dmSituation?: string; worldEvents?: string[] };
       if (dmScene.worldEvents?.length) setWorldEvents(dmScene.worldEvents);
 
+      const statusSave = applySceneStatus(saveRef.current, scene, dmCtx.customStatus?.revision);
       const sceneJournal = scene.journalEntry?.trim();
       if (sceneJournal) {
         persistSave({
-          ...save,
-          journal: [...save.journal, {
+          ...statusSave,
+          journal: [...statusSave.journal, {
             id: `j_${Date.now()}`,
             timestamp: formatGameTime(save.gameDay, save.gameTime),
             realTime: new Date().toISOString(),
@@ -482,6 +497,8 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
           timestamp: new Date().toISOString(),
         });
       }
+
+      if (!sceneJournal && statusSave !== saveRef.current) persistSave(statusSave);
 
       // Push dialogues to text stream
       pushSceneToStream(scene);
@@ -515,7 +532,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
     } finally {
       setEventLoading(false);
     }
-  }, [save, skeleton, currentNode, characters, inEvent, eventLoading, pushSceneToStream, pushMessages]);
+  }, [save, skeleton, currentNode, characters, inEvent, eventLoading, pushSceneToStream, pushMessages, applySceneStatus]);
 
   // ── Handle player action — Collect-Resolve-Narrate loop ──
   const handlePlayerAction = useCallback(async (actionText: string, skipDisplay?: boolean) => {
@@ -575,7 +592,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         if (pendingIds.length > 0) {
           setLoadingPhase("companions");
           for (const cid of pendingIds) {
-            const decl = await companionDeclare(cid, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === cid)?.affinity);
+            const decl = await companionDeclare(cid, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === cid)?.affinity, { customStatus: saveRef.current.customStatus });
 
             if (decl.failed) {
               pushMessages({ id: mkId(), type: "system", text: `${decl.speaker} 回复失败` });
@@ -632,6 +649,8 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       dmCtx.previousDialogue = prevDialogue;
       dmCtx.director = save.director;
       dmCtx.recentJournal = saveRef.current.journal.map(j => j.text);
+      dmCtx.customStatus = saveRef.current.customStatus;
+      dmCtx.gameTime = formatGameTime(saveRef.current.gameDay, saveRef.current.gameTime);
 
       const continuation = await resolveRound(dmCtx, allDeclarations, apiConfig);
 
@@ -785,8 +804,9 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         }
       }
 
-      const newSave: GameSave = {
+      const newSave: GameSave = applySceneStatus({
         ...save,
+        customStatus: saveRef.current.customStatus,
         currentNodeId: newNodeId,
         currentNodeType: newNodeType,
         hp: newHp,
@@ -799,7 +819,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         discoveredNodes: newDiscovered,
         visitedNodes: newNodeId !== save.currentNodeId ? [...new Set([...save.visitedNodes, newNodeId])] : save.visitedNodes,
         timestamp: new Date().toISOString(),
-      };
+      }, continuation, dmCtx.customStatus?.revision);
       persistSave(newSave);
 
       // ── Death check: HP=0 → show death dialog ──
@@ -831,6 +851,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         try {
           let dmCtxForEnding: import("@/lib/map-rpg-engine").DMContext;
           try { dmCtxForEnding = JSON.parse(eventContext); } catch { dmCtxForEnding = { worldLore: skeleton.world.lore, currentLocation: currentNode?.name || "", eventType: "", eventBrief: "", companionNames: [], recentJournal: save.journal.map(j => j.text), keyChoices: save.keyChoices, gameTime: formatGameTime(save.gameDay, save.gameTime) }; }
+          dmCtxForEnding.customStatus = newSave.customStatus;
           dmCtxForEnding.director = newSave.director;
           dmCtxForEnding.recentJournal = newSave.journal.map(j => j.text);
           const ending = await generateEnding(dmCtxForEnding, apiConfig);
@@ -900,7 +921,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         }
       }
     }
-  }, [eventContext, accumulatedEvent, save, currentNode, activeEventMeta, persistSave, allNodes, characters, pushMessages, pushSceneToStream, userIdentity, skeleton]);
+  }, [eventContext, accumulatedEvent, save, currentNode, activeEventMeta, persistSave, allNodes, characters, pushMessages, pushSceneToStream, userIdentity, skeleton, applySceneStatus]);
 
   // ── Growth roll ref (defined below, used by handlePlayerAction) ──
   const runGrowthRollRef = useRef<(s: GameSave) => GameSave>((s) => s);
@@ -970,7 +991,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
               streamRef.current,
               save.agents.length > 1 ? userIdentity : undefined,
               save.agents.find(a => a.characterId === cid)?.affinity,
-              { instruction: exitReactionInstruction },
+              { instruction: exitReactionInstruction, customStatus: saveRef.current.customStatus },
             ))
           );
           for (const decl of decls) {
@@ -1151,7 +1172,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       const apiConfig = (slot?.apiConfigId ? apiConfigs.find(c => c.id === slot.apiConfigId) : null) || apiConfigs.find(c => c.apiKey) || apiConfigs[0];
       if (!apiConfig?.apiKey) throw new Error("未找到API配置");
 
-      const decl = await companionDeclare(characterId, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === characterId)?.affinity);
+      const decl = await companionDeclare(characterId, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === characterId)?.affinity, { customStatus: saveRef.current.customStatus });
 
       if (decl.speech && decl.speech !== "……") {
         pushMessages({ id: mkId(), type: "character", speaker: decl.speaker, text: decl.speech, emotion: decl.emotion });
@@ -2443,6 +2464,37 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
             ) : toolTab === "bag" ? (
               /* Bag tab */
               <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+                <AdventureStatusPanel
+                  key={save.customStatus?.revision ?? 0}
+                  state={save.customStatus}
+                  gameTime={formatGameTime(save.gameDay, save.gameTime)}
+                  disabled={eventLoading || eventContinueLoading || freeModeReplying}
+                  onGenerate={async (fields, signal) => {
+                    const base = saveRef.current;
+                    const configs = loadApiConfigs();
+                    const slot = resolveBinding(loadBindingConfig(), base.agents.length === 1 ? base.agents[0].characterId : undefined, "adventure");
+                    const config = configs.find(c => c.id === slot.apiConfigId) || configs.find(c => c.apiKey);
+                    if (!config) throw new Error("请先配置冒险使用的模型 API");
+                    const suggested = await generateStatusSuggestions(config, {
+                      worldDescription: `${skeleton.world.name}\n${skeleton.world.lore}`,
+                      recentStory: [
+                        ...base.journal.slice(-6).map(j => j.text),
+                        ...(base.streamLog || []).filter(m => m.type === "narration" || m.type === "npc").slice(-6).map(m => m.speaker ? `${m.speaker}：${m.text}` : m.text),
+                      ],
+                      playerName: userIdentity?.name,
+                      gameTime: formatGameTime(base.gameDay, base.gameTime),
+                    }, fields, signal);
+                    if (saveRef.current.journal.length !== base.journal.length || saveRef.current.streamLog?.at(-1)?.id !== base.streamLog?.at(-1)?.id) {
+                      throw new Error("生成期间剧情已推进，请根据最新剧情重新生成字段");
+                    }
+                    return suggested;
+                  }}
+                  onSave={(next, expectedRevision) => {
+                    if (eventLoading || eventContinueLoading || freeModeReplying) throw new Error("请等待当前剧情生成完成");
+                    if ((saveRef.current.customStatus?.revision ?? 0) !== expectedRevision) throw new Error("状态已更新，请重新打开设置");
+                    persistSave({ ...saveRef.current, customStatus: next, timestamp: new Date().toISOString() });
+                  }}
+                />
                 {/* Player stats */}
                 <div style={{ fontSize: "calc(10px*var(--app-text-scale,1))", color: "var(--c-adv-text-muted)", marginBottom: 8, fontFamily: "monospace", letterSpacing: "0.1em" }}>属性</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>

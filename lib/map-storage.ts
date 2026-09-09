@@ -132,6 +132,7 @@ export function createInitialSave(worldId: string, startNodeId: string): GameSav
   return {
     id: `save_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     worldId,
+    ...(getMapWorld(worldId)?.initialCustomStatus ? { customStatus: structuredClone(getMapWorld(worldId)!.initialCustomStatus!) } : {}),
     timestamp: now,
     currentNodeId: startNodeId,
     currentNodeType: "l1",

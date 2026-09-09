@@ -31,6 +31,10 @@ import { loadApiConfigs, loadBindingConfig, resolveBinding } from "@/lib/setting
 import type { MapWorld, GameSave } from "@/lib/map-types";
 import { Toggle } from "@/components/ui/form";
 
+import AdventureStatusPanel from "./adventure-status-panel";
+import { generateStatusSuggestions } from "@/lib/adventure-status-generator";
+import type { AdventureStatus } from "@/lib/adventure-status";
+
 type Props = {
   onClose: () => void;
   onStartGame: (world: MapWorld, save: GameSave) => void;
@@ -61,6 +65,9 @@ export default function MapLobby({ onClose, onStartGame }: Props) {
     }, 2000);
     return () => clearInterval(interval);
   }, [mode, worlds]);
+  const [statusGenerating, setStatusGenerating] = useState(false);
+  const [statusDirty, setStatusDirty] = useState(false);
+  const [customStatus, setCustomStatus] = useState<AdventureStatus>();
   const [description, setDescription] = useState("");
   const [tone, setTone] = useState("");
   const [regionCount, setRegionCount] = useState(6);
@@ -167,7 +174,7 @@ export default function MapLobby({ onClose, onStartGame }: Props) {
 
   // ── Create World (background generation) ──
   const handleCreate = async () => {
-    if (!description.trim() || isGenerating) return;
+    if (!description.trim() || isGenerating || statusDirty || statusGenerating) return;
     setIsGenerating(true);
     setError(null);
 
@@ -188,6 +195,7 @@ export default function MapLobby({ onClose, onStartGame }: Props) {
       createdAt: now,
       updatedAt: now,
       status: "generating",
+      initialCustomStatus: customStatus,
     };
     saveMapWorld(placeholder);
     setWorlds(loadMapWorlds());
@@ -207,7 +215,7 @@ export default function MapLobby({ onClose, onStartGame }: Props) {
         npc_count: String(npcCount),
         difficulty: difficulty || "适中",
       };
-      const skeleton = await generateWorldSkeleton(description, [], apiConfig, vars);
+      const skeleton = await generateWorldSkeleton(description, [], apiConfig, vars, customStatus);
 
       const resp = await fetch("/countries.geo.json");
       const geoData: GeoJSONData = await resp.json();
@@ -218,6 +226,7 @@ export default function MapLobby({ onClose, onStartGame }: Props) {
         id: worldId,
         skeleton,
         renderedMap,
+        initialCustomStatus: customStatus,
         createdAt: now,
         updatedAt: new Date().toISOString(),
       };
@@ -527,6 +536,19 @@ export default function MapLobby({ onClose, onStartGame }: Props) {
               )}
             </div>
 
+            <AdventureStatusPanel key={customStatus?.revision ?? 0} state={customStatus} onSave={setCustomStatus} gameTime="世界创建前" creation disabled={isGenerating} onDirtyChange={setStatusDirty}
+              onGenerationChange={setStatusGenerating}
+              onGenerate={(fields, signal) => {
+                const configs = loadApiConfigs();
+                const bindings = loadBindingConfig();
+                const slot = resolveBinding(bindings, selectedCharIds.length === 1 ? selectedCharIds[0] : undefined, "adventure");
+                const config = configs.find(c => c.id === slot.apiConfigId) || configs.find(c => c.apiKey);
+                if (!config) throw new Error("请先配置冒险使用的模型 API");
+                return generateStatusSuggestions(config, {
+                  worldDescription: description.trim() ? `${description}\n风格：${tone}\n主线：${mainQuestType}\n难度：${difficulty}` : "",
+                }, fields, signal);
+              }} />
+
             {/* ── Error ── */}
             {error && (
               <div style={{
@@ -538,10 +560,12 @@ export default function MapLobby({ onClose, onStartGame }: Props) {
               </div>
             )}
 
+            {statusDirty && <p role="status" style={{ color: "#e8d0a0" }}>请先点击上方「保存状态设置」，再创建世界。</p>}
+
             {/* ── Create button (ritual activation) ── */}
             <button className="tome-ritual"
               onClick={handleCreate}
-              disabled={!description.trim() || isGenerating}
+              disabled={!description.trim() || isGenerating || statusDirty || statusGenerating}
               style={{
                 width: "100%", padding: "15px 0", borderRadius: 10,
                 border: isGenerating ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(200,160,100,0.3)",

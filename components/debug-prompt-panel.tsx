@@ -535,9 +535,10 @@ export function DebugPromptPanel() {
                     selectedAdventureSave.streamLog,
                     sharedUserIdentity,
                     agent?.affinity,
-                    adventureInstructionMode === "exit"
-                        ? { instruction: "{{user}}刚才决定离开当前事件，不再继续。请以你的身份回应{{user}}的离开：你会说什么、有什么反应、接下来是否跟随/挽留/沉默旁观。" }
-                        : undefined,
+                    {
+                        customStatus: selectedAdventureSave.customStatus,
+                        ...(adventureInstructionMode === "exit" ? { instruction: "{{user}}刚才决定离开当前事件，不再继续。请以你的身份回应{{user}}的离开：你会说什么、有什么反应、接下来是否跟随/挽留/沉默旁观。" } : {}),
+                    },
                 );
             }
             setExtraResult(result);

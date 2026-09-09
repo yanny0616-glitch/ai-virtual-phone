@@ -1,0 +1,80 @@
+import fs from "node:fs";
+import vm from "node:vm";
+import assert from "node:assert/strict";
+import ts from "typescript";
+import { randomUUID } from "node:crypto";
+const read = f => fs.readFileSync(new URL("../" + f, import.meta.url), "utf8");
+function load(file, dependencies) {
+  const testModule = { exports: {} };
+  const code = ts.transpileModule(read(file), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  vm.runInNewContext(code, { module: testModule, exports: testModule.exports, crypto: { randomUUID }, require: name => dependencies[name] }, { filename: file });
+  return testModule.exports;
+}
+const D = load("lib/adventure-status.ts", {});
+let reply, calls = [];
+const G = load("lib/adventure-status-generator.ts", {
+  "./adventure-status": D,
+  "./api-helpers": { simpleLLMCall: async (config, messages, options) => { calls.push({ config, messages, options }); return typeof reply === "function" ? reply() : reply; } },
+});
+const plain = value => JSON.parse(JSON.stringify(value));
+let sequence = 0;
+const id = () => `new_${++sequence}`;
+const makeReply = fields => JSON.stringify({ fields });
+const field = { name: "宗门身份", type: "text", value: "外门弟子", rule: "正式拜师或任命后改变；许诺不算生效。" };
+const old = D.palaceStatusFields();
+old[0].value = "常在";
+const snapshot = JSON.stringify(old);
+const merged = G.mergeStatusSuggestions(makeReply([{ ...old[0], value: "皇后", rule: "立即晋升" }, field]), old, id);
+assert.equal(merged.length, old.length + 1);
+assert.equal(merged[0].value, "常在");
+assert.equal(merged[0].rule, old[0].rule);
+assert.notEqual(merged.at(-1).id, field.id);
+assert.equal(JSON.stringify(old), snapshot);
+assert.throws(() => G.mergeStatusSuggestions(makeReply([old[0]]), old, id), /没有建议新的字段/);
+assert.equal(G.mergeStatusSuggestions(makeReply([field, field]), [], id).length, 1);
+for (const invalid of [null, {}, { name: "缺少类型" }, { ...field, value: 8 }, { ...field, type: "number", value: 9, min: 0, max: 5 }, { ...field, rule: null }]) {
+  assert.throws(() => G.mergeStatusSuggestions(makeReply([invalid]), [], id));
+}
+assert.throws(() => G.mergeStatusSuggestions('{"fields":[', [], id), /不完整/);
+assert.throws(() => G.mergeStatusSuggestions(makeReply(Array.from({length:7}, (_,i)=>({...field,name:`字段${i}`}))), [], id), /超过 6/);
+const nearLimit = Array.from({length:20}, (_,i)=>({...field,id:`f${i}`,name:`已有${i}`}));
+assert.throws(() => G.mergeStatusSuggestions(makeReply([field]), nearLimit, id), /最多设置 20/);
+const cfg = { apiKey: "fixture", defaultModel: "test" };
+const context = { worldDescription: "修仙宗门冒险", playerName: "云舟", gameTime: "第2天", recentStory: ["你正式拜入宗门，成为外门弟子。"] };
+reply = { content: makeReply([field]) };
+const controller = new AbortController();
+const suggested = await G.generateStatusSuggestions(cfg, context, [], controller.signal);
+assert.equal(suggested[0].value, "外门弟子");
+const request = calls.at(-1);
+assert.equal(request.options.signal, controller.signal);
+assert.equal(request.options.label, "冒险·建议状态字段");
+assert.match(request.messages[0].content, /禁止数值达标自动改变身份/);
+assert.match(request.messages[1].content, /修仙宗门/);
+assert.match(request.messages[1].content, /正式拜入宗门/);
+assert.equal(JSON.parse(request.messages[1].content).player, "云舟");
+assert.equal(calls.length, 1, "one explicit suggestion request");
+reply = { content: makeReply([{ name: "营地身份", type: "text", value: "新成员", rule: "正式接纳或任命后改变。" }]) };
+assert.equal((await G.generateStatusSuggestions(cfg, {worldDescription:"末日营地求生"}, [], controller.signal))[0].name, "营地身份");
+assert.match(calls.at(-1).messages[1].content, /末日营地/);
+reply = { content: makeReply([field]) };
+await G.generateStatusSuggestions(cfg, {...context,recentStory:Array.from({length:40},()=>"文".repeat(3000))}, old, controller.signal);
+const bounded = JSON.parse(calls.at(-1).messages[1].content);
+assert.equal(bounded.recentStory.length, 12);
+assert.equal(bounded.recentStory[0].length, 1200);
+assert.equal(bounded.existingFields[0].value, "常在");
+const before = calls.length;
+await assert.rejects(G.generateStatusSuggestions(cfg, {worldDescription:""}, [], controller.signal), /填写世界描述/);
+await assert.rejects(G.generateStatusSuggestions(cfg, context, nearLimit, controller.signal), /上限/);
+await assert.rejects(G.generateStatusSuggestions({}, context, [], controller.signal), /API/);
+controller.abort();
+await assert.rejects(G.generateStatusSuggestions(cfg, context, [], controller.signal), /取消/);
+assert.equal(calls.length, before, "invalid inputs do not call a model");
+const later = new AbortController();
+reply = () => { later.abort(); return { content: makeReply([field]) }; };
+await assert.rejects(G.generateStatusSuggestions(cfg, context, [], later.signal), /取消/);
+reply = { content: makeReply([field]), wasTruncated: true };
+await assert.rejects(G.generateStatusSuggestions(cfg, context, [], new AbortController().signal), /截断/);
+reply = { content: null, error: "连接失败" };
+await assert.rejects(G.generateStatusSuggestions(cfg, context, [], new AbortController().signal), /连接失败/);
+assert.deepEqual(plain(old), JSON.parse(snapshot));
+console.log("PASS AI suggestions: multiple genres, initial values/rules, bounded story context, no existing-field overwrite, type/range validation, host IDs, one request, invalid-input short circuit, abort/truncation/errors.");
