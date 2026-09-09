@@ -313,6 +313,7 @@ type AssistantMessageDraft = Omit<ChatMessage, "id" | "createdAt" | "status"> & 
 
 type ManagedGenerationOptions = {
     history: ChatMessage[];
+    generationIntent?: "regenerate";
     errorPrefix?: string;
     onDecline?: () => void | Promise<void>;
 };
@@ -1982,6 +1983,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // Prevents flash of wrong scroll position, works reliably under transform: scale()
     const displayMessages = useMemo(() => {
         return [...messages, ...transientMessages]
+            .filter(message => !message.silentUpdate)
             .map((msg, index) => ({ msg, index }))
             .sort((a, b) => {
                 const orderDiff = compareChatMessages(a.msg, b.msg);
@@ -3262,6 +3264,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     const runManagedGeneration = async ({
         history,
+        generationIntent,
         errorPrefix = "发送失败",
         onDecline,
     }: ManagedGenerationOptions) => {
@@ -3334,6 +3337,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     history,
                     {
                         appTags: theaterMode ? ["chat"] : ["chat", "text"],
+                        generationIntent,
                         signal: generationRun.controller.signal,
                     },
                     {
@@ -4533,6 +4537,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
         await runManagedGeneration({
             history: contextMessages,
+            generationIntent: "regenerate",
             errorPrefix: "重试失败",
             onDecline: triggerReply,
         });

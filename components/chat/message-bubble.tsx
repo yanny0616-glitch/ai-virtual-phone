@@ -1,5 +1,7 @@
 "use client";
 
+import { resolveVoiceExpressionText, stripVoiceExpression } from "@/lib/voice-expression";
+
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import { findCustomStickerByName, resolveCustomStickerUrl } from "@/lib/custom-sticker-storage";
 import { isMediaStoreRef, loadMediaObjectUrl } from "@/lib/media-cache-storage";
@@ -145,6 +147,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         if (prev.msg.isTyping !== next.msg.isTyping) return false;
         if (prev.msg.mediaData?.status !== next.msg.mediaData?.status) return false;
         if (prev.msg.mediaData?.label !== next.msg.mediaData?.label) return false;
+        if (prev.msg.mediaData?.ttsText !== next.msg.mediaData?.ttsText) return false;
         if (prev.msg.mediaData?.claimedBy?.length !== next.msg.mediaData?.claimedBy?.length) return false;
         if (prev.msg.mediaData?.appName !== next.msg.mediaData?.appName) return false;
         if (prev.msg.mediaData?.appCardTitle !== next.msg.mediaData?.appCardTitle) return false;
@@ -2210,10 +2213,10 @@ function synthesizeVoiceForMessage(msgId: string, characterId: string, speechTex
     const existing = _voiceSynthInFlight.get(msgId);
     if (existing) return existing;
     const task = (async () => {
-        const { resolveVoiceConfig, synthesizeSpeech } = await import("@/lib/tts-service");
+        const { resolveVoiceConfig, synthesizeChatSpeech } = await import("@/lib/tts-service");
         const vc = resolveVoiceConfig(characterId);
         if (!vc) throw new Error("未绑定语音配置");
-        const blob = await synthesizeSpeech(speechText, vc);
+        const blob = await synthesizeChatSpeech(speechText, vc);
         if (!blob) throw new Error("合成失败");
         const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
@@ -2239,11 +2242,10 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
     const mountedRef = useRef(true);
     useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
     const text = msg.mediaData?.label || "语音消息";
-    const bilingual = splitBilingualText(text);
-    const speechText = bilingual?.original || text;
+    const speechText = resolveVoiceExpressionText(text, msg.mediaData?.ttsText);
     const synthesizedFromText = msg.mediaData?.synthesizedFromText;
     const needsResynthesis = msg.role !== "user" && synthesizedFromText !== speechText;
-    const duration = msg.mediaData?.voiceDuration || Math.max(2, Math.ceil(speechText.length / 4));
+    const duration = msg.mediaData?.voiceDuration || Math.max(2, Math.ceil(stripVoiceExpression(speechText).length / 4));
 
     const playSrc = (src: string) => {
         // 必须用 <audio> 元素:iOS 静音拨键会掐掉 Web Audio 的输出(表现为全线

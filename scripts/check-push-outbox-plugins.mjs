@@ -33,8 +33,9 @@ function harness({ enabled = true, ready = Promise.resolve(), initial = {} } = {
         ui: { injectCSS() {}, slot() {}, toast() {} },
     };
     const stateParser = load("lib/state-value-parser.ts", {}, "parseStateValues,mergeStateValues");
+    const voiceExpression = load("lib/voice-expression.ts", {}, "extractVoiceExpression");
     const parser = load("lib/rich-message-parser.ts", {
-        ...stateParser, stripActionShells: text => text, stripTextToolDirectives: text => text,
+        ...stateParser, ...voiceExpression, stripActionShells: text => text, stripTextToolDirectives: text => text,
         loadCustomAppChatDirectives: () => [],
     }, "parseAIResponse");
     const client = load("lib/push-outbox-client.ts", {

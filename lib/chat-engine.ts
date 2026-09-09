@@ -1,7 +1,8 @@
-import { CHAT_SILENCE_TOKEN, isChatSilenceResponse, createChatSilenceStreamFilter } from "./chat-silence-protocol";
+import { CHAT_SILENCE_TOKEN, isChatSilenceResponse, stripChatSilenceMarker, createChatSilenceStreamFilter } from "./chat-silence-protocol";
 // lib/chat-engine.ts
 
 import { createSseJsonParser } from "./sse-json";
+import { buildVoiceExpressionPrompt } from "./voice-expression";
 import { maybeAppendShortcutCapability } from "./offline-shortcut-capability";
 import { loadCharacters } from "./character-storage";
 import { buildScreenEffectPromptHint } from "./chat-screen-effects";
@@ -30,6 +31,7 @@ import {
     resolveBinding,
     loadBindingConfig,
     loadApiConfigs,
+    loadVoiceConfigs,
     loadPresets,
     loadWorldBooks,
     loadRegexes,
@@ -352,6 +354,7 @@ export type DebugPromptRequestOptions = {
 };
 
 type ChatPromptBuildOptions = {
+    generationIntent?: "regenerate";
     followUpCount?: number;
     followUpDelay?: number;
     timedWakeElapsedMinutes?: number;
@@ -526,7 +529,9 @@ export function appendEmptyGenerateGuardMessage(
     messages: LLMMessage[],
     config: ApiConfig,
     history: ChatMessage[],
+    generationIntent?: "regenerate",
 ): void {
+    if (generationIntent === "regenerate") return;
     if (!shouldApplyEmptyGenerateGuard(config)) return;
 
     const hasRealUserHistory = history.some(isRealUserHistoryMessage);
@@ -615,12 +620,27 @@ async function applyChatPluginLlmRequest<T extends { role: string }>(
     return { messages: nextMessages, preset: nextPreset };
 }
 
+async function ensureChatPromptPluginsReady(): Promise<void> {
+    if (typeof window === "undefined") return;
+    const { getChatPluginRuntime } = await import("./chat-plugin-runtime");
+    await getChatPluginRuntime().ensureReady();
+}
+
 /** 聊天插件 llm.response 织入：模型原始回复在内置正则处理前交给插件改写 */
 async function applyChatPluginLlmResponse(text: string, purpose: string, sessionId?: string, thinkingTag?: string): Promise<string> {
-    if (isChatSilenceResponse(text, thinkingTag)) return text;
+    const silenced = isChatSilenceResponse(text, thinkingTag);
+    if (silenced && !stripChatSilenceMarker(text, thinkingTag)) return text;
     if (typeof window === "undefined") return text;
     const payload = await runChatPluginTransform("llm.response", { text, sessionId, purpose });
-    return typeof payload.text === "string" ? payload.text : text;
+    const result = typeof payload.text === "string" ? payload.text : text;
+    return silenced ? `${CHAT_SILENCE_TOKEN}\n${stripChatSilenceMarker(result, thinkingTag)}`.trim() : result;
+}
+
+async function persistChatSilenceMetadata(session: ChatSession, text: string, thinkingTag?: string, reasoningText?: string): Promise<void> {
+    const { parseAndSaveResponse } = await import("./follow-up-service");
+    await parseAndSaveResponse(stripChatSilenceMarker(text, thinkingTag), session.id, 0, undefined, [], {
+        suppressReply: true, silent: true, durable: true, reasoningText,
+    });
 }
 
 export function prepareMessagesForApi(
@@ -1831,6 +1851,7 @@ export async function buildChatPromptMessages(
     toolsEnabled: boolean;
     allowSilence: boolean;
 }> {
+    history = history.filter(message => !message.silentUpdate);
     const chars = loadCharacters();
     const character = chars.find(c => c.id === session.contactId);
     if (!character) throw new ChatEngineError(`Character not found: ${session.contactId}`);
@@ -1934,6 +1955,7 @@ export async function buildChatPromptMessages(
         && options?.appTags?.includes("text") === true && !options?.followUpCount
         && !options?.appTags?.includes("followup") && !options?.promptProfile
         && history.at(-1)?.role === "user";
+    await ensureChatPromptPluginsReady();
     const pluginPrompt = await runChatPluginTransform("prompt.system", {
         sessionId: session.id,
         isGroup: !!session.isGroup,
@@ -1958,6 +1980,10 @@ export async function buildChatPromptMessages(
         )
         : "";
 
+    const voiceConfig = loadVoiceConfigs().find(voice => voice.id === activeSlot.voiceConfigId);
+    const voiceExpression = resolvedAppId === "chat" && !session.isGroup && !isOfflineMode && !promptProfile
+        && !effectiveAppTags.includes("video")
+        ? buildVoiceExpressionPrompt(voiceConfig, effectiveAppTags.includes("voice") ? "call" : "chat") : "";
     const llmMessages = assemblePromptPayload({
         character,
         history: promptHistory,
@@ -1994,6 +2020,7 @@ export async function buildChatPromptMessages(
         customAppRichMediaDirectives,
         customAppContext,
         chatBilingualInstruction,
+        voiceExpression,
         statusRegionSection: resolveStatusRegionSection(statusRegionCfg),
         statusRegionExampleLine: resolveStatusRegionExampleLine(statusRegionCfg),
         statusRegionComposition: resolveStatusRegionComposition(statusRegionCfg),
@@ -2013,12 +2040,17 @@ export async function buildChatPromptMessages(
             content: "本次自定义 APP AI 任务只输出严格 JSON。不要输出 Markdown 代码块、解释文字或聊天富媒体指令。",
         });
     }
-    appendEmptyGenerateGuardMessage(llmMessages, config, historyForPrompt);
+    appendEmptyGenerateGuardMessage(llmMessages, config, historyForPrompt, options?.generationIntent);
 
     const allowSilence = silenceEligible && pluginPrompt.allowSilence === true;
-    if (allowSilence) llmMessages.push({ role: "system", content:
-        `本轮允许自主选择沉默。决定不回复时，整个回复正文必须且只能是 ${CHAT_SILENCE_TOKEN}；不要附加任何其他正文、状态、内心、签名或工具调用。决定回复时按正常格式输出，不要带此标记。此协议优先于要求每轮必有正文或状态的格式示例。`
-    });
+    if (allowSilence) {
+        // Preserve the earlier common prefix when this conditional protocol is absent next turn.
+        const firstConversationIndex = llmMessages.findIndex(message => message.role !== "system");
+        llmMessages.splice(firstConversationIndex < 0 ? llmMessages.length : firstConversationIndex, 0, {
+            role: "system", marker: "沉默输出规则", content:
+                `本轮允许自主选择沉默。决定不回复时，第一行单独输出 ${CHAT_SILENCE_TOKEN}，后面换行，状态数值、[状态栏]、[内心]、签名及必要的状态更新仍按已有规则正常输出或执行。沉默只表示不向用户发送聊天消息，不停止内部更新；不输出聊天正文、语音条或表情，不用旁白或工具消息代替回复。本轮内心与状态会保存，但不显示新的爱心或聊天卡片。不要为沉默额外编造签名或状态。决定回复时按正常格式输出，不带此标记。此规则仅覆盖必须发送聊天正文的要求，其他已配置规则保持有效。`,
+        });
+    }
     return { llmMessages, character, config, preset, regexes, userIdentity, toolsEnabled, allowSilence };
 }
 
@@ -2196,6 +2228,7 @@ async function generateNativeChatCompletion(
     let nativeBundle = buildNativeChatTools(enabledTools, expandedSourceIds, nativeToolBuildOptions);
     const requestMessages: LlmRequestMessage[] = toLlmRequestMessages(llmMessages);
     const parts: ChatCompletionPart[] = [];
+    let replySuppressed = false;
     const meta = { characterName: character.name, characterId: character.id, userName: userIdentity?.name };
     const actionContext = { characterId: session.contactId, sessionId: session.id, sourceEngine: "chat" as const, signal: options?.signal };
     const expandableSourceKeys = new Set(enabledTools.filter(tool => !isNativeSingleTool(tool)).map(nativeToolSourceKey));
@@ -2205,7 +2238,7 @@ async function generateNativeChatCompletion(
     const onlineThinkingTag = preset?.online_thinking_tag?.trim() || "thinking";
     for (let round = 0; round < maxToolRounds; round += 1) {
         let result: LLMToolRequestResult;
-        const silenceStream = allowSilence ? createChatSilenceStreamFilter(text => callbacks?.onStreamDelta?.(text), preset?.online_thinking_tag) : null;
+        const silenceStream = allowSilence ? createChatSilenceStreamFilter(text => { if (!replySuppressed) return callbacks?.onStreamDelta?.(text); }, preset?.online_thinking_tag) : null;
         try {
             if (isSessionStreamingEnabled(session, true)) {
                 let streamReasoning = "";
@@ -2261,10 +2294,7 @@ async function generateNativeChatCompletion(
         throwIfAborted(options?.signal);
 
         // 线上思维链标签解析：开启时从正文提取 <tag> 思维链（覆盖原生），并剥离标签后再做后续解析
-        if (allowSilence && result.toolCalls.length === 0 && isChatSilenceResponse(result.content, preset?.online_thinking_tag)) {
-            bailoutRef.shortcutCompleted = true;
-            return { parts, silenced: parts.length === 0 };
-        }
+        replySuppressed ||= allowSilence && isChatSilenceResponse(result.content, preset?.online_thinking_tag);
         await silenceStream?.flush();
         let displayContent = result.content;
         if (onlineThinkingEnabled) {
@@ -2275,9 +2305,10 @@ async function generateNativeChatCompletion(
         // 剔除预设配置的文本片段（<思考结束> 等残留标签）
         displayContent = stripPresetTexts(displayContent, preset);
 
-        if (allowSilence && isChatSilenceResponse(displayContent, preset?.online_thinking_tag)) {
-            if (result.toolCalls.length === 0) { bailoutRef.shortcutCompleted = true; return { parts, silenced: parts.length === 0 }; }
-            displayContent = "";
+        replySuppressed ||= allowSilence && isChatSilenceResponse(displayContent, preset?.online_thinking_tag);
+        if (replySuppressed) {
+            await persistChatSilenceMetadata(session, displayContent, preset?.online_thinking_tag, result.reasoning);
+            displayContent = stripChatSilenceMarker(displayContent, preset?.online_thinking_tag);
         }
         const { cleanText: afterActionStrip, actions } = parseActionTags(displayContent);
         if (actions.length > 0) {
@@ -2287,6 +2318,7 @@ async function generateNativeChatCompletion(
         const assistantForToolContext = stripStateAndInnerForPrompt(displayContent);
 
         if (result.toolCalls.length === 0) {
+            if (replySuppressed) { bailoutRef.shortcutCompleted = true; return { parts, silenced: parts.length === 0 }; }
             throwIfAborted(options?.signal);
             // 无工具调用的最终轮：把解析到的思维链先交给回调（先于 onTextPart，与非原生路径一致）
             // 标签解析开启时已在上方用标签思维链覆盖，此处不再重复喂原生
@@ -2299,13 +2331,13 @@ async function generateNativeChatCompletion(
 
         throwIfAborted(options?.signal);
         await callbacks?.onNativeToolAssistantTurn?.({
-            content: afterActionStrip,
-            rawContent: displayContent,
+            content: replySuppressed ? "" : afterActionStrip,
+            rawContent: replySuppressed ? "" : displayContent,
             reasoning: onlineThinkingEnabled ? (extractThinkingTag(result.content, onlineThinkingTag) || undefined) : result.reasoning,
             openRouterReasoningDetails: onlineThinkingEnabled ? undefined : result.openRouterReasoningDetails,
             toolCalls: result.toolCalls,
         });
-        if (afterActionStrip) {
+        if (afterActionStrip && !replySuppressed) {
             parts.push({ text: afterActionStrip });
         }
 
@@ -2319,7 +2351,7 @@ async function generateNativeChatCompletion(
             ...realNativeCalls.map(call => nativeBundle.displayNameMap.get(call.name) || nativeBundle.nameMap.get(call.name) || call.name),
         ];
         const actorName = character.name;
-        callbacks?.onToolNotice?.(`${actorName}正在${displayedActionNames.join("、")}...`);
+        if (!replySuppressed) callbacks?.onToolNotice?.(`${actorName}正在${displayedActionNames.join("、")}...`);
 
         let realResults: Awaited<ReturnType<typeof executeToolCalls>> = [];
         try {
@@ -2505,7 +2537,7 @@ async function generateNativeChatCompletion(
         }
     }
 
-    return { parts };
+    return { parts, ...(replySuppressed && parts.length === 0 ? { silenced: true } : {}) };
 }
 
 type ReplyBailoutRef = {
@@ -2673,6 +2705,7 @@ async function generateChatCompletionCore(
 
     // ── Tool calling loop with real-time callbacks ──
     const parts: ChatCompletionPart[] = [];
+    let replySuppressed = false;
     const meta = { characterName: character.name, characterId: character.id, userName: userIdentity?.name };
     const actionContext = { characterId: session.contactId, sessionId: session.id, sourceEngine: "chat" as const, signal: options?.signal };
 
@@ -2684,7 +2717,7 @@ async function generateChatCompletionCore(
     };
     for (let round = 0; round < maxToolRounds; round++) {
         let filteredOutput: string;
-        const silenceStream = allowSilence ? createChatSilenceStreamFilter(text => callbacks?.onStreamDelta?.(text), preset?.online_thinking_tag) : null;
+        const silenceStream = allowSilence ? createChatSilenceStreamFilter(text => { if (!replySuppressed) return callbacks?.onStreamDelta?.(text); }, preset?.online_thinking_tag) : null;
         try {
             if (isSessionStreamingEnabled(session, true)) {
                 // 流式分支：与 sendLLMRequest 走同一套请求构造/日志/正则，仅把「整段等待」换成
@@ -2726,10 +2759,7 @@ async function generateChatCompletionCore(
         }
         throwIfAborted(options?.signal);
 
-        if (allowSilence && isChatSilenceResponse(filteredOutput, preset?.online_thinking_tag)) {
-            bailoutRef.shortcutCompleted = true;
-            return { parts, silenced: parts.length === 0 };
-        }
+        replySuppressed ||= allowSilence && isChatSilenceResponse(filteredOutput, preset?.online_thinking_tag);
         await silenceStream?.flush();
         // 线上思维链标签解析：开启时每轮从正文提取 <tag> 思维链（覆盖原生），并剥离标签后再做后续解析
         if (onlineThinking.enabled) {
@@ -2744,7 +2774,11 @@ async function generateChatCompletionCore(
         filteredOutput = stripPresetTexts(filteredOutput, preset);
 
         // Parse actions (朋友圈 etc) — strip from display text but keep tool tags
-        if (allowSilence && isChatSilenceResponse(filteredOutput, preset?.online_thinking_tag)) { bailoutRef.shortcutCompleted = true; return { parts, silenced: parts.length === 0 }; }
+        replySuppressed ||= allowSilence && isChatSilenceResponse(filteredOutput, preset?.online_thinking_tag);
+        if (replySuppressed) {
+            await persistChatSilenceMetadata(session, filteredOutput, preset?.online_thinking_tag, onlineThinking.reasoning);
+            filteredOutput = stripChatSilenceMarker(filteredOutput, preset?.online_thinking_tag);
+        }
         const { cleanText: afterActionStrip, actions } = parseActionTags(filteredOutput);
         if (actions.length > 0) {
             throwIfAborted(options?.signal);
@@ -2758,6 +2792,7 @@ async function generateChatCompletionCore(
 
         // No tool activity — final round
         if (toolFetches.length === 0 && toolCalls.length === 0) {
+            if (replySuppressed) { bailoutRef.shortcutCompleted = true; return { parts, silenced: parts.length === 0 }; }
             throwIfAborted(options?.signal);
             await callbacks?.onTextPart?.(afterActionStrip);
             parts.push({ text: afterActionStrip });
@@ -2770,7 +2805,7 @@ async function generateChatCompletionCore(
         throwIfAborted(options?.signal);
         const responseBatchId = createResponseBatchId();
         const toolDirectiveText = extractTextToolDirectiveText(afterActionStrip);
-        await callbacks?.onTextPart?.(afterActionStrip, undefined, {
+        if (!replySuppressed) await callbacks?.onTextPart?.(afterActionStrip, undefined, {
             responseBatchId,
             rawResponseText: afterActionStrip,
         });
@@ -2793,7 +2828,7 @@ async function generateChatCompletionCore(
                 throwIfAborted(options?.signal);
                 const actorName = fetch.actor || character.name;
                 const toolNotice = `${actorName}正在获取「${fetch.name}」指令...`;
-                callbacks?.onToolNotice?.(toolNotice);
+                if (!replySuppressed) callbacks?.onToolNotice?.(toolNotice);
 
                 const tool = findEnabledToolForSchema(fetch.name, options?.appId ?? "chat", {
                     characterName: character.name,
@@ -2822,7 +2857,7 @@ async function generateChatCompletionCore(
         if (toolCalls.length > 0) {
             const actorName = toolCalls[0]?.actor || character.name;
             const toolNotice = `${actorName}正在${toolCalls.map(t => t.name).join("、")}...`;
-            callbacks?.onToolNotice?.(toolNotice);
+            if (!replySuppressed) callbacks?.onToolNotice?.(toolNotice);
 
             let results: Awaited<ReturnType<typeof executeToolCalls>>;
             try {
@@ -2921,7 +2956,7 @@ async function generateChatCompletionCore(
             if (round === maxToolRounds - 1) {
                 try {
                     let finalOutput: string;
-                    const finalSilenceStream = allowSilence ? createChatSilenceStreamFilter(text => callbacks?.onStreamDelta?.(text), preset?.online_thinking_tag) : null;
+                    const finalSilenceStream = allowSilence ? createChatSilenceStreamFilter(text => { if (!replySuppressed) return callbacks?.onStreamDelta?.(text); }, preset?.online_thinking_tag) : null;
                     if (isSessionStreamingEnabled(session, true)) {
                         let streamReasoning = "";
                         const streamFinal = await sendLLMStreamRequest(config, preset, llmMessages, regexes, meta, {
@@ -2956,7 +2991,12 @@ async function generateChatCompletionCore(
                     }
                     // 剔除预设配置的文本片段（<思考结束> 等残留标签）
                     finalOutput = stripPresetTexts(finalOutput, preset);
-                    if (allowSilence && isChatSilenceResponse(finalOutput, preset?.online_thinking_tag)) { bailoutRef.shortcutCompleted = true; return { parts, silenced: parts.length === 0 }; }
+                    replySuppressed ||= allowSilence && isChatSilenceResponse(finalOutput, preset?.online_thinking_tag);
+                    if (replySuppressed) {
+                        await persistChatSilenceMetadata(session, finalOutput, preset?.online_thinking_tag, onlineThinking.reasoning);
+                        bailoutRef.shortcutCompleted = true;
+                        return { parts, silenced: parts.length === 0 };
+                    }
                     await finalSilenceStream?.flush();
                     await callbacks?.onTextPart?.(finalOutput);
                     parts.push({ text: finalOutput });
@@ -2971,6 +3011,8 @@ async function generateChatCompletionCore(
         }
     }
 
+    if (replySuppressed) { bailoutRef.shortcutCompleted = true; return { parts, silenced: parts.length === 0 }; }
+
     // Memory: increment event counter + check if summarization needed (non-blocking)
     (async () => {
         try {
@@ -2982,7 +3024,7 @@ async function generateChatCompletionCore(
         }
     })();
 
-    return { parts };
+    return { parts, ...(replySuppressed && parts.length === 0 ? { silenced: true } : {}) };
 }
 
 /**
@@ -3043,7 +3085,8 @@ export async function previewPromptPayload(
     // Use the SAME shared builder as generateChatCompletion
     const { llmMessages, character, config, preset } = await buildChatPromptMessages(session, effectiveHistory, options);
 
-    const apiMessages = previewMessagesForApi(config, preset, llmMessages);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, llmMessages, options?.appId ?? "chat", session.id);
+    const apiMessages = previewMessagesForApi(config, afterPlugins.preset, afterPlugins.messages);
 
     return {
         messages: apiMessages,
@@ -3117,11 +3160,12 @@ export async function previewPromptRequestSnapshot(
             characterName: character.name,
             userName: userIdentity?.name ?? "用户",
         });
-        const request = buildProviderRequest(config, preset, requestMessages, { tools: nativeBundle.definitions });
+        const afterPlugins = await applyChatPluginLlmRequest(preset, requestMessages, options?.appId ?? "chat", session.id);
+        const request = buildProviderRequest(config, afterPlugins.preset, afterPlugins.messages, { tools: nativeBundle.definitions });
         return publishDebugPromptSnapshot({
             request,
             config,
-            preset,
+            preset: afterPlugins.preset,
             meta,
             options: {
                 appId: options?.appId ?? "chat",
@@ -3133,11 +3177,12 @@ export async function previewPromptRequestSnapshot(
         });
     }
 
-    const request = buildProviderRequest(config, preset, requestMessages);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, llmMessages, options?.appId ?? "chat", session.id);
+    const request = buildProviderRequest(config, afterPlugins.preset, toLlmRequestMessages(afterPlugins.messages));
     return publishDebugPromptSnapshot({
         request,
         config,
-        preset,
+        preset: afterPlugins.preset,
         meta,
         options: {
             appId: options?.appId ?? "chat",

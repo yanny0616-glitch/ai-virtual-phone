@@ -10,12 +10,12 @@ import { generateChatCompletion, flattenCompletionResult, ChatEngineError } from
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { cancelFollowUp } from "@/lib/follow-up-service";
 import { createSTTSession, type STTSession } from "@/lib/stt-service";
-import { resolveVoiceConfig, synthesizeSpeech, playAudioBlob, playAudioBlobViaMediaElement, setCallAudioSessionActive } from "@/lib/tts-service";
+import { resolveVoiceConfig, synthesizeChatSpeech, playAudioBlob, playAudioBlobViaMediaElement, setCallAudioSessionActive } from "@/lib/tts-service";
+import { isVoiceExpressionEnabled, resolveVoiceExpressionText, splitVoiceExpressionSegments, stripVoiceExpression } from "@/lib/voice-expression";
 import { isCallRecordingSupported, resolveCloudSttConfig } from "@/lib/stt-cloud";
 import { useHoldToTalk } from "./use-hold-to-talk";
 import { suspendKeepAliveForCall, resumeKeepAliveAfterCall } from "@/lib/use-weixin-bridge";
 import { BilingualTextBlock } from "./message-bubble";
-import { splitBilingualText } from "@/lib/bilingual-text";
 import type { Character } from "@/lib/character-types";
 import { useCallKeyboardOffsetStyle } from "./use-call-keyboard-offset";
 import { CallSttWarningDialog, hideCallSttWarningPermanently, isCallSttWarningHidden } from "./call-stt-warning-dialog";
@@ -46,13 +46,6 @@ type VoiceCallScreenProps = {
     onConnect?: () => void;
     initiator?: "user" | "character";
 };
-
-function stripBilingualForSpeech(text: string): string {
-    return text
-        .split("\n")
-        .map(line => splitBilingualText(line)?.original || line)
-        .join("\n");
-}
 
 // ── Component ───────────────────────────────────────
 
@@ -305,8 +298,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
         // Return clean text parts for TTS (exclude rich media content)
         const cleanParts = chatParts
-            .filter(p => !p.mediaType && p.content.trim())
-            .map(p => p.content);
+            .filter(p => (!p.mediaType && p.content.trim()) || (p.mediaType === "audio" && p.mediaData?.label?.trim()))
+            .map(p => p.mediaData?.ttsText || (p.mediaType === "audio" ? p.mediaData?.label || "" : p.content));
 
         return { cleanParts, stateValues };
     }, [session.id, session.contactId]);
@@ -342,8 +335,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
             // 4. Process response
             const { cleanParts } = processAIResponse(aiResponseText);
-            const displayText = cleanParts.join("\n");
-            const speechText = stripBilingualForSpeech(displayText);
+            const displayText = stripVoiceExpression(cleanParts.join("\n"));
 
             if (!displayText) {
                 setCallState("IDLE");
@@ -360,14 +352,21 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             const voiceConfig = resolveVoiceConfig(session.contactId);
             if (voiceConfig) {
                 try {
-                    const audioBlob = await synthesizeSpeech(speechText, voiceConfig);
-                    if (stateRef.current === "ENDED") return;
+                    const segments = isVoiceExpressionEnabled(voiceConfig)
+                        ? cleanParts.flatMap(splitVoiceExpressionSegments)
+                        : [cleanParts.join("\n")];
+                    for (const segment of segments) {
+                        if (stateRef.current === "ENDED") return;
+                        const speechText = resolveVoiceExpressionText(stripVoiceExpression(segment), segment, "call");
+                        const audioBlob = await synthesizeChatSpeech(speechText, voiceConfig);
+                        if (stateRef.current === "ENDED") return;
 
-                    if (audioBlob) {
-                        const { promise, abort } = playCallAudio(audioBlob);
-                        audioAbortRef.current = abort;
-                        await promise;
-                        audioAbortRef.current = null;
+                        if (audioBlob) {
+                            const { promise, abort } = playCallAudio(audioBlob);
+                            audioAbortRef.current = abort;
+                            await promise;
+                            audioAbortRef.current = null;
+                        }
                     }
                 } catch (e) {
                     console.warn("[VoiceCall] TTS failed:", e);

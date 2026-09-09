@@ -32,6 +32,7 @@ type OutboxEntry = {
         appId?: string;
         appTags?: string[];
         followUpCount?: number;
+        silentUpdate?: boolean;
         armAt?: string;
         replyAfterLocalMessageId?: string;
         /** 云端触发快捷动作失败的摘要；成功时不带这个字段 */
@@ -249,6 +250,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         {
                             durable: true,
                             silent: options?.silent !== false,
+                            suppressReply: meta.silentUpdate === true,
                             responseBatchId,
                             // 补收时间不是角色发送时间；无效旧数据交给解析器使用本地时间兜底。
                             createdAt: Number.isFinite(Date.parse(entry.created_at)) ? entry.created_at : undefined,

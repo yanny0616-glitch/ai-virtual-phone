@@ -52,6 +52,7 @@ export class MacroEngine {
     customAppRichMediaDirectives: string = "";
     customAppContext: string = "";
     chatBilingualInstruction: string = "";
+    voiceExpression: string = "";
     statusRegionSection: string = "";
     statusRegionExampleLine: string = "";
     statusRegionComposition: string = "";
@@ -185,6 +186,7 @@ export class MacroEngine {
         if (body === "customAppRichMediaDirectives" || body === "customAppChatCapabilities") return this.customAppRichMediaDirectives || "\x00TRIM\x00";
         if (body === "customAppContext" || body === "自定义应用状态") return this.customAppContext || "\x00TRIM\x00";
         if (body === "chatBilingualInstruction") return this.chatBilingualInstruction || "\x00TRIM\x00";
+        if (body === "voiceExpression") return this.voiceExpression || "\x00TRIM\x00";
         // 状态区宏：空值直返空串而非 TRIM——TRIM 会吞掉相邻换行把上下行粘死，off 挡留空行更安全
         if (body === "statusRegionSection") return this.statusRegionSection;
         if (body === "statusRegionExampleLine") return this.statusRegionExampleLine;

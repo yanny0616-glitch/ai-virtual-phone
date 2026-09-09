@@ -89,6 +89,7 @@ export interface AssemblerInput {
     customAppRichMediaDirectives?: string;   // formatted custom app rich-media directives
     customAppContext?: string;               // 自定义 app 注入的状态片段（{{customAppContext}}）
     chatBilingualInstruction?: string;       // session-specific bilingual output rule for {{chatBilingualInstruction}}
+    voiceExpression?: string;              // expanded inside the existing chat/voice format entry
     statusRegionSection?: string;            // {{statusRegionSection}} — 状态区章节（native 原文 / 空 / 自定义契约）
     statusRegionExampleLine?: string;        // {{statusRegionExampleLine}} — 主动消息输出示例中的状态区行
     statusRegionComposition?: string;        // {{statusRegionComposition}} — 文字聊天模式【输出构成】行
@@ -611,6 +612,7 @@ function isWBAtDepthPosition(entry: WorldBookEntry): boolean {
  * 预设里没有的东西一律不注入——不存在人设/世界书/记忆的硬编码兜底。
  */
 export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
+    input = { ...input, history: input.history.filter(message => !message.silentUpdate) };
     const { character, history, preset, worldBooks, regexes, userIdentity, userName = "User",
         longTermMemories, coreMemories, scheduleSummary } = input;
     const appId = input.appId ?? "chat";
@@ -688,6 +690,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
         engine.customAppRichMediaDirectives = input.customAppRichMediaDirectives ?? "";
         engine.customAppContext = input.customAppContext ?? "";
         engine.chatBilingualInstruction = input.chatBilingualInstruction ?? "";
+        engine.voiceExpression = input.voiceExpression ?? "";
         engine.statusRegionSection = input.statusRegionSection ?? "";
         engine.statusRegionExampleLine = input.statusRegionExampleLine ?? "";
         engine.statusRegionComposition = input.statusRegionComposition ?? "";

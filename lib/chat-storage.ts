@@ -199,6 +199,7 @@ export type ChatMessage = {
         callDuration?: string;    // 通话时长（如 05:23）
         voiceDuration?: number;   // 语音条时长（秒）
         synthesizedFromText?: string; // 语音条当前音频对应的合成文本
+        ttsText?: string; // 含情绪/声音标记的朗读原文；label/content 保持可读文本
         memoryContent?: string;   // 记忆写入内容
         memoryReason?: string;    // 记忆写入原因
         memoryImportance?: number;// 记忆写入重要性
@@ -236,6 +237,7 @@ export type ChatMessage = {
     statusPanel?: string; // AI display-only status content from [状态栏] tags
     statusRegionMode?: "custom"; // 该消息生成时会话处于自定义状态栏模式（缺省=原生渲染）
     innerMonologue?: string; // AI inner monologue content from [内心] tags
+    silentUpdate?: boolean; // 沉默轮的后台更新记录，不显示、不计未读、不作为对话历史
     reasoningText?: string; // 模型思维链（reasoning/CoT）内容，挂在回复批次的第一条气泡上
     stateValues?: StateValue[]; // parsed character state values from inner monologue
     // 本轮回复实际输出的状态值（未合并历史）。undefined = 旧数据（渲染时回退到 stateValues）；
@@ -320,6 +322,7 @@ export function isSystemInstructionMessage(msg: Pick<ChatMessage, "role" | "medi
 }
 
 export function getChatMessagePreview(msg: ChatMessage): string {
+    if (msg.silentUpdate) return "";
     if (isReadingDiscussMessage(msg)) return "";
 
     const userName = (() => { try { return resolveUserIdentity()?.name; } catch { return undefined; } })();
@@ -436,6 +439,7 @@ function hasPreviewText(text: string | undefined): boolean {
 }
 
 function isSessionPreviewCandidate(msg: ChatMessage): boolean {
+    if (msg.silentUpdate) return false;
     if (isReadingDiscussMessage(msg)) return false;
     if (msg.mediaType === "tool_result" || msg.mediaType === "tool_call") return false;
     if (msg.mediaType === "tool_notice") return false;
@@ -1272,10 +1276,10 @@ function publishChatMessage(newMsg: ChatMessage, persisted = false, insertedByTi
 
     if (isUnreadCandidate(newMsg)) bumpSessionUnread(newMsg.sessionId);
 
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && !newMsg.silentUpdate) {
         window.dispatchEvent(new CustomEvent(CHAT_MESSAGE_PUSHED_EVENT, { detail: { message: newMsg } }));
     }
-    emitChatPluginEvent("message.persisted", { message: newMsg });
+    if (!newMsg.silentUpdate) emitChatPluginEvent("message.persisted", { message: newMsg });
 
     return newMsg;
 }

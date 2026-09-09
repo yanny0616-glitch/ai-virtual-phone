@@ -378,9 +378,16 @@ function stripSilenceThinking(text: string, thinkingTag?: string): string {
     return text.replace(new RegExp(`<(${silenceThinkingTags(thinkingTag)})>[\\s\\S]*?<\\/\\1>`, "gi"), "");
 }
 
-/** Only a whole response is a decision. Quoting the token in prose is ordinary text. */
+/** A dedicated first-line decision may be followed by normal metadata/update instructions. */
 function isChatSilenceResponse(text: string, thinkingTag?: string): boolean {
-    return stripSilenceThinking(text, thinkingTag).trim() === CHAT_SILENCE_TOKEN;
+    const candidate = stripSilenceThinking(text, thinkingTag).trim();
+    return candidate === CHAT_SILENCE_TOKEN || candidate.startsWith(`${CHAT_SILENCE_TOKEN}\n`)
+        || candidate.startsWith(`${CHAT_SILENCE_TOKEN}\r\n`);
+}
+
+function stripChatSilenceMarker(text: string, thinkingTag?: string): string {
+    if (!isChatSilenceResponse(text, thinkingTag)) return text;
+    return stripSilenceThinking(text, thinkingTag).trim().slice(CHAT_SILENCE_TOKEN.length).trim();
 }
 
 /** Hold only the possible protocol prefix; normal prose continues streaming immediately. */
@@ -392,7 +399,7 @@ function createChatSilenceStreamFilter(emit: (text: string) => void | Promise<vo
             if (released) { await emit(delta); return; }
             pending += delta;
             const candidate = stripSilenceThinking(pending, thinkingTag).trimStart();
-            if (!candidate || CHAT_SILENCE_TOKEN.startsWith(candidate.trimEnd())
+            if (!candidate || isChatSilenceResponse(pending, thinkingTag) || CHAT_SILENCE_TOKEN.startsWith(candidate.trimEnd())
                 || new RegExp(`^(?:<(?:${silenceThinkingTags(thinkingTag)})>[\\s\\S]*|<\\/?[a-zA-Z0-9_-]*)$`, "i").test(candidate)) return;
             released = true;
             await emit(pending);
@@ -1336,6 +1343,26 @@ Deno.serve(async (req: Request) => {
     }
     let rawText = payload.generatedResponse.rawText;
     if (payload.allowSilence === true && isChatSilenceResponse(rawText, payload.silenceThinkingTag)) {
+      if (stripChatSilenceMarker(rawText, payload.silenceThinkingTag)) {
+        if (generationLease) {
+          const valid = await rest("rpc/push_generation_lease", { method: "POST", body: JSON.stringify({
+            p_user_id: job.user_id, p_session_id: generationLease.sessionId, p_token: generationLease.token, p_action: "renew",
+          }) });
+          if (!valid.ok || await valid.json() !== true) { await retry("hold: 沉默更新的会话生成租约失效"); return; }
+        }
+        // Retain updates for the normal client/plugin parser, without pushing a chat notification.
+        const saved = await rest("push_outbox?on_conflict=id", {
+          method: "POST", headers: { Prefer: "resolution=ignore-duplicates" },
+          body: JSON.stringify([{
+            id: `out_silence_${job.id}`, user_id: job.user_id, job_id: job.id,
+            session_id: payload.merge?.sessionId ?? null, trigger_key: job.trigger_key,
+            raw_text: `${CHAT_SILENCE_TOKEN}\n${stripChatSilenceMarker(rawText, payload.silenceThinkingTag)}`,
+            created_at: payload.generatedResponse.createdAt,
+            meta: { ...(payload.merge ?? {}), pushGenerated: true, silentUpdate: true },
+          }]),
+        });
+        if (!saved.ok) { await retry("silence updates pending: outbox write failed"); return; }
+      }
       await finish("done", "reply silenced");
       return;
     }

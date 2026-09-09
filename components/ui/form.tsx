@@ -40,16 +40,19 @@ export function Toggle({
   onChange,
   className,
   disabled,
+  "aria-label": ariaLabel,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   className?: string;
   disabled?: boolean;
+  "aria-label"?: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
+      aria-label={ariaLabel}
       aria-checked={checked}
       className={`ui-toggle ${className ?? ""}`}
       data-ui="toggle"

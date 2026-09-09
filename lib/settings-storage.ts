@@ -15,6 +15,7 @@ import type {
     PromptOrderEntry,
 } from "./settings-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
+import { migrateVoiceExpressionPreset } from "./voice-expression";
 import {
     createBuiltinPreset,
     BUILTIN_PRESET_VERSION,
@@ -213,7 +214,7 @@ export function loadPresets(): PresetConfig[] {
     if (typeof window === "undefined") return [];
     try {
         const cachedPresets = readPresetsCache();
-        const presets: PresetConfig[] = cachedPresets.map(stripDeprecatedPresetFields);
+        const presets: PresetConfig[] = cachedPresets.map(stripDeprecatedPresetFields).map(migrateVoiceExpressionPreset);
         let shouldPersistCleanup = JSON.stringify(cachedPresets) !== JSON.stringify(presets);
 
         // Ensure built-in preset exists and is up-to-date

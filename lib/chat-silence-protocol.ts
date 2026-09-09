@@ -9,9 +9,16 @@ function stripSilenceThinking(text: string, thinkingTag?: string): string {
     return text.replace(new RegExp(`<(${silenceThinkingTags(thinkingTag)})>[\\s\\S]*?<\\/\\1>`, "gi"), "");
 }
 
-/** Only a whole response is a decision. Quoting the token in prose is ordinary text. */
+/** A dedicated first-line decision may be followed by normal metadata/update instructions. */
 export function isChatSilenceResponse(text: string, thinkingTag?: string): boolean {
-    return stripSilenceThinking(text, thinkingTag).trim() === CHAT_SILENCE_TOKEN;
+    const candidate = stripSilenceThinking(text, thinkingTag).trim();
+    return candidate === CHAT_SILENCE_TOKEN || candidate.startsWith(`${CHAT_SILENCE_TOKEN}\n`)
+        || candidate.startsWith(`${CHAT_SILENCE_TOKEN}\r\n`);
+}
+
+export function stripChatSilenceMarker(text: string, thinkingTag?: string): string {
+    if (!isChatSilenceResponse(text, thinkingTag)) return text;
+    return stripSilenceThinking(text, thinkingTag).trim().slice(CHAT_SILENCE_TOKEN.length).trim();
 }
 
 /** Hold only the possible protocol prefix; normal prose continues streaming immediately. */
@@ -23,7 +30,7 @@ export function createChatSilenceStreamFilter(emit: (text: string) => void | Pro
             if (released) { await emit(delta); return; }
             pending += delta;
             const candidate = stripSilenceThinking(pending, thinkingTag).trimStart();
-            if (!candidate || CHAT_SILENCE_TOKEN.startsWith(candidate.trimEnd())
+            if (!candidate || isChatSilenceResponse(pending, thinkingTag) || CHAT_SILENCE_TOKEN.startsWith(candidate.trimEnd())
                 || new RegExp(`^(?:<(?:${silenceThinkingTags(thinkingTag)})>[\\s\\S]*|<\\/?[a-zA-Z0-9_-]*)$`, "i").test(candidate)) return;
             released = true;
             await emit(pending);

@@ -5,6 +5,7 @@
  * Messages are saved to storage; UI is notified via CustomEvent.
  */
 
+import { stripChatSilenceMarker } from "./chat-silence-protocol";
 import {
     loadChatSessions,
     loadChatMessages,
@@ -920,6 +921,7 @@ export async function parseAndSaveResponse(
         senderCharacterId?: string;
         senderName?: string;
         silent?: boolean;
+        suppressReply?: boolean;
         /** 离线回端整批落盘成功后才发布，失败交给消费器重试。 */
         durable?: boolean;
         responseBatchId?: string;
@@ -948,7 +950,9 @@ export async function parseAndSaveResponse(
     const sess = sessions.find(s => s.id === sessionId);
     const previousState = sess && !sess.isGroup ? getLatestCharacterStateValues(sess.contactId) : [];
 
-    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(rawText, previousState);
+    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(
+        options?.suppressReply ? stripChatSilenceMarker(rawText) : rawText, previousState,
+    );
 
     // 自定义状态栏渲染戳：追发/屏幕速聊/离线回传落库的消息此前从不盖
     // statusRegionMode，custom 模式下 [状态栏] 原文被当 markdown 渲染成一坨
@@ -956,6 +960,18 @@ export async function parseAndSaveResponse(
     const statusRegionMode = statusPanel && isCustomStatusRegionActive(getStatusRegionConfig(sessionId))
         ? ("custom" as const)
         : undefined;
+
+    if (options?.suppressReply) {
+        // A hidden carrier consumes plugin pending metadata for THIS round, even when
+        // the plugin already removed the entire inner-monologue block from rawText.
+        saveMessage({
+            sessionId, role: "assistant", content: "", silentUpdate: true,
+            createdAt: options.createdAt, responseBatchId, statusPanel, statusRegionMode,
+            innerMonologue, reasoningText, stateValues, freshStateValues,
+        });
+        if (batch) await batch.commit();
+        return { hasVisible: false, newCount: currentCount, stateValues };
+    }
 
     // Detect call triggers and AI media actions, filter them out (not stored as messages)
     let triggerCall: "voice" | "video" | undefined;

@@ -66,6 +66,8 @@ export type Prompt = {
 };
 
 export type PresetConfig = SettingItemMeta & {
+    /** One-time, non-destructive insertion of voice-expression macro into existing format entries. */
+    voiceExpressionVersion?: number;
     builtIn?: boolean;
     builtInVersion?: number;
     /** 出厂条目补丁号，见 builtin-preset.ts 的 BUILTIN_PROMPT_PATCH_VERSION */
@@ -178,6 +180,9 @@ export type VoiceApiConfig = {
     speechSpeed?: number;
     /** Minimax voice_setting.pitch（半音，±12）。缺省保持旧行为（0，原声）。 */
     speechPitch?: number;
+    /** Opt-in expressive host chat and voice calls; missing means disabled. */
+    speechExpressionEnabled?: boolean;
+    speechExpressionPrompt?: string;
     customVoices?: { id: string; name: string; createdAt?: number }[];
     enableSTT: boolean;
     enableTTS: boolean;

@@ -10,6 +10,7 @@
  */
 
 import type { ChatMessage } from "./chat-storage";
+import { extractVoiceExpression } from "./voice-expression";
 import type { StateValue } from "./chat-storage";
 import { parseStateValues, mergeStateValues } from "./state-value-parser";
 import { stripActionShells } from "./action-parser";
@@ -246,11 +247,14 @@ const RICH_PATTERNS: {
     {
         // [语音条:文字内容] — voice message
         regex: new RegExp(`\\[语音条${C}([^\\]]+)\\]`),
-        build: (m) => ({
-            content: "",
-            mediaType: "audio" as const,
-            mediaData: { label: m[1].trim() },
-        }),
+        build: (m) => {
+            const speech = extractVoiceExpression(m[1].trim(), true);
+            return {
+                content: "",
+                mediaType: "audio" as const,
+                mediaData: { label: speech.displayText, ...(speech.ttsText ? { ttsText: speech.ttsText } : {}) },
+            };
+        },
     },
     {
         regex: /\[我向[^\]]+发起了语音通话\]/,
@@ -658,8 +662,11 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
     const cleaned = parts.map(p => {
         if (p.mediaType) return p;
         const display = stripTextToolDirectives(restore(p.content));
-        return { ...p, content: display };
-    }).filter(p => p.mediaType || !isInvisibleOrWhitespaceOnly(p.content));
+        const speech = extractVoiceExpression(display);
+        return { ...p, content: speech.displayText, ...(speech.ttsText ? { mediaData: { ...p.mediaData, ttsText: speech.ttsText } } : {}) };
+    }).filter(p => p.mediaType === "audio" && p.mediaData?.ttsText
+        ? !isInvisibleOrWhitespaceOnly(p.mediaData.label || "")
+        : p.mediaType || !isInvisibleOrWhitespaceOnly(p.content));
 
     return {
         parts: cleaned,

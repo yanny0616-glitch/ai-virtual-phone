@@ -2,8 +2,14 @@
 
 import type { VoiceApiConfig, ContentAppId } from "./settings-types";
 import { loadVoiceConfigs, loadBindingConfig, resolveBinding } from "./settings-storage";
+import { prepareVoiceExpression } from "./voice-expression";
 
 export type VoiceApiConfigResolved = VoiceApiConfig;
+
+export async function synthesizeChatSpeech(text: string, config: VoiceApiConfig): Promise<Blob | null> {
+    const speech = prepareVoiceExpression(text, config);
+    return synthesizeSpeech(speech.text, config, { emotion: speech.emotion });
+}
 
 /**
  * Resolve the TTS voice config for a character via the binding cascade.

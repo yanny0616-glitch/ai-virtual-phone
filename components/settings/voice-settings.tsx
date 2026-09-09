@@ -5,7 +5,9 @@ import { Plus, Play, Pause, AlertCircle, RefreshCw, FileEdit, Trash2, X, Check, 
 import { SettingsContext } from "../phone-settings-app";
 import type { VoiceApiConfig } from "@/lib/settings-types";
 import { loadVoiceConfigs, saveVoiceConfigs } from "@/lib/settings-storage";
-import { synthesizeSpeech } from "@/lib/tts-service";
+import { synthesizeChatSpeech } from "@/lib/tts-service";
+import { isVoiceExpressionEnabled, supportsVoiceSoundTags } from "@/lib/voice-expression";
+import { VoiceExpressionSettings } from "./voice-expression-settings";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { Toggle, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
@@ -532,8 +534,11 @@ export function VoiceSettings() {
             const previewText = config.provider === "Minimax" && config.languageBoost
                 ? MINIMAX_PREVIEW_TEXT[config.languageBoost] || "你好，很高兴认识你。这是一段语音试听。"
                 : "你好，我现在是" + (config.defaultVoice || "默认") + "音色。很高兴认识你。";
-            const blob = await synthesizeSpeech(
-                previewText,
+            const expressivePreview = isVoiceExpressionEnabled(config)
+                ? `<tts:happy>${previewText}${supportsVoiceSoundTags(config) ? "(chuckle)" : ""}`
+                : previewText;
+            const blob = await synthesizeChatSpeech(
+                expressivePreview,
                 config,
             );
             if (!blob) throw new Error("当前语音配置未返回真实音频");
@@ -742,6 +747,7 @@ export function VoiceSettings() {
 
                                         {config.provider === "Minimax" && (
                                             <>
+                                                <VoiceExpressionSettings config={config} onChange={patch => updateConfig(config.id, patch)} />
                                                 <div className="flex flex-col gap-1">
                                                     <div className="flex items-center justify-between px-1">
                                                         <label className="menu-desc">语速 (Speed)</label>

@@ -5,8 +5,8 @@ import { stripTypeScriptTypes } from 'node:module';
 const read = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
 const js = s => stripTypeScriptTypes(s).replace(/^export /gm, '');
 const protocol = vm.createContext({});
-vm.runInContext(js(read('lib/chat-silence-protocol.ts')) + '\nglobalThis.api={isChatSilenceResponse,createChatSilenceStreamFilter};', protocol);
-const { isChatSilenceResponse, createChatSilenceStreamFilter } = protocol.api;
+vm.runInContext(js(read('lib/chat-silence-protocol.ts')) + '\nglobalThis.api={isChatSilenceResponse,stripChatSilenceMarker,createChatSilenceStreamFilter};', protocol);
+const { isChatSilenceResponse, stripChatSilenceMarker, createChatSilenceStreamFilter } = protocol.api;
 for (const value of ['[本轮不回复]', ' \n[本轮不回复]\n', '<think>不想回应</think>[本轮不回复]', '<thought>先想想</thought>[本轮不回复]']) {
   assert.ok(isChatSilenceResponse(value, 'thought'));
   let visible = '';
@@ -55,10 +55,11 @@ const native = engine.slice(engine.indexOf('async function generateNativeChatCom
 const core = engine.slice(engine.indexOf('async function generateChatCompletionCore('), engine.indexOf('/**\n * Preview'));
 assert.ok(native.length > 1000 && core.length > 1000);
 async function completion({ output = '[本轮不回复]', stream = false, nativeTools = false, enabled = true, fail = false } = {}) {
-  const visible = [], deltas = [], effects = [];
+  const visible = [], deltas = [], effects = [], updates = [];
   const request = async () => { if (fail) throw new Error('network down'); return output; };
   const streamRequest = async (...args) => { const text = await request(); for (const char of text) await args.at(-1).onDelta(char); return { content: text, toolCalls: [] }; };
-  const context = vm.createContext({ console, isChatSilenceResponse, createChatSilenceStreamFilter,
+  const context = vm.createContext({ console, isChatSilenceResponse, stripChatSilenceMarker, createChatSilenceStreamFilter,
+    persistChatSilenceMetadata: async (_session, text) => { updates.push(stripChatSilenceMarker(text)); },
     buildChatPromptMessages: async () => ({ llmMessages: [], character: { id: 'c', name: '角色' }, config: {}, preset: {}, regexes: [], userIdentity: {}, toolsEnabled: nativeTools, allowSilence: enabled }),
     mergeAppTags: tags => tags, maybeAppendShortcutCapability() {}, isSessionStreamingEnabled: () => stream,
     getEnabledTools: () => nativeTools ? [{ source: 'rest', sourceId: 'test' }] : [], nativeToolProtocolForConfig: () => nativeTools,
@@ -76,12 +77,16 @@ async function completion({ output = '[本轮不回复]', stream = false, native
   const result = await context.core({ id: 's', contactId: 'c' }, [], { appTags: ['followup'] }, {
     onTextPart: text => visible.push(text), onStreamDelta: text => deltas.push(text),
   }, bailout);
-  return { result, visible, deltas, effects };
+  return { result, visible, deltas, effects, updates };
 }
 for (const nativeTools of [false, true]) for (const stream of [false, true]) {
   const silent = await completion({ nativeTools, stream });
   assert.equal(silent.result.silenced, true);
   assert.equal(silent.result.parts.length, 0); assert.equal(silent.visible.length, 0); assert.equal(silent.deltas.length, 0); assert.equal(silent.effects.length, 0);
+  const withMetadata = await completion({ nativeTools, stream, output: '[本轮不回复]\n[好感度:42][内心]我记得这件事。[/内心]' });
+  assert.equal(withMetadata.result.silenced, true);
+  assert.equal(withMetadata.visible.length, 0); assert.equal(withMetadata.deltas.length, 0);
+  assert.deepEqual(withMetadata.updates, ['[好感度:42][内心]我记得这件事。[/内心]']);
   const reply = await completion({ nativeTools, stream, output: '我还没想好怎么说。' });
   assert.notEqual(reply.result.silenced, true); assert.deepEqual(reply.visible, ['我还没想好怎么说。']);
   if (stream) assert.equal(reply.deltas.join(''), '我还没想好怎么说。');
