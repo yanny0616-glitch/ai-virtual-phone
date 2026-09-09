@@ -13,7 +13,7 @@
 <p id="notice" class="sg-save-hint" role="status" aria-live="polite"></p>
 <section id="memories"><div id="cards"><p class="sg-empty">正在翻找记忆…</p></div><button id="more" class="sg-action sg-more" type="button" hidden>显示更多</button></section>
 <section id="rules" hidden aria-label="回忆规则">
-<div class="sg-note sg-static"><h2>选哪条，由这些规则决定</h2><dl class="sg-rules"><dt>优先携带</dt><dd>不需要话题命中，在预算内优先放入，最多占预算一半。适合重要关系、边界或希望经常记住的事。</dd><dt>按话题回忆</dt><dd>按标题和关键词匹配最近几句聊天；昨天至未来 7 天内仍待兑现的约定也可入选。</dd><dt>不发送</dt><dd>只留在记忆本里，不放进聊天提示词。</dd></dl><p class="sg-fine">每来一条新消息都按最近几句重选一遍，所以「按话题回忆」跟的是上一轮话题。整理用的模型按「绑定配置」里给拾光绑的 API，没绑就用这位角色的聊天模型。</p></div>
+<div class="sg-note sg-static"><h2>选哪条，由这些规则决定</h2><dl class="sg-rules"><dt>优先携带</dt><dd>不需要话题命中，在预算内优先放入，最多占预算一半。适合重要关系、边界或希望经常记住的事。</dd><dt>按话题回忆</dt><dd>优先匹配标题和关键词，摘要及最新后续也能帮助找到相关记忆；昨天至未来 7 天内仍待兑现的约定也可入选。</dd><dt>不发送</dt><dd>只留在记忆本里，不放进聊天提示词。</dd></dl><p class="sg-fine">新版小手机支持普通私聊在回复前按当前话题选取记忆；其他场景沿用最近同步的回忆。整理用的模型按「绑定配置」里给拾光绑的 API，没绑就用这位角色的聊天模型。</p></div>
 <form id="settings" class="sg-note sg-static sg-update">
 <label class="sg-switch"><span>启用拾光记录与回忆<small>关闭后保留记录，暂停整理与发送。</small></span><input type="checkbox" name="enabled"></label>
 <label class="sg-switch"><span>自动整理新消息<small>聊满设定轮数就自动整理，小手机关着也会跑。</small></span><input type="checkbox" name="autoEnabled"></label>

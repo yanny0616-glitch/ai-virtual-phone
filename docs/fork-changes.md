@@ -152,6 +152,10 @@
 
 ### 拾光独立 APP（2026-09-07，2.0）
 
+- 2.1.1（2026-09-09）改善关键词覆盖与本地召回：整理提示词要求具体名称、简短叫法及摘要细节，落库去重复、过滤独立泛词；检索分为完整关键词、标题/关键词分词、摘要/后续分词三档，旧记录无需重跑模型。保留原预算、优先携带、约定日期和删除保护。新增 `check-shiguang-recall.mjs` 正反例并接入拾光专项；没有引入向量服务或额外 API 调用。
+
+- 2.1.0（2026-09-09）普通文字私聊改为当轮召回：宿主新增通用 `extensions.prompt.contextProvider` / `chat.registerContextProvider`，通过现有 iframe handler 通道等待 APP 返回本次记忆，默认最多 2000ms。请求结果覆盖本轮该 APP 的状态，不写共享缓存；无命中/关闭/失败/超时省略，其他 APP 内容保留。拾光只读最新设置与记录、沿用现有预算和关键词规则，不调模型、不运行整理。APP 未打开时可后台执行；群聊、追发、线下模式、云端主动消息沿用原路径。需同步更新宿主和拾光 2.1.0，旧数据无需迁移。验证入口见拾光架构说明。
+
 - 2.0.3 修复同文注入不续期：`syncContext` 每次同步都写 `chat.setContext`，避免跨天或超过宿主 6 小时过期后，即使继续收到事件也因文本相同而一直漏掉记忆。专项脚本 `check-shiguang-context.mjs` 使用真实宿主状态格式化器验证过期后恢复、跨天刷新、角色隔离和关闭撤销，已接入 `check:shiguang-app`；首轮事件时序边界保持不变。
 - `custom-apps/shiguang` 是真正的独立 APP：记录存在 APP 自己的 db，整理（`ai.chat`）、回忆选取、注入（`chat.setContext`）、自动触发（`chat.message.created` 后台事件）全在 APP 内。目录结构与挂念一致（`src/domain/*.mjs` 纯函数 + 闭包模块 + `bundle.json`），`scripts/build-shiguang.mjs` 合成单文件。架构与关键决定见 `custom-apps/shiguang/ARCHITECTURE.md`。
 - 宿主删除了整个拾光管线：`lib/shiguang-summarizer.ts`、`lib/shiguang-domain.ts`、`memory-service` 的注入、`memory-summarizer` / `follow-up-service` 的触发、`memory-storage` 的编辑与水位函数、运行器里的六个专属 bridge 动作及 `memory.writeShiguang` / `memory.organizeShiguang` 权限。只保留只读的 `memory.readShiguang`（`lib/shiguang-app-api.ts`），供 APP 第一次打开时把 2.0 之前存在记忆库里的旧记录搬走。`lib/shiguang-types.ts` 与 `MemoryEntry.type = "shiguang"` 保留，旧数据仍可备份恢复。

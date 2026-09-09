@@ -1,10 +1,10 @@
 {
   "id": "float.shiguang",
   "name": "拾光",
-  "version": "2.0.3",
+  "version": "2.1.1",
   "sdkVersion": "1.0",
   "author": "Float",
-  "description": "按角色收藏共同经历：自动从聊天里整理出值得记住的小事，按话题带进下一次对话。摘要可见可编辑，发送方式随你定。",
+  "description": "按角色收藏共同经历：自动整理值得记住的小事，普通私聊按当前话题回忆。摘要可见可编辑，发送方式随你定。",
   "icon": "icon.svg",
   "entry": "index.html",
   "permissions": [
@@ -19,6 +19,7 @@
     "memory.readShiguang"
   ],
   "extensions": {
+    "prompt": { "contextProvider": { "timeoutMs": 2000 } },
     "events": [
       {
         "event": "chat.message.created",

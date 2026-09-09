@@ -5,6 +5,9 @@
       notice("这个版本的小手机还不支持拾光 APP，请先更新宿主。", true); $("cards").innerHTML = ""; return;
     }
     S.api.on("chat.message.created", onChatMessage);
+    if (S.api.chat.registerContextProvider) {
+      S.api.chat.registerContextProvider(providePromptContext).catch(err => console.warn("[拾光] 当轮回忆注册失败", err));
+    }
     S.launch = await S.api.app.getLaunchContext().catch(() => null);
     S.background = !!(S.launch && S.launch.background);
     if (S.background) return;   // 隐藏环境只跑事件 handler，不渲染界面

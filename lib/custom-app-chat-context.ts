@@ -8,6 +8,7 @@
 
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { loadInstalledCustomApps } from "./custom-app-storage";
+import type { CustomAppPromptContexts } from "./custom-app-prompt-context";
 
 const KEY = "custom_app_chat_context_v1";
 registerKvMigration(KEY);
@@ -132,21 +133,27 @@ function isStaleContext(updatedAt: unknown): boolean {
     return a.getFullYear() !== n.getFullYear() || a.getMonth() !== n.getMonth() || a.getDate() !== n.getDate();
 }
 
-export function formatCustomAppChatContextForPrompt(characterId?: string): string {
+export function formatCustomAppChatContextForPrompt(characterId?: string, currentTurn?: CustomAppPromptContexts): string {
     const store = readStore();
-    if (Object.keys(store).length === 0) return "";
+    if (Object.keys(store).length === 0 && !currentTurn) return "";
     const allowed = new Map(
         loadInstalledCustomApps()
             .filter(app => app.permissions.includes("chat.context"))
             .map(app => [app.id, app.name]),
     );
+    const readable = new Set(loadInstalledCustomApps()
+        .filter(app => app.permissions.includes("chat.read") || app.permissions.includes("chat.read.background"))
+        .map(app => app.id));
     if (allowed.size === 0) return "";
 
     const scope = trim(characterId, 160);
     const blocks: string[] = [];
-    for (const [appId, bucket] of Object.entries(store)) {
+    for (const appId of new Set([...Object.keys(store), ...Object.keys(currentTurn || {})])) {
         if (!allowed.has(appId)) continue;
-        const entry = (scope && bucket[scope]) || bucket[GLOBAL_SCOPE];
+        const bucket = store[appId] || {};
+        const fresh = currentTurn?.[appId];
+        if (fresh !== undefined && !readable.has(appId)) continue;
+        const entry = fresh !== undefined ? { ...fresh, updatedAt: Date.now(), appName: "" } : (scope && bucket[scope]) || bucket[GLOBAL_SCOPE];
         if (!entry?.text?.trim()) continue;
         // app 关着就不再刷新，写死的「在开会」过几小时就是假话；隔了天更别当此刻
         if (isStaleContext(entry.updatedAt)) continue;

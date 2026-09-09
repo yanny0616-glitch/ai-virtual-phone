@@ -4,6 +4,7 @@ import type { CustomAppToolDefinition, InstalledCustomApp } from "./custom-app-t
 import { toolNameMatches, type ToolNameMacroContext } from "./tool-storage";
 import type { CustomAppHostAction } from "./custom-app-host-api";
 import type { ToolCall, ToolExecutionContext, ToolResult } from "./tool-executor";
+import type { CustomAppPromptContextInput } from "./custom-app-prompt-context";
 
 export type CustomAppToolExecutorPayload = {
   app: InstalledCustomApp;
@@ -16,6 +17,23 @@ export type CustomAppToolExecutor = (payload: CustomAppToolExecutorPayload) => P
 
 const customAppToolExecutors = new Map<string, CustomAppToolExecutor>();
 let customAppBackgroundToolExecutor: CustomAppToolExecutor | null = null;
+
+/** 复用 iframe handler 的请求/结果通道，不注册模型工具、不触发工具动作。 */
+export async function invokeCustomAppContextProvider(app: InstalledCustomApp, input: CustomAppPromptContextInput, timeoutMs: number): Promise<unknown> {
+  const payload: CustomAppToolExecutorPayload = {
+    app,
+    tool: { id: "__prompt_context__", name: "__prompt_context__", handler: "__prompt_context__", appId: app.id, appName: app.name, timeoutMs },
+    args: { ...input },
+    context: { sessionId: input.sessionId, characterId: input.characterId, appId: "chat" },
+  };
+  const foreground = customAppToolExecutors.get(app.id);
+  if (foreground) {
+    try { return await foreground(payload); }
+    catch (error) { if (!isRuntimeHandlerMissing(errorMessage(error))) throw error; }
+  }
+  if (!customAppBackgroundToolExecutor) throw new Error("APP 后台运行器尚未就绪");
+  return customAppBackgroundToolExecutor(payload);
+}
 
 function stringifyToolData(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;

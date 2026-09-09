@@ -1,5 +1,5 @@
 // 整理：把聊天原消息变成拾光记录。提示词、候选挑选、结果校验都在这里，模型请求在 core/organize.js。
-import { clean, overlap, hash, isValidDate } from "./text.mjs";
+import { clean, overlap, hash, isValidDate, normalizeKeywords } from "./text.mjs";
 import { CATEGORIES, defaultSummary, recallMode } from "./recall.mjs";
 
 function candidateText(entry) {
@@ -35,7 +35,12 @@ ${events}
 卡片 summary/story/details 保留有依据的人名、具体物品或作品名、关键行为、约定日期和完成情况，不把具体事实概括成泛泛习惯。
 promptSummary 是后续发给角色回忆用的一段话，最多200字：保留事实、缘由、日期、承诺和当前进展，不要空话。
 pinned 只对持续重要的边界、关系和相处习惯填 true（会每次都带上）；普通经历填 false（按话题命中才带上）。
-dueAt 仅在原文日期能确定时填 YYYY-MM-DD，不确定留空；完成或取消后清空。keywords 给2到6个具体检索词，不用「聊天」「用户」等泛词。
+dueAt 仅在原文日期能确定时填 YYYY-MM-DD，不确定留空；完成或取消后清空。
+keywords 给2到8个不重复的检索词，按「以后聊天时会怎么提起这件事」选择：
+- 优先保留原文的人名/称呼、地点、具体物品或作品名，以及这件事区别于其他事的关键事实。
+- 复合名称同时保留有用的简短叫法，例如「草莓蛋糕」与「蛋糕」；有明确依据时补常用称呼或同义叫法，例如「生日礼物」与「礼物」。
+- 关键词要覆盖摘要里值得再次提起的具体细节，不要只重复标题；例如原文说「奶油太甜」，可保留「奶油」「太甜」。
+- 不编造人名昵称、关系或新事实；不堆泛词如「聊天」「用户」「今天」「一起」「喜欢」「开心」，不把整句话当一个关键词。具体词不够时可以少于2个，不凑数。
 details/reason/significance 没有依据就留空。status=remembered 普通记忆，pending 未兑现约定，completed 已兑现，changed 已变化。
 仅输出一个JSON对象（不要代码围栏）：
 {"memories":[{"existingId":"新记录留空","title":"简短标题，最多24字","summary":"卡片简述，最多80字","categories":["共同经历"],"reason":"事情缘由","story":"发生的事情及双方回应","details":[{"label":"日期","value":"具体信息"}],"significance":"值得记住的缘由","promptSummary":"发给角色回忆的摘要","pinned":false,"keywords":["具体检索词"],"dueAt":"","status":"remembered","followup":"最新后续，没有留空","sourceIds":["s1"]}]}
@@ -96,7 +101,7 @@ export function parseResult(raw, sources, candidates, characterId, now) {
       significance: text(item.significance, 600) || (old && old.significance) || "",
       promptSummary: text(item.promptSummary, 600) || (old && old.promptSummary) || "",
       recallMode: old && old.recallMode ? old.recallMode : (item.pinned === true ? "priority" : "relevant"),
-      keywords: Array.isArray(item.keywords) ? item.keywords.slice(0, 8).map(v => text(v, 40, true)) : [],
+      keywords: Array.isArray(item.keywords) ? normalizeKeywords(item.keywords.slice(0, 24).map(v => text(v, 40, true))).slice(0, 8) : [],
       status, dueAt: status === "pending" ? dueAt || undefined : undefined,
       followup: text(item.followup, 1000),
     };

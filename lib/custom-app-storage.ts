@@ -546,6 +546,10 @@ export function normalizeCustomAppManifest(raw: unknown): CustomAppManifest {
   };
   const uiExtensions = asRecord(extensionsRecord.ui);
   const promptExtension = asRecord(extensionsRecord.prompt);
+  const rawContextProvider = promptExtension.contextProvider;
+  const contextProvider = rawContextProvider && typeof rawContextProvider === "object" && !Array.isArray(rawContextProvider)
+    ? { timeoutMs: Math.max(100, Math.min(3000, Number(asRecord(rawContextProvider).timeoutMs) || 2000)) }
+    : undefined;
   const rawChatDirectives = Array.isArray(canonicalChatExtensions.directives)
     ? canonicalChatExtensions.directives as unknown[]
     : [
@@ -646,11 +650,11 @@ export function normalizeCustomAppManifest(raw: unknown): CustomAppManifest {
       searchProviders: searchProviders.length > 0 ? searchProviders : undefined,
     }
     : undefined;
-  const extensions: CustomAppExtensions | undefined = chatBlock || uiBlock || promptProfiles.length > 0 || tools.length > 0 || events.length > 0
+  const extensions: CustomAppExtensions | undefined = chatBlock || uiBlock || promptProfiles.length > 0 || contextProvider || tools.length > 0 || events.length > 0
     ? {
       chat: chatBlock,
       ui: uiBlock,
-      prompt: promptProfiles.length > 0 ? { profiles: promptProfiles } : undefined,
+      prompt: promptProfiles.length > 0 || contextProvider ? { profiles: promptProfiles.length > 0 ? promptProfiles : undefined, contextProvider } : undefined,
       tools: tools.length > 0 ? tools : undefined,
       events: events.length > 0 ? events : undefined,
     }

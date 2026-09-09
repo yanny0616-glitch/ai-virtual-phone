@@ -455,6 +455,11 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       unsubscribe: function(eventName){ return request('events.unsubscribe', { event: eventName }); }
     },
     chat: {
+      registerContextProvider: function(handler){
+        if (typeof handler !== 'function') throw new Error('AiPhone.chat.registerContextProvider 需要函数');
+        toolHandlers.__prompt_context__ = handler;
+        return request('chat.registerContextProvider');
+      },
       getCurrentSession: function(){ return request('chat.getCurrentSession'); },
       readHistory: function(payload){ return request('chat.readHistory', payload || {}); },
       sendMessage: function(payload){ return request('chat.sendMessage', payload || {}); },
@@ -1058,7 +1063,14 @@ export function CustomAppRunner({
   const invokeOpenAppTool = useCallback((payload: CustomAppToolExecutorPayload) => (
     new Promise<unknown>((resolve, reject) => {
       const toolRequestId = `${frameId}_tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      pendingToolInvocationsRef.current.set(toolRequestId, { resolve, reject });
+      const timeout = payload.tool.id === "__prompt_context__" ? window.setTimeout(() => {
+        pendingToolInvocationsRef.current.delete(toolRequestId);
+        reject(new Error("上下文 provider 执行超时"));
+      }, payload.tool.timeoutMs || 2000) : undefined;
+      pendingToolInvocationsRef.current.set(toolRequestId, {
+        resolve: value => { window.clearTimeout(timeout); resolve(value); },
+        reject: error => { window.clearTimeout(timeout); reject(error); },
+      });
       iframeRef.current?.contentWindow?.postMessage({
         source: "ai-phone-custom-app-host",
         type: "tool.invoke",
@@ -1179,6 +1191,15 @@ export function CustomAppRunner({
       if (!eventName) return true;
       subscribedEventsRef.current.delete(eventName);
       return true;
+    }
+
+    if (action === "chat.registerContextProvider") {
+      requirePermission("chat.context");
+      requireAnyPermission(["chat.read", "chat.read.background"]);
+      if (!app.manifest.extensions?.prompt?.contextProvider) throw new Error("manifest.extensions.prompt 未声明 contextProvider");
+      registeredToolHandlersRef.current.add("__prompt_context__");
+      if (backgroundTool) window.setTimeout(postBackgroundToolIfReady, 0);
+      return { ok: true };
     }
 
     if (action === "tools.registerHandler") {
@@ -2070,7 +2091,9 @@ export function CustomAppRunner({
   }, [app, isBackgroundRunner, postHostEvent]);
 
   useEffect(() => {
-    if (isBackgroundRunner || !hasPermission(app, "chat.tools")) return undefined;
+    const contextProvider = app.manifest.extensions?.prompt?.contextProvider && hasPermission(app, "chat.context")
+      && (hasPermission(app, "chat.read") || hasPermission(app, "chat.read.background"));
+    if (isBackgroundRunner || (!hasPermission(app, "chat.tools") && !contextProvider)) return undefined;
     return registerCustomAppToolExecutor(app.id, invokeOpenAppTool);
   }, [app, invokeOpenAppTool, isBackgroundRunner]);
 

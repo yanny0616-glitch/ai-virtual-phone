@@ -1,5 +1,5 @@
 // 回忆选取：哪些拾光进聊天、发什么字。APP 卡片和注入文字共用这里的函数。
-import { clean, overlap, estimateTokens } from "./text.mjs";
+import { clean, searchTerms, normalizeKeywords, estimateTokens } from "./text.mjs";
 
 export const CATEGORIES = ["共同经历", "约定与承诺", "喜好与边界", "人物与关系", "重要信息"];
 export const STATUSES = { remembered: "记在心里", pending: "等待兑现", completed: "已经完成", changed: "计划有变" };
@@ -41,15 +41,24 @@ export function selectForPrompt(entries, context, tokenBudget, now = new Date())
   const budget = Math.max(0, Math.min(4000, Number.isFinite(tokenBudget) ? tokenBudget : 800));
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const cleanContext = clean(context);
+  const contextTerms = new Set(searchTerms(context));
+  const hits = text => searchTerms(text).filter(term => contextTerms.has(term)).length;
   const ranked = entries.filter(isActive).map(entry => {
     const mode = recallMode(entry);
     const due = entry.dueAt ? new Date(entry.dueAt + "T00:00:00").getTime() : NaN;
     const days = (due - today) / 86400000;
-    const keywords = entry.keywords || [];
-    const relevance = overlap(entry.title + " " + keywords.join(" "), context);
-    const keywordHit = keywords.some(k => clean(k).length >= 2 && cleanContext.includes(clean(k)));
+    const keywords = normalizeKeywords(entry.keywords || []);
+    const primaryHits = hits(entry.title + " " + keywords.join(" "));
+    const keywordHit = keywords.some(k => /^[a-z0-9]+$/i.test(clean(k))
+      ? contextTerms.has(clean(k)) : cleanContext.includes(clean(k)));
+    // 摘要/后续仅作低权重补充；不修改旧记录、不为它们重新请求模型。
+    const bodyHits = keywordHit || primaryHits ? 0
+      : hits(((entry.promptSummary || "").trim() || defaultSummary(entry)) + " " + (entry.followup || ""));
+    const relevance = keywordHit ? 20 + Math.min(primaryHits, 8)
+      : primaryHits ? 12 + Math.min(primaryHits, 8)
+      : bodyHits ? 4 + Math.min(bodyHits, 4) : 0;
     const timely = entry.status === "pending" && days >= -1 && days <= 7;
-    return { entry, mode, score: (keywordHit ? 20 : 0) + relevance + (timely ? 15 : 0), relevant: keywordHit || relevance >= 3 || timely };
+    return { entry, mode, score: relevance + (timely ? 15 : 0), relevant: relevance > 0 || timely };
   }).filter(v => v.mode !== "off" && (v.mode === "priority" || v.relevant));
   const byRecent = (a, b) => b.score - a.score || String(b.entry.updatedAt).localeCompare(String(a.entry.updatedAt));
   const priority = ranked.filter(v => v.mode === "priority").sort(byRecent);

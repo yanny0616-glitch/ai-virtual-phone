@@ -73,6 +73,7 @@ import type { ToolCall, ToolResult } from "./tool-executor";
 import { getCustomStickerNames, getCustomStickerExample } from "./custom-sticker-storage";
 import { formatCustomAppChatDirectivesForPrompt } from "./custom-app-chat-directives";
 import { formatCustomAppChatContextForPrompt } from "./custom-app-chat-context";
+import { prepareCustomAppPromptContexts } from "./custom-app-prompt-context";
 import { formatReplyGateNoteForPrompt } from "./chat-reply-gate";
 import { loadAllTracks } from "./music-storage";
 import { getActiveAppTags } from "./content-tag-utils";
@@ -1965,7 +1966,18 @@ export async function buildChatPromptMessages(
     });
     const pluginPromptHint = pluginPrompt.hint?.trim() ? `\n\n### 扩展插件\n${pluginPrompt.hint.trim()}\n` : "";
     const customAppRichMediaDirectives = formatCustomAppChatDirectivesForPrompt() + buildScreenEffectPromptHint() + pluginPromptHint;
-    const customAppContext = [formatCustomAppChatContextForPrompt(character.id), formatReplyGateNoteForPrompt(session.id)].filter(Boolean).join("\n\n");
+    // 普通文字私聊：本次输入先召回，再装配；追发、离线和其他场景仍使用已有 APP 状态。
+    const currentTurnAppContext = !isOfflineMode && !session.isGroup && resolvedAppId === "chat"
+        && options?.appTags?.includes("text") === true && !options?.followUpCount
+        && !options?.appTags?.includes("followup") && !options?.promptProfile
+        && history.at(-1)?.role === "user"
+        ? await prepareCustomAppPromptContexts({
+            characterId: character.id,
+            sessionId: session.id,
+            messages: history.filter(m => !m.isRetracted && (m.role === "user" || m.role === "assistant")).slice(-8)
+                .map(m => ({ id: m.id, role: m.role, content: stripStateAndInnerForPrompt(m.content), createdAt: m.createdAt })),
+        }) : undefined;
+    const customAppContext = [formatCustomAppChatContextForPrompt(character.id, currentTurnAppContext), formatReplyGateNoteForPrompt(session.id)].filter(Boolean).join("\n\n");
     const toolsPrompt = toolsEnabled && !usesNativeActions ? formatToolsForPrompt(enabledTools) : "";
     const chatBilingualInstruction = !session.isGroup
         ? buildChatBilingualInstruction(session.bilingualTranslationEnabled !== false, "single", session.bilingualTranslationPrompt)

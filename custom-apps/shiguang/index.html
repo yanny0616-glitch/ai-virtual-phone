@@ -82,7 +82,7 @@ button,textarea,select,input{font:inherit;color:inherit}button{cursor:pointer;-w
 <p id="notice" class="sg-save-hint" role="status" aria-live="polite"></p>
 <section id="memories"><div id="cards"><p class="sg-empty">正在翻找记忆…</p></div><button id="more" class="sg-action sg-more" type="button" hidden>显示更多</button></section>
 <section id="rules" hidden aria-label="回忆规则">
-<div class="sg-note sg-static"><h2>选哪条，由这些规则决定</h2><dl class="sg-rules"><dt>优先携带</dt><dd>不需要话题命中，在预算内优先放入，最多占预算一半。适合重要关系、边界或希望经常记住的事。</dd><dt>按话题回忆</dt><dd>按标题和关键词匹配最近几句聊天；昨天至未来 7 天内仍待兑现的约定也可入选。</dd><dt>不发送</dt><dd>只留在记忆本里，不放进聊天提示词。</dd></dl><p class="sg-fine">每来一条新消息都按最近几句重选一遍，所以「按话题回忆」跟的是上一轮话题。整理用的模型按「绑定配置」里给拾光绑的 API，没绑就用这位角色的聊天模型。</p></div>
+<div class="sg-note sg-static"><h2>选哪条，由这些规则决定</h2><dl class="sg-rules"><dt>优先携带</dt><dd>不需要话题命中，在预算内优先放入，最多占预算一半。适合重要关系、边界或希望经常记住的事。</dd><dt>按话题回忆</dt><dd>优先匹配标题和关键词，摘要及最新后续也能帮助找到相关记忆；昨天至未来 7 天内仍待兑现的约定也可入选。</dd><dt>不发送</dt><dd>只留在记忆本里，不放进聊天提示词。</dd></dl><p class="sg-fine">新版小手机支持普通私聊在回复前按当前话题选取记忆；其他场景沿用最近同步的回忆。整理用的模型按「绑定配置」里给拾光绑的 API，没绑就用这位角色的聊天模型。</p></div>
 <form id="settings" class="sg-note sg-static sg-update">
 <label class="sg-switch"><span>启用拾光记录与回忆<small>关闭后保留记录，暂停整理与发送。</small></span><input type="checkbox" name="enabled"></label>
 <label class="sg-switch"><span>自动整理新消息<small>聊满设定轮数就自动整理，小手机关着也会跑。</small></span><input type="checkbox" name="autoEnabled"></label>
@@ -103,6 +103,8 @@ const require = id => { const m = ({  })[id]; if (!m) throw new Error("unknown m
 // 纯文本工具：不依赖宿主，Node 测试直接 import。
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.clean = clean;
+exports.normalizeKeywords = normalizeKeywords;
+exports.searchTerms = searchTerms;
 exports.overlap = overlap;
 exports.estimateTokens = estimateTokens;
 exports.hash = hash;
@@ -111,6 +113,46 @@ exports.isValidDate = isValidDate;
 const CJK = /[぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]/g;
 function clean(text) {
     return String(text || "").toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+}
+// 只过滤缺乏辨识度的独立词，保留包含它们的具体短语（如「喜欢抹茶」）。
+const SEARCH_STOP_WORDS = new Set([
+    "今天", "昨天", "明天", "现在", "刚才", "最近", "上次", "下次", "这次", "当时", "以后", "之前", "之后",
+    "我们", "你们", "他们", "她们", "自己", "对方", "用户", "角色", "这个", "那个", "这些", "那些", "什么", "怎么", "为什么",
+    "一起", "在一起", "喜欢", "觉得", "知道", "记得", "记忆", "回忆", "事情", "东西", "时候", "时间", "聊天", "对话",
+    "开心", "快乐", "美好", "感觉", "真的", "非常", "特别", "有点", "还是", "也是", "就是", "已经", "可以", "可能",
+    "没有", "不是", "因为", "所以", "但是", "然后", "如果", "这样", "那样", "一次", "一个", "一下", "一些", "一直",
+    "the", "and", "with", "that", "this", "have", "was", "are", "you", "our", "today", "remember",
+]);
+const wordSegmenter = typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter("zh", { granularity: "word" }) : null;
+const SINGLE_FILLERS = new Set(Array.from("我你他她它的了呢啊吗是在很都也和不没太就把让给被想去来买吃说要又好与及"));
+function normalizeKeywords(values) {
+    const seen = new Set();
+    return values.filter(value => {
+        const key = clean(value);
+        if (key.length < 2 || SEARCH_STOP_WORDS.has(key) || seen.has(key))
+            return false;
+        seen.add(key);
+        return true;
+    });
+}
+/** 按词边界匹配，避免把所有相邻两字都当关键词。旧浏览器保守退回完整词串。 */
+function searchTerms(text) {
+    const parts = wordSegmenter ? Array.from(wordSegmenter.segment(String(text || ""))) : [];
+    const words = wordSegmenter ? parts.filter(part => part.isWordLike).map(part => part.segment)
+        : (String(text || "").match(/[\p{L}\p{N}]+/gu) || []);
+    // 分词器可能把外来专名拆成单字（如「提拉米苏」）；保留连续专名片段。
+    let run = "";
+    for (const part of [...parts, { segment: "", isWordLike: false }]) {
+        if (part.isWordLike && /^[\p{Script=Han}]$/u.test(part.segment) && !SINGLE_FILLERS.has(part.segment))
+            run += part.segment;
+        else {
+            if (run.length >= 2)
+                words.push(run);
+            run = "";
+        }
+    }
+    return normalizeKeywords(words).map(clean).filter(word => !/^\d+$/.test(word));
 }
 /** 双字重叠数：无模型、无向量的本地相关性。 */
 function overlap(text, context) {
@@ -241,15 +283,24 @@ function selectForPrompt(entries, context, tokenBudget, now = new Date()) {
     const budget = Math.max(0, Math.min(4000, Number.isFinite(tokenBudget) ? tokenBudget : 800));
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const cleanContext = (0, text_mjs_1.clean)(context);
+    const contextTerms = new Set((0, text_mjs_1.searchTerms)(context));
+    const hits = text => (0, text_mjs_1.searchTerms)(text).filter(term => contextTerms.has(term)).length;
     const ranked = entries.filter(isActive).map(entry => {
         const mode = recallMode(entry);
         const due = entry.dueAt ? new Date(entry.dueAt + "T00:00:00").getTime() : NaN;
         const days = (due - today) / 86400000;
-        const keywords = entry.keywords || [];
-        const relevance = (0, text_mjs_1.overlap)(entry.title + " " + keywords.join(" "), context);
-        const keywordHit = keywords.some(k => (0, text_mjs_1.clean)(k).length >= 2 && cleanContext.includes((0, text_mjs_1.clean)(k)));
+        const keywords = (0, text_mjs_1.normalizeKeywords)(entry.keywords || []);
+        const primaryHits = hits(entry.title + " " + keywords.join(" "));
+        const keywordHit = keywords.some(k => /^[a-z0-9]+$/i.test((0, text_mjs_1.clean)(k))
+            ? contextTerms.has((0, text_mjs_1.clean)(k)) : cleanContext.includes((0, text_mjs_1.clean)(k)));
+        // 摘要/后续仅作低权重补充；不修改旧记录、不为它们重新请求模型。
+        const bodyHits = keywordHit || primaryHits ? 0
+            : hits(((entry.promptSummary || "").trim() || defaultSummary(entry)) + " " + (entry.followup || ""));
+        const relevance = keywordHit ? 20 + Math.min(primaryHits, 8)
+            : primaryHits ? 12 + Math.min(primaryHits, 8)
+                : bodyHits ? 4 + Math.min(bodyHits, 4) : 0;
         const timely = entry.status === "pending" && days >= -1 && days <= 7;
-        return { entry, mode, score: (keywordHit ? 20 : 0) + relevance + (timely ? 15 : 0), relevant: keywordHit || relevance >= 3 || timely };
+        return { entry, mode, score: relevance + (timely ? 15 : 0), relevant: relevance > 0 || timely };
     }).filter(v => v.mode !== "off" && (v.mode === "priority" || v.relevant));
     const byRecent = (a, b) => b.score - a.score || String(b.entry.updatedAt).localeCompare(String(a.entry.updatedAt));
     const priority = ranked.filter(v => v.mode === "priority").sort(byRecent);
@@ -337,7 +388,12 @@ ${events}
 卡片 summary/story/details 保留有依据的人名、具体物品或作品名、关键行为、约定日期和完成情况，不把具体事实概括成泛泛习惯。
 promptSummary 是后续发给角色回忆用的一段话，最多200字：保留事实、缘由、日期、承诺和当前进展，不要空话。
 pinned 只对持续重要的边界、关系和相处习惯填 true（会每次都带上）；普通经历填 false（按话题命中才带上）。
-dueAt 仅在原文日期能确定时填 YYYY-MM-DD，不确定留空；完成或取消后清空。keywords 给2到6个具体检索词，不用「聊天」「用户」等泛词。
+dueAt 仅在原文日期能确定时填 YYYY-MM-DD，不确定留空；完成或取消后清空。
+keywords 给2到8个不重复的检索词，按「以后聊天时会怎么提起这件事」选择：
+- 优先保留原文的人名/称呼、地点、具体物品或作品名，以及这件事区别于其他事的关键事实。
+- 复合名称同时保留有用的简短叫法，例如「草莓蛋糕」与「蛋糕」；有明确依据时补常用称呼或同义叫法，例如「生日礼物」与「礼物」。
+- 关键词要覆盖摘要里值得再次提起的具体细节，不要只重复标题；例如原文说「奶油太甜」，可保留「奶油」「太甜」。
+- 不编造人名昵称、关系或新事实；不堆泛词如「聊天」「用户」「今天」「一起」「喜欢」「开心」，不把整句话当一个关键词。具体词不够时可以少于2个，不凑数。
 details/reason/significance 没有依据就留空。status=remembered 普通记忆，pending 未兑现约定，completed 已兑现，changed 已变化。
 仅输出一个JSON对象（不要代码围栏）：
 {"memories":[{"existingId":"新记录留空","title":"简短标题，最多24字","summary":"卡片简述，最多80字","categories":["共同经历"],"reason":"事情缘由","story":"发生的事情及双方回应","details":[{"label":"日期","value":"具体信息"}],"significance":"值得记住的缘由","promptSummary":"发给角色回忆的摘要","pinned":false,"keywords":["具体检索词"],"dueAt":"","status":"remembered","followup":"最新后续，没有留空","sourceIds":["s1"]}]}
@@ -415,7 +471,7 @@ function parseResult(raw, sources, candidates, characterId, now) {
             significance: text(item.significance, 600) || (old && old.significance) || "",
             promptSummary: text(item.promptSummary, 600) || (old && old.promptSummary) || "",
             recallMode: old && old.recallMode ? old.recallMode : (item.pinned === true ? "priority" : "relevant"),
-            keywords: Array.isArray(item.keywords) ? item.keywords.slice(0, 8).map(v => text(v, 40, true)) : [],
+            keywords: Array.isArray(item.keywords) ? (0, text_mjs_1.normalizeKeywords)(item.keywords.slice(0, 24).map(v => text(v, 40, true))).slice(0, 8) : [],
             status, dueAt: status === "pending" ? dueAt || undefined : undefined,
             followup: text(item.followup, 1000),
         };
@@ -564,8 +620,18 @@ return Object.freeze(exports);
     return found.sort(byTime);
   }
   /* ================= 注入聊天提示词 ================= */
+  // 当轮路径纯读：每次重读设置和记录，不用前台缓存，也不写共享上下文或等待自动整理。
+  async function providePromptContext(input) {
+    if (!input || !input.characterId || !Array.isArray(input.messages)) return "";
+    const rows = await S.api.db.list("settings", { limit: 5 });
+    const settings = { ...SETTINGS_DEFAULT, ...((rows || [])[0] || {}) };
+    if (!settings.enabled) return "";
+    const entries = await S.api.db.list(col(input.characterId), { limit: 500 });
+    const text = input.messages.map(m => typeof m.content === "string" ? m.content : "").join("\n");
+    return ShiguangRecall.contextText(ShiguangRecall.selectForPrompt(entries || [], text, settings.tokenBudget, new Date()));
+  }
   // 覆盖式写一段进角色的提示词，宿主排在聊天历史之后。每来一条消息就按最近几句
-  // 重算一次，所以「按话题回忆」跟的是上一轮话题；关掉拾光要写空串撤销。
+  // 重算一次，为其他场景和旧宿主刷新状态；普通私聊优先用上面的当轮返回值。
   async function syncContext(cid, recent) {
     const settings = await loadSettings();
     let text = "";
@@ -958,6 +1024,9 @@ ${field("title", "标题", e.title, 1)}${field("summary", "记忆简述", e.summ
       notice("这个版本的小手机还不支持拾光 APP，请先更新宿主。", true); $("cards").innerHTML = ""; return;
     }
     S.api.on("chat.message.created", onChatMessage);
+    if (S.api.chat.registerContextProvider) {
+      S.api.chat.registerContextProvider(providePromptContext).catch(err => console.warn("[拾光] 当轮回忆注册失败", err));
+    }
     S.launch = await S.api.app.getLaunchContext().catch(() => null);
     S.background = !!(S.launch && S.launch.background);
     if (S.background) return;   // 隐藏环境只跑事件 handler，不渲染界面

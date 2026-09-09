@@ -225,6 +225,8 @@ export type CustomAppExtensions = {
   ui?: CustomAppUiExtensions;
   prompt?: {
     profiles?: CustomAppPromptProfile[];
+    /** 普通私聊装配前调用 APP 的只读上下文 provider；不作为模型工具展示。 */
+    contextProvider?: { timeoutMs?: number };
   };
   tools?: CustomAppToolDefinition[];
   events?: CustomAppEventSubscription[];

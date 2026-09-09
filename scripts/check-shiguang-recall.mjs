@@ -1,0 +1,34 @@
+// 检索质量专项：固定正反例，直接运行领域函数，不调用模型。
+import assert from "node:assert/strict";
+import { selectForPrompt } from "../custom-apps/shiguang/src/domain/recall.mjs";
+import { parseResult, buildPrompt } from "../custom-apps/shiguang/src/domain/extraction.mjs";
+
+const cake = { id: "cake", title: "生日的惊喜", promptSummary: "生日买了草莓蛋糕，她说奶油太甜。", keywords: ["草莓蛋糕", "生日庆祝"], recallMode: "relevant", status: "remembered" };
+const now = new Date("2026-09-09T12:00:00Z");
+const recall = (entries, query, budget = 800) => selectForPrompt(entries, query, budget, now).map(p => p.entry.id);
+assert.deepEqual(recall([cake], "想吃蛋糕"), ["cake"], "完整名词的简称应命中旧记忆");
+assert.deepEqual(recall([cake], "奶油太甜了"), ["cake"], "摘要事实应补足关键词遗漏");
+assert.deepEqual(recall([cake], "想吃草莓蛋糕"), ["cake"]);
+assert.deepEqual(recall([cake], "上次那个甜点"), [], "不能凭空声称理解摘要未出现的同义词");
+assert.deepEqual(recall([{ ...cake, keywords: [...cake.keywords, "甜点"] }], "上次那个甜点"), ["cake"], "明确提供的常用叫法可召回");
+assert.deepEqual(recall([cake], "今天想去海边"), []);
+const generic = { ...cake, id: "generic", title: "美好的回忆", keywords: ["一起", "喜欢", "今天"], promptSummary: "今天我们一起聊天，非常开心，喜欢和你在一起。" };
+assert.deepEqual(recall([generic], "今天我们一起聊天，很开心"), [], "泛词不应独立触发记忆");
+const detail = { ...cake, id: "detail", title: "某次约定", keywords: [], promptSummary: "", summary: "决定去厦门看海。" };
+assert.deepEqual(recall([detail], "厦门"), ["detail"], "没有新版摘要的旧卡片仍可参与");
+assert.deepEqual(recall([{ ...cake, followup: "改成买提拉米苏。" }], "提拉米苏"), ["cake"], "明确后续可检索");
+const body = { ...cake, id: "body", title: "另一次生日", keywords: [], updatedAt: "2099", promptSummary: "收到蛋糕。" };
+assert.deepEqual(recall([body, cake], "蛋糕"), ["cake", "body"], "标题/关键词匹配优先于摘要补充");
+assert.deepEqual(recall([{ ...cake, recallMode: "off" }, { ...body, deletedAt: "y" }], "蛋糕"), [], "不发送和删除记录不能复活");
+assert.deepEqual(recall([cake], "蛋糕", 1), [], "预算仍然有效");
+const frozen = JSON.stringify([cake, body]);
+recall([cake, body], "蛋糕");
+assert.equal(JSON.stringify([cake, body]), frozen, "检索不修改用户记录");
+assert.deepEqual(recall([{ ...cake, keywords: ["cat"], title: "宠物", promptSummary: "家里养猫。" }], "vacation"), [], "英文词不能在其他单词中误命中");
+const sources = [{ id: "m1", createdAt: now.toISOString(), role: "user", content: "草莓蛋糕的奶油太甜了" }];
+const [parsed] = parseResult(JSON.stringify({ memories: [{ title: "蛋糕", summary: "奶油太甜", sourceIds: ["s1"], categories: ["喜好与边界"], details: [], status: "remembered", keywords: ["今天", "草莓蛋糕", "草莓蛋糕", "蛋糕", "奶油", "喜欢"] }] }), sources, [], "c1", now.toISOString());
+assert.deepEqual(parsed.keywords, ["草莓蛋糕", "蛋糕", "奶油"], "落库前去重复、过滤泛词，保留不同粒度的具体词");
+const instructions = buildPrompt("角色", "原消息", []);
+assert.match(instructions, /简短叫法/);
+assert.match(instructions, /不编造/);
+console.log("PASS 拾光检索：简称、摘要事实、已有别名、旧记录、后续、泛词与预算保护");
