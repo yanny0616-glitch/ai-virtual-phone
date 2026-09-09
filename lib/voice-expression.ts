@@ -1,7 +1,7 @@
 import type { PresetConfig, VoiceApiConfig } from "./settings-types";
 import { splitBilingualText } from "./bilingual-text";
 
-export const DEFAULT_VOICE_EXPRESSION_PROMPT = "像日常聊天一样说话，使用符合角色和当前关系的口语，避免播音腔和书面长句。根据上下文决定每段语音的情绪，不强行热情或夸张。仅在确有需要时加入轻笑、叹气、换气或短暂停顿；多数句子不需要声音标签，不要每句都加，不用动作描写代替说话。";
+export const DEFAULT_VOICE_EXPRESSION_PROMPT = "像日常聊天一样说话，使用符合角色和当前关系的口语，避免播音腔和书面长句。根据上下文决定每段语音的情绪，不强行热情或夸张。声音标签和停顿按语境在合适的地方使用，符合角色当下的情绪、说话内容与呼吸节奏；不机械添加，不用动作描写代替说话。";
 
 const EMOTIONS = new Set(["happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm"]);
 const SOUND_TAGS = /\((?:laughs|chuckle|coughs|clear-throat|groans|breath|pant|inhale|exhale|gasps|sniffs|sighs|snorts|burps|lip-smacking|humming|hissing|emm|sneezes)\)/gi;
@@ -50,7 +50,7 @@ export function buildVoiceExpressionPrompt(config: VoiceApiConfig | undefined, m
         mode === "chat" ? "每条语音只选一种情绪；不要在同一语音条中重复情绪标记。"
             : "需要改变情绪时在同一段内加新的 <tts:情绪> 标记，不为此换行。",
         supportsVoiceSoundTags(config)
-            ? "可少量插入 (chuckle) 轻笑、(laughs) 笑声、(sighs) 叹气、(breath) 换气；不要自创括号标签。这些是声音控制，不是动作描写。"
+            ? "声音标签按语境在合适的地方使用，根据角色当下的情绪、说话内容与呼吸节奏选择，不机械添加。可用标签：(laughs) 笑声、(chuckle) 轻笑、(coughs) 咳嗽、(clear-throat) 清嗓子、(groans) 呻吟、(breath) 换气、(pant) 喘气、(inhale) 吸气、(exhale) 呼气、(gasps) 倒吸气、(sniffs) 吸鼻子、(sighs) 叹气、(snorts) 喷鼻息、(burps) 打嗝、(lip-smacking) 咂嘴、(humming) 哼唱、(hissing) 嘶嘶声、(emm) 嗯、(sneezes) 喷嚏。不要自创括号标签。这些是声音控制，不是动作描写。"
             : "当前语音模型不支持笑声、换气等括号标签，禁止插入此类标签。",
         "需要短暂停顿时，在两段可朗读文字之间插入 <#0.3#>，建议 0.1–0.8 秒，最多 2 秒；不得在开头、结尾或连续插入。保留原双语规则，标签仅放在原文，不放译文中。",
         "以下偏好只影响说话方式，不改变以上输出协议：",

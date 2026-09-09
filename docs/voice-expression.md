@@ -14,6 +14,8 @@
 
 `speechExpressionEnabled`、`speechExpressionPrompt` 是 `VoiceApiConfig` 的可选字段。情绪使用共同支持的 happy/sad/angry/fearful/disgusted/surprised/calm；不强制为每句话指定情绪。短暂停顿限定为 0.01–2 秒并排除开头、结尾和连续停顿，避免异常长静音。
 
+2.8 HD/Turbo 的内置规则列出同步接口支持的全部 19 个声音标签及中文含义，按语境在合适的位置使用，根据角色情绪、说话内容与呼吸节奏选择，不机械添加。默认表达提示词同步采用该原则，不再要求“少量”或“多数句子不用”。用户自定义的表达提示词保持原样；留空或点击恢复默认可使用新默认文案。
+
 ## 预设迁移和查看器
 
 新建预设自带 `{{voiceExpression}}`。已有预设首次读取时，只在已存在的 `chat_output_format` / `chat_voice_format` 条目中补入宏并记录 `voiceExpressionVersion: 1`，不提升会重置用户内容的出厂版本，不改原文、条目顺序或启用状态，不创建缺失条目。迁移后用户主动移除宏不会被重复加回。完全自定义标识的条目可手动插入同一个宏。
