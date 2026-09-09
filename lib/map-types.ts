@@ -199,6 +199,7 @@ export type GameSave = {
 
 // ── MapWorld (stored in IndexedDB) — world is independent of characters ──
 export type MapWorld = {
+  settingOverrides?: import("./adventure-world-edit").WorldSettingOverrides;
   id: string;
   skeleton: WorldSkeleton;
   renderedMap: import("./map-engine").MapGenerationOutput;

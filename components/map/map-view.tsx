@@ -4,6 +4,7 @@ import { ArrowLeft, BookOpen, LogOut, Bug, Map as MapIcon, MessageCircle, Save, 
 import type { MapWorld, GameSave, NodeInteraction, EventScene, EventChoice, StreamMessage, Declaration } from "@/lib/map-types";
 import {
   saveGame,
+  saveWorldSettingPlan,
   loadWorldTheme,
   saveWorldTheme,
   type WorldTheme,
@@ -17,6 +18,8 @@ import { STAT_LABELS, ALL_STATS } from "@/lib/map-types";
 import MapRenderer from "./map-renderer";
 import MapTextStream from "./map-text-stream";
 import { generateStatusSuggestions } from "@/lib/adventure-status-generator";
+import AdventureWorldEditor from "./adventure-world-editor";
+import { generateWorldSettingEdit } from "@/lib/adventure-world-edit-generator";
 import AdventureStatusPanel from "./adventure-status-panel";
 import { applyAdventureStatusChanges } from "@/lib/adventure-status";
 
@@ -24,10 +27,14 @@ type Props = {
   world: MapWorld;
   save: GameSave;
   onSaveUpdate: (save: GameSave) => void;
+  onWorldUpdate: (world: MapWorld) => void;
   onBack: () => void;
 };
 
-export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
+export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBack }: Props) {
+  const [worldEditorBusy, setWorldEditorBusy] = useState(false);
+  const worldEditorBusyRef = useRef(false);
+  const handleWorldEditorBusy = useCallback((busy: boolean) => { worldEditorBusyRef.current = busy; setWorldEditorBusy(busy); }, []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showJournal, setShowJournal] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventScene | null>(null);
@@ -406,7 +413,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
     brief: string,
     meta?: { questId?: string; npcName?: string; npcPersonality?: string },
   ) => {
-    if (inEvent || eventLoading) return;
+    if (inEvent || eventLoading || worldEditorBusyRef.current) return;
     setEventLoading(true);
     setActiveEventMeta({ type: eventType, questId: meta?.questId });
     try {
@@ -442,6 +449,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       skeleton.mainQuest.stages.forEach((s, i) => { mqNodeMap[i] = s.locationHint; });
 
       const dmCtx = {
+        worldId: world.id,
         worldLore: skeleton.world.lore,
         currentLocation: currentNode?.name || "",
         eventType,
@@ -532,10 +540,11 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
     } finally {
       setEventLoading(false);
     }
-  }, [save, skeleton, currentNode, characters, inEvent, eventLoading, pushSceneToStream, pushMessages, applySceneStatus]);
+  }, [save, skeleton, currentNode, characters, inEvent, eventLoading, pushSceneToStream, pushMessages, applySceneStatus, world.id]);
 
   // ── Handle player action — Collect-Resolve-Narrate loop ──
   const handlePlayerAction = useCallback(async (actionText: string, skipDisplay?: boolean) => {
+    if (worldEditorBusyRef.current) return;
     // ── Phase 2: Player declares ──
     const playerName = userIdentity?.name || "你";
     if (!skipDisplay) {
@@ -592,7 +601,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         if (pendingIds.length > 0) {
           setLoadingPhase("companions");
           for (const cid of pendingIds) {
-            const decl = await companionDeclare(cid, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === cid)?.affinity, { customStatus: saveRef.current.customStatus });
+            const decl = await companionDeclare(cid, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === cid)?.affinity, { customStatus: saveRef.current.customStatus, worldId: world.id });
 
             if (decl.failed) {
               pushMessages({ id: mkId(), type: "system", text: `${decl.speaker} 回复失败` });
@@ -646,6 +655,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
 
       let dmCtx: import("@/lib/map-rpg-engine").DMContext;
       try { dmCtx = JSON.parse(eventContext); } catch { dmCtx = { worldLore: "", currentLocation: "", eventType: "", eventBrief: "", companionNames: [], recentJournal: [], keyChoices: [], gameTime: "" }; }
+      dmCtx.worldId = world.id;
       dmCtx.previousDialogue = prevDialogue;
       dmCtx.director = save.director;
       dmCtx.recentJournal = saveRef.current.journal.map(j => j.text);
@@ -851,6 +861,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         try {
           let dmCtxForEnding: import("@/lib/map-rpg-engine").DMContext;
           try { dmCtxForEnding = JSON.parse(eventContext); } catch { dmCtxForEnding = { worldLore: skeleton.world.lore, currentLocation: currentNode?.name || "", eventType: "", eventBrief: "", companionNames: [], recentJournal: save.journal.map(j => j.text), keyChoices: save.keyChoices, gameTime: formatGameTime(save.gameDay, save.gameTime) }; }
+          dmCtxForEnding.worldId = world.id;
           dmCtxForEnding.customStatus = newSave.customStatus;
           dmCtxForEnding.director = newSave.director;
           dmCtxForEnding.recentJournal = newSave.journal.map(j => j.text);
@@ -921,7 +932,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         }
       }
     }
-  }, [eventContext, accumulatedEvent, save, currentNode, activeEventMeta, persistSave, allNodes, characters, pushMessages, pushSceneToStream, userIdentity, skeleton, applySceneStatus]);
+  }, [eventContext, accumulatedEvent, save, currentNode, activeEventMeta, persistSave, allNodes, characters, pushMessages, pushSceneToStream, userIdentity, skeleton, applySceneStatus, world.id]);
 
   // ── Growth roll ref (defined below, used by handlePlayerAction) ──
   const runGrowthRollRef = useRef<(s: GameSave) => GameSave>((s) => s);
@@ -991,7 +1002,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
               streamRef.current,
               save.agents.length > 1 ? userIdentity : undefined,
               save.agents.find(a => a.characterId === cid)?.affinity,
-              { instruction: exitReactionInstruction, customStatus: saveRef.current.customStatus },
+              { instruction: exitReactionInstruction, customStatus: saveRef.current.customStatus, worldId: world.id },
             ))
           );
           for (const decl of decls) {
@@ -1011,7 +1022,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
     setActiveEvent(null);
     setActiveEventMeta(null);
     setAccumulatedEvent(null);
-    setLastFailedAction(null);  }, [save, characters, userIdentity, pushMessages]);
+    setLastFailedAction(null);  }, [save, characters, userIdentity, pushMessages, world.id]);
 
   // ── Handle choice click — if statCheck, everyone rolls, then proceed ──
   const handleChoiceClick = useCallback(async (choice: EventChoice) => {
@@ -1162,7 +1173,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
 
   // ── Free mode: send message to a specific companion ──
   const handleFreeModeChat = useCallback(async (characterId: string) => {
-    if (freeModeReplying) return;
+    if (freeModeReplying || worldEditorBusyRef.current) return;
 
     setFreeModeReplying(true);
     try {
@@ -1172,7 +1183,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       const apiConfig = (slot?.apiConfigId ? apiConfigs.find(c => c.id === slot.apiConfigId) : null) || apiConfigs.find(c => c.apiKey) || apiConfigs[0];
       if (!apiConfig?.apiKey) throw new Error("未找到API配置");
 
-      const decl = await companionDeclare(characterId, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === characterId)?.affinity, { customStatus: saveRef.current.customStatus });
+      const decl = await companionDeclare(characterId, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === characterId)?.affinity, { customStatus: saveRef.current.customStatus, worldId: world.id });
 
       if (decl.speech && decl.speech !== "……") {
         pushMessages({ id: mkId(), type: "character", speaker: decl.speaker, text: decl.speech, emotion: decl.emotion });
@@ -1185,11 +1196,11 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
     } finally {
       setFreeModeReplying(false);
     }
-  }, [freeModeReplying, pushMessages]);
+  }, [freeModeReplying, pushMessages, world.id]);
 
   // ── Direct DM resolve (skip companion LLM, use free-mode chat as declarations) ──
   const handleDirectResolve = useCallback(async () => {
-    if (!inEvent || eventContinueLoading) return;
+    if (!inEvent || eventContinueLoading || worldEditorBusyRef.current) return;
     setEventContinueLoading(true);
     setFreeMode(false);
     pushMessages({ id: mkId(), type: "system", text: "—— DM 裁决中 ——" });
@@ -1238,6 +1249,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
 
       let dmCtx: import("@/lib/map-rpg-engine").DMContext;
       try { dmCtx = JSON.parse(eventContext); } catch { dmCtx = { worldLore: "", currentLocation: "", eventType: "", eventBrief: "", companionNames: [], recentJournal: [], keyChoices: [], gameTime: "" }; }
+      dmCtx.worldId = world.id;
       dmCtx.previousDialogue = prevDialogue;
       dmCtx.director = save.director;
       dmCtx.recentJournal = save.journal.map(j => j.text);
@@ -1289,7 +1301,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       setEventContinueLoading(false);
       setLoadingPhase("");
     }
-  }, [inEvent, eventContinueLoading, eventContext, save, characters, userIdentity, pushMessages, pushSceneToStream, persistSave]);
+  }, [inEvent, eventContinueLoading, eventContext, save, characters, userIdentity, pushMessages, pushSceneToStream, persistSave, world.id]);
 
   // ── Handle interaction button click ──
   const handleInteraction = useCallback((ia: NodeInteraction) => {
@@ -2464,11 +2476,29 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
             ) : toolTab === "bag" ? (
               /* Bag tab */
               <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+                <AdventureWorldEditor
+                  world={world}
+                  disabled={eventLoading || eventContinueLoading || freeModeReplying}
+                  onBusyChange={handleWorldEditorBusy}
+                  onGenerate={(instruction, signal) => {
+                    const configs = loadApiConfigs();
+                    const agents = saveRef.current.agents;
+                    const slot = resolveBinding(loadBindingConfig(), agents.length === 1 ? agents[0].characterId : undefined, "adventure");
+                    const config = configs.find(c => c.id === slot.apiConfigId) || configs.find(c => c.apiKey);
+                    if (!config) throw new Error("请先配置冒险使用的模型 API");
+                    return generateWorldSettingEdit(world, instruction, config, signal);
+                  }}
+                  onApply={async plan => {
+                    if (eventLoading || eventContinueLoading || freeModeReplying) throw new Error("请等待当前剧情生成完成再保存设定");
+                    const next = await saveWorldSettingPlan(plan);
+                    onWorldUpdate(next);
+                  }}
+                />
                 <AdventureStatusPanel
                   key={save.customStatus?.revision ?? 0}
                   state={save.customStatus}
                   gameTime={formatGameTime(save.gameDay, save.gameTime)}
-                  disabled={eventLoading || eventContinueLoading || freeModeReplying}
+                  disabled={eventLoading || eventContinueLoading || freeModeReplying || worldEditorBusy}
                   onGenerate={async (fields, signal) => {
                     const base = saveRef.current;
                     const configs = loadApiConfigs();

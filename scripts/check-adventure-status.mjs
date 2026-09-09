@@ -14,6 +14,7 @@ function load(file, dependencies = {}, globals = {}) {
 }
 const plain = value => JSON.parse(JSON.stringify(value));
 const D = load("lib/adventure-status.ts");
+const worldEdit = load("lib/adventure-world-edit.ts");
 let sequence = 0;
 const stamp = () => ({ id: `event_${sequence++}`, gameTime: "第3天 · 清晨", createdAt: "2026-09-08T10:00:00.000Z" });
 let fields = D.palaceStatusFields();
@@ -107,7 +108,7 @@ class FakeDexie {
     this[key] = { toArray: async () => [...data.values()].map(row => structuredClone(row)), put: async row => { data.set(row.id, structuredClone(row)); }, delete: async id => data.delete(id) };
   } } }; }
 }
-const storageDeps = { dexie: FakeDexie, "./llm-prompt-assembler": { formatChatTimestamp: x => x },
+const storageDeps = { "./adventure-world-edit": worldEdit, dexie: FakeDexie, "./llm-prompt-assembler": { formatChatTimestamp: x => x },
   "./kv-db": { kvGet: () => undefined, kvSet() {}, kvRemove() {}, registerKvMigration() {}, registerDynamicPrefix() {} },
   "./bilingual-prompt-defaults": {},
 };
@@ -134,8 +135,9 @@ const deps = {};
 for (const match of read("lib/map-rpg-engine.ts").matchAll(/from ["']([^"']+)["']/g)) deps[match[1]] = {};
 Object.assign(deps, {
   "./adventure-status": D,
+  "./adventure-world-edit": worldEdit,
   "./api-helpers": { simpleLLMCall: async (_config, messages) => { calls.push(messages); return { content: typeof response === "string" ? response : JSON.stringify(response) }; } },
-  "./map-storage": { loadDMPrompts: () => ({ scene: "自定义场景提示", resolve: "自定义裁决提示" }), loadDMTokenConfig: () => ({}) },
+  "./map-storage": { getMapWorld: () => null, loadDMPrompts: () => ({ scene: "自定义场景提示", resolve: "自定义裁决提示" }), loadDMTokenConfig: () => ({}) },
   "./user-macro": { renderUserNameMacro: text => text, normalizeUserNameToMacro: text => text },
   "./token-counter": { estimateTokens: s => s.length },
 });
@@ -192,3 +194,15 @@ assert.match(preview.messages.at(-1).content, /最新存档/);
 const disabledPreview = await engine.previewAdventureCompanionPromptPayload("emperor", [], undefined, undefined, { customStatus: off });
 assert.equal(disabledPreview.messages.length, 1);
 console.log("PASS parsing + companion integration: repaired JSON cannot mutate state; normal/exit/preview get latest status; disabled adds no context.");
+
+// Saved world edits are also visible to character prompts alongside custom status.
+const editedWorld = { id: "world-edited", settingOverrides: { revision: 1, loreEdited: true, npcIds: ["npc_0"], aliases: {npc_0:["陆敬堂"]} }, skeleton: { world: {name:"大燕",lore:"皇帝尚无子嗣。"}, npcs:[{id:"npc_0",name:"陆承安",personality:"四十岁的首辅。"}] } };
+Object.assign(deps["./map-storage"], { getMapWorld: id => id === editedWorld.id ? editedWorld : null });
+const editedPreview = await engine.previewAdventureCompanionPromptPayload("emperor", [], undefined, undefined, { customStatus: corrected, worldId: editedWorld.id });
+assert.match(editedPreview.messages.at(-1).content, /最新世界设定/);
+assert.match(editedPreview.messages.at(-1).content, /陆承安/);
+assert.match(editedPreview.messages.at(-2).content, /最新存档/);
+const editedReply = await engine.companionDeclare("emperor", null, [], undefined, undefined, { worldId: editedWorld.id });
+assert.equal(editedReply.speech, "遵旨");
+assert.match(companionCalls.at(-1).at(-1).content, /皇帝尚无子嗣/);
+console.log("PASS companion world edits: real request + preview include latest public settings and coexist with custom status.");

@@ -17,6 +17,10 @@ export default function MapApp({ onClose }: { onClose: () => void }) {
     setView("playing");
   }, []);
 
+  const handleWorldUpdate = useCallback((world: MapWorld) => {
+    setActiveWorld(current => current?.id === world.id ? world : current);
+  }, []);
+
   const handleBackToLobby = useCallback(() => {
     setView("lobby");
     setActiveWorld(null);
@@ -29,6 +33,7 @@ export default function MapApp({ onClose }: { onClose: () => void }) {
         world={activeWorld}
         save={activeSave}
         onSaveUpdate={setActiveSave}
+        onWorldUpdate={handleWorldUpdate}
         onBack={handleBackToLobby}
       />
     );

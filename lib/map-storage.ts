@@ -2,6 +2,7 @@
 // RPG Map Mode — IndexedDB storage
 
 import Dexie from "dexie";
+import { applyWorldSettingEdit, planWorldSettingEdit, worldSettingVersion, type WorldSettingPlan } from "./adventure-world-edit";
 import type { MapWorld, GameSave, CharacterAgent, StoryDirector, CharStats } from "./map-types";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import { kvGet, kvSet, kvRemove, registerKvMigration, registerDynamicPrefix } from "./kv-db";
@@ -85,6 +86,24 @@ export function saveMapWorld(world: MapWorld): void {
   if (idx >= 0) _worldsCache[idx] = world;
   else _worldsCache.push(world);
   mapDb.worlds.put(world).catch(() => undefined);
+}
+
+/** Persist reviewed setting changes before updating the in-memory world. */
+export async function saveWorldSettingPlan(plan: WorldSettingPlan): Promise<MapWorld> {
+  const next = await mapDb.transaction("rw", mapDb.worlds, async () => {
+    const stored = await mapDb.worlds.get(plan.worldId);
+    if (!stored) throw new Error("世界已不存在，未保存改动");
+    if (worldSettingVersion(stored) !== plan.baseVersion) throw new Error("世界设定已变化，请重新生成预览，避免覆盖新内容");
+    // Revalidate the review payload, then compare its original version at write time.
+    const verified = planWorldSettingEdit(stored, { changes: plan.changes.map(c => ({ target: c.target, field: c.field, value: c.after, reason: c.reason })) });
+    const updated = applyWorldSettingEdit(stored, { ...verified, baseVersion: plan.baseVersion }, new Date().toISOString());
+    await mapDb.worlds.put(updated);
+    return updated;
+  });
+  const index = _worldsCache.findIndex(w => w.id === next.id);
+  if (index >= 0) _worldsCache[index] = next;
+  else _worldsCache.push(next);
+  return next;
 }
 
 export function deleteMapWorld(id: string): void {

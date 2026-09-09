@@ -3,6 +3,8 @@
 
 import type { WorldSkeleton, WorldSkeletonInput, EventScene, GameSave, WorldNPC, QuestLine, EncounterSeed, CharacterAgent, AgentDecision, RichRegion, Declaration, CharStats } from "./map-types";
 import { STAT_LABELS, ALL_STATS } from "./map-types";
+import { worldSettingContext, findCurrentWorldNpc } from "./adventure-world-edit";
+import { getMapWorld } from "./map-storage";
 import { adventureStatusContext, adventureStatusInstruction, type AdventureStatus } from "./adventure-status";
 import { simpleLLMCall } from "./api-helpers";
 import { previewMessagesForApi, sendLLMRequest } from "./chat-engine";
@@ -571,6 +573,8 @@ export type DMSceneResult = {
 };
 
 export type DMContext = {
+  worldId?: string;
+  worldSettingNote?: string;
   customStatus?: AdventureStatus;
   worldLore: string;
   currentLocation: string;
@@ -614,6 +618,17 @@ function truncateByTokenBudget(items: string[], budget: number): string[] {
     if (total > budget) return items.slice(i + 1);
   }
   return items;
+}
+
+/** Refresh cached event snapshots after a reviewed world edit. */
+export function refreshDMWorldSettings(ctx: DMContext): DMContext {
+  const current = ctx.worldId ? getMapWorld(ctx.worldId) : null;
+  if (!current?.settingOverrides) return ctx;
+  const npc = findCurrentWorldNpc(current, ctx.npcName);
+  return { ...ctx, worldLore: current.skeleton.world.lore, richRegions: current.skeleton.richRegions,
+    dmDossier: current.skeleton.dmDossier, worldSettingNote: worldSettingContext(current, false),
+    ...(npc ? { npcName: npc.name, npcPersonality: npc.personality, npcSecret: current.skeleton.dmDossier?.npcSecrets[npc.id] } : {}),
+  };
 }
 
 function buildDMUserMsg(ctx: DMContext): string {
@@ -751,7 +766,8 @@ function parseStatusAwareDMReply(raw: string, enabled: boolean) {
 }
 
 export async function dmScene(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneResult> {
-  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus);
+  ctx = refreshDMWorldSettings(ctx);
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "");
   const scenePrompt = getActivePrompt("scene", DEFAULT_DM_SCENE_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [
@@ -953,7 +969,7 @@ export async function companionDeclare(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string; customStatus?: AdventureStatus },
+  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string },
 ): Promise<Declaration> {
   const allChars = loadCharacters();
   const character = allChars.find(c => c.id === characterId);
@@ -1012,7 +1028,7 @@ async function buildCompanionDeclarePromptPayload(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string; customStatus?: AdventureStatus },
+  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string },
 ) {
   const allChars = loadCharacters();
   const character = allChars.find(c => c.id === characterId);
@@ -1080,6 +1096,8 @@ async function buildCompanionDeclarePromptPayload(
 
   const statusContext = adventureStatusContext(options?.customStatus);
   if (statusContext) llmMessages.push({ role: "system", content: statusContext });
+  const settingContext = worldSettingContext(options?.worldId ? getMapWorld(options.worldId) : null);
+  if (settingContext) llmMessages.push({ role: "system", content: settingContext });
 
   return { character, apiConfig, preset, regexes, llmMessages };
 }
@@ -1089,7 +1107,7 @@ export async function previewAdventureCompanionPromptPayload(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string; customStatus?: AdventureStatus },
+  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string },
 ): Promise<{ messages: LLMMessage[]; characterName: string; model: string; presetName: string }> {
   const { character, apiConfig, preset, llmMessages } = await buildCompanionDeclarePromptPayload(
     characterId,
@@ -1154,7 +1172,8 @@ export const DEFAULT_DM_RESOLVE_PROMPT = `你是RPG世界的DM。这是裁定阶
 {"narration":"火光在墙上跳了两下，照得每个人的神情都忽明忽暗。\\n\\n队伍各自的行动在同一刻撞在一起，让原本僵持的局势突然松动。\\n\\n门外传来的脚步声，说明新的变化已经逼近。","npc_lines":[{"speaker":"NPC名","text":"台词"}],"situation":"新局势描述","choices":[{"label":"保持警惕前进","stat_check":{"stat":"per"}},{"label":"{{user}}优雅地周旋","stat_check":{"stat":"cha","who":"{{user}}"}},{"label":"直接离开"}],"journal":"日志","gained":["获得物品"],"lost":["失去物品"],"advance":false,"ending":false,"move_to":"节点名 或 {\"{{user}}\":\"节点名\",\"角色名\":\"节点名\"}","world_events":["世界各处事件"]}`;
 
 async function dmResolve(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneResult> {
-  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus);
+  ctx = refreshDMWorldSettings(ctx);
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "");
   const resolvePrompt = getActivePrompt("resolve", DEFAULT_DM_RESOLVE_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [
@@ -1503,7 +1522,8 @@ export type EndingResult = {
 };
 
 export async function generateEnding(ctx: DMContext, apiConfig: ApiConfig): Promise<EndingResult> {
-  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus);
+  ctx = refreshDMWorldSettings(ctx);
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "");
   const endingPrompt = getActivePrompt("ending", DEFAULT_DM_ENDING_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [
@@ -1573,7 +1593,7 @@ export async function generateAdventureSummary(
 
   const result = await simpleLLMCall(apiConfig, [
     { role: "system", content: prompt },
-    { role: "user", content: `世界：${worldName}\n玩家天数：第${save.gameDay}天\n\n日志：\n${journalText}${adventureStatusContext(save.customStatus)}` },
+    { role: "user", content: `世界：${worldName}\n玩家天数：第${save.gameDay}天\n\n日志：\n${journalText}${adventureStatusContext(save.customStatus)}${worldSettingContext(getMapWorld(save.worldId))}` },
   ], { temperature: 0.5 });
 
   if (!result.content) throw new Error(`总结生成失败: ${result.error || "空内容"}`);
