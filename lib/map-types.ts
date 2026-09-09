@@ -174,6 +174,7 @@ export type GameSave = {
   usedEncounterIds: string[];
   // DM story director — the living narrative state
   director: StoryDirector;
+  lastTimeTurnId?: string; // Successful DM turn already considered for time progression
   gameDay: number;
   gameTime: "morning" | "afternoon" | "evening" | "night";
 
@@ -185,6 +186,7 @@ export type GameSave = {
   streamLog?: StreamMessage[];   // text stream history (last 200)
   pendingEvent?: {               // restore event state on re-entry
     inEvent: boolean;
+    timeTurnId?: string; // Reuse on retry to avoid advancing the same turn twice
     choices?: EventChoice[];
     eventContext?: string;
     eventMeta?: { type: string; questId?: string };
@@ -260,6 +262,7 @@ export type EventDialogue = {
 };
 
 export type EventScene = {
+  timeUpdate?: unknown;
   statusChanges?: unknown;
   background?: string;         // scene description (for atmosphere)
   dialogues: EventDialogue[];

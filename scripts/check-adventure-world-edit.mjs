@@ -105,6 +105,7 @@ const status = load("lib/adventure-status.ts");
 let dmCalls = [];
 Object.assign(deps, {
   "./adventure-world-edit": D, "./adventure-status": status,
+  "./adventure-time": load("lib/adventure-time.ts"),
   "./api-helpers": {simpleLLMCall:async(_api,messages)=>{dmCalls.push(messages);return {content:'{"narration":"继续剧情","choices":[],"paragraphs":[],"closing":"结束"}'};}},
   "./map-storage": {getMapWorld:id=>id===next.id?next:null,loadDMPrompts:()=>({}),loadDMTokenConfig:()=>({})},
   "./token-counter": {estimateTokens:s=>s.length},

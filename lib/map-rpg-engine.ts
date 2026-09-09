@@ -3,6 +3,7 @@
 
 import type { WorldSkeleton, WorldSkeletonInput, EventScene, GameSave, WorldNPC, QuestLine, EncounterSeed, CharacterAgent, AgentDecision, RichRegion, Declaration, CharStats } from "./map-types";
 import { STAT_LABELS, ALL_STATS } from "./map-types";
+import { adventureTimeContext, adventureTimeInstruction, formatAdventureClock, type AdventureClock } from "./adventure-time";
 import { worldSettingContext, findCurrentWorldNpc } from "./adventure-world-edit";
 import { getMapWorld } from "./map-storage";
 import { adventureStatusContext, adventureStatusInstruction, type AdventureStatus } from "./adventure-status";
@@ -558,6 +559,7 @@ export const DEFAULT_DM_SCENE_PROMPT = `你是RPG世界的DM。你控制旁白�
 {"narration":"雨水沿着屋檐滴落，青石板路泛着冷光。\\n\\n酒馆门口的风铃轻轻晃动，像是在提醒来客这里并不太平。\\n\\n柜台后的老板抬起头，看了队伍一眼。","npc_lines":[{"speaker":"NPC名","text":"台词"}],"situation":"角色们看到的（传给角色AI）","choices":[{"label":"保持警惕前进","stat_check":{"stat":"per"}},{"label":"{{user}}优雅地与贵族周旋","stat_check":{"stat":"cha","who":"{{user}}"}},{"label":"用钥匙开门","requires":"古老钥匙"},{"label":"直接离开"}],"journal":"这轮日志","gained":["获得的物品"],"lost":["使用/失去的物品"],"advance":false,"ending":false,"move_to":"如果移动了则填目的地节点名，否则留空","world_events":["此刻世界各处正在发生的事件，每条包含地点和事件描述，3-5条"]}`;
 
 export type DMSceneResult = {
+  timeUpdate?: unknown;
   narration: string;
   npcLines: { speaker: string; text: string }[];
   situation: string;
@@ -573,6 +575,7 @@ export type DMSceneResult = {
 };
 
 export type DMContext = {
+  clock?: AdventureClock;
   worldId?: string;
   worldSettingNote?: string;
   customStatus?: AdventureStatus;
@@ -761,17 +764,18 @@ function parseStatusAwareDMReply(raw: string, enabled: boolean) {
   } catch {
     const repaired = JSON.parse(extractJSON(raw));
     repaired.status_changes = null;
+    repaired.time_update = { invalid: true };
     return repaired;
   }
 }
 
 export async function dmScene(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneResult> {
   ctx = refreshDMWorldSettings(ctx);
-  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "");
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "") + adventureTimeContext(ctx.clock);
   const scenePrompt = getActivePrompt("scene", DEFAULT_DM_SCENE_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [
-    { role: "system", content: renderUserNameMacro(scenePrompt + adventureStatusInstruction(ctx.customStatus), playerName) },
+    { role: "system", content: renderUserNameMacro(scenePrompt + adventureStatusInstruction(ctx.customStatus) + adventureTimeInstruction(ctx.clock), playerName) },
     { role: "user", content: renderUserNameMacro(userMsg, playerName) },
   ];
   dmLog("DM场景·发送", formatDebugMessages(messages, apiConfig));
@@ -787,7 +791,7 @@ export async function dmScene(ctx: DMContext, apiConfig: ApiConfig): Promise<DMS
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let p: any;
   try {
-    p = parseStatusAwareDMReply(result.content, ctx.customStatus?.enabled === true);
+    p = parseStatusAwareDMReply(result.content, ctx.customStatus?.enabled === true || !!ctx.clock);
   } catch (e) {
     console.error("[DM] JSON parse failed. Raw:", result.content.slice(0, 500));
     throw new Error(`DM返回格式错误: ${(e as Error).message}\n原文前200字: ${result.content.slice(0, 200)}`);
@@ -813,6 +817,7 @@ export async function dmScene(ctx: DMContext, apiConfig: ApiConfig): Promise<DMS
     worldEvents: (p.world_events || p.worldEvents || []).map((event: string) => String(event || "")),
     ending: p.ending || false,
     statusChanges: p.status_changes,
+    timeUpdate: result.wasTruncated ? { invalid: true } : p.time_update,
   };
 }
 
@@ -931,6 +936,7 @@ export async function expandEvent(
     worldEvents: dm.worldEvents,
     ending: dm.ending,
     statusChanges: dm.statusChanges,
+    timeUpdate: dm.timeUpdate,
   };
 }
 
@@ -969,7 +975,7 @@ export async function companionDeclare(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string },
+  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string; clock?: AdventureClock },
 ): Promise<Declaration> {
   const allChars = loadCharacters();
   const character = allChars.find(c => c.id === characterId);
@@ -1028,7 +1034,7 @@ async function buildCompanionDeclarePromptPayload(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string },
+  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string; clock?: AdventureClock },
 ) {
   const allChars = loadCharacters();
   const character = allChars.find(c => c.id === characterId);
@@ -1098,6 +1104,8 @@ async function buildCompanionDeclarePromptPayload(
   if (statusContext) llmMessages.push({ role: "system", content: statusContext });
   const settingContext = worldSettingContext(options?.worldId ? getMapWorld(options.worldId) : null);
   if (settingContext) llmMessages.push({ role: "system", content: settingContext });
+  const clockContext = adventureTimeContext(options?.clock);
+  if (clockContext) llmMessages.push({ role: "system", content: clockContext });
 
   return { character, apiConfig, preset, regexes, llmMessages };
 }
@@ -1107,7 +1115,7 @@ export async function previewAdventureCompanionPromptPayload(
   streamLog?: import("./map-types").StreamMessage[],
   overrideUserIdentity?: import("../components/settings/user-identity").UserIdentity | null,
   overrideAffinity?: number,
-  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string },
+  options?: { instruction?: string; customStatus?: AdventureStatus; worldId?: string; clock?: AdventureClock },
 ): Promise<{ messages: LLMMessage[]; characterName: string; model: string; presetName: string }> {
   const { character, apiConfig, preset, llmMessages } = await buildCompanionDeclarePromptPayload(
     characterId,
@@ -1173,11 +1181,11 @@ export const DEFAULT_DM_RESOLVE_PROMPT = `你是RPG世界的DM。这是裁定阶
 
 async function dmResolve(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneResult> {
   ctx = refreshDMWorldSettings(ctx);
-  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "");
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "") + adventureTimeContext(ctx.clock);
   const resolvePrompt = getActivePrompt("resolve", DEFAULT_DM_RESOLVE_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [
-    { role: "system", content: renderUserNameMacro(resolvePrompt + adventureStatusInstruction(ctx.customStatus), playerName) },
+    { role: "system", content: renderUserNameMacro(resolvePrompt + adventureStatusInstruction(ctx.customStatus) + adventureTimeInstruction(ctx.clock), playerName) },
     { role: "user", content: renderUserNameMacro(userMsg, playerName) },
   ];
   dmLog("DM裁决·发送", formatDebugMessages(messages, apiConfig));
@@ -1193,7 +1201,7 @@ async function dmResolve(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneR
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let p: any;
   try {
-    p = parseStatusAwareDMReply(result.content, ctx.customStatus?.enabled === true);
+    p = parseStatusAwareDMReply(result.content, ctx.customStatus?.enabled === true || !!ctx.clock);
   } catch (e) {
     throw new Error(`DM裁决格式错误: ${(e as Error).message}`);
   }
@@ -1218,6 +1226,7 @@ async function dmResolve(ctx: DMContext, apiConfig: ApiConfig): Promise<DMSceneR
     worldEvents: (p.world_events || p.worldEvents || []).map((event: string) => String(event || "")),
     ending: p.ending || false,
     statusChanges: p.status_changes,
+    timeUpdate: result.wasTruncated ? { invalid: true } : p.time_update,
   };
 }
 
@@ -1253,6 +1262,7 @@ export async function resolveRound(
     worldEvents: dm.worldEvents,
     ending: dm.ending,
     statusChanges: dm.statusChanges,
+    timeUpdate: dm.timeUpdate,
   };
 }
 
@@ -1329,13 +1339,7 @@ export function pickEncounter(
 
 /** Format game time for display */
 export function formatGameTime(day: number, time: GameSave["gameTime"]): string {
-  const timeLabels: Record<string, string> = {
-    morning: "清晨",
-    afternoon: "午后",
-    evening: "黄昏",
-    night: "夜晚",
-  };
-  return `第${day}天 · ${timeLabels[time]}`;
+  return formatAdventureClock({ day, period: time });
 }
 
 // ═══════════════════════════════════════
@@ -1523,7 +1527,7 @@ export type EndingResult = {
 
 export async function generateEnding(ctx: DMContext, apiConfig: ApiConfig): Promise<EndingResult> {
   ctx = refreshDMWorldSettings(ctx);
-  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "");
+  const userMsg = buildDMUserMsg(ctx) + adventureStatusContext(ctx.customStatus) + (ctx.worldSettingNote || "") + adventureTimeContext(ctx.clock);
   const endingPrompt = getActivePrompt("ending", DEFAULT_DM_ENDING_PROMPT);
   const playerName = dmPlayerName(ctx);
   const messages = [

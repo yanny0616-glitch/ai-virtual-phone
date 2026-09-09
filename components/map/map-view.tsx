@@ -21,6 +21,7 @@ import { generateStatusSuggestions } from "@/lib/adventure-status-generator";
 import AdventureWorldEditor from "./adventure-world-editor";
 import { generateWorldSettingEdit } from "@/lib/adventure-world-edit-generator";
 import AdventureStatusPanel from "./adventure-status-panel";
+import { applyAdventureTime, readAdventureClock, type AdventureClock } from "@/lib/adventure-time";
 import { applyAdventureStatusChanges } from "@/lib/adventure-status";
 
 type Props = {
@@ -117,6 +118,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
   const lastFailedActionRef = useRef(lastFailedAction);
   lastFailedActionRef.current = lastFailedAction;
   const saveRef = useRef(save);
+  const timeTurnIdRef = useRef(save.pendingEvent?.timeTurnId);
   React.useEffect(() => {
     saveRef.current = save;
   }, [save]);
@@ -128,6 +130,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       streamLog: streamRef.current.slice(-200),
       pendingEvent: inEventRef.current ? {
         inEvent: true,
+        timeTurnId: timeTurnIdRef.current,
         choices: currentChoicesRef.current || undefined,
         eventContext: eventContextRef.current || undefined,
         eventMeta: activeEventMetaRef.current || undefined,
@@ -140,6 +143,14 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
     saveGame(withExtra);
     onSaveUpdate(withExtra);
   }, [onSaveUpdate]);
+
+  const applySceneTime = useCallback((base: GameSave, scene: EventScene, expected: AdventureClock, turnId: string, locationName: string): GameSave => {
+    const result = applyAdventureTime(base, scene.timeUpdate, {
+      expected, turnId, createdAt: new Date().toISOString(), locationName,
+    });
+    if (result.warning || result.notice) pushMessages({ id: mkId(), type: "system", text: result.warning || result.notice! });
+    return result.save;
+  }, [pushMessages]);
 
   const applySceneStatus = useCallback((base: GameSave, scene: EventScene, expectedRevision?: number): GameSave => {
     const result = applyAdventureStatusChanges(base.customStatus, scene.statusChanges, {
@@ -414,6 +425,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
     meta?: { questId?: string; npcName?: string; npcPersonality?: string },
   ) => {
     if (inEvent || eventLoading || worldEditorBusyRef.current) return;
+    const timeTurnId = crypto.randomUUID();
     setEventLoading(true);
     setActiveEventMeta({ type: eventType, questId: meta?.questId });
     try {
@@ -449,6 +461,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       skeleton.mainQuest.stages.forEach((s, i) => { mqNodeMap[i] = s.locationHint; });
 
       const dmCtx = {
+        clock: readAdventureClock(saveRef.current),
         worldId: world.id,
         worldLore: skeleton.world.lore,
         currentLocation: currentNode?.name || "",
@@ -461,7 +474,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
         playerName: userIdentity?.name || "玩家",
         recentJournal: save.journal.map(j => j.text),
         keyChoices: save.keyChoices,
-        gameTime: formatGameTime(save.gameDay, save.gameTime),
+        gameTime: formatGameTime(saveRef.current.gameDay, saveRef.current.gameTime),
         dmDossier: skeleton.dmDossier,
         director: save.director,
         mainQuestSynopsis: skeleton.mainQuest.synopsis,
@@ -489,14 +502,15 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       const dmScene = scene as EventScene & { dmSituation?: string; worldEvents?: string[] };
       if (dmScene.worldEvents?.length) setWorldEvents(dmScene.worldEvents);
 
-      const statusSave = applySceneStatus(saveRef.current, scene, dmCtx.customStatus?.revision);
+      const timeSave = applySceneTime(saveRef.current, scene, dmCtx.clock, timeTurnId, currentNode?.name || "");
+      const statusSave = applySceneStatus(timeSave, scene, dmCtx.customStatus?.revision);
       const sceneJournal = scene.journalEntry?.trim();
       if (sceneJournal) {
         persistSave({
           ...statusSave,
           journal: [...statusSave.journal, {
             id: `j_${Date.now()}`,
-            timestamp: formatGameTime(save.gameDay, save.gameTime),
+            timestamp: formatGameTime(statusSave.gameDay, statusSave.gameTime),
             realTime: new Date().toISOString(),
             locationName: currentNode?.name || "",
             text: sceneJournal,
@@ -507,6 +521,8 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       }
 
       if (!sceneJournal && statusSave !== saveRef.current) persistSave(statusSave);
+      dmCtx.clock = readAdventureClock(statusSave);
+      dmCtx.gameTime = formatGameTime(statusSave.gameDay, statusSave.gameTime);
 
       // Push dialogues to text stream
       pushSceneToStream(scene);
@@ -540,11 +556,13 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
     } finally {
       setEventLoading(false);
     }
-  }, [save, skeleton, currentNode, characters, inEvent, eventLoading, pushSceneToStream, pushMessages, applySceneStatus, world.id]);
+  }, [save, skeleton, currentNode, characters, inEvent, eventLoading, pushSceneToStream, pushMessages, applySceneStatus, applySceneTime, world.id]);
 
   // ── Handle player action — Collect-Resolve-Narrate loop ──
-  const handlePlayerAction = useCallback(async (actionText: string, skipDisplay?: boolean) => {
+  const handlePlayerAction = useCallback(async (actionText: string, skipDisplay?: boolean, retryTimeTurn = false) => {
     if (worldEditorBusyRef.current) return;
+    const timeTurnId = retryTimeTurn && timeTurnIdRef.current ? timeTurnIdRef.current : crypto.randomUUID();
+    timeTurnIdRef.current = timeTurnId;
     // ── Phase 2: Player declares ──
     const playerName = userIdentity?.name || "你";
     if (!skipDisplay) {
@@ -570,6 +588,8 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
     setCurrentChoices(null);
     setEventContinueLoading(true);
     setLastFailedAction(actionText);  // save immediately so it persists if interrupted
+    lastFailedActionRef.current = actionText;
+    persistSave(saveRef.current);
 
     try {
       const apiConfigs = loadApiConfigs();
@@ -601,7 +621,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
         if (pendingIds.length > 0) {
           setLoadingPhase("companions");
           for (const cid of pendingIds) {
-            const decl = await companionDeclare(cid, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === cid)?.affinity, { customStatus: saveRef.current.customStatus, worldId: world.id });
+            const decl = await companionDeclare(cid, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === cid)?.affinity, { customStatus: saveRef.current.customStatus, worldId: world.id, clock: readAdventureClock(saveRef.current) });
 
             if (decl.failed) {
               pushMessages({ id: mkId(), type: "system", text: `${decl.speaker} 回复失败` });
@@ -660,9 +680,12 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       dmCtx.director = save.director;
       dmCtx.recentJournal = saveRef.current.journal.map(j => j.text);
       dmCtx.customStatus = saveRef.current.customStatus;
+      dmCtx.clock = readAdventureClock(saveRef.current);
       dmCtx.gameTime = formatGameTime(saveRef.current.gameDay, saveRef.current.gameTime);
 
       const continuation = await resolveRound(dmCtx, allDeclarations, apiConfig);
+
+      const timeSave = applySceneTime(saveRef.current, continuation, dmCtx.clock, timeTurnId, currentNode?.name || "");
 
       // Update Director
       const ev = continuation as EventScene & { gained?: string[]; lost?: string[]; npcsInvolved?: string[]; moveTo?: string; worldEvents?: string[] };
@@ -738,10 +761,10 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       if (ev.gained?.length) pushMessages({ id: mkId(), type: "system", text: `获得：${ev.gained.join("、")}` });
       if (lostItems.length) pushMessages({ id: mkId(), type: "system", text: `失去：${lostItems.join("、")}` });
 
-      const newJournal = [...saveRef.current.journal];
+      const newJournal = [...timeSave.journal];
       if (ev.journalEntry) {
         newJournal.push({
-          id: `j_${Date.now()}`, timestamp: formatGameTime(save.gameDay, save.gameTime),
+          id: `j_${Date.now()}`, timestamp: formatGameTime(timeSave.gameDay, timeSave.gameTime),
           realTime: new Date().toISOString(), locationName: currentNode?.name || "",
           text: ev.journalEntry, type: activeEventMeta?.type === "main_quest" ? "main" : "side",
         });
@@ -816,6 +839,9 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
 
       const newSave: GameSave = applySceneStatus({
         ...save,
+        gameDay: timeSave.gameDay,
+        gameTime: timeSave.gameTime,
+        lastTimeTurnId: timeSave.lastTimeTurnId,
         customStatus: saveRef.current.customStatus,
         currentNodeId: newNodeId,
         currentNodeType: newNodeType,
@@ -831,6 +857,8 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
         timestamp: new Date().toISOString(),
       }, continuation, dmCtx.customStatus?.revision);
       persistSave(newSave);
+      dmCtx.clock = readAdventureClock(newSave);
+      dmCtx.gameTime = formatGameTime(newSave.gameDay, newSave.gameTime);
 
       // ── Death check: HP=0 → show death dialog ──
       if (newHp <= 0) {
@@ -861,6 +889,8 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
         try {
           let dmCtxForEnding: import("@/lib/map-rpg-engine").DMContext;
           try { dmCtxForEnding = JSON.parse(eventContext); } catch { dmCtxForEnding = { worldLore: skeleton.world.lore, currentLocation: currentNode?.name || "", eventType: "", eventBrief: "", companionNames: [], recentJournal: save.journal.map(j => j.text), keyChoices: save.keyChoices, gameTime: formatGameTime(save.gameDay, save.gameTime) }; }
+          dmCtxForEnding.clock = readAdventureClock(newSave);
+          dmCtxForEnding.gameTime = formatGameTime(newSave.gameDay, newSave.gameTime);
           dmCtxForEnding.worldId = world.id;
           dmCtxForEnding.customStatus = newSave.customStatus;
           dmCtxForEnding.director = newSave.director;
@@ -932,7 +962,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
         }
       }
     }
-  }, [eventContext, accumulatedEvent, save, currentNode, activeEventMeta, persistSave, allNodes, characters, pushMessages, pushSceneToStream, userIdentity, skeleton, applySceneStatus, world.id]);
+  }, [eventContext, accumulatedEvent, save, currentNode, activeEventMeta, persistSave, allNodes, characters, pushMessages, pushSceneToStream, userIdentity, skeleton, applySceneStatus, applySceneTime, world.id]);
 
   // ── Growth roll ref (defined below, used by handlePlayerAction) ──
   const runGrowthRollRef = useRef<(s: GameSave) => GameSave>((s) => s);
@@ -1002,7 +1032,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
               streamRef.current,
               save.agents.length > 1 ? userIdentity : undefined,
               save.agents.find(a => a.characterId === cid)?.affinity,
-              { instruction: exitReactionInstruction, customStatus: saveRef.current.customStatus, worldId: world.id },
+              { instruction: exitReactionInstruction, customStatus: saveRef.current.customStatus, worldId: world.id, clock: readAdventureClock(saveRef.current) },
             ))
           );
           for (const decl of decls) {
@@ -1183,7 +1213,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       const apiConfig = (slot?.apiConfigId ? apiConfigs.find(c => c.id === slot.apiConfigId) : null) || apiConfigs.find(c => c.apiKey) || apiConfigs[0];
       if (!apiConfig?.apiKey) throw new Error("未找到API配置");
 
-      const decl = await companionDeclare(characterId, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === characterId)?.affinity, { customStatus: saveRef.current.customStatus, worldId: world.id });
+      const decl = await companionDeclare(characterId, apiConfig, streamRef.current, save.agents.length > 1 ? userIdentity : undefined, save.agents.find(a => a.characterId === characterId)?.affinity, { customStatus: saveRef.current.customStatus, worldId: world.id, clock: readAdventureClock(saveRef.current) });
 
       if (decl.speech && decl.speech !== "……") {
         pushMessages({ id: mkId(), type: "character", speaker: decl.speaker, text: decl.speech, emotion: decl.emotion });
@@ -1201,6 +1231,9 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
   // ── Direct DM resolve (skip companion LLM, use free-mode chat as declarations) ──
   const handleDirectResolve = useCallback(async () => {
     if (!inEvent || eventContinueLoading || worldEditorBusyRef.current) return;
+    const timeTurnId = crypto.randomUUID();
+    timeTurnIdRef.current = timeTurnId;
+    persistSave(saveRef.current);
     setEventContinueLoading(true);
     setFreeMode(false);
     pushMessages({ id: mkId(), type: "system", text: "—— DM 裁决中 ——" });
@@ -1252,10 +1285,16 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       dmCtx.worldId = world.id;
       dmCtx.previousDialogue = prevDialogue;
       dmCtx.director = save.director;
-      dmCtx.recentJournal = save.journal.map(j => j.text);
+      dmCtx.recentJournal = saveRef.current.journal.map(j => j.text);
+      dmCtx.clock = readAdventureClock(saveRef.current);
+      dmCtx.gameTime = formatGameTime(saveRef.current.gameDay, saveRef.current.gameTime);
 
       setLoadingPhase("dm");
       const continuation = await resolveRound(dmCtx, allDeclarations, apiConfig);
+
+      const timeSave = applySceneTime(saveRef.current, continuation, dmCtx.clock, timeTurnId, currentNode?.name || "");
+      dmCtx.clock = readAdventureClock(timeSave);
+      dmCtx.gameTime = formatGameTime(timeSave.gameDay, timeSave.gameTime);
 
       // Reuse the same result processing as handlePlayerAction
       // (This duplicates some logic but keeps it self-contained)
@@ -1293,7 +1332,13 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       }
 
       // Save (simplified — skipping stat/item/position processing here, handled by handlePlayerAction for full events)
-      persistSave({ ...save, timestamp: new Date().toISOString() });
+      persistSave({ ...timeSave, timestamp: new Date().toISOString(),
+        journal: continuation.journalEntry ? [...timeSave.journal, {
+          id: `${timeTurnId}_scene`, timestamp: formatGameTime(timeSave.gameDay, timeSave.gameTime),
+          realTime: new Date().toISOString(), locationName: currentNode?.name || "",
+          text: continuation.journalEntry, type: activeEventMeta?.type === "main_quest" ? "main" : "side",
+        }] : timeSave.journal,
+      });
 
     } catch (e) {
       pushMessages({ id: mkId(), type: "system", text: `裁决失败：${e instanceof Error ? e.message : String(e)}` });
@@ -1301,7 +1346,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
       setEventContinueLoading(false);
       setLoadingPhase("");
     }
-  }, [inEvent, eventContinueLoading, eventContext, save, characters, userIdentity, pushMessages, pushSceneToStream, persistSave, world.id]);
+  }, [inEvent, eventContinueLoading, eventContext, save, characters, userIdentity, pushMessages, pushSceneToStream, persistSave, applySceneTime, currentNode, activeEventMeta, world.id]);
 
   // ── Handle interaction button click ──
   const handleInteraction = useCallback((ia: NodeInteraction) => {
@@ -1623,7 +1668,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
             <button onClick={() => {
               const action = lastFailedAction;
               setLastFailedAction(null);
-              handlePlayerAction(action, true);
+              handlePlayerAction(action, true, true);
             }} style={{
               width: "100%", padding: "8px 0", borderRadius: 8, marginBottom: 5,
               border: "1px solid rgba(255,160,80,0.2)",
@@ -1738,7 +1783,7 @@ export default function MapView({ world, save, onSaveUpdate, onWorldUpdate, onBa
                   <button onClick={() => {
                     const action = lastFailedAction;
                     setLastFailedAction(null);
-                    handlePlayerAction(action, true);
+                    handlePlayerAction(action, true, true);
                   }} style={{
                     flex: 1, padding: "8px 0", borderRadius: 8,
                     border: "1px solid rgba(255,160,80,0.2)",

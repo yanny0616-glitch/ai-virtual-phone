@@ -135,6 +135,7 @@ const deps = {};
 for (const match of read("lib/map-rpg-engine.ts").matchAll(/from ["']([^"']+)["']/g)) deps[match[1]] = {};
 Object.assign(deps, {
   "./adventure-status": D,
+  "./adventure-time": load("lib/adventure-time.ts"),
   "./adventure-world-edit": worldEdit,
   "./api-helpers": { simpleLLMCall: async (_config, messages) => { calls.push(messages); return { content: typeof response === "string" ? response : JSON.stringify(response) }; } },
   "./map-storage": { getMapWorld: () => null, loadDMPrompts: () => ({ scene: "自定义场景提示", resolve: "自定义裁决提示" }), loadDMTokenConfig: () => ({}) },
@@ -206,3 +207,11 @@ const editedReply = await engine.companionDeclare("emperor", null, [], undefined
 assert.equal(editedReply.speech, "遵旨");
 assert.match(companionCalls.at(-1).at(-1).content, /皇帝尚无子嗣/);
 console.log("PASS companion world edits: real request + preview include latest public settings and coexist with custom status.");
+
+const clockPreview = await engine.previewAdventureCompanionPromptPayload("emperor", [], undefined, undefined, { customStatus: corrected, worldId: editedWorld.id, clock: { day: 6, period: "night" } });
+assert.match(clockPreview.messages.at(-1).content, /第6天 · 夜晚/);
+assert.match(clockPreview.messages.at(-2).content, /最新世界设定/);
+assert.match(clockPreview.messages.at(-3).content, /最新存档/);
+await engine.companionDeclare("emperor", null, [], undefined, undefined, { clock: { day: 6, period: "night" } });
+assert.match(companionCalls.at(-1).at(-1).content, /第6天 · 夜晚/);
+console.log("PASS companion clock: live request and preview use latest game time alongside world edits and custom status.");

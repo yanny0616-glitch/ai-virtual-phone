@@ -41,6 +41,7 @@ import { previewCoCreatePromptPayload } from "@/lib/cocreate-engine";
 import { previewShoppingPromptPayload } from "@/lib/shopping-engine";
 import { previewInterviewMagazinePromptPayload } from "@/lib/interview-magazine-engine";
 import { hydrateMapStorage, loadMapWorlds, getLatestSave } from "@/lib/map-storage";
+import { readAdventureClock } from "@/lib/adventure-time";
 import { previewAdventureCompanionPromptPayload } from "@/lib/map-rpg-engine";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import type { BookChapter } from "@/lib/reading-types";
@@ -538,6 +539,7 @@ export function DebugPromptPanel() {
                     {
                         customStatus: selectedAdventureSave.customStatus,
                         worldId: selectedAdventureSave.worldId,
+                        clock: readAdventureClock(selectedAdventureSave),
                         ...(adventureInstructionMode === "exit" ? { instruction: "{{user}}刚才决定离开当前事件，不再继续。请以你的身份回应{{user}}的离开：你会说什么、有什么反应、接下来是否跟随/挽留/沉默旁观。" } : {}),
                     },
                 );
