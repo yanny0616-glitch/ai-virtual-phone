@@ -26,6 +26,7 @@ const CUSTOM_APP_DATA_PREFIX = "ai_phone_custom_app_data_v1:";
 const CUSTOM_APP_TIMELINE_PREFIX = "ai_phone_custom_app_timeline_v1:";
 const CUSTOM_APP_ICON_STYLE_KEY = "ai_phone_custom_app_icon_styles_v1";
 
+export const CUSTOM_APP_DATA_UPDATED_EVENT = "ai-phone-custom-app-data-updated";
 export const CUSTOM_APPS_UPDATED_EVENT = "ai-phone-custom-apps-updated";
 /** 请求桌面为某个已安装应用摆放图标（detail: { appId }）。桌面 shell 监听并落位。 */
 export const CUSTOM_APP_PLACE_DESKTOP_EVENT = "ai-phone-custom-app-place-desktop";
@@ -932,6 +933,7 @@ export function readCustomAppCollection(appId: string, collection: string): Arra
 export function writeCustomAppCollection(appId: string, collection: string, rows: Array<Record<string, unknown>>): void {
   migrateLegacyCustomAppData(appId);
   kvSet(customAppCollectionKey(appId, collection), JSON.stringify(rows));
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(CUSTOM_APP_DATA_UPDATED_EVENT, { detail: { appId, collection } }));
 }
 
 function loadCustomAppTimelineForApp(appId: string): CustomAppTimelineEntry[] {

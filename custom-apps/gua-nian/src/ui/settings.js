@@ -133,6 +133,7 @@
   }
 
   function openSheet() {
+    renderSettingsEffects();
     const cx = cur();
     // 四节用页签切，所有节都渲染在 DOM 里只是藏起来：回填 / 读表按 id 找，不用管哪节在前台
     const tab = SET_SECTIONS.some((x) => x.id === S._setTab) ? S._setTab : SET_SECTIONS[0].id;

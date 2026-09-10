@@ -7,7 +7,7 @@ export default {
     id: "presence-status",
     name: "在线状态",
     apiVersion: 1,
-    version: "1.0.0",
+    version: "1.0.1",
     author: "自制",
     description: "聊天列表头像上的点 + 聊天页名字下的一行小字：在线 / 忙碌 / 睡觉中 / 离开 / 隐身。装了挂念就按TA的作息实时变，点那行字可以手动锁定。",
     permissions: ["chat.read", "ui"],
@@ -73,6 +73,10 @@ export default {
       const nowMs = Date.now();
       const at = p ? Number(p.at) || 0 : 0;
       const fresh = !!p && (!at || nowMs - at <= STALE_MS);
+      if (p && p.managedBy === "guanian-host" && fresh) {
+        const state = asState(p.state) || "away";
+        return { state, label: str(p.label) || (state === "online" ? (showDoing ? str(p.doing) : "") : LABELS[state] + (state === "busy" && showDoing && p.doing ? " · " + str(p.doing) : "")) };
+      }
       const live = liveFromGate(cid, new Date(nowMs));
       if (live) {
         if (live.state === "online" && fresh && p) {
@@ -92,6 +96,7 @@ export default {
     // 所有挂着的坑位统一重画：变量池有写入、每分钟到点（「离开」按快照年龄算，没人写也会变）、设置改了
     const painters = new Set();
     const repaintAll = () => { for (const fn of painters) { try { fn(); } catch (e) { ctx.system.log("repaint", e && e.message); } } };
+    ctx.hooks.on("session.opened", () => window.dispatchEvent(new Event("guanian-presence-refresh")));
     ctx.hooks.on("variables.changed", (p) => { if (p.name === "presence" || p.name === "presenceOverride") repaintAll(); });
     ctx.system.settings.onChange(repaintAll);
     ctx.system.timers.setInterval(repaintAll, 60000);

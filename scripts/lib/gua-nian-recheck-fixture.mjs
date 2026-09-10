@@ -10,7 +10,7 @@ export function recheckFixture() {
       gateGapMin: 0, gateFreshMin: 0, gateHorizonMin: 0, gateMinMsgs: 1, selfImpulseCap: 0, sentinelWakeId: 'sentinel', wakePrefix: 'app_', judgeTemplate: 'judge', minGapMin: 0, momentsOn: 0 }, items: [], decisions: [] };
   class Clock extends Date { constructor(...a) { super(...(a.length ? a : [h.now])); } static now() { return h.now; } }
   let handler;
-  const c = vm.createContext({ console, Date: Clock, Response, Request, URL, Headers, TextEncoder, TextDecoder, Uint8Array, AbortController,
+  const c = vm.createContext({ h, console, Date: Clock, Response, Request, URL, Headers, TextEncoder, TextDecoder, Uint8Array, AbortController, AbortSignal,
     crypto: webcrypto, setTimeout: () => 1, clearTimeout() {},
     Deno: { env: { get: () => 'https://test' }, serve: fn => handler = fn },
     fetch: async (url, init = {}) => {
@@ -19,6 +19,7 @@ export function recheckFixture() {
         return h.modelFails ? new Response('', { status: 503 }) : Response.json({ choices: [{ message: { content: JSON.stringify(h.result) } }] });
       }
       const u = new URL(url), table = u.pathname.split('/').at(-1), body = init.body ? JSON.parse(init.body) : null;
+      if (table === 'broadcast') { (h.broadcasts ||= []).push(body); return new Response('', {status:h.broadcastFails?503:200}); }
       if (table === 'push_server_config') return Response.json([{ cron_secret: 'secret', payload_key: 'key' }]);
       if (table === 'push_chat_mirror') return h.historyFails ? new Response('', { status: 503 }) : Response.json(h.mirrors);
       if (table === 'push_outbox') return Response.json(h.outputs);
@@ -35,6 +36,7 @@ export function recheckFixture() {
       if (table === 'push_jobs') {
         if (init.method === 'POST') { h.jobs.push(...body); return Response.json(body); }
         if (init.method === 'PATCH') { for (const j of h.jobs) if (j.status === 'pending') Object.assign(j, body); return Response.json(h.jobs); }
+        if (h.templateReadFails) return new Response('', {status:503});
         return Response.json(h.noTemplate ? [] : [{ trigger_key: 'timedwake:sentinel', payload: 'template', status: 'pending' }, { trigger_key: 'judge', payload: 'template', status: 'pending' }]);
       }
       if (table === 'push_recheck_judge') { if (body.p_action === 'claim') h.plan.judge_token = body.p_token; return Response.json({ claimed: true }); }
@@ -45,7 +47,7 @@ export function recheckFixture() {
   });
   vm.runInContext(code + `
     lifeRoll=()=>null;feedbackWithPreviousDay=async()=>null;usageBudget=async()=>({tz:0});usageExceeded=()=>"";usageAdd=async()=>{};
-    decryptPayload=async()=>JSON.stringify({request:{url:"https://model.test",headers:{},providerKind:"openai-compatible",body:{messages:[{role:"user",content:"__CUSTOM_APP_INSTRUCTION__"}]}},merge:{sessionId:"s"},notify:{title:"角色"}});
+    decryptPayload=async()=>{if(h.templateDecryptFails)throw Error("test decrypt failure");return JSON.stringify({request:{url:"https://model.test",headers:{},providerKind:"openai-compatible",body:{messages:[{role:"user",content:"__CUSTOM_APP_INSTRUCTION__"}]}},merge:{sessionId:"s"},notify:{title:"角色"}});};
     encryptPayload=async text=>({ct:text});
   `, c);
   const run = () => handler(new Request('https://test', { method: 'POST', body: JSON.stringify({ token: 'secret', userId: 'u', characterId: 'c', planDate: '2026-09-07' }) }));

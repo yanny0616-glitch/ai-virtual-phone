@@ -66,14 +66,17 @@
       .filter((w) => isImpromptu(w) && (w.fireAt > floor || w.kind === "promise"));
   }
 
-  async function cancelTodayWakes(cx, keepIds) {
+  async function cancelTodayWakes(cx, keepIds, includeTemplate) {
     const done = Object.assign({}, keepIds || {});
+    const template = sentinelOf(cx);
+    if (!includeTemplate && template && template.wakeId) done[template.wakeId] = 1;
+    if (!includeTemplate) for (const id of template && template.previousWakeIds || []) done[id] = 1;
     try {
       const wakes = await AiPhone.push.listWakes();
       const d0 = timeToMs("00:00"), d1 = d0 + 86400000;
       for (const w of wakes || []) {
         if (w.characterId === cx.character.id && w.fireAt >= d0 && w.fireAt < d1) {
-          if (done[w.id]) continue;
+          if (done[w.id] || !includeTemplate && /_sentinel_\d+_[a-z0-9]+$/i.test(w.id)) continue;
           done[w.id] = 1;
           try { await AiPhone.push.cancelWake(w.id); } catch (e) { /* 已触发的取消失败可忽略 */ }
         }
@@ -94,7 +97,8 @@
       let n = 0;
       for (const j of (jr && jr.jobs) || []) {
         const id = /^timedwake:(timed_wake_capp_.+)$/.exec(String(j.triggerKey || ""));
-        if (!id || j.status !== "pending" || j.sessionId !== cx._session || done[id[1]]) continue;
+        if (!id || j.status !== "pending" || j.sessionId !== cx._session || done[id[1]]
+          || !includeTemplate && /_sentinel_\d+_[a-z0-9]+$/i.test(id[1])) continue;
         done[id[1]] = 1; n++;
         try { await AiPhone.push.cancelWake(id[1]); } catch (e) { /* 宿主本地没登记也没关系，云端那条会被删 */ }
       }
@@ -115,7 +119,7 @@
   }
   async function forgetCharacter(cx) {
     await unfreezeGenTemplates(cx);
-    await cancelTodayWakes(cx);
+    await cancelTodayWakes(cx, null, true);
     const old = sentinelOf(cx);
     if (old && old.wakeId) { try { await AiPhone.push.cancelWake(old.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
     if (cloudCfg()) { try { await cloudFetch("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id }) }); } catch (e) { /* 云端没配好就算了 */ } }
@@ -126,18 +130,26 @@
     });
   }
   async function armSentinel(cx) {
+    // 先建立可用的新模板，再切换引用。旧任务保留给仍引用它的历史/明日计划，
+    // 新旧哨兵到点均不生成聊天，不通过提前删旧任务来替换模板。
+    if (!cloudCfg() || !cloudRecheckOn() && !(S.settings.autoGen && S.settings.cloudGen)) return null;
     const old = sentinelOf(cx);
-    if (old && old.wakeId) { try { await AiPhone.push.cancelWake(old.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
-    let next = null;
     try {
       const res = await AiPhone.push.wake({
         characterId: cx.character.id, fireAt: Date.now() + 48 * 3600000, source: "tool",
         intent: "挂念后台复核模板，仅供后台调用，不生成聊天消息",
       });
-      next = { wakeId: res.id, armed: !!res.armed };
-      if (!res.armed) await log(cx, "哨兵预约只在本地挂上（" + (res.reason || "服务端未挂载") + "），云端复核这两天没有模板可借");
-    } catch (e) { await log(cx, "哨兵预约失败（云端复核这两天没有模板可借）：" + (e && e.message || e)); }
-    await patchSettings((s) => ({ sentinels: Object.assign({}, s.sentinels, { [cx.character.id]: next }) }));
+      if (!res || !res.armed || !res.id) throw new Error(res && res.reason || "服务端未确认模板挂载成功");
+      const next = { wakeId: res.id, armed: true, at: Date.now(), cloudUrl: (cloudCfg() || {}).url,
+        previousWakeIds: [...new Set([...(old && old.previousWakeIds || []), ...(old && old.wakeId ? [old.wakeId] : [])])].slice(-24) };
+      await patchSettings((s) => ({ sentinels: Object.assign({}, s.sentinels, { [cx.character.id]: next }) }));
+      return next;
+    } catch (e) {
+      const message = "聊天模板更新失败：" + String(e && e.message || e) + (old && old.wakeId ? "；旧模板引用已保留" : "；尚无可用模板");
+      await setPlanSync(cx, { date: todayStr(), cloudUrl: (cloudCfg() || {}).url, at: Date.now(), status: "failed", message });
+      await log(cx, message);
+      throw new Error(message);
+    }
   }
 
   async function orchestrate(cx) {
@@ -152,8 +164,8 @@
       // 随用随判：早上不排念头，也就不调模型。只把哨兵和空计划寄上去，白天云端随时起。
       if (+S.settings.impulseMode === 1 && !cloudRecheckOn()) await log(cx, "随用随判要开着云端复核才有人起念，这次按「早上定完」排");
       if (liveMode()) {
-        await cancelTodayWakes(cx, keptIds);
         await armSentinel(cx);
+        await cancelTodayWakes(cx, keptIds);
         const liveItems = kept.slice().sort((a, b) => a.fireAt - b.fireAt);
         cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
           { date: todayStr(), characterId: cx.character.id, items: liveItems, chatUsed: 0, plannedAt: Date.now(), recheckAt: 0, selfUsed: 0, postedIds: [], outbox: [] });
@@ -185,8 +197,8 @@
       });
       const raw = Array.isArray(parsed.impulses) ? parsed.impulses : [];
       await log(cx, "TA提了 " + raw.length + " 个念头：" + (raw.map((x) => normHM(x && x.time) + "·" + String((x && x.about) || "")).join("，") || "（一个都没有）"));
-      await cancelTodayWakes(cx, keptIds);
       await armSentinel(cx);
+      await cancelTodayWakes(cx, keptIds);
 
       // 留下来的临时起念一样占今天的额度和最小间隔，否则重排会在它旁边再排一条。
       const items = kept.slice();

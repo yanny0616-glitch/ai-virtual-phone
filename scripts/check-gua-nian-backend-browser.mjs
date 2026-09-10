@@ -1,5 +1,4 @@
-// 拾光 APP 端到端冒烟：真 Chromium 跑单文件产物，宿主 SDK 全部用内存假实现。
-// 覆盖：启动、接续旧记录、自动整理（假模型）、注入文字、编辑冲突保护、删除墓碑、后台事件握手。
+// 挂念后台与设置面板：真实 Chromium 运行产物，宿主与网络使用受控假实现。
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -69,6 +68,20 @@ const TEST = String.raw`
     for (const tab of ['today', 'heart', 'archive']) {
       S.tab = tab; render();
       check(!$('#cloud-sync'), 'leaving backend retained sync');
+    }
+    S._settingsEffects = ['设置已保存，本轮验证说明'];
+    renderSettingsEffects();
+    check($('#settings-effects').closest('#sheet'), 'effects must be inside settings sheet');
+    openSheet();
+    check(document.body.classList.contains('sheet-open'), 'settings sheet did not open');
+    check($('#settings-effects').textContent.includes('本轮验证说明'), 'effects unavailable in settings');
+    closeSheet();
+    for (const tab of ['today', 'heart', 'archive', 'back']) {
+      S.tab = tab; render();
+      check(!document.body.classList.contains('sheet-open'), 'tab reopened settings');
+      check(!$('#view').textContent.includes('本轮验证说明'), 'effects leaked into page');
+      const box = $('#settings-effects').getBoundingClientRect();
+      check(box.top >= innerHeight || box.bottom <= 0 || getComputedStyle($('#sheet')).visibility === 'hidden', 'closed sheet effects visible');
     }
     S.tab = 'back'; render();
     window.guanianCheck = {passed:true, checks};

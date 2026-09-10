@@ -6,7 +6,7 @@ export default {
     id: "affection-ledger",
     name: "好感与关系",
     apiVersion: 1,
-    version: "1.6.0",
+    version: "1.6.1",
     author: "自制",
     description: "角色回复里自带心里话与好感变化量，插件累加成慢变的好感；关系按角色各自存，由TA按人设自己定，转折时可选经你确认或TA自己改。区间、提示词、数值都在面板里改。",
     permissions: ["chat.read", "chat.write", "ui", "storage"],
@@ -467,7 +467,7 @@ export default {
     function statusHtml(cid, st) {
       const tier = tierOf(st.score);
       return `
-        ${presenceCard(cid)}
+        <div class="afl-live-presence">${presenceCard(cid)}</div>
         ${st.pendingRelation ? `<div class="afl-card soft"><div class="afl-pending">
           <div class="t">TA觉得，你们现在是<b>「${esc(st.pendingRelation.to)}」</b>了</div>
           ${st.pendingRelation.reason ? `<div class="r">${esc(st.pendingRelation.reason)}</div>` : ""}
@@ -501,12 +501,14 @@ export default {
     }
     function presenceCard(cid) {
       const pr = ctx.data.variables.get("presence", "character", cid);
-      if (!pr || typeof pr !== "object" || !pr.doing) return "";
+      if (!pr || typeof pr !== "object" || !pr.doing && pr.managedBy !== "guanian-host") return "";
+      const syncNote = pr.managedBy === "guanian-host" && pr.syncStatus === "cached" ? "同步暂未成功，按已保存日程显示" : "";
       const ageMin = pr.at ? Math.round((Date.now() - Number(pr.at)) / 60000) : null;
       const meta = [pr.place ? "📍 " + pr.place : "", pr.mood ? "情绪 " + pr.mood : "", Number.isFinite(Number(pr.energy)) ? "精力 " + pr.energy + "%" : "", pr.next ? "接下来 " + pr.next : ""].filter(Boolean).map(esc).join(" · ");
       return `<div class="afl-card"><h4>此刻</h4><div class="afl-presence"><div class="ic">${pr.asleep ? ICON.moon : ICON.clock}</div><div>
-        <div class="main">${esc(pr.asleep ? "在睡觉" : "正在" + pr.doing)}${pr.step ? "<span style='font-weight:400;opacity:.7'>（" + esc(pr.step) + "）</span>" : ""}</div>
+        <div class="main">${esc(pr.asleep ? "在睡觉" : pr.doing ? "正在" + pr.doing : pr.label || "状态待同步")}${pr.step ? "<span style='font-weight:400;opacity:.7'>（" + esc(pr.step) + "）</span>" : ""}</div>
         ${meta ? `<div class="meta">${meta}</div>` : ""}
+        ${syncNote ? `<div class="age">${esc(syncNote)}</div>` : ""}
         ${ageMin != null && ageMin > 30 ? `<div class="age">${ageMin >= 120 ? Math.round(ageMin / 60) + " 小时" : ageMin + " 分钟"}前挂念同步的快照</div>` : ""}
       </div></div></div>`;
     }
@@ -537,6 +539,7 @@ export default {
       if (!cid) { ctx.ui.toast("这个面板只在单聊里用"); return; }
       const ch = ctx.data.characters.get(cid);
       let tab = "status";
+      window.dispatchEvent(new Event("guanian-presence-refresh"));
       ctx.ui.openModal((el, api) => {
         // 宿主给的容器只当透明壳，让底页自己做遮罩的直接子项，高度按遮罩算而不是按窗口
         el.style.cssText = "display:contents";
@@ -580,6 +583,11 @@ export default {
           el.querySelectorAll("[data-s]").forEach((cb) => cb.addEventListener("change", () => ctx.system.settings.set(cb.getAttribute("data-s"), cb.checked)));
         };
         paint();
+        return ctx.hooks.on("variables.changed", (event) => {
+          if (event.name !== "presence" || event.scope !== "character" || event.targetId !== cid) return;
+          const box = el.querySelector(".afl-live-presence");
+          if (box) box.innerHTML = presenceCard(cid);
+        });
       });
     }
   },

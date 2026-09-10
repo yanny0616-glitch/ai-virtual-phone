@@ -98,13 +98,16 @@ Object.assign(local, {
   createOrGetSession: () => ({id:'s'}), armTimedWakeBailout: async () => ({ok:true}),
   emitHostStateUpdated() {}, customAppTimedWakePrefix: id => 'timed_wake_capp_' + id + '_',
 });
-vm.runInContext('loadTimedWakeSchedules=()=>[];saveTimedWakeSchedule=()=>{};\n' + scheduleCode + ';globalThis.registerWake=scheduleCustomAppTimedWake;', local);
+local.localWrites = 0;
+vm.runInContext('loadTimedWakeSchedules=()=>[];saveTimedWakeSchedule=()=>{globalThis.localWrites++;};\n' + scheduleCode + ';globalThis.registerWake=scheduleCustomAppTimedWake;', local);
 for (const intent of ['已经两天没在挂念里排过日程了，忽然想起用户，随口问候一句就好', '挂念后台复核模板，仅供后台调用，不生成聊天消息']) {
   const registered = await local.registerWake({id:'app_gua.nian_01dda58254d4'}, {characterId:'c', intent, fireAt:Date.now()+48*3600000});
   assert.match(registered.id, /_sentinel_\d+_/);
 }
+assert.equal(local.localWrites, 0, 'templates must not replace local ordinary schedules');
 const ordinary = await local.registerWake({id:'app_gua.nian_01dda58254d4'}, {characterId:'c', intent:'按约定问候', fireAt:Date.now()+3600000});
 assert.doesNotMatch(ordinary.id, /_sentinel_/);
+assert.equal(local.localWrites, 1);
 console.log('PASS actual host registers both legacy and new template intents with dedicated identity');
 
 

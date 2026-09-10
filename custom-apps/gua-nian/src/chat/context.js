@@ -158,24 +158,9 @@
     if (!cx.character || !AiPhone.variables || !AiPhone.variables.set) return;
     try {
       const opts = { scope: "character", characterId: cx.character.id };
-      const nb = nightBridge(cx);
-      if (nb) {
-        await AiPhone.variables.set("presence", { at: Date.now(), asleep: nb.asleep, busy: false, doing: nb.doing, step: "", place: "", mood: String(cx.prev.mood || ""), energy: Math.round(energyAt(cx.prev, Date.now())), next: nb.next }, opts);
-        return;
-      }
-      if (!cx.day) { await AiPhone.variables.unset("presence", opts); return; }
-      const now = Date.now(), ph = phaseAt(cx.day, now), sw = sleepWindow(cx.day), nx = nextSched(cx.day, now);
-      await AiPhone.variables.set("presence", {
-        at: now,
-        asleep: ph.kind === "sleep",
-        busy: ph.kind === "on" && !!ph.it && isBusyItem(ph.it),
-        doing: ph.kind === "sleep" ? "睡觉" : (currentDoing(cx) || cx.day.doing || ""),
-        step: currentStep(cx) || "",
-        place: ph.kind === "sleep" ? "" : currentPlace(cx),
-        mood: (moodNow(cx.day, now).text || cx.day.mood || ""),
-        energy: Math.round(energyAt(cx.day, now)),
-        next: nx ? nx.time + " " + nx.title : (ph.kind === "pre" && sw ? sw.bed + " 睡觉" : (ph.kind === "sleep" && sw ? sw.wake + " 起床" : "")),
-      }, opts);
+      const value = GuaNianPresence.calculateGuanianPresence(cx.day, cx.prev, S.settings || {}, Date.now());
+      if (value) await AiPhone.variables.set("presence", value, opts);
+      else await AiPhone.variables.unset("presence", opts);
     } catch (e) { /* 变量池不可用就算了 */ }
   }
   async function syncChatContext(cx, force) {

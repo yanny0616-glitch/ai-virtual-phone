@@ -2472,8 +2472,10 @@ export async function scheduleCustomAppTimedWake(
     source: record.source === "user" ? "user" : "tool",
     ...(cooldownRounds > 0 ? { cooldownRounds } : {}),
   };
-  if (isGuanianTemplateWake(schedule)) schedule.id = schedule.id.replace(prefix, prefix + "sentinel_");
-  saveTimedWakeSchedule(schedule);
+  const templateOnly = isGuanianTemplateWake(schedule);
+  if (templateOnly) schedule.id = schedule.id.replace(prefix, prefix + "sentinel_");
+  // 后台模板不进入本地发送队列，避免替换同会话的正常预约。
+  if (!templateOnly) saveTimedWakeSchedule(schedule);
   const armResult = await armTimedWakeBailout(schedule);
   emitHostStateUpdated();
   return { id: schedule.id, fireAt, armed: armResult.ok, reason: armResult.ok ? undefined : armResult.reason };

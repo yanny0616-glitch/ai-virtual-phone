@@ -4,6 +4,7 @@ import { Component, memo, useCallback, useEffect, useInsertionEffect, useLayoutE
 
 import { updateStatusBarTone } from "@/lib/bg-tone";
 import { startDiaryEntryTimerService, stopDiaryEntryTimerService } from "@/lib/diary-entry-timer-service";
+import { startGuanianPresenceSync } from "@/lib/guanian-presence-sync";
 import { startFollowUpService, stopFollowUpService } from "@/lib/follow-up-service";
 import { startMomentsService, stopMomentsService } from "@/lib/moments-engine";
 import { bgTimerCleanup } from "@/lib/bg-timer";
@@ -1782,11 +1783,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     return () => window.removeEventListener("music-css-change", handler);
   }, []);
 
+  useEffect(() => { window.dispatchEvent(new Event("guanian-presence-refresh")); }, [activeApp]);
+
   // Start background services after storage hydration so they don't read half-initialized state.
   useEffect(() => {
     let cancelled = false;
     let servicesStarted = false;
     let cleanupWeixinCloudRealtimeSync: (() => void) | null = null;
+    let cleanupGuanianPresence: (() => void) | null = null;
 
     void (async () => {
       try {
@@ -1821,6 +1825,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       }
 
       if (cancelled) return;
+      cleanupGuanianPresence = startGuanianPresenceSync();
       startFollowUpService();
       startMomentsService();
       startDiaryEntryTimerService();
@@ -1846,6 +1851,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     return () => {
       cancelled = true;
       cleanupWeixinCloudRealtimeSync?.();
+      cleanupGuanianPresence?.();
       if (servicesStarted) {
         stopFollowUpService();
         stopMomentsService();

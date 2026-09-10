@@ -247,16 +247,17 @@
     renderCloudSync();
     try {
       // 必须先成功读取并合并云端的新裁决，避免重试把云端新增预约覆盖掉。
-      await cloudFetchBounded("scheduler-retry", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr() }) });
       await pullCloudDecisionsBody(cx, true);
+      await armSentinel(cx);
       const result = await uploadPlanCloud(cx, false);
+      if (result.status === "synced") await cloudFetchBounded("scheduler-retry", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr() }) });
       toast(result.status === "synced" ? "今天的计划已同步云端" : "云端同步未完成，请查看页面提示");
     } catch (e) {
       const previous = planSyncState(cx);
       await setPlanSync(cx, {
         date: cx.plan.date, cloudUrl: (cloudCfg() || {}).url || "", at: Date.now(), status: "failed",
         resetDecisions: !!(previous && previous.resetDecisions),
-        message: "同步前读取云端失败，本地数据已保留：" + String(e && e.message || e).slice(0, 200),
+        message: "模板修复或同步未完成，本地数据已保留：" + String(e && e.message || e).slice(0, 200),
       });
       toast("云端同步未完成，本地数据已保留");
     } finally {

@@ -1309,6 +1309,12 @@ Deno.serve(async (req: Request) => {
       currentPlan!.state_version = rows[0].state_version;
       if (rows[0].updated_at) currentPlan!.updated_at = rows[0].updated_at;
     }
+    if (ownsPath && patch?.context?.day && response.ok) {
+      try {
+        await fetch(`${supabaseUrl}/realtime/v1/api/broadcast`, { method: "POST", headers: restHeaders,
+          signal: AbortSignal.timeout(2000), body: JSON.stringify({ messages: [{ topic: `guanian-presence:${userId}`, event: "changed", payload: {}, private: true }] }) });
+      } catch { /* 状态通知失败由宿主定时补同步，不影响已保存的日程。 */ }
+    }
     return response;
   };
 
@@ -1818,13 +1824,15 @@ Deno.serve(async (req: Request) => {
     let judgeTemplate: JobPayload | null = null;
     let found: JobPayload | null = null;
     const jobsByKey = new Map<string, JobRow>();
+    let unreadableTemplates = 0;
     if (wakeKeys.length > 0) {
       const jobsResponse = await rest(
         `push_jobs?user_id=eq.${encodeURIComponent(userId)}`
         + `&trigger_key=in.(${encodeURIComponent(wakeKeys.join(","))})`
         + "&select=id,trigger_key,status,execute_at,payload",
       );
-      const jobRows = jobsResponse.ok ? await jobsResponse.json() as JobRow[] : [];
+      if (!jobsResponse.ok) throw new Error(`聊天模板读取失败：HTTP ${jobsResponse.status}，请检查云端连接后重试`);
+      const jobRows = await jobsResponse.json() as JobRow[];
       for (const row of jobRows) jobsByKey.set(row.trigger_key, row);
       // 待发的快照最新，已发过的是今早的上下文——克隆和裁决都优先用前者。
       jobRows.sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending"));
@@ -1832,10 +1840,14 @@ Deno.serve(async (req: Request) => {
         try {
           if (row.trigger_key === judgeKey) judgeTemplate = JSON.parse(await decryptPayload(row.payload, payloadKey)) as JobPayload;
           else if (!found) found = JSON.parse(await decryptPayload(row.payload, payloadKey)) as JobPayload;
-        } catch { /* 单条解不开就换下一条 */ }
+        } catch { if (row.trigger_key !== judgeKey) unreadableTemplates++; }
       }
     }
-    if (!found) throw new Error("缺少聊天模板，请打开挂念重新同步");
+    if (!found) throw new Error(unreadableTemplates
+      ? "聊天模板解密失败：记录存在但无法解密，请在挂念后台重试同步以重建模板"
+      : wakeKeys.some(key => key !== `"${judgeKey}"`)
+        ? "缺少聊天模板：计划引用的聊天预约记录不存在，请在挂念后台重试同步"
+        : "缺少聊天模板：计划没有关联聊天预约，请在挂念后台重试同步");
     const template = found;
     const judgeRequest = (judgeTemplate || template).request;
 
@@ -1990,7 +2002,8 @@ Deno.serve(async (req: Request) => {
         retry_count: 0, next_retry_at: null, retry_error: null, retry_stopped: false,
         judged_chat_at: Math.max(+plan.judged_chat_at || 0, judgeTask?.chatAt || 0), judged_at: Date.now(),
         recheck_count: (plan.recheck_count || 0) + 1,
-        ...(postDecision ? { decisions: [...priorDecisions, postDecision].slice(-60) } : {}),
+        ...((postDecision || selfReason) ? { decisions: [...priorDecisions, ...(postDecision ? [postDecision] : []),
+          ...(selfReason ? [{ at: nowMs, kind: "self", note: `自发起念（${selfReason}）——本轮没有新增念头`, by: "cloud" }] : [])].slice(-60) } : {}),
         ...(ctxDirty ? { context: { ...context, ...ctxPatch, ...(selfReason ? { selfUsed: selfUsed + 1 } : {}) } } : {}),
       }, true);
       if (!saved?.ok && saved?.status !== 409) throw new Error("复核结果保存失败");

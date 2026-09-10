@@ -569,7 +569,6 @@
     <button class="tab" data-tab="back">后 台</button>
   </div>
 
-  <div id="settings-effects" role="status" aria-live="polite" hidden></div>
   <div id="view"></div>
 
   <div class="sheet-mask" id="sheet-mask"></div>
@@ -578,6 +577,7 @@
       <h3>设 置</h3>
       <button class="sheet-x" id="sheet-close" title="关闭">✕</button>
     </div>
+    <div id="settings-effects" role="status" aria-live="polite" hidden></div>
     <div id="sheet-body"></div>
     <button class="big-btn" id="btn-save-settings">保 存</button>
   </div>
@@ -822,6 +822,101 @@ function promiseIntent(t, localDue) {
     return `核对约定 [${t.id}]：${promiseSubjectLabel(t.subject)}约好在 ${localDue} ${t.text}。`
         + "这是明确约定，到点核对最新时间、双方对话和当前行程。角色自己的承诺应交代进展；用户的事情只能询问，不能替用户宣称完成。"
         + "时间到了不等于事情已完成；有事实支持才能说到了或做完了，延误就按现在的情况说明，不能照搬旧时间。已改期、取消、完成且交代过则作罢。";
+}
+
+return Object.freeze(exports);
+})();
+  const GuaNianPresence = (() => {
+const exports = Object.create(null);
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.presenceBusy = presenceBusy;
+exports.presenceDate = presenceDate;
+exports.calculateGuanianPresence = calculateGuanianPresence;
+exports.guanianPresenceGate = guanianPresenceGate;
+const busyPattern = /上课|课堂|听课|自习|复习|预习|写作业|做作业|赶作业|做题|考试|测验|开会|会议|值班|实习|训练|排练|实验|赶稿|写稿|编程|写代码|专注|集中精神|通勤|赶路|开车|面试|汇报|手术|门诊/;
+const freePattern = /睡觉|睡眠|午睡|午休|补觉|休息|发呆|摸鱼|放松|吃饭|用餐|散步|刷视频|看番|打游戏|玩游戏|聊天|自由时间|准备睡|洗漱|刚醒|起床|看剧|逛/;
+function presenceBusy(it) {
+    return typeof it.busy === 'boolean' ? it.busy : busyPattern.test(it.title || '') && !freePattern.test(it.title || '');
+}
+function presenceDate(now) {
+    const d = new Date(now);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function time(value) {
+    const m = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(value || '');
+    return m ? `${String(Math.min(23, +m[1])).padStart(2, '0')}:${String(Math.min(59, +(m[2] || 0))).padStart(2, '0')}` : '';
+}
+function at(hm, now) {
+    if (!hm || !/^\d{2}:\d{2}$/.test(hm))
+        return now;
+    const d = new Date(now);
+    d.setHours(+hm.slice(0, 2), +hm.slice(3), 0, 0);
+    return d.getTime();
+}
+function calculateGuanianPresence(day, previous, settings, now) {
+    const data = day || previous;
+    if (!data)
+        return null;
+    const d = new Date(now), hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const bed = time(data.bed) || settings.quietStart || '', wake = time(data.wake) || settings.quietEnd || '';
+    const hasSleep = !!bed && !!wake && bed !== wake;
+    if (!day && !hasSleep)
+        return null;
+    const asleep = hasSleep && (bed < wake ? hm >= bed && hm < wake : hm >= bed || hm < wake);
+    const schedule = Array.isArray(data.schedule) ? data.schedule.filter(it => it && it.time) : [];
+    const done = [...schedule].reverse().find(it => String(it.time) <= hm);
+    const next = schedule.find(it => String(it.time) > hm);
+    const phase = asleep ? 'sleep' : !done ? hasSleep && bed < wake && hm < bed ? 'pre' : 'gap'
+        : done.end && done.end > String(done.time) && hm >= done.end ? next ? 'gap' : 'pre' : 'on';
+    const active = day && phase === 'on' ? done : undefined;
+    const doing = !day ? asleep ? '睡觉' : hasSleep && bed < wake && hm < bed ? '还没睡，快上床了' : '刚起床，今天的安排还没定'
+        : phase === 'sleep' ? '睡觉' : phase === 'on' ? done?.title || '' : phase === 'pre' ? '睡前自己待着，准备睡了' : done ? `歇着（刚忙完${done.title}）` : data.doing || '起床后的时间';
+    let energy = data.energy != null ? +data.energy : 60;
+    const h = d.getHours() + d.getMinutes() / 60, hh = h < 5 ? h + 24 : h;
+    const conds = (Array.isArray(data.conds) ? data.conds : []).filter(c => c && Number(c.startAt) <= now).map(c => ({ c, w: Math.pow(0.5, Math.max(0, now - (Number(c.startAt) || 0)) / (Math.max(10, Number(c.halfLifeMin) || 180) * 60000)) })).filter(x => x.w > 0.08).sort((a, b) => b.w * (Number(b.c.intensity) || 50) - a.w * (Number(a.c.intensity) || 50));
+    if (Array.isArray(data.schedule)) {
+        for (const it of schedule) {
+            if (h >= 5 && String(it.time) > hm)
+                continue;
+            const a = at(it.time, now), b = it.end ? at(it.end, now) : 0;
+            const progress = b > a ? Math.max(0, Math.min(1, (now - a) / (b - a))) : 1;
+            energy += Math.max(-15, Math.min(15, Math.round(Number(it.cost) || 0))) * progress;
+        }
+        energy += Math.max(-12, conds.reduce((n, x) => n + (Number(x.c.energyDelta) || 0) * x.w, 0));
+        const wk = /^(\d{1,2}):(\d{2})$/.exec(data.wake || '');
+        const wakeH = wk ? +wk[1] + +wk[2] / 60 : 7;
+        energy -= Math.max(0, Math.min(hh, 22) - wakeH) * 1.2 + Math.max(0, hh - 22) * 8;
+    }
+    const moods = [];
+    if (conds[0]?.c.mood)
+        moods.push({ text: conds[0].c.mood, w: conds[0].w * (Number(conds[0].c.intensity) || 50) / 100 });
+    if (done?.mood)
+        moods.push({ text: done.mood, w: Math.pow(0.5, Math.max(0, now - at(done.time, now)) / (90 * 60000)) * 0.6 });
+    moods.sort((a, b) => b.w - a.w);
+    const state = asleep ? 'sleep' : !day ? 'away' : active && presenceBusy(active) ? 'busy' : 'online';
+    const steps = (Array.isArray(active?.steps) ? active.steps : []).filter(s => s && s.time && s.time <= hm);
+    return {
+        at: now, state, label: !day && !asleep ? '今日状态待同步' : '', asleep, busy: state === 'busy', doing,
+        step: steps.length ? steps[steps.length - 1].what || '' : '', place: !day || asleep ? '' : done?.place || data.location || '',
+        mood: !day ? data.mood || '' : moods.find(m => m.w > 0.15)?.text || data.mood || '', energy: Math.max(0, Math.min(100, Math.round(energy))),
+        next: !day ? asleep ? `${wake} 起床` : hasSleep && bed < wake && hm < bed ? `${bed} 睡觉` : ''
+            : next ? `${next.time} ${next.title}` : phase === 'pre' && hasSleep ? `${bed} 睡觉` : asleep && hasSleep ? `${wake} 起床` : '',
+    };
+}
+function guanianPresenceGate(day, previous, settings, now) {
+    const data = day || previous;
+    if (!data)
+        return null;
+    const bed = time(data.bed) || settings.quietStart || '', wake = time(data.wake) || settings.quietEnd || '';
+    return { availabilityOnly: true, updatedAt: now,
+        sleep: bed && wake && bed !== wake ? { bed, wake } : undefined,
+        busy: { date: presenceDate(now), windows: (Array.isArray(day?.schedule) ? day.schedule : []).filter(it => it && presenceBusy(it) && it.time && it.end && it.end > it.time).map(it => {
+                const steps = (Array.isArray(it.steps) ? it.steps : []).filter(x => x && x.time && x.time >= it.time && x.time < it.end).slice().sort((a, b) => a.time.localeCompare(b.time));
+                const breaks = steps.flatMap((x, i) => /休息|茶歇|课间|中场休|散会|停车休息/.test(x.what || '') && !/不休息|没休息|没有休息|无休|取消休息/.test(x.what || '') ? [{ from: x.time, to: steps[i + 1]?.time || it.end }] : []);
+                return { from: it.time, to: it.end, title: it.title || '', ...(breaks.length ? { breaks } : {}) };
+            }) },
+    };
 }
 
 return Object.freeze(exports);
@@ -1978,16 +2073,17 @@ return Object.freeze(exports);
     renderCloudSync();
     try {
       // 必须先成功读取并合并云端的新裁决，避免重试把云端新增预约覆盖掉。
-      await cloudFetchBounded("scheduler-retry", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr() }) });
       await pullCloudDecisionsBody(cx, true);
+      await armSentinel(cx);
       const result = await uploadPlanCloud(cx, false);
+      if (result.status === "synced") await cloudFetchBounded("scheduler-retry", { method: "POST", body: JSON.stringify({ characterId: cx.character.id, planDate: todayStr() }) });
       toast(result.status === "synced" ? "今天的计划已同步云端" : "云端同步未完成，请查看页面提示");
     } catch (e) {
       const previous = planSyncState(cx);
       await setPlanSync(cx, {
         date: cx.plan.date, cloudUrl: (cloudCfg() || {}).url || "", at: Date.now(), status: "failed",
         resetDecisions: !!(previous && previous.resetDecisions),
-        message: "同步前读取云端失败，本地数据已保留：" + String(e && e.message || e).slice(0, 200),
+        message: "模板修复或同步未完成，本地数据已保留：" + String(e && e.message || e).slice(0, 200),
       });
       toast("云端同步未完成，本地数据已保留");
     } finally {
@@ -3092,14 +3188,17 @@ return Object.freeze(exports);
       .filter((w) => isImpromptu(w) && (w.fireAt > floor || w.kind === "promise"));
   }
 
-  async function cancelTodayWakes(cx, keepIds) {
+  async function cancelTodayWakes(cx, keepIds, includeTemplate) {
     const done = Object.assign({}, keepIds || {});
+    const template = sentinelOf(cx);
+    if (!includeTemplate && template && template.wakeId) done[template.wakeId] = 1;
+    if (!includeTemplate) for (const id of template && template.previousWakeIds || []) done[id] = 1;
     try {
       const wakes = await AiPhone.push.listWakes();
       const d0 = timeToMs("00:00"), d1 = d0 + 86400000;
       for (const w of wakes || []) {
         if (w.characterId === cx.character.id && w.fireAt >= d0 && w.fireAt < d1) {
-          if (done[w.id]) continue;
+          if (done[w.id] || !includeTemplate && /_sentinel_\d+_[a-z0-9]+$/i.test(w.id)) continue;
           done[w.id] = 1;
           try { await AiPhone.push.cancelWake(w.id); } catch (e) { /* 已触发的取消失败可忽略 */ }
         }
@@ -3120,7 +3219,8 @@ return Object.freeze(exports);
       let n = 0;
       for (const j of (jr && jr.jobs) || []) {
         const id = /^timedwake:(timed_wake_capp_.+)$/.exec(String(j.triggerKey || ""));
-        if (!id || j.status !== "pending" || j.sessionId !== cx._session || done[id[1]]) continue;
+        if (!id || j.status !== "pending" || j.sessionId !== cx._session || done[id[1]]
+          || !includeTemplate && /_sentinel_\d+_[a-z0-9]+$/i.test(id[1])) continue;
         done[id[1]] = 1; n++;
         try { await AiPhone.push.cancelWake(id[1]); } catch (e) { /* 宿主本地没登记也没关系，云端那条会被删 */ }
       }
@@ -3141,7 +3241,7 @@ return Object.freeze(exports);
   }
   async function forgetCharacter(cx) {
     await unfreezeGenTemplates(cx);
-    await cancelTodayWakes(cx);
+    await cancelTodayWakes(cx, null, true);
     const old = sentinelOf(cx);
     if (old && old.wakeId) { try { await AiPhone.push.cancelWake(old.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
     if (cloudCfg()) { try { await cloudFetch("recheck-plan", { method: "DELETE", body: JSON.stringify({ characterId: cx.character.id }) }); } catch (e) { /* 云端没配好就算了 */ } }
@@ -3152,18 +3252,26 @@ return Object.freeze(exports);
     });
   }
   async function armSentinel(cx) {
+    // 先建立可用的新模板，再切换引用。旧任务保留给仍引用它的历史/明日计划，
+    // 新旧哨兵到点均不生成聊天，不通过提前删旧任务来替换模板。
+    if (!cloudCfg() || !cloudRecheckOn() && !(S.settings.autoGen && S.settings.cloudGen)) return null;
     const old = sentinelOf(cx);
-    if (old && old.wakeId) { try { await AiPhone.push.cancelWake(old.wakeId); } catch (e) { /* 已触发的取消失败可忽略 */ } }
-    let next = null;
     try {
       const res = await AiPhone.push.wake({
         characterId: cx.character.id, fireAt: Date.now() + 48 * 3600000, source: "tool",
         intent: "挂念后台复核模板，仅供后台调用，不生成聊天消息",
       });
-      next = { wakeId: res.id, armed: !!res.armed };
-      if (!res.armed) await log(cx, "哨兵预约只在本地挂上（" + (res.reason || "服务端未挂载") + "），云端复核这两天没有模板可借");
-    } catch (e) { await log(cx, "哨兵预约失败（云端复核这两天没有模板可借）：" + (e && e.message || e)); }
-    await patchSettings((s) => ({ sentinels: Object.assign({}, s.sentinels, { [cx.character.id]: next }) }));
+      if (!res || !res.armed || !res.id) throw new Error(res && res.reason || "服务端未确认模板挂载成功");
+      const next = { wakeId: res.id, armed: true, at: Date.now(), cloudUrl: (cloudCfg() || {}).url,
+        previousWakeIds: [...new Set([...(old && old.previousWakeIds || []), ...(old && old.wakeId ? [old.wakeId] : [])])].slice(-24) };
+      await patchSettings((s) => ({ sentinels: Object.assign({}, s.sentinels, { [cx.character.id]: next }) }));
+      return next;
+    } catch (e) {
+      const message = "聊天模板更新失败：" + String(e && e.message || e) + (old && old.wakeId ? "；旧模板引用已保留" : "；尚无可用模板");
+      await setPlanSync(cx, { date: todayStr(), cloudUrl: (cloudCfg() || {}).url, at: Date.now(), status: "failed", message });
+      await log(cx, message);
+      throw new Error(message);
+    }
   }
 
   async function orchestrate(cx) {
@@ -3178,8 +3286,8 @@ return Object.freeze(exports);
       // 随用随判：早上不排念头，也就不调模型。只把哨兵和空计划寄上去，白天云端随时起。
       if (+S.settings.impulseMode === 1 && !cloudRecheckOn()) await log(cx, "随用随判要开着云端复核才有人起念，这次按「早上定完」排");
       if (liveMode()) {
-        await cancelTodayWakes(cx, keptIds);
         await armSentinel(cx);
+        await cancelTodayWakes(cx, keptIds);
         const liveItems = kept.slice().sort((a, b) => a.fireAt - b.fireAt);
         cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
           { date: todayStr(), characterId: cx.character.id, items: liveItems, chatUsed: 0, plannedAt: Date.now(), recheckAt: 0, selfUsed: 0, postedIds: [], outbox: [] });
@@ -3211,8 +3319,8 @@ return Object.freeze(exports);
       });
       const raw = Array.isArray(parsed.impulses) ? parsed.impulses : [];
       await log(cx, "TA提了 " + raw.length + " 个念头：" + (raw.map((x) => normHM(x && x.time) + "·" + String((x && x.about) || "")).join("，") || "（一个都没有）"));
-      await cancelTodayWakes(cx, keptIds);
       await armSentinel(cx);
+      await cancelTodayWakes(cx, keptIds);
 
       // 留下来的临时起念一样占今天的额度和最小间隔，否则重排会在它旁边再排一条。
       const items = kept.slice();
@@ -3709,24 +3817,9 @@ return Object.freeze(exports);
     if (!cx.character || !AiPhone.variables || !AiPhone.variables.set) return;
     try {
       const opts = { scope: "character", characterId: cx.character.id };
-      const nb = nightBridge(cx);
-      if (nb) {
-        await AiPhone.variables.set("presence", { at: Date.now(), asleep: nb.asleep, busy: false, doing: nb.doing, step: "", place: "", mood: String(cx.prev.mood || ""), energy: Math.round(energyAt(cx.prev, Date.now())), next: nb.next }, opts);
-        return;
-      }
-      if (!cx.day) { await AiPhone.variables.unset("presence", opts); return; }
-      const now = Date.now(), ph = phaseAt(cx.day, now), sw = sleepWindow(cx.day), nx = nextSched(cx.day, now);
-      await AiPhone.variables.set("presence", {
-        at: now,
-        asleep: ph.kind === "sleep",
-        busy: ph.kind === "on" && !!ph.it && isBusyItem(ph.it),
-        doing: ph.kind === "sleep" ? "睡觉" : (currentDoing(cx) || cx.day.doing || ""),
-        step: currentStep(cx) || "",
-        place: ph.kind === "sleep" ? "" : currentPlace(cx),
-        mood: (moodNow(cx.day, now).text || cx.day.mood || ""),
-        energy: Math.round(energyAt(cx.day, now)),
-        next: nx ? nx.time + " " + nx.title : (ph.kind === "pre" && sw ? sw.bed + " 睡觉" : (ph.kind === "sleep" && sw ? sw.wake + " 起床" : "")),
-      }, opts);
+      const value = GuaNianPresence.calculateGuanianPresence(cx.day, cx.prev, S.settings || {}, Date.now());
+      if (value) await AiPhone.variables.set("presence", value, opts);
+      else await AiPhone.variables.unset("presence", opts);
     } catch (e) { /* 变量池不可用就算了 */ }
   }
   async function syncChatContext(cx, force) {
@@ -3783,7 +3876,6 @@ return Object.freeze(exports);
   }
   /* ================= 渲染 ================= */
   function render() {
-    renderSettingsEffects();
     const cx = cur();
     $("#hdr-date").textContent = todayStr().slice(5).replace("-", " / ") + " · 周" + "日一二三四五六"[new Date().getDay()];
     // 挂念几位时，顶上一排头像切换看谁
@@ -5237,6 +5329,7 @@ return Object.freeze(exports);
   }
 
   function openSheet() {
+    renderSettingsEffects();
     const cx = cur();
     // 四节用页签切，所有节都渲染在 DOM 里只是藏起来：回填 / 读表按 id 找，不用管哪节在前台
     const tab = SET_SECTIONS.some((x) => x.id === S._setTab) ? S._setTab : SET_SECTIONS[0].id;

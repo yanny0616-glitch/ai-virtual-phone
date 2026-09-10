@@ -351,6 +351,12 @@ Deno.serve(async (request: Request) => {
     ...init,
     headers: { ...restHeaders, ...(init.headers || {}) },
   });
+  const notifyPresence = async () => {
+    try {
+      await fetch(`${supabaseUrl}/realtime/v1/api/broadcast`, { method: "POST", headers: restHeaders,
+        signal: AbortSignal.timeout(2000), body: JSON.stringify({ messages: [{ topic: `guanian-presence:${OWNER_ID}`, event: "changed", payload: {}, private: true }] }) });
+    } catch { /* 变更通知失败不影响保存，宿主 60 秒后核对。 */ }
+  };
   const readJson = async <T,>(response: Response): Promise<T> => {
     const value = await response.json().catch(() => null);
     if (!response.ok) {
@@ -672,7 +678,7 @@ Deno.serve(async (request: Request) => {
           ...(schemaVersion >= 5 ? ["recheck-plan"] : []),
           ...(schemaVersion >= 6 ? ["usage"] : []),
           // 部署了本版网关即支持（纯代码能力，不依赖 schema）
-          "job-status", "guanian-history-read",
+          "job-status", "guanian-history-read", "guanian-presence-days",
         ],
       });
     }
@@ -989,6 +995,31 @@ Deno.serve(async (request: Request) => {
         ));
         return json({ ok: true });
       }
+    }
+
+    if (action === "presence-days" && request.method === "GET") {
+      const date = String(url.searchParams.get("date") || "");
+      let ids: unknown;
+      try { ids = JSON.parse(url.searchParams.get("characterIds") || "[]"); } catch { ids = null; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(ids) || !ids.length || ids.length > 50
+        || ids.some(id => typeof id !== "string" || !/^[A-Za-z0-9._-]{1,120}$/.test(id))) return json({ ok: false, error: "日期或角色列表无效" }, 400);
+      const characterIds = ids as string[];
+      const previous = new Date(date + "T12:00:00Z");
+      if (!Number.isFinite(previous.getTime()) || previous.toISOString().slice(0,10) !== date) return json({ ok: false, error: "日期无效" }, 400);
+      previous.setUTCDate(previous.getUTCDate()-1);
+      const yesterday = previous.toISOString().slice(0,10);
+      const response = await rest(`push_recheck_plans?user_id=eq.${OWNER_ID}`
+        + `&character_id=in.(${encodeURIComponent(characterIds.map(id => `"${id}"`).join(","))})`
+        + `&plan_date=in.(${date},${yesterday})&select=character_id,plan_date,updated_at,state_version,context&order=plan_date.desc&limit=100`);
+      if (!response.ok) return json({ ok: false, error: "日程同步失败，请重试" }, 503);
+      const plans = await response.json() as {character_id:string;plan_date:string;updated_at:string;state_version:number;context?:Record<string,unknown>}[];
+      const rows = plans.filter(p => characterIds.includes(p.character_id) && [date,yesterday].includes(p.plan_date)
+        && p.context?.day && typeof p.context.day === "object" && !Array.isArray(p.context.day)).map(p => ({
+          characterId:p.character_id,date:p.plan_date,updatedAt:p.updated_at,version:p.state_version,
+          day:{ ...(p.context!.day as Record<string,unknown>),date:p.plan_date },
+          settings:{quietStart:p.context?.quietStart,quietEnd:p.context?.quietEnd},
+        }));
+      return json({ok:true,date,rows});
     }
 
     // 诊断历史独立于待领取 outbox；已领取的消息也可查，不改变 consumed_at。
@@ -1486,6 +1517,7 @@ Deno.serve(async (request: Request) => {
         }
         const savedPlan = await save.json();
         if (!savedPlan?.ok) return json({ ok: false, conflict: true, error: "云端计划已更新，请点同步重试，先合并最新计划；旧上传未覆盖云端。" }, 409);
+        await notifyPresence();
         // Schema triggers merge promise revisions and cancel old tasks in the same
         // transaction as the save; never cancel using the client's stale snapshot.
         return json({ ok: true, stateVersion: savedPlan.stateVersion, items: items.length, acceptedUserSleep: {

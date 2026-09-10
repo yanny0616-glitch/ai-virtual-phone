@@ -1,6 +1,5 @@
   /* ================= 渲染 ================= */
   function render() {
-    renderSettingsEffects();
     const cx = cur();
     $("#hdr-date").textContent = todayStr().slice(5).replace("-", " / ") + " · 周" + "日一二三四五六"[new Date().getDay()];
     // 挂念几位时，顶上一排头像切换看谁
