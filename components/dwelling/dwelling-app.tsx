@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronLeft, RefreshCw, Trash2, Wand2, X } from "lucide-react";
+import { ChevronLeft, Layers, RefreshCw, Trash2, Wand2, X } from "lucide-react";
 import type { Character } from "@/lib/character-types";
 import { loadCharacters } from "@/lib/character-storage";
 import type { DwellingLayout, DwellingRoom, DwellingFurniture, DwellingFurnitureItem } from "@/lib/dwelling-storage";
@@ -82,6 +82,12 @@ export function DwellingApp({ onClose, visible, onIdle }: DwellingAppProps) {
     const [characters, setCharacters] = useState<Character[]>([]);
     const [activeCharId, setActiveCharId] = useState<string | null>(null);
     const [activeRoomIdx, setActiveRoomIdx] = useState(0);
+    // 批量探索：当前房间里勾选物品，按顺序生成
+    const [batchOpen, setBatchOpen] = useState(false);
+    const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
+    const [batchRunning, setBatchRunning] = useState(false);
+    const [batchErrors, setBatchErrors] = useState<Record<string, string>>({});
+    const batchCancelRef = useRef(false);
     const [, forceUpdate] = useState(0);
     const rerender = () => forceUpdate(n => n + 1);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -309,16 +315,17 @@ export function DwellingApp({ onClose, visible, onIdle }: DwellingAppProps) {
         });
     }
 
-    // ── Explore single item (called from RoomView) ──
-    async function handleExploreItem(charId: string, roomId: string, furniture: DwellingFurniture, item: DwellingFurnitureItem) {
+    // ── Explore single item ──
+    // openOnDone：单个探索完直接打开详情；批量时只落盘不打开
+    async function exploreItem(charId: string, roomId: string, furniture: DwellingFurniture, item: DwellingFurnitureItem, openOnDone: boolean): Promise<string | null> {
         const cs = getCharState(charId);
         const room = cs.layout?.rooms.find(r => r.id === roomId);
-        if (!room) return;
+        if (!room) return null;
 
         const key = itemKey(roomId, item.id);
-        if (cs.loadingItemKeys.has(key)) return; // already loading
+        if (cs.loadingItemKeys.has(key)) return null; // already loading
         cs.loadingItemKeys.add(key);
-        cs.lastItemError = null;
+        if (openOnDone) cs.lastItemError = null;
         rerender();
 
         const { html, error } = await generateItemHtml(charId, room.name, furniture.label, item.name, item.preview);
@@ -328,10 +335,65 @@ export function DwellingApp({ onClose, visible, onIdle }: DwellingAppProps) {
             cs.itemHtmlCache[key] = html;
             void saveItemHtml(charId, roomId, item.id, html);
             const currentRoom = activeCharIdRef.current === charId ? cs.layout?.rooms[activeRoomIdxRef.current] : null;
-            if (currentRoom?.id === roomId) openItemDetail(room, furniture, item, html);
+            if (openOnDone && currentRoom?.id === roomId) openItemDetail(room, furniture, item, html);
         }
-        cs.lastItemError = error || null;
+        if (openOnDone) cs.lastItemError = error || null;
         rerender();
+        return html ? null : (error || "生成失败");
+    }
+
+    function handleExploreItem(charId: string, roomId: string, furniture: DwellingFurniture, item: DwellingFurnitureItem) {
+        void exploreItem(charId, roomId, furniture, item, true);
+    }
+
+    // ── Batch explore（当前房间） ──
+    function openBatch(room: DwellingRoom, cs: CharState) {
+        if (batchRunning) { setBatchOpen(true); return; }
+        const unexplored = new Set<string>();
+        for (const f of room.furniture || []) for (const it of f.items) {
+            const key = itemKey(room.id, it.id);
+            if (!cs.itemHtmlCache[key]) unexplored.add(key);
+        }
+        setBatchSelected(unexplored);
+        setBatchErrors({});
+        setBatchOpen(true);
+    }
+
+    function toggleBatchItem(key: string) {
+        if (batchRunning) return;
+        setBatchSelected(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+    }
+
+    function selectBatch(room: DwellingRoom, cs: CharState, mode: "all" | "unexplored" | "none") {
+        if (batchRunning) return;
+        const next = new Set<string>();
+        if (mode !== "none") for (const f of room.furniture || []) for (const it of f.items) {
+            const key = itemKey(room.id, it.id);
+            if (mode === "all" || !cs.itemHtmlCache[key]) next.add(key);
+        }
+        setBatchSelected(next);
+    }
+
+    async function startBatch(charId: string, room: DwellingRoom) {
+        if (batchRunning || batchSelected.size === 0) return;
+        const queue: Array<{ furniture: DwellingFurniture; item: DwellingFurnitureItem; key: string }> = [];
+        for (const f of room.furniture || []) for (const it of f.items) {
+            const key = itemKey(room.id, it.id);
+            if (batchSelected.has(key)) queue.push({ furniture: f, item: it, key });
+        }
+        batchCancelRef.current = false;
+        setBatchRunning(true);
+        setBatchErrors({});
+        const worker = async () => {
+            while (queue.length > 0 && !batchCancelRef.current) {
+                const job = queue.shift()!;
+                const error = await exploreItem(charId, room.id, job.furniture, job.item, false);
+                if (error) setBatchErrors(prev => ({ ...prev, [job.key]: error }));
+                else setBatchSelected(prev => { const next = new Set(prev); next.delete(job.key); return next; });
+            }
+        };
+        await Promise.all([worker(), worker()]);
+        setBatchRunning(false);
     }
 
     const cs = activeCharId ? getCharState(activeCharId) : null;
@@ -372,6 +434,62 @@ export function DwellingApp({ onClose, visible, onIdle }: DwellingAppProps) {
             {cs?.isGenerating && cs.layout && (
                 <div className="dwelling-loading-bar"><span className="dwelling-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /><span>刷新中…</span></div>
             )}
+            {batchOpen && activeRoom && cs && activeCharId && (() => {
+                const total = (activeRoom.furniture || []).reduce((n, f) => n + f.items.length, 0);
+                const explored = (activeRoom.furniture || []).reduce((n, f) => n + f.items.filter(it => cs.itemHtmlCache[itemKey(activeRoom.id, it.id)]).length, 0);
+                return (
+                    <div className="dw2-sheet-overlay">
+                        <div className="dw2-dim" onClick={() => setBatchOpen(false)} />
+                        <div className="dw2-sheet dw2-batch" role="dialog" aria-modal="true" aria-label="批量探索">
+                            <div className="dw2-grab" />
+                            <div className="dw2-sh">
+                                <span className="dw2-sh-zh">批量探索<i>{String(batchSelected.size).padStart(2, "0")}</i></span>
+                                <span className="dw2-sh-en">BATCH</span>
+                                <span className="dw2-sh-cnt">{activeRoom.name} · 已探索 {explored}/{total}</span>
+                            </div>
+                            <div className="dw2-shline" />
+                            <div className="dw2-btools">
+                                <button onClick={() => selectBatch(activeRoom, cs, "all")} disabled={batchRunning}>全选</button>
+                                <button onClick={() => selectBatch(activeRoom, cs, "unexplored")} disabled={batchRunning}>只选未探索</button>
+                                <button onClick={() => selectBatch(activeRoom, cs, "none")} disabled={batchRunning}>清空</button>
+                            </div>
+                            <div className="dw2-blist">
+                                {(activeRoom.furniture || []).map(f => (
+                                    <div key={f.id} className="dw2-bgroup">
+                                        <div className="dw2-bgroup-name">{f.label}{f.en && <span>{f.en}</span>}</div>
+                                        {f.items.map(it => {
+                                            const key = itemKey(activeRoom.id, it.id);
+                                            const done = Boolean(cs.itemHtmlCache[key]);
+                                            const loading = cs.loadingItemKeys.has(key);
+                                            const err = batchErrors[key];
+                                            return (
+                                                <button key={it.id} className="dw2-brow" data-on={batchSelected.has(key) ? "true" : undefined} onClick={() => toggleBatchItem(key)} disabled={batchRunning}>
+                                                    <span className="dw2-bcheck" />
+                                                    <span className="dw2-btx">
+                                                        <span className="dw2-bname">{it.name}{done && <em className="dw2-sdone">已探索</em>}</span>
+                                                        {err && <span className="dw2-berr">{err}</span>}
+                                                    </span>
+                                                    {loading && <span className="dwelling-spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="dw2-bfoot">
+                                {batchRunning ? (
+                                    <button className="dw-confirm-btn dw-confirm-btn-cancel" onClick={() => { batchCancelRef.current = true; }}>停止</button>
+                                ) : (
+                                    <button className="dw-confirm-btn dw-confirm-btn-cancel" onClick={() => setBatchOpen(false)}>关闭</button>
+                                )}
+                                <button className="dw-confirm-btn" onClick={() => void startBatch(activeCharId, activeRoom)} disabled={batchRunning || batchSelected.size === 0}>
+                                    {batchRunning ? "探索中…" : `探索 ${batchSelected.size} 件`}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
             {cs && (cs.error || cs.lastItemError) && (
                 <div className="dw-confirm-overlay">
                     <div className="dw-confirm-shade" onClick={() => { cs.error = null; cs.lastItemError = null; rerender(); }} />
@@ -404,6 +522,11 @@ export function DwellingApp({ onClose, visible, onIdle }: DwellingAppProps) {
                         </button>
                     ))}
                     <div className="dw-tabs-actions">
+                        {activeRoom && (
+                            <button className="dw-tab-action" data-on={batchRunning ? "true" : undefined} onClick={() => openBatch(activeRoom, cs)} disabled={cs.isGenerating} title="批量探索">
+                                <Layers size={13} />
+                            </button>
+                        )}
                         <button className="dw-tab-action" onClick={() => setShowRefreshConfirm(true)} disabled={cs.isGenerating} title="重新生成">
                             <RefreshCw size={13} />
                         </button>

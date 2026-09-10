@@ -36,8 +36,14 @@ import {
   Heart,
   ChevronRight,
   Languages,
-  History
+  History,
+  Layers,
 } from "lucide-react";
+import {
+  loadCheckPhoneGeneratedSet,
+  runCheckPhoneBatch,
+  type CheckPhoneBatchItemStatus,
+} from "@/lib/checkphone-batch";
 import { PageShell } from "@/components/ui/page-shell";
 import { ConfirmDialog, Toggle } from "@/components/ui";
 import { CheckPhoneDebugErrorCard } from "@/components/checkphone/checkphone-debug-error-card";
@@ -345,6 +351,13 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
   const [historyGroups, setHistoryGroups] = useState<{ characterId: string; name: string; entries: CheckPhoneProjectionEntry[] }[]>([]);
   const [confirmClearHistoryCharId, setConfirmClearHistoryCharId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 批量生成：勾选桌面上的 APP，按顺序生成各自的快照
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchSelected, setBatchSelected] = useState<Set<CheckPhoneAppId>>(new Set());
+  const [batchGenerated, setBatchGenerated] = useState<Set<CheckPhoneAppId>>(new Set());
+  const [batchStatus, setBatchStatus] = useState<Partial<Record<CheckPhoneAppId, { status: CheckPhoneBatchItemStatus; error?: string }>>>({});
+  const [batchRunning, setBatchRunning] = useState(false);
+  const batchCancelRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState(DEFAULT_CHECKPHONE_BILINGUAL_PROMPT);
   const [checkPhoneSettings, setCheckPhoneSettings] = useState<CheckPhoneSettings>({
@@ -535,6 +548,50 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
     }));
   }
 
+  const batchAppIds = useMemo<CheckPhoneAppId[]>(() => {
+    const ids = [...sanitizeCheckPhoneAppIds(manifest?.topAppIds), ...sanitizeCheckPhoneAppIds(manifest?.dockAppIds)];
+    return ids.filter((id, index) => ids.indexOf(id) === index);
+  }, [manifest]);
+
+  async function openBatch() {
+    if (!activeCharId || batchAppIds.length === 0) return;
+    setSettingsOpen(false);
+    const generated = await loadCheckPhoneGeneratedSet(activeCharId, batchAppIds);
+    setBatchGenerated(generated);
+    if (!batchRunning) {
+      setBatchStatus({});
+      setBatchSelected(new Set(batchAppIds.filter(id => !generated.has(id))));
+    }
+    setBatchOpen(true);
+  }
+
+  function toggleBatchApp(appId: CheckPhoneAppId) {
+    if (batchRunning) return;
+    setBatchSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(appId)) next.delete(appId); else next.add(appId);
+      return next;
+    });
+  }
+
+  async function startBatch() {
+    if (!activeCharId || batchRunning || batchSelected.size === 0) return;
+    const characterId = activeCharId;
+    const ids = batchAppIds.filter(id => batchSelected.has(id));
+    batchCancelRef.current = { cancelled: false };
+    setBatchRunning(true);
+    setBatchStatus(Object.fromEntries(ids.map(id => [id, { status: "pending" as const }])));
+    await runCheckPhoneBatch(characterId, ids, progress => {
+      setBatchStatus(prev => ({ ...prev, [progress.appId]: { status: progress.status, error: progress.error } }));
+      if (progress.status === "done") setBatchGenerated(prev => new Set(prev).add(progress.appId));
+    }, batchCancelRef.current);
+    setBatchRunning(false);
+  }
+
+  function stopBatch() {
+    batchCancelRef.current.cancelled = true;
+  }
+
   const handleBack = () => {
     if (activeCharId) {
       setActiveCharId(null);
@@ -635,6 +692,15 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
               </div>
 
               <div className="cp-floating-actions">
+                <button
+                  className={`cp-float-batch ${batchOpen ? "is-active" : ""} ${batchRunning ? "is-running" : ""}`}
+                  onClick={() => (batchOpen ? setBatchOpen(false) : void openBatch())}
+                  aria-label="批量生成"
+                  aria-expanded={batchOpen}
+                  disabled={!!activeState?.loading || !manifest}
+                >
+                  <Layers size={18} strokeWidth={2.4} />
+                </button>
                 <button className="cp-float-refresh" onClick={handleGenerate} aria-label="Refresh Signal" disabled={!!activeState?.loading}>
                   <RefreshCw size={18} strokeWidth={2.5} className={activeState?.loading ? "cp-spin" : undefined} />
                 </button>
@@ -645,6 +711,51 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
                   disabled={!!activeState?.loading || !manifest}
                 >
                   <Trash2 size={17} strokeWidth={2.25} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {batchOpen && manifest && (
+            <div className="cp-batch-popover" role="dialog" aria-label="批量生成">
+              <div className="cp-desktop-settings-head">
+                <span>批量生成</span>
+                <b>BATCH</b>
+              </div>
+              <div className="cp-batch-tools">
+                <button type="button" onClick={() => !batchRunning && setBatchSelected(new Set(batchAppIds))} disabled={batchRunning}>全选</button>
+                <button type="button" onClick={() => !batchRunning && setBatchSelected(new Set(batchAppIds.filter(id => !batchGenerated.has(id))))} disabled={batchRunning}>只选未生成</button>
+                <button type="button" onClick={() => !batchRunning && setBatchSelected(new Set())} disabled={batchRunning}>清空</button>
+              </div>
+              <div className="cp-batch-list">
+                {batchAppIds.map(appId => {
+                  const spec = CHECKPHONE_APP_SPECS[appId];
+                  const state = batchStatus[appId];
+                  const checked = batchSelected.has(appId);
+                  return (
+                    <label key={appId} className={`cp-batch-row ${state ? `is-${state.status}` : ""}`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleBatchApp(appId)} disabled={batchRunning} />
+                      <span className="cp-batch-name">{spec.label}</span>
+                      <span className="cp-batch-state">
+                        {state?.status === "running" ? <RefreshCw size={12} strokeWidth={2.5} className="cp-spin" />
+                          : state?.status === "done" ? "已生成"
+                          : state?.status === "failed" ? (state.error ? `失败：${state.error}` : "失败")
+                          : state?.status === "skipped" ? "生成中，已跳过"
+                          : state?.status === "pending" ? "排队"
+                          : batchGenerated.has(appId) ? "已有内容" : "未生成"}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="cp-batch-foot">
+                {batchRunning ? (
+                  <button type="button" className="ui-btn ui-btn-ghost" onClick={stopBatch}>停止（完成当前后）</button>
+                ) : (
+                  <button type="button" className="ui-btn ui-btn-ghost" onClick={() => setBatchOpen(false)}>关闭</button>
+                )}
+                <button type="button" className="ui-btn ui-btn-primary" onClick={() => void startBatch()} disabled={batchRunning || batchSelected.size === 0}>
+                  {batchRunning ? "生成中…" : `生成 ${batchSelected.size} 个`}
                 </button>
               </div>
             </div>

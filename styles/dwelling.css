@@ -1051,3 +1051,59 @@
   border-color: rgba(180, 90, 95, 0.55);
   background: rgba(180, 90, 95, 0.08);
 }
+
+/* ── 批量探索 ── */
+.dw2-batch { display: flex; flex-direction: column; max-height: 80%; }
+.dw2-btools { display: flex; gap: 8px; padding: 12px 0 6px; }
+.dw2-btools button {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid var(--dw-line);
+  background: transparent;
+  color: var(--dw-dim);
+  font-family: var(--dw-serif);
+  font-size: calc(11px*var(--app-text-scale,1));
+  letter-spacing: 2px;
+  cursor: pointer;
+}
+.dw2-btools button:disabled { opacity: 0.35; cursor: default; }
+.dw2-blist { flex: 1; min-height: 0; overflow-y: auto; }
+.dw2-bgroup-name {
+  padding: 12px 0 4px;
+  color: var(--dw-faint);
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  letter-spacing: 3px;
+}
+.dw2-bgroup-name span { margin-left: 8px; font-family: var(--dw-latin); font-size: 8px; letter-spacing: 2px; opacity: 0.6; }
+.dw2-brow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
+  color: var(--dw-dim);
+  font-family: var(--dw-serif);
+  text-align: left;
+  cursor: pointer;
+}
+.dw2-brow:disabled { cursor: default; }
+.dw2-brow[data-on="true"] { color: var(--dw-ink); }
+.dw2-bcheck {
+  width: 12px; height: 12px;
+  flex-shrink: 0;
+  border: 1px solid var(--dw-line-strong);
+  position: relative;
+}
+.dw2-brow[data-on="true"] .dw2-bcheck::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  background: var(--dw-ink);
+}
+.dw2-btx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dw2-bname { font-size: calc(13px*var(--app-text-scale,1)); letter-spacing: 1.5px; }
+.dw2-berr { color: #c98a8e; font-size: calc(10.5px*var(--app-text-scale,1)); line-height: 1.5; }
+.dw2-bfoot { display: flex; gap: 10px; padding-top: 14px; }

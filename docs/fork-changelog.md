@@ -17,6 +17,12 @@
 
 ## B. 功能与修复
 
+### 查手机与栖所的批量生成（2026-09-10）
+
+- `lib/checkphone-batch.ts`：`generateCheckPhoneAppSnapshot` 统一分派 23 个 APP 的生成函数并落盘，用 `beginCheckPhoneRefresh/endCheckPhoneRefresh` 与页面共享生成中状态；`runCheckPhoneBatch` 并发 2，可取消（完成当前后停）。`checkphone-app.tsx` 桌面右上角新增「批量」按钮和浮层：全选 / 只选未生成 / 清空，逐行状态（排队 / 生成中 / 已生成 / 失败原因 / 已有内容），样式在 `styles/checkphone.css` 末尾。
+- 栖所：`handleExploreItem` 拆成 `exploreItem(…, openOnDone)`，批量时不打开详情、不弹单条错误。房间页签栏加「批量探索」按钮，底部弹窗复用 `dw2-sheet`，按家具分组、方块勾选，默认勾未探索项，并发 2，失败原因写在行内，可停止。样式在 `styles/dwelling.css` 末尾。
+- 验证：`tsc --noEmit` 0 错误；两个组件 lint 与改前数量一致、我改的行没有新增；两份 CSS 经 `app/globals.css` 进入哈希产物，不用升 SW 缓存版本。未在浏览器和手机上实际点过，弹窗布局需要实机看一眼。
+
 ### 官方 APP 随宿主自动升级 + 个人云函数版本提示（2026-09-10）
 
 - 新增 `scripts/lib/custom-app-package.mjs`（统一打包口径）和 `scripts/build-custom-apps-dist.mjs`：四个官方 APP 打成 `public/custom-apps/<目录名>.zip` 并生成 `index.json`，进 `npm run build`；`build-shiguang.mjs` / `build-gua-nian.mjs` 改用同一打包函数。`npm run apps:build-dist` / `check:apps-dist`。
