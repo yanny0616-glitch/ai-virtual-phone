@@ -14,6 +14,7 @@ import { CustomAppFailurePanel, type CustomAppFailureDetail } from "@/components
 import { permissionLabelWithContext } from "@/lib/custom-app-permission-labels";
 import { registerCustomAppToolExecutor, type CustomAppToolExecutorPayload } from "@/lib/custom-app-tool-runtime";
 import { updateInstalledCustomAppFromMarket } from "@/lib/custom-app-market-update";
+import { customAppVisibilityId, filterVisibleCharacters } from "@/lib/character-visibility";
 import { loadCharacters } from "@/lib/character-storage";
 import { getApiUsageDays, USAGE_MAX_DAYS } from "@/lib/api-usage-stats";
 import { resolveUsageSourceNames } from "@/lib/usage-source-names";
@@ -1762,7 +1763,8 @@ export function CustomAppRunner({
 
     if (action === "characters.list") {
       requirePermission("characters.read");
-      return loadCharacters().map(character => ({
+      // 按设置里的「角色可见范围」过滤；APP 自己不用管标签
+      return filterVisibleCharacters(customAppVisibilityId(app.manifest.id), loadCharacters()).map(character => ({
         id: character.id,
         name: character.name,
         avatar: character.avatar,

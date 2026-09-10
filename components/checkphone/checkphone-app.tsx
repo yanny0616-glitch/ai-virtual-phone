@@ -39,6 +39,7 @@ import {
   History,
   Layers,
 } from "lucide-react";
+import { loadVisibleCharacters } from "@/lib/character-visibility";
 import {
   loadCheckPhoneGeneratedSet,
   runCheckPhoneBatch,
@@ -70,7 +71,6 @@ import { CheckPhoneWeiboPage } from "@/components/checkphone/checkphone-weibo-pa
 import { CheckPhoneXiaohongshuPage } from "@/components/checkphone/checkphone-xiaohongshu-page";
 import { CheckPhoneXPage } from "@/components/checkphone/checkphone-x-page";
 import { CheckPhoneYoutubePage } from "@/components/checkphone/checkphone-youtube-page";
-import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
 import {
   CHECKPHONE_APP_SPECS,
@@ -368,7 +368,7 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
   const settingsPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const all = loadCharacters();
+    const all = loadVisibleCharacters("checkphone");
     setCharacters(all);
     setCheckPhoneSettings(loadCheckPhoneSettings());
 
@@ -1075,7 +1075,7 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
   // STAGE 1: ARCHIVE ROSTER
   const refreshHistoryGroups = () => {
     setHistoryGroups(
-      loadCharacters()
+      loadVisibleCharacters("checkphone")
         .map(character => ({
           characterId: character.id,
           name: character.name || "未知角色",

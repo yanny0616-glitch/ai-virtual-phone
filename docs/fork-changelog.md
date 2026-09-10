@@ -17,6 +17,13 @@
 
 ## B. 功能与修复
 
+### 角色可见范围（2026-09-10）
+
+- 新增 `lib/character-visibility.ts`：kv `character-visibility`，`{ default, apps }` 两层规则（`hiddenTags` / `hiddenIds`），`loadVisibleCharacters(appId)` / `filterVisibleCharacters` / `isCharacterVisibleIn`，`collectCharacterTags` 收集候选标签。
+- 新增设置页 `components/settings/character-visibility.tsx`，挂在「数据与规则」卡片组；全局默认一张卡，下面按功能（宿主功能 + 已装自定义 APP）逐个展开覆盖，可恢复跟随默认。
+- `custom-app-runner.tsx` 的 `characters.list` 按 `custom_app:<manifest.id>` 过滤；挂念、拾光等自定义 APP 零改动。查手机与栖所的角色列表改调 `loadVisibleCharacters`。
+- 验证：`tsc --noEmit` 0 错误；新文件 lint 只有与绑定管理相同的 `<img>` 警告；`phone-settings-app.tsx` 的 2 个 lint 错误为原有。未实机验证设置页布局。
+
 ### 查手机与栖所的批量生成（2026-09-10）
 
 - `lib/checkphone-batch.ts`：`generateCheckPhoneAppSnapshot` 统一分派 23 个 APP 的生成函数并落盘，用 `beginCheckPhoneRefresh/endCheckPhoneRefresh` 与页面共享生成中状态；`runCheckPhoneBatch` 并发 2，可取消（完成当前后停）。`checkphone-app.tsx` 桌面右上角新增「批量」按钮和浮层：全选 / 只选未生成 / 清空，逐行状态（排队 / 生成中 / 已生成 / 失败原因 / 已有内容），样式在 `styles/checkphone.css` 末尾。

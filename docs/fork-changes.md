@@ -105,6 +105,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 ## 8. 宿主功能与修补
 
+- **角色可见范围**（`lib/character-visibility.ts`，设置 → 数据与规则 → 角色可见范围）：全局默认 + 按功能覆盖，按标签或点名隐藏角色。自定义 APP 在 SDK `characters.list` 处按 `custom_app:<manifest.id>` 统一过滤，APP 不用改。**宿主功能的角色选择器一律用 `loadVisibleCharacters("<功能id>")`**，并把功能加进 `CHARACTER_VISIBILITY_HOST_FEATURES`；聊天、联系人不过滤。目前接入：查手机、栖所。
 - **查手机批量生成**（`lib/checkphone-batch.ts`）：桌面右上角「批量」按钮，勾选桌面上的 APP 后按顺序生成快照（并发 2），默认只勾未生成的；走 refresh-tracker，正开着的页面同步转圈并自动刷新。
 - **栖所批量探索**（`components/dwelling/dwelling-app.tsx`）：每个房间页签栏多一个「批量探索」，底部弹窗按家具分组勾选物品（默认未探索的），并发 2 生成并落盘，不打开详情；失败逐条显示原因，可中途停止。
 - **查手机**（`lib/checkphone-engine.ts`）：带时区时间戳按设备本地格式化；六个查询工具按 2000 字符预算报未展示条数；会话匹配原名/备注/微信号优先，多候选先返回列表；历史排除 `silentUpdate`；读库失败与空列表区分。

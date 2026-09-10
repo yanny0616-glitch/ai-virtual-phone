@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ChevronLeft, Layers, RefreshCw, Trash2, Wand2, X } from "lucide-react";
 import type { Character } from "@/lib/character-types";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadVisibleCharacters } from "@/lib/character-visibility";
 import type { DwellingLayout, DwellingRoom, DwellingFurniture, DwellingFurnitureItem } from "@/lib/dwelling-storage";
 import {
     loadDwellingLayout,
@@ -124,7 +124,7 @@ export function DwellingApp({ onClose, visible, onIdle }: DwellingAppProps) {
     }, [visible, activeCharId]);
 
     useEffect(() => {
-        const chars = loadCharacters();
+        const chars = loadVisibleCharacters("dwelling");
         setCharacters(chars);
         if (chars.length === 1) setActiveCharId(chars[0].id);
         // Pre-load all characters' cached layouts + item HTML so ✓ shows immediately
