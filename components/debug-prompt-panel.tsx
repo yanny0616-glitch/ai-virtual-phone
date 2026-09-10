@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useSyncExternalStore, useMemo, useCallback
 import { getDebugChatState, getDebugPromptSnapshot, subscribeDebugChatState, subscribeDebugPromptSnapshot, type DebugPromptSnapshot } from "@/lib/debug-store";
 import { previewPromptRequestSnapshot, ChatEngineError } from "@/lib/chat-engine";
 import { previewGroupPromptRequestSnapshot } from "@/lib/group-chat-engine";
-import { FileText, X } from "lucide-react";
+import { FileText, Tags, X } from "lucide-react";
 import {
     getFloatingDockState,
     subscribeFloatingDockState,
@@ -21,7 +21,7 @@ import {
     type MomentsPreviewResult,
 } from "@/lib/moments-engine";
 import { previewCalendarPromptPayload } from "@/lib/calendar-engine";
-import { CHAT_APP_SETTINGS_UPDATED_EVENT, loadChatAppSettings, loadChatContacts, loadChatMessages, loadChatSessions, type ChatSession } from "@/lib/chat-storage";
+import { CHAT_APP_SETTINGS_UPDATED_EVENT, hydrateChatStorage, loadChatAppSettings, loadChatContacts, loadChatMessages, loadChatSessions, type ChatSession } from "@/lib/chat-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { getAllPosts } from "@/lib/moments-storage";
 import type { LLMMessage } from "@/lib/llm-prompt-assembler";
@@ -181,7 +181,18 @@ export function DebugPromptPanel() {
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [expandedIdx, setExpandedIdx] = useState<Set<number>>(new Set());
+    const [badgesShownIdx, setBadgesShownIdx] = useState<Set<number>>(new Set());
     const scrollRef = useRef<HTMLDivElement>(null);
+    // 聊天存储是异步水合的：面板可能在水合完成前就算出空的会话列表，
+    // 之后不点进聊天室依赖不变化，列表永远是空的。这里等水合完成后主动刷新一次。
+    const [sessionsVersion, setSessionsVersion] = useState(0);
+    useEffect(() => {
+        let cancelled = false;
+        void hydrateChatStorage().then(() => {
+            if (!cancelled) setSessionsVersion(v => v + 1);
+        });
+        return () => { cancelled = true; };
+    }, []);
     const chatSessionOptions = useMemo(() => {
         if (typeof window === "undefined") return [] as { session: ChatSession; label: string }[];
         const sessions = loadChatSessions();
@@ -209,7 +220,8 @@ export function DebugPromptPanel() {
                     label: charNameById.get(session.contactId) || session.alias || session.contactId,
                 };
             });
-    }, [enabled, chatState?.session?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [enabled, chatState?.session?.id, sessionsVersion, collapsed]);
     const activeChatSession = chatSessionOptions.find(option => option.session.id === selectedChatSessionId)?.session
         ?? chatState?.session
         ?? null;
@@ -234,7 +246,7 @@ export function DebugPromptPanel() {
         setVnResult(null);
         setExtraResult(null);
         setError(null);
-        setExpandedIdx(new Set());
+        setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
     }, [activeChatSession?.id, mode, extraAppId, readingMode]);
 
     useEffect(() => {
@@ -286,7 +298,7 @@ export function DebugPromptPanel() {
     useEffect(() => {
         if (mode !== "chat" || !activeChatSnapshot) return;
         setError(null);
-        setExpandedIdx(new Set());
+        setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
         requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
     }, [activeChatSnapshot?.id, mode]);
 
@@ -397,7 +409,7 @@ export function DebugPromptPanel() {
                     );
                 }
             }
-            setExpandedIdx(new Set());
+            setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
             requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
         } catch (e) {
             setError(e instanceof ChatEngineError ? e.message : String(e));
@@ -413,7 +425,7 @@ export function DebugPromptPanel() {
         try {
             const result = await previewCalendarPromptPayload("character", calendarOwnerId, calendarWeekStart);
             setCalendarResult(result);
-            setExpandedIdx(new Set());
+            setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
             requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -434,7 +446,7 @@ export function DebugPromptPanel() {
                 sessionContextExcludedTags: session?.contextExcludedTags,
             });
             setStoryResult(result);
-            setExpandedIdx(new Set());
+            setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
             requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -454,7 +466,7 @@ export function DebugPromptPanel() {
             const history = session ? loadVnMessages(session.id) : [];
             const result = await previewVnPromptPayload(vnCharacterId, history);
             setVnResult(result);
-            setExpandedIdx(new Set());
+            setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
             requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -493,7 +505,7 @@ export function DebugPromptPanel() {
                 return;
             }
             setMomentsResult(result);
-            setExpandedIdx(new Set());
+            setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
             requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
         } catch (e) {
             setError(String(e));
@@ -580,7 +592,7 @@ export function DebugPromptPanel() {
                 );
             }
             setExtraResult(result);
-            setExpandedIdx(new Set());
+            setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
             requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -598,8 +610,15 @@ export function DebugPromptPanel() {
             return next;
         });
     }
+    function toggleBadges(idx: number) {
+        setBadgesShownIdx(prev => {
+            const next = new Set(prev);
+            if (next.has(idx)) next.delete(idx); else next.add(idx);
+            return next;
+        });
+    }
     function expandAll() { setExpandedIdx(new Set(displayMessages.map((_, i) => i))); }
-    function collapseAll() { setExpandedIdx(new Set()); }
+    function collapseAll() { setExpandedIdx(new Set()); setBadgesShownIdx(new Set()); }
     const allMessagesExpanded = displayMessages.length > 0 && expandedIdx.size === displayMessages.length;
 
     function clampFloatingPosition(value: number, max: number): number {
@@ -752,7 +771,8 @@ export function DebugPromptPanel() {
         const chars = loadCharacters();
         const map = new Map<string, string>();
         contacts.forEach(c => {
-            map.set(c.characterId, chars.find(ch => ch.id === c.characterId)?.name ?? c.characterId);
+            const name = chars.find(ch => ch.id === c.characterId)?.name;
+            if (name) map.set(c.characterId, name);
         });
         chars.forEach(c => map.set(c.id, c.name));
         return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
@@ -1169,13 +1189,24 @@ export function DebugPromptPanel() {
                     const needsTruncation = textContent.length > 120;
                     const markerBadges = splitMarkerBadges(msg.marker);
 
+                    const badgesVisible = badgesShownIdx.has(idx);
+
                     return (
                         <div key={idx} className="pv-msg">
                             <div className="pv-msg-header" onClick={() => toggleExpand(idx)}>
                                 <span className="pv-msg-role" data-role={msg.role}>{msg.role}</span>
-                                {markerBadges.map((badge, bi) => (
-                                    <span key={`${idx}-${bi}`} className="pv-msg-badge">{badge}</span>
-                                ))}
+                                {markerBadges.length > 0 && (
+                                    <button
+                                        type="button"
+                                        className="pv-msg-badge-toggle"
+                                        aria-label={badgesVisible ? "收起组成标签" : "展开组成标签"}
+                                        {...(badgesVisible ? { "data-active": "" } : {})}
+                                        onClick={e => { e.stopPropagation(); toggleBadges(idx); }}
+                                    >
+                                        <Tags size={11} strokeWidth={2} />
+                                        {markerBadges.length}
+                                    </button>
+                                )}
                                 {msg.depth !== undefined && (
                                     <span className="pv-msg-depth">D:{msg.depth} O:{msg.order}</span>
                                 )}
@@ -1184,6 +1215,13 @@ export function DebugPromptPanel() {
                                     {isExpanded ? "▼" : "▶"} {textContent.length}c
                                 </span>
                             </div>
+                            {badgesVisible && markerBadges.length > 0 && (
+                                <div className="pv-msg-badges">
+                                    {markerBadges.map((badge, bi) => (
+                                        <span key={`${idx}-${bi}`} className="pv-msg-badge">{badge}</span>
+                                    ))}
+                                </div>
+                            )}
                             <div className="pv-msg-body" style={{
                                 maxHeight: isExpanded ? undefined : 60,
                                 overflow: isExpanded ? undefined : "hidden",
