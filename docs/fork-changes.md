@@ -44,13 +44,14 @@
 - 钩子（`lib/chat-plugin-types.ts`）：`app.ready` `plugins.changed` `session.opened` `user.beforeSend` `prompt.system` `llm.request` `llm.streamChunk` `llm.response` `message.beforePersist` `message.persisted` `message.beforeReveal` `message.updated` `message.deleted` `chat.read` `chat.write` `chat.replyGate` `moments.beforePost` `moments.schedule` `variables.changed`。
 - UI 坑位：`chat.header` `chat.presence` `chat.inputToolbar` `message.side` `message.footer` `message.panel` `list.avatar` `settings.section`。
 - **共享变量池**：插件 `ctx.data.variables` 与自定义 APP `AiPhone.variables.*` 读写同一个池。
+- **忙碌回复状态提示**：使用中文摘要，仅读取当前状态、活动/进展、地点、心情、精力、下一安排、有效手动状态；不再读取好感与关系变量。当前关系、好感分数、同步元数据、内部 ID、好感/关系历史不进入这段提示，存储及面板不受影响。
 - 离线回传（`lib/push-outbox-client.ts`）也跑 `llm.response` → 输出正则 → 消息解析，固定批次 ID 防重复结算。
 
 | 插件 | 版本 | 做什么 |
 | --- | --- | --- |
 | `affection-ledger` | 1.6.1 | `[内心]` 里带好感变化量和关系转折，累加、每日封顶、闲置回落；气泡旁爱心 + 便利贴卡片；写变量池 `affection` |
 | `presence-status` | 1.0.1 | 列表头像点 + 聊天页标题下小字，按作息实时算，手动覆盖优先 |
-| `busy-reply` | 1.1.0 | 被动回复的等待、概率偷空、睡眠、紧急优先；「允许角色选择不回复」默认开 |
+| `busy-reply` | 1.1.1 | 被动回复的等待、概率偷空、睡眠、紧急优先；「允许角色选择不回复」默认开 |
 | `moments-rhythm` | 1.0.0 | 每小时按作息/精力掷骰决定发不发朋友圈，不再到点必发 |
 | `typing-rhythm` | 1.0.0 | `message.beforeReveal` 控制多气泡显示节奏 |
 | `profile-signature` | 1.0.0 | 朋友圈个人主页个性签名 |
