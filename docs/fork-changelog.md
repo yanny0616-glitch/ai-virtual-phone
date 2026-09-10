@@ -17,6 +17,11 @@
 
 ## B. 功能与修复
 
+### 自用实例开放隐藏入口（2026-09-10）
+
+- 日记：`NOTE_WALL_UI_ENABLED` 改 true，便签墙卡片回来（上游关着）。表用 `docs/notewall-supabase.sql` 或 `supabase-all-in-one.sql`。
+- 购物：黑市触发词增加「黑市」；首页列表底部加一行灰字「· black market ·」直接进入，不必搜索。
+
 ### 角色可见范围（2026-09-10）
 
 - 新增 `lib/character-visibility.ts`：kv `character-visibility`，`{ default, apps }` 两层规则（`hiddenTags` / `hiddenIds`），`loadVisibleCharacters(appId)` / `filterVisibleCharacters` / `isCharacterVisibleIn`，`collectCharacterTags` 收集候选标签。

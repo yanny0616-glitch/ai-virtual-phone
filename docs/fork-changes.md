@@ -114,6 +114,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 - **网易云音乐**：`ncm-api` 容器挂在同域 `/ncm`，Caddy 侧 `strip_prefix`；默认地址由 `NEXT_PUBLIC_DEFAULT_NETEASE_API_BASE` 在 CI 里给。
 - **安全**：`lib/server/safe-outbound-fetch.ts` 所有出站请求校验目标 IP 防 SSRF，Undici 统一；`story-html-renderer.tsx` 渲染前清洗。
 - 绑定管理有「App Defaults」入口；记忆库删长期记忆后总结进度回退；会话列表未读角标；桌面拖拽翻页优化；朋友圈动态回写照片标签按真实模式。
+- **自用放开的入口**：便签墙（日记内，`NOTE_WALL_UI_ENABLED`）；黑市可搜「黑市」/「black market」或点购物首页底部灰字进入。这些联网功能的表用 `docs/supabase-all-in-one.sql` 一次建齐。
 - 日历「暖桃」主题已移除，`LEGACY_THEME_MAP` 有 `peach → cream`。**以后删主题往这张表补一条**。
 
 ## 9. 一致性校验与回归脚本
