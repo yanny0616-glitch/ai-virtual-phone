@@ -167,7 +167,8 @@ function normalizeShoppingSearchValue(value: string): string {
 }
 
 function isBlackMarketSearchTrigger(value: string): boolean {
-  return normalizeShoppingSearchValue(value).replace(/\s+/g, " ") === "black market";
+  const normalized = normalizeShoppingSearchValue(value).replace(/\s+/g, " ");
+  return normalized === "black market" || normalized === "黑市";
 }
 
 function shoppingFieldsMatchSearch(fields: Array<string | undefined>, normalizedQuery: string): boolean {
@@ -1482,6 +1483,16 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                   </div>
                 </section>
               )}
+              {selectedTab === "home" && loaded ? (
+                <button
+                  type="button"
+                  onClick={enterBlackMarketFromSearch}
+                  disabled={blackMarketTransition}
+                  style={{ alignSelf: "center", marginTop: "-8px", border: "none", background: "transparent", color: "#b5b5b5", fontSize: "calc(11px*var(--app-text-scale,1))", letterSpacing: "0.18em", padding: "6px 12px", cursor: "pointer" }}
+                >
+                  · black market ·
+                </button>
+              ) : null}
             </div>
 
             <nav style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#fff", display: "flex", justifyContent: "space-around", padding: "12px 0 calc(12px + env(safe-area-inset-bottom, 0px))", borderTop: "1px solid #eaeaea", zIndex: 10 }}>
