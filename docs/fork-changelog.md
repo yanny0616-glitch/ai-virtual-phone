@@ -17,6 +17,14 @@
 
 ## B. 功能与修复
 
+### 官方 APP 随宿主自动升级 + 个人云函数版本提示（2026-09-10）
+
+- 新增 `scripts/lib/custom-app-package.mjs`（统一打包口径）和 `scripts/build-custom-apps-dist.mjs`：四个官方 APP 打成 `public/custom-apps/<目录名>.zip` 并生成 `index.json`，进 `npm run build`；`build-shiguang.mjs` / `build-gua-nian.mjs` 改用同一打包函数。`npm run apps:build-dist` / `check:apps-dist`。
+- 新增 `lib/custom-app-official.ts`：按 `manifest.id` 对照 index，`updateInstalledCustomAppFromOfficial` 复用市场更新的注册/回滚流程，但保留本机运行时 id 与 `marketItemId`。`desktop-shell.tsx` 的更新弹窗改为 `source: market | official` 双来源；启动时巡检已装官方 APP（一次只提示一个，更新后不打开），打开 APP 时官方目录优先于市场。
+- 新增 `lib/personal-push-version.ts` 部署包代号 + 摘要，`push:build-dist` 自动 +1 并内联进网关 health（`functionsVersion`），`check:push` 校验代号与摘要一致。`personal-push-cloud.ts` 状态多记 `functionsVersion`，新增 `probePersonalPushCloudUpdate()`；设置页「离线推送」卡片显示落后并给出黄色提示，桌面启动每个代号提醒一次。
+- CI 构建前新增 `check:push && check:apps-dist && check:sdk` 一步。
+- 验证：`tsc --noEmit` 0 错误；改动文件 lint 无新增（`cloud-services-setup.tsx:160` 的 `set-state-in-effect` 为原有）；`check:push`、`check:apps-dist`、`check:sdk`、`shiguang:check`、`gua-nian:check` 通过。`check-fork-regressions.mjs` 在 HEAD 上已有一项失败（recheck-plan 409），与本次无关。未在手机上实测升级弹窗，未部署真实个人云验证 `functionsVersion`。
+
 ### 查手机时间、完整条目与查询可靠性（2026-09-10）
 
 - 带时区的时间戳按设备本地时间格式化，逐条标注历史时刻的 UTC 偏移，正确处理跨日及夏令时；无时区的原始日期时间标注“未标注时区”，不猜测。日历日期/时段保持原本地含义；订单优先显示带时区换算的付款时间，缺少付款时间时保留原标签。

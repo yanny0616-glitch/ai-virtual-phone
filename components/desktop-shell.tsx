@@ -83,6 +83,13 @@ import {
   updateInstalledCustomAppFromMarket,
 } from "@/lib/custom-app-market-update";
 import type { CustomAppMarketItem } from "@/lib/custom-app-market-types";
+import { probePersonalPushCloudUpdate } from "@/lib/personal-push-cloud";
+import {
+  findOfficialCustomAppUpdate,
+  findOfficialCustomAppUpdates,
+  updateInstalledCustomAppFromOfficial,
+  type OfficialCustomAppEntry,
+} from "@/lib/custom-app-official";
 import {
   CUSTOM_APP_HOST_STATE_UPDATED_EVENT,
   loadCustomAppBadges,
@@ -253,8 +260,10 @@ type PendingCustomAppBackgroundTool = {
 
 type PendingCustomAppUpdatePrompt = {
   app: InstalledCustomApp;
-  item: CustomAppMarketItem;
+  source: { kind: "market"; item: CustomAppMarketItem } | { kind: "official"; entry: OfficialCustomAppEntry };
   launchContext: Record<string, unknown>;
+  /** 更新完成后是否打开这个 APP（启动时的巡检不打开） */
+  launchAfterUpdate: boolean;
 };
 
 const CHAT_CUSTOM_APP_RETURN_SOURCES = new Set(["chat_plus_action", "chat_card", "chat_directive"]);
@@ -1488,7 +1497,27 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       const stored = readThemeProfile();
       setSavedTheme(stored);
       setDraftTheme(stored);
-      setCustomApps(loadInstalledCustomApps());
+      const installedApps = loadInstalledCustomApps();
+      setCustomApps(installedApps);
+      // 官方 APP 随宿主一起更新：启动巡检一次，落后就提示（一次只提示一个，更新完不打开）
+      void findOfficialCustomAppUpdates(installedApps).then(updates => {
+        const first = updates[0];
+        if (!first) return;
+        setCustomAppUpdatePrompt(current => current ?? {
+          app: first.app,
+          source: { kind: "official", entry: first.entry },
+          launchContext: {},
+          launchAfterUpdate: false,
+        });
+      }).catch(() => undefined);
+      // 个人云函数落后于本站：每个宿主版本只提醒一次，具体操作在设置页
+      void probePersonalPushCloudUpdate().then(status => {
+        if (!status?.outdated) return;
+        const key = "personal_push_update_noticed_v";
+        if (kvGet(key) === String(status.hostVersion)) return;
+        kvSet(key, String(status.hostVersion));
+        setNotice("你的个人云函数有新版本，请到「设置 → 云服务部署」重新部署一次。");
+      }).catch(() => undefined);
 
       // Reload widgets + layout after hydration
       const hydratedWidgets = loadWidgets();
@@ -2318,15 +2347,21 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     customAppUpdateCheckingRef.current.add(app.id);
     void (async () => {
       try {
-        const item = await resolveCustomAppMarketItemForInstalled(app.id);
+        // 随宿主发布的官方 APP 先看站内目录；不是官方的再问市场
+        const entry = await findOfficialCustomAppUpdate(app);
+        const item = entry ? null : await resolveCustomAppMarketItemForInstalled(app.id);
         const activeCustomAppId = activeAppRef.current ? customAppIdFromIconId(activeAppRef.current) : null;
-        if (activeCustomAppId !== app.id || !item) return;
+        if (activeCustomAppId !== app.id || (!entry && !item)) return;
         const freshApp = getFreshInstalledCustomApp(app.id) ?? app;
-        if (isCustomAppMarketItemNewerThanInstalled(freshApp, item)) {
+        const source: PendingCustomAppUpdatePrompt["source"] | null = entry
+          ? { kind: "official", entry }
+          : item && isCustomAppMarketItemNewerThanInstalled(freshApp, item) ? { kind: "market", item } : null;
+        if (source) {
           setCustomAppUpdatePrompt(current => current?.app.id === freshApp.id ? current : {
             app: freshApp,
-            item,
+            source,
             launchContext,
+            launchAfterUpdate: true,
           });
         }
       } catch {
@@ -4028,15 +4063,17 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     const pending = customAppUpdatePrompt;
     setCustomAppUpdateBusy(true);
     try {
-      const result = await updateInstalledCustomAppFromMarket(pending.app, {
-        resolveMarketItem: async () => pending.item,
-      });
+      const result = pending.source.kind === "official"
+        ? await updateInstalledCustomAppFromOfficial(pending.app, pending.source.entry)
+        : await updateInstalledCustomAppFromMarket(pending.app, {
+          resolveMarketItem: async () => (pending.source as { kind: "market"; item: CustomAppMarketItem }).item,
+        });
       setCustomApps(loadInstalledCustomApps());
       setCustomAppUpdatePrompt(null);
       setNotice(result.previousVersion === result.installed.version
         ? `已同步「${result.installed.name}」`
         : `已更新「${result.installed.name}」到 v${result.installed.version}`);
-      activateCustomApp(result.installed.id, pending.launchContext);
+      if (pending.launchAfterUpdate) activateCustomApp(result.installed.id, pending.launchContext);
     } catch (err) {
       setNotice(`更新失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -4338,11 +4375,13 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                     <div className="modal-body" data-ui="modal-body">
                       <p>
                         「{customAppUpdatePrompt.app.name}」当前为 v{customAppUpdatePrompt.app.version}，
-                        市场版本为 v{customAppUpdatePrompt.item.version}。是否立即更新？
+                        {customAppUpdatePrompt.source.kind === "official" ? "随本站发布的版本" : "市场版本"}为
+                        v{customAppUpdatePrompt.source.kind === "official" ? customAppUpdatePrompt.source.entry.version : customAppUpdatePrompt.source.item.version}。
+                        是否立即更新？数据与设置会保留。
                       </p>
-                      {customAppUpdatePrompt.item.changelog?.trim() ? (
+                      {customAppUpdatePrompt.source.kind === "market" && customAppUpdatePrompt.source.item.changelog?.trim() ? (
                         <p style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>
-                          更新日志：{customAppUpdatePrompt.item.changelog.trim()}
+                          更新日志：{customAppUpdatePrompt.source.item.changelog.trim()}
                         </p>
                       ) : null}
                     </div>

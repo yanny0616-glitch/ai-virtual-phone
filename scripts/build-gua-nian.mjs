@@ -2,6 +2,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { packageCustomAppDir } from "./lib/custom-app-package.mjs";
 import { Script } from "node:vm";
 import ts from "typescript";
 
@@ -79,19 +80,11 @@ async function main() {
   console.log("[gua-nian] 已从 src 合成 index.html。");
   if (!args.includes("--package")) return;
 
-  const { default: JSZip } = await import("jszip");
-  const manifest = JSON.parse(readFileSync(resolve(app, "manifest.json"), "utf8"));
-  if (manifest.entry !== "index.html" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
-    throw new Error("挂念安装包需要 index.html 入口和有效版本号。");
-  }
-  const zip = new JSZip();
-  for (const file of ["manifest.json", "index.html", "icon.png", "presets.json", "README.md"]) {
-    zip.file(file, readFileSync(resolve(app, file)));
-  }
+  const { manifest, buffer } = await packageCustomAppDir(app);
   const targetDir = resolve(root, "out/custom-apps");
   mkdirSync(targetDir, { recursive: true });
   const target = resolve(targetDir, `gua-nian-${manifest.version}.zip`);
-  writeFileSync(target, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+  writeFileSync(target, buffer);
   console.log(`[gua-nian] 安装包：${target}`);
 }
 

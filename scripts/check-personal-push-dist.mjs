@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { computePersonalPushDigest, readPersonalPushVersion, VERSION_BLOCK } from "./lib/personal-push-version.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pairs = [
@@ -27,6 +28,12 @@ for (const name of ["push-recheck", "push-generate"]) {
     const shared = readFileSync(resolve(root, path), "utf8").replace(/^export /gm, "").trim();
     if (!code.includes(`// BEGIN ${label}\n${shared}\n// END ${label}`)) failures.push(`${name} 的 ${label} 与共享源码不一致`);
   }
+}
+{
+  const current = readPersonalPushVersion(root);
+  if (current.digest !== computePersonalPushDigest(root)) failures.push("云函数或 schema 内容变了，但部署包代号没有更新");
+  const gateway = readFileSync(resolve(root, "supabase/functions/ai-phone-push/index.ts"), "utf8").match(VERSION_BLOCK);
+  if (!gateway || Number(gateway[1]) !== current.version) failures.push("网关内联的部署包代号与 lib/personal-push-version.ts 不一致");
 }
 for (const [source, output] of pairs) {
   const sourceText = readFileSync(resolve(root, source), "utf8");

@@ -2,6 +2,10 @@
 // 用户个人 Supabase 上的离线推送网关：订阅、预约、回传箱与测试推送。
 // verify_jwt 必须关闭；请求改用用户自己的 service_role key 做逐次校验。
 
+// BEGIN PERSONAL PUSH VERSION
+const PERSONAL_PUSH_FUNCTIONS_VERSION = 1;
+// END PERSONAL PUSH VERSION
+
 type SubscriptionRow = { endpoint: string; p256dh: string; auth: string };
 type ShortcutCommandRow = {
   id: string;
@@ -670,6 +674,7 @@ Deno.serve(async (request: Request) => {
         ok: true,
         service: "ai-phone-personal-push",
         version: 2,
+        functionsVersion: PERSONAL_PUSH_FUNCTIONS_VERSION,
         schemaVersion,
         capabilities: [
           ...(schemaVersion >= 3 ? ["screen-chat-continuous"] : []),

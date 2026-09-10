@@ -10,7 +10,7 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `.github/workflows/float-release.yml` | `npm ci → build → 打包 standalone → gh release create float-build-<sha12>`，只留最近 3 个 release |
+| `.github/workflows/float-release.yml` | `npm ci → check:push / check:apps-dist / check:sdk → build → 打包 standalone → gh release create float-build-<sha12>`，只留最近 3 个 release。副本不同步就不发版 |
 | `ops/float-deploy.sh` / `.service` / `.timer` | 每 5 分钟拉最新 release：校验 tag + sha256 → 解压 → 切软链 → 重启 → 健康检查 → 失败回滚。服务器上只保留当前 + 2 个回滚版本，`--prune-only` 可单独清理 |
 | `ops/float-ai-phone.service` | 生产服务单元 |
 | `next.config.mjs` | `output: "standalone"`；`ignoreBuildErrors: true`（TS 报错不挡构建，本地要自己跑 `tsc --noEmit`） |
@@ -76,6 +76,8 @@
 
 正本 `docs/personal-push-supabase.sql`（当前 **schema 12**）、`supabase/functions/{ai-phone-push,push-generate,push-recheck,push-bridge,push-shortcut-result}`；公开副本 `public/ai-phone-push/*.mjs` 由 `npm run push:build-dist` 生成，`check:push` 校验字节一致。用户改完要在「设置 → 云服务部署」重新部署。
 
+- **部署包代号** `lib/personal-push-version.ts`：`push:build-dist` 对六个云函数 + schema 做摘要，内容变了代号自动 +1 并内联进网关（`// BEGIN PERSONAL PUSH VERSION` 块），health 回报 `functionsVersion`。宿主启动和进「云服务部署」页时比对，落后就提示重新部署（每个代号只弹一次桌面提示，设置页常驻黄色卡片）。Access Token 仍要用户粘贴，这一步省不掉。**不要手改代号**，改完云函数跑一次 `push:build-dist` 即可。
+
 - **聊天镜像** `push_chat_mirror`：新消息抄送云端（仅单聊、截 4000 字、60 天保留），本地 IndexedDB 仍是唯一事实来源；跟着本地编辑/删除同步；支持整轮批次快照。
 - **降速** `cooldownRounds`：到点先查镜像 + 已代发 outbox，用户连续 N 轮没回就取消生成。
 - **复核门禁**（`push-recheck`）：日上限 / 间隔 / 时间窗 / 刚说完等待 / 最少句数五道门，阈值由 APP 上传的 `context.gate*` 覆盖，全过才花钱。
@@ -91,6 +93,8 @@
 ## 7. 自定义 APP（zip 交付，手机手动装，不进构建）
 
 zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾光源码在 `src/` 分文件，`scripts/build-<app>.mjs` 合成单 HTML + 打 zip。
+
+**随宿主自动升级**：`scripts/build-custom-apps-dist.mjs` 把四个目录打成 `public/custom-apps/<目录名>.zip` + `index.json`（打包口径统一在 `scripts/lib/custom-app-package.mjs`，文件时间固定，内容不变字节不变，已进 `npm run build`）。宿主 `lib/custom-app-official.ts` 按 `manifest.id` 对照 index：启动巡检一次、打开 APP 时再查一次，落后就复用市场更新那个弹窗提示「立即更新」，本机运行时 id、数据、设置原地保留。用户不再需要下载 zip 手动导入；`releases/` 里的 zip 只剩给没装过的人首次安装用。
 
 | APP | 版本 | 做什么 | 说明文档 |
 | --- | --- | --- | --- |
@@ -113,7 +117,8 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 | 命令 | 校验什么 |
 | --- | --- |
-| `npm run check:push` | 云函数源码 ↔ `public/ai-phone-push/*.mjs` ↔ schema 副本字节一致 |
+| `npm run check:push` | 云函数源码 ↔ `public/ai-phone-push/*.mjs` ↔ schema 副本字节一致；部署包代号与内容摘要一致 |
+| `npm run check:apps-dist` | `public/custom-apps/*.zip` + `index.json` 与 `custom-apps/` 源码一致 |
 | `npm run check:sdk` | 自定义 APP SDK / 派发 / 权限 / 文档四处一致 |
 | `npm run check:weixin` | 微信助手提示词等价 |
 | `npm run gua-nian:test` / `check:shiguang-app` | 两个 APP 的领域层 + 产物一致 |
@@ -121,4 +126,4 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 | `node scripts/check-fork-regressions.mjs` | fork 回归总集（40+ 项） |
 | `node scripts/check-<feature>.mjs` | 其余 60 来个单项脚本，各自的名字见 `scripts/`，changelog 每段末尾写了对应哪个 |
 
-目前没有一条命令跑全部，CI 也不跑它们。
+目前没有一条命令跑全部；CI 只跑 `check:push` / `check:apps-dist` / `check:sdk`。`check-fork-regressions.mjs` 里「网关保留用户睡眠设置」一项在 2026-09-10 已知失败（recheck-plan 返回 409，设备锁改动后测试没跟上），不是新问题。

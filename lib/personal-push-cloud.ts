@@ -13,6 +13,8 @@ export const PERSONAL_PUSH_GATEWAY_SLUG = "ai-phone-push";
 export const PERSONAL_PUSH_GENERATE_SLUG = "push-generate";
 export const PERSONAL_PUSH_SW_SCOPE = "/personal-push/";
 export const PERSONAL_PUSH_SCHEMA_VERSION = 3;
+export { PERSONAL_PUSH_FUNCTIONS_VERSION } from "./personal-push-version";
+import { PERSONAL_PUSH_FUNCTIONS_VERSION as PERSONAL_PUSH_FUNCTIONS_VERSION_HOST } from "./personal-push-version";
 
 registerKvMigration(PERSONAL_PUSH_STATE_KEY);
 
@@ -23,6 +25,8 @@ export type PersonalPushCloudState = {
   deployedAt: string;
   healthStatus: "ready" | "pending";
   schemaVersion: number;
+  /** 云端网关回报的部署包代号；旧网关不回报则缺省 */
+  functionsVersion?: number;
   healthError?: string;
 };
 
@@ -51,6 +55,7 @@ export function loadPersonalPushCloudState(): PersonalPushCloudState | null {
       // 旧版本只会在健康检查通过后写入状态，因此向后兼容时视为 ready。
       healthStatus: parsed.healthStatus === "pending" ? "pending" : "ready",
       schemaVersion: Number.isSafeInteger(parsed.schemaVersion) ? Number(parsed.schemaVersion) : 2,
+      functionsVersion: Number.isSafeInteger(parsed.functionsVersion) ? Number(parsed.functionsVersion) : undefined,
       healthError: typeof parsed.healthError === "string" ? parsed.healthError : undefined,
     };
   } catch {
@@ -217,6 +222,7 @@ export async function connectPersonalPushCloud(): Promise<PersonalPushConnectOut
     ok?: boolean;
     error?: string;
     schemaVersion?: number;
+    functionsVersion?: number;
     capabilities?: string[];
   };
   if (!(res.ok && data?.ok === true)) {
@@ -237,6 +243,7 @@ export async function connectPersonalPushCloud(): Promise<PersonalPushConnectOut
     schemaVersion: upToDate
       ? reported
       : Math.min(Number.isSafeInteger(reported) ? reported : 2, PERSONAL_PUSH_SCHEMA_VERSION - 1),
+    functionsVersion: Number.isSafeInteger(data.functionsVersion) ? Number(data.functionsVersion) : undefined,
   });
   return {
     status: "connected",
@@ -311,8 +318,40 @@ export async function deployPersonalPushCloud(accessToken: string): Promise<Pers
     ...state,
     healthStatus: health.ready ? "ready" : "pending",
     schemaVersion: PERSONAL_PUSH_SCHEMA_VERSION,
+    functionsVersion: PERSONAL_PUSH_FUNCTIONS_VERSION_HOST,
     healthError: health.ready ? undefined : health.error,
   };
   savePersonalPushState(state);
   return state;
+}
+
+export type PersonalPushCloudUpdateStatus = {
+  outdated: boolean;
+  /** 云端回报的代号；旧网关没有这个字段时为 0 */
+  cloudVersion: number;
+  hostVersion: number;
+};
+
+/**
+ * 个人云函数是否落后于当前宿主：打一次网关 health 比对部署包代号。
+ * 未部署、离线或探测失败返回 null，不打扰用户。
+ */
+export async function probePersonalPushCloudUpdate(): Promise<PersonalPushCloudUpdateStatus | null> {
+  const state = loadPersonalPushCloudState();
+  if (!state?.enabled) return null;
+  const backup = loadCloudBackupConfig();
+  if (!isCloudBackupConfigured(backup)) return null;
+  const res = await fetch(`${state.url}/functions/v1/${PERSONAL_PUSH_GATEWAY_SLUG}?action=health`, {
+    headers: {
+      "x-ai-phone-service-key": backup.key.trim(),
+      "x-ai-phone-origin": window.location.origin,
+    },
+    cache: "no-store",
+  }).catch(() => null);
+  if (!res?.ok) return null;
+  const data = await res.json().catch(() => ({})) as { ok?: boolean; functionsVersion?: number };
+  if (data?.ok !== true) return null;
+  const cloudVersion = Number.isSafeInteger(data.functionsVersion) ? Number(data.functionsVersion) : 0;
+  if (cloudVersion !== state.functionsVersion) savePersonalPushState({ ...state, functionsVersion: cloudVersion });
+  return { outdated: cloudVersion < PERSONAL_PUSH_FUNCTIONS_VERSION_HOST, cloudVersion, hostVersion: PERSONAL_PUSH_FUNCTIONS_VERSION_HOST };
 }

@@ -23,7 +23,7 @@ import {
     probeWeixinCloudDeployed,
     syncAllWeixinBotRuntimesToCloud,
 } from "@/lib/weixin-cloud-sync";
-import { connectPersonalPushCloud, deployPersonalPushCloud, isPersonalPushCloudActive } from "@/lib/personal-push-cloud";
+import { connectPersonalPushCloud, deployPersonalPushCloud, isPersonalPushCloudActive, probePersonalPushCloudUpdate, type PersonalPushCloudUpdateStatus } from "@/lib/personal-push-cloud";
 import { clearChatMirrorCloud, flushChatMirrorNow, getChatMirrorQueueSize, isChatMirrorEnabled, setChatMirrorEnabled } from "@/lib/chat-mirror-client";
 import { ensurePersonalPushSubscription, getOfflinePushState, markAccountPushSubscribed } from "@/lib/push-client";
 import { getWeixinCloudDeployedAt, markWeixinCloudDeployed, savePushCloudScheduled, saveWeixinCloudScheduled } from "@/lib/cloud-deploy-status";
@@ -148,6 +148,8 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
     const [resultDialog, setResultDialog] = useState<{ title: string; text: string } | null>(null);
     const [progress, setProgress] = useState("");
     const [mirrorEnabled, setMirrorEnabled] = useState(false);
+    // 云函数是否落后于宿主：进页面探测一次，部署完再探测
+    const [pushUpdate, setPushUpdate] = useState<PersonalPushCloudUpdateStatus | null>(null);
     const [mirrorBusy, setMirrorBusy] = useState(false);
     // 换设备重连（上游）：填部署时的项目地址 + service_role key，探测既有云服务并恢复本机状态
     const [connectOpen, setConnectOpen] = useState(false);
@@ -159,6 +161,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
         setPushActive(isPersonalPushCloudActive());
         setWeixinDeployed(Boolean(getWeixinCloudDeployedAt()));
         setMirrorEnabled(isChatMirrorEnabled());
+        void probePersonalPushCloudUpdate().then(setPushUpdate).catch(() => undefined);
     }, []);
 
     const configuredUrl = normalizeBackupUrl(loadCloudBackupConfig().url);
@@ -167,6 +170,7 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
         setCloudReady(isCloudBackupConfigured(loadCloudBackupConfig()));
         setPushActive(isPersonalPushCloudActive());
         setWeixinDeployed(Boolean(getWeixinCloudDeployedAt()));
+        void probePersonalPushCloudUpdate().then(setPushUpdate).catch(() => undefined);
         onConfigChanged?.();
     };
 
@@ -529,8 +533,18 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
             <div className="flex flex-col gap-2">
                 {statusCard(<CloudUpload size={17} strokeWidth={1.9} />, "云备份", cloudReady, `已部署 · ${configuredUrl.replace(/^https?:\/\//, "").replace(/\.supabase\.co$/, "")}`)}
                 {statusCard(<MessageSquare size={17} strokeWidth={1.9} />, "微信接入", weixinDeployed, "云函数与定时任务已部署")}
-                {statusCard(<Satellite size={17} strokeWidth={1.9} />, "离线推送", pushActive, "已部署到你的 Supabase")}
+                {statusCard(<Satellite size={17} strokeWidth={1.9} />, "离线推送", pushActive, pushUpdate?.outdated ? `已部署 · 云函数落后于本站（云端 ${pushUpdate.cloudVersion || "旧版"} / 本站 ${pushUpdate.hostVersion}）` : "已部署到你的 Supabase")}
             </div>
+
+            {pushUpdate?.outdated && (
+                <div className="flex flex-col gap-1 rounded-[16px] px-3.5 py-3" style={{ background: "var(--c-warning-bg, rgba(245, 158, 11, 0.12))" }}>
+                    <span className="menu-label">云服务需要重新部署</span>
+                    <span className="menu-desc !mt-0">
+                        本站的离线推送云函数已更新，你 Supabase 里的还是旧版，挂念等依赖云端的功能可能不完整。
+                        在上方粘贴 Access Token 点确认，勾选「离线推送」重新部署即可，云端数据不受影响。
+                    </span>
+                </div>
+            )}
 
             {/* 聊天镜像：默认关闭；开启后新消息抄送到个人云，供离线判断与面板读取 */}
             <div className="flex flex-col gap-2 rounded-[16px] bg-black/[0.03] px-3.5 py-3">

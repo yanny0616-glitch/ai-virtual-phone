@@ -3,6 +3,7 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { computePersonalPushDigest, readPersonalPushVersion, VERSION_BLOCK } from "./lib/personal-push-version.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = resolve(root, "public/ai-phone-push");
@@ -32,6 +33,23 @@ for (const name of ["push-recheck", "push-generate"]) {
     code = pattern.test(code) ? code.replace(pattern, () => block) : code + "\n" + block + "\n";
   }
   writeFileSync(path, code);
+}
+
+// 部署包代号：内容（版本块除外）变了就 +1，写回 lib 常量并内联进网关 health
+{
+  const digest = computePersonalPushDigest(root);
+  const current = readPersonalPushVersion(root);
+  const version = current.digest === digest ? current.version : current.version + 1;
+  writeFileSync(resolve(root, "lib/personal-push-version.ts"), [
+    "// 个人云部署包的代号：push:build-dist 发现云函数或 schema 内容变了就自动 +1，",
+    "// 网关 health 回报它，宿主对不上就提示「云服务需要重新部署」。不要手改。",
+    `export const PERSONAL_PUSH_FUNCTIONS_VERSION = ${version};`,
+    `export const PERSONAL_PUSH_FUNCTIONS_DIGEST = "${digest}";`,
+    "",
+  ].join("\n"));
+  const gatewayPath = resolve(root, "supabase/functions/ai-phone-push/index.ts");
+  writeFileSync(gatewayPath, readFileSync(gatewayPath, "utf8").replace(VERSION_BLOCK, () => `// BEGIN PERSONAL PUSH VERSION\nconst PERSONAL_PUSH_FUNCTIONS_VERSION = ${version};\n// END PERSONAL PUSH VERSION`));
+  if (version !== current.version) console.log(`[personal-push-dist] 部署包内容有变，代号 ${current.version} → ${version}。`);
 }
 
 copyFileSync(resolve(root, "supabase/functions/ai-phone-push/index.ts"), resolve(output, "gateway.mjs"));

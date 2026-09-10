@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { packageCustomAppDir } from "./lib/custom-app-package.mjs";
 import { Script } from "node:vm";
 import ts from "typescript";
 
@@ -58,14 +59,9 @@ export function renderShiguang() {
 }
 
 const bundled = resolve(root, "public/custom-apps/shiguang.zip");
-const PACKAGE_FILES = ["manifest.json", "index.html", "icon.svg", "README.md"];
 
-/** 随宿主发布的那份 zip：文件时间固定，内容不变字节就不变，check 才能逐字节比。 */
 async function buildZip(html) {
-  const { default: JSZip } = await import("jszip");
-  const zip = new JSZip();
-  for (const file of PACKAGE_FILES) zip.file(file, file === "index.html" ? html : readFileSync(resolve(app, file)), { date: new Date(0) });
-  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+  return (await packageCustomAppDir(app, { "index.html": html })).buffer;
 }
 
 export async function checkShiguangBuild() {
@@ -87,7 +83,6 @@ async function main() {
   const html = renderShiguang();
   writeFileSync(output, html);
   const manifest = JSON.parse(readFileSync(resolve(app, "manifest.json"), "utf8"));
-  if (manifest.entry !== "index.html" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) throw new Error("拾光安装包需要 index.html 入口和有效版本号。");
   const zip = await buildZip(html);
   mkdirSync(dirname(bundled), { recursive: true });
   writeFileSync(bundled, zip);
