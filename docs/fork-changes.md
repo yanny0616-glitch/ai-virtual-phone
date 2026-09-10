@@ -11,6 +11,7 @@
 
 - `.github/workflows/float-release.yml` — 构建+发布流水线（链路图见 CLAUDE.md 的「部署链路」）
 - `ops/float-deploy.sh` / `.service` / `.timer` — 拉取、校验、切换、回滚、健康检查
+- 服务器版本清理（2026-09-08）：部署前及健康检查成功后，仅保留当前运行版与两个回滚版本；切换后明确保护上一运行版。仅清理名称、VERSION 和入口文件符合部署格式的目录，跳过其他目录和符号链接，并复用部署锁防止并发清理。`/usr/local/sbin/float-deploy --prune-only` 可独立执行；专项验证为 `python3 scripts/check-float-release-retention.py`。
 - `ops/float-ai-phone.service` — 生产服务单元
 - `next.config.mjs` — 加 `output: "standalone"`，让 CI 产出自包含运行时，服务器上不需要 `npm install` / `next build`
 
