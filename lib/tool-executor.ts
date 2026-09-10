@@ -122,7 +122,11 @@ export type MediaAttachment = {
     title?: string;
 };
 
+// Internal structured payload survives presentation limits; symbols are omitted by JSON serialization.
+const STRUCTURED_TOOL_DATA = Symbol("structuredToolData");
+
 export type ToolResult = {
+    [STRUCTURED_TOOL_DATA]?: unknown;
     name: string;
     success: boolean;
     data?: string;
@@ -671,7 +675,8 @@ async function executeCompositeScriptStep(
         return {
             name: step.name || step.saveAs || "脚本步骤",
             success: true,
-            data: truncate(stringifyCompositeScriptReturn(value)),
+            data: stringifyCompositeScriptReturn(value),
+            [STRUCTURED_TOOL_DATA]: typeof value === "string" ? tryParseCompositeJson(value) : value,
         };
     } catch (err) {
         const error = err instanceof Error ? (err.stack || err.message) : String(err);
@@ -730,7 +735,7 @@ async function executeCompositeTool(
                 name: result.name,
                 success: result.success,
                 data: result.data,
-                json: tryParseCompositeJson(result.data),
+                json: STRUCTURED_TOOL_DATA in result ? result[STRUCTURED_TOOL_DATA] : tryParseCompositeJson(result.data),
                 error: result.error,
                 userNotice: result.userNotice,
             };
@@ -760,6 +765,7 @@ async function executeCompositeTool(
             name: toolDisplayName,
             success: true,
             data: truncate(output),
+            [STRUCTURED_TOOL_DATA]: tryParseCompositeJson(output),
             userNotice: `${toolDisplayName}完成`,
             mediaAttachments: mediaAttachments.length > 0 ? mediaAttachments : undefined,
         };
@@ -1142,6 +1148,7 @@ async function executeLocalDataTool(call: ToolCall): Promise<ToolResult> {
             name: call.name,
             success: true,
             data: stringifyLocalDataResult(data),
+            [STRUCTURED_TOOL_DATA]: data,
             userNotice: `${call.name}完成`,
         };
     } catch (err) {

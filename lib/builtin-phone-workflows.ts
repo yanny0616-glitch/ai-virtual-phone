@@ -63,7 +63,7 @@ function localRecords(step) {
         }).filter(Boolean);
     }
     if (Array.isArray(json.value)) return json.value.filter(Boolean);
-    return [];
+    throw new Error((step && step.name || "资料读取") + "返回的数据无法解析，请重试；这不代表没有会话或联系人。");
 }
 
 function localObject(step) {
@@ -94,7 +94,15 @@ function buildChatLookups(steps) {
     function sessionName(session) {
         if (!session) return "";
         if (session.isGroup) return session.groupName || session.alias || "群聊";
-        return session.alias || characterName(session.contactId) || session.contactId || "未知联系人";
+        var contact = contactByCharacterId.get(session.contactId);
+        return session.alias || characterName(session.contactId) || (contact && contact.nickname) || session.contactId || "未知联系人";
+    }
+
+    function searchNames(characterId, session) {
+        var character = charById.get(characterId) || {};
+        var contact = contactByCharacterId.get(characterId) || {};
+        return [character.name, character.wechatID, contact.nickname, session && session.alias, session && session.groupName]
+            .filter(Boolean).join(" ");
     }
 
     function participantNames(session) {
@@ -109,6 +117,7 @@ function buildChatLookups(steps) {
         charById: charById,
         contactByCharacterId: contactByCharacterId,
         sessionName: sessionName,
+        searchNames: searchNames,
         participantNames: participantNames
     };
 }
@@ -236,6 +245,15 @@ const CHAT_DATA_STEPS: CompositeToolStep[] = [
     },
 ];
 
+// Message/history lookups need identity fields, not long personality text.
+const CHAT_LOOKUP_STEPS = CHAT_DATA_STEPS.map(step => step.saveAs === "characters" ? {
+    ...step,
+    argsTemplate: JSON.stringify({
+        ...JSON.parse(step.argsTemplate || "{}"),
+        fields: ["id", "name", "wechatID"],
+    }),
+} : step);
+
 function schema(properties: Record<string, unknown>, required?: string[]): string {
     return JSON.stringify({
         type: "object",
@@ -302,6 +320,7 @@ lookups.contacts.forEach(function (contact) {
         characterId: contact.characterId,
         contactRecordId: contact.id,
         name: contact.nickname || character.name || contact.characterId,
+        searchNames: lookups.searchNames(contact.characterId, session),
         wechatID: character.wechatID || "",
         tags: Array.isArray(character.tags) ? character.tags : [],
         personality: compactText(character.personality, 120),
@@ -321,6 +340,7 @@ lookups.sessions.forEach(function (session) {
         characterId: session.contactId,
         contactRecordId: "",
         name: session.alias || character.name || session.contactId,
+        searchNames: lookups.searchNames(session.contactId, session),
         wechatID: character.wechatID || "",
         tags: Array.isArray(character.tags) ? character.tags : [],
         personality: compactText(character.personality, 120),
@@ -334,7 +354,7 @@ lookups.sessions.forEach(function (session) {
 });
 
 rows = rows
-    .filter(function (row) { return matchesQuery(row, query, ["name", "wechatID", "characterId", "lastMessagePreview", "personality"]); })
+    .filter(function (row) { return matchesQuery(row, query, ["name", "searchNames", "wechatID", "characterId", "lastMessagePreview", "personality"]); })
     .sort(function (a, b) {
         return String(b.lastActiveAt || b.addedAt || "").localeCompare(String(a.lastActiveAt || a.addedAt || ""));
     });
@@ -374,6 +394,7 @@ var rows = lookups.sessions.map(function (session) {
     return {
         sessionId: session.id,
         name: name,
+        searchNames: lookups.searchNames(session.contactId, session),
         type: session.isGroup ? "group" : "direct",
         participantNames: participants,
         lastMessagePreview: compactText(session.lastMessagePreview, 160) || "暂无消息",
@@ -383,7 +404,7 @@ var rows = lookups.sessions.map(function (session) {
         isMuted: Boolean(session.isMuted)
     };
 }).filter(function (row) {
-    return matchesQuery(row, query, ["sessionId", "name", "lastMessagePreview"]);
+    return matchesQuery(row, query, ["sessionId", "name", "searchNames", "lastMessagePreview"]);
 }).sort(function (a, b) {
     if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
     return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
@@ -443,7 +464,11 @@ function messageSender(message, session, lookups) {
 
 async function readSessionMessages(sessionId) {
     var db = await openIndexedDb("AiPhoneChatDB");
-    if (!db || !Array.from(db.objectStoreNames).includes("messages")) return [];
+    if (!db) throw new Error("聊天记录数据库读取失败，请重试；这不代表没有聊天记录。");
+    if (!Array.from(db.objectStoreNames).includes("messages")) {
+        db.close();
+        throw new Error("聊天记录数据表不存在，请检查本地数据。");
+    }
     try {
         var transaction = db.transaction("messages", "readonly");
         var store = transaction.objectStore("messages");
@@ -471,10 +496,12 @@ var matches = lookups.sessions.filter(function (session) {
     if (!query) return false;
     var name = lookups.sessionName(session).toLowerCase();
     var participantText = lookups.participantNames(session).join(" ").toLowerCase();
+    var names = lookups.searchNames(session.contactId, session).toLowerCase();
     return session.id === target
         || String(session.contactId || "").toLowerCase() === query
         || name === query
         || name.includes(query)
+        || names.includes(query)
         || participantText.includes(query);
 });
 
@@ -731,11 +758,11 @@ export const BUILTIN_PHONE_WORKFLOWS: CompositeToolConfig[] = [
         "查看{{user}}微信消息列表",
         "查看{{user}}微信消息列表里的最近会话预览。适合在{{user}}长时间没回复、态度冷淡、或者你想知道{{user}}最近在和谁聊天时使用。这里只看消息列表和最后消息预览，不会直接展开完整聊天记录。",
         schema({
-            query: { type: "string", description: "可选。按会话名、联系人名、sessionId 或最后消息预览筛选。" },
+            query: { type: "string", description: "可选。按会话名、角色原名、联系人备注名、微信号、sessionId 或最后消息预览筛选。" },
             limit: { type: "number", description: "可选。最多返回多少个会话，默认 30，最大 80。" },
         }),
         [
-            ...CHAT_DATA_STEPS,
+            ...CHAT_LOOKUP_STEPS,
             scriptStep("format_message_list", MESSAGE_LIST_SCRIPT),
         ],
     ),
@@ -744,13 +771,13 @@ export const BUILTIN_PHONE_WORKFLOWS: CompositeToolConfig[] = [
         "查看{{user}}聊天记录",
         "查看{{user}}和某个联系人或会话的聊天记录。适合在消息列表里发现可疑对象、{{user}}提到某个人、或者你想进一步确认两人关系时使用。需要指定联系人、会话名或会话 ID，并限制读取条数。",
         schema({
-            target: { type: "string", description: "联系人名、群名、会话名、角色 id 或 sessionId。优先使用消息列表结果里的 sessionId。" },
+            target: { type: "string", description: "角色原名、联系人备注名、微信号、群名、会话名、角色 id 或 sessionId。优先使用消息列表结果里的 sessionId。" },
             sessionId: { type: "string", description: "可选。微信会话 id；提供后优先按 sessionId 精确查找。" },
             limit: { type: "number", description: "可选。读取最近多少条聊天记录，默认 30，最大 80。" },
             includeSystem: { type: "boolean", description: "可选。是否包含系统/工具类隐藏消息，默认 false。" },
         }),
         [
-            ...CHAT_DATA_STEPS,
+            ...CHAT_LOOKUP_STEPS,
             scriptStep("format_chat_history", CHAT_HISTORY_SCRIPT),
         ],
     ),
