@@ -1994,8 +1994,8 @@ export async function buildChatPromptMessages(
 
     const voiceConfig = loadVoiceConfigs().find(voice => voice.id === activeSlot.voiceConfigId);
     const voiceExpression = resolvedAppId === "chat" && !session.isGroup && !isOfflineMode && !promptProfile
-        && !effectiveAppTags.includes("video")
-        ? buildVoiceExpressionPrompt(voiceConfig, effectiveAppTags.includes("voice") ? "call" : "chat") : "";
+        && !effectiveAppTags?.includes("video")
+        ? buildVoiceExpressionPrompt(voiceConfig, effectiveAppTags?.includes("voice") ? "call" : "chat") : "";
     const llmMessages = assemblePromptPayload({
         character,
         history: promptHistory,
@@ -2059,7 +2059,7 @@ export async function buildChatPromptMessages(
         // Preserve the earlier common prefix when this conditional protocol is absent next turn.
         const firstConversationIndex = llmMessages.findIndex(message => message.role !== "system");
         llmMessages.splice(firstConversationIndex < 0 ? llmMessages.length : firstConversationIndex, 0, {
-            role: "system", marker: "沉默输出规则", content:
+            role: "system", _debugMeta: { marker: "沉默输出规则" }, content:
                 `本轮允许自主选择沉默。决定不回复时，第一行单独输出 ${CHAT_SILENCE_TOKEN}，后面换行，状态数值、[状态栏]、[内心]、签名及必要的状态更新仍按已有规则正常输出或执行。沉默只表示不向用户发送聊天消息，不停止内部更新；不输出聊天正文、语音条或表情，不用旁白或工具消息代替回复。本轮内心与状态会保存，但不显示新的爱心或聊天卡片。不要为沉默额外编造签名或状态。决定回复时按正常格式输出，不带此标记。此规则仅覆盖必须发送聊天正文的要求，其他已配置规则保持有效。`,
         });
     }
