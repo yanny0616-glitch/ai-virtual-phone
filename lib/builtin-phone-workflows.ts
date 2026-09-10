@@ -33,8 +33,36 @@ function compactText(value, maxLength) {
 }
 
 function compactDateTime(value) {
-    var text = compactText(value, 32);
-    return text.replace("T", " ").replace(/\\.\\d{3}Z$/, "Z");
+    var text = String(value == null ? "" : value).trim();
+    if (!text) return "";
+    if (!/(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(text)) {
+        return compactText(text, 80) + (/^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:/.test(text) ? "（原始时间，未标注时区）" : "");
+    }
+    var date = new Date(text);
+    if (!Number.isFinite(date.getTime())) return compactText(text, 80) + "（时间格式无效）";
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    var offset = -date.getTimezoneOffset();
+    var zone = "UTC" + (offset >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(offset) / 60)) + ":" + pad(Math.abs(offset) % 60);
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate())
+        + " " + pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds()) + " " + zone;
+}
+
+// Keep complete formatted records within the executor's 2000-character presentation budget.
+function formatRecords(label, lines, total, suffix, keepLatest) {
+    var shown = [];
+    suffix = compactText(suffix, 240);
+    function render(records) {
+        var omitted = total - records.length;
+        var note = omitted > 0 ? "受条数或长度限制，另有 " + omitted + " 条未展示，请缩小查询范围。" : "";
+        return [countHeader(label, records.length, total, suffix), records.join("\\n") || (total > 0 ? "当前长度限制下未展示记录（不代表没有记录）" : "无"), note].filter(Boolean).join("\\n");
+    }
+    var ordered = keepLatest ? lines.slice().reverse() : lines;
+    for (var line of ordered) {
+        var candidate = keepLatest ? [line].concat(shown) : shown.concat([line]);
+        if (render(candidate).length > 2000) break;
+        shown = candidate;
+    }
+    return render(shown);
 }
 
 function joinNonEmpty(parts, separator) {
@@ -144,28 +172,32 @@ function openIndexedDb(name) {
 
 async function readPhoneKv(key) {
     var db = await openIndexedDb("AiPhoneKvDB");
-    if (db && Array.from(db.objectStoreNames).includes("entries")) {
-        try {
-            var transaction = db.transaction("entries", "readonly");
-            var record = await requestAsPromise(transaction.objectStore("entries").get(key));
-            if (record && typeof record.value === "string") return record.value;
-        } finally {
-            db.close();
+    if (!db) throw new Error("本地资料数据库读取失败，请重试；这不代表没有数据。");
+    try {
+        if (!Array.from(db.objectStoreNames).includes("entries")) throw new Error("本地资料数据表不存在，请检查本地数据。");
+        var transaction = db.transaction("entries", "readonly");
+        var record = await requestAsPromise(transaction.objectStore("entries").get(key));
+        if (record !== undefined && record !== null) {
+            if (typeof record.value !== "string") throw new Error("本地资料格式损坏，请检查数据。");
+            return record.value;
         }
+    } finally {
+        db.close();
     }
-    if (typeof window !== "undefined" && window.localStorage) {
-        return window.localStorage.getItem(key);
-    }
+    // A successful missing-key lookup may still have an unmigrated legacy value.
+    if (typeof window !== "undefined" && window.localStorage) return window.localStorage.getItem(key);
     return null;
 }
 
 function parseJsonText(text, fallbackValue) {
-    if (!text) return fallbackValue;
-    try {
-        return JSON.parse(text);
-    } catch {
-        return fallbackValue;
-    }
+    if (text === null) return fallbackValue;
+    var parsed;
+    try { parsed = JSON.parse(text); } catch { throw new Error("本地资料 JSON 损坏，请检查数据；不能据此判断没有记录。"); }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+        || Object.keys(fallbackValue).some(function (key) {
+            return !Array.isArray(parsed[key]) || parsed[key].some(function (row) { return !row || typeof row !== "object" || Array.isArray(row); });
+        })) throw new Error("本地资料结构损坏，请检查数据；不能据此判断没有记录。");
+    return parsed;
 }
 
 function looksLikeIsoDate(value) {
@@ -360,9 +392,7 @@ rows = rows
     });
 
 var selected = rows.slice(0, limit);
-return [
-    countHeader("微信联系人", selected.length, rows.length, query ? "query=" + query : ""),
-    selected.map(function (row, index) {
+var lines = selected.map(function (row, index) {
         var meta = joinNonEmpty([
             row.wechatID ? "wx=" + row.wechatID : "",
             row.characterId ? "cid=" + row.characterId : "",
@@ -377,8 +407,8 @@ return [
             row.lastMessagePreview ? "最近=" + row.lastMessagePreview : ""
         ], " | ");
         return indexedLine(index, joinNonEmpty([row.name, meta ? "(" + meta + ")" : "", detail], " | "));
-    }).join("\\n") || "无"
-].filter(Boolean).join("\\n");
+    });
+return formatRecords("微信联系人", lines, rows.length, query ? "query=" + query : "", false);
 `;
 
 const MESSAGE_LIST_SCRIPT = `
@@ -411,9 +441,7 @@ var rows = lookups.sessions.map(function (session) {
 });
 
 var selected = rows.slice(0, limit);
-return [
-    countHeader("微信消息列表", selected.length, rows.length, query ? "query=" + query : ""),
-    selected.map(function (row, index) {
+var lines = selected.map(function (row, index) {
         var flags = joinNonEmpty([
             row.isPinned ? "置顶" : "",
             row.isMuted ? "免打扰" : "",
@@ -432,8 +460,8 @@ return [
             participants,
             row.lastMessagePreview
         ], " | "));
-    }).join("\\n") || "无"
-].filter(Boolean).join("\\n");
+    });
+return formatRecords("微信消息列表", lines, rows.length, query ? "query=" + query : "", false);
 `;
 
 const CHAT_HISTORY_SCRIPT = `
@@ -491,62 +519,46 @@ var target = compactText(input.sessionId || input.target || input.name, 160);
 var query = normalizeQuery(target);
 var exactSessionId = compactText(input.sessionId, 160);
 
-var matches = lookups.sessions.filter(function (session) {
-    if (exactSessionId && session.id === exactSessionId) return true;
-    if (!query) return false;
-    var name = lookups.sessionName(session).toLowerCase();
-    var participantText = lookups.participantNames(session).join(" ").toLowerCase();
-    var names = lookups.searchNames(session.contactId, session).toLowerCase();
-    return session.id === target
-        || String(session.contactId || "").toLowerCase() === query
-        || name === query
-        || name.includes(query)
-        || names.includes(query)
-        || participantText.includes(query);
-});
-
-matches.sort(function (a, b) {
-    if (a.id === exactSessionId) return -1;
-    if (b.id === exactSessionId) return 1;
-    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
-});
-
-if (!target) {
-    return [
-        "需要提供 target 或 sessionId，才能查看指定聊天记录。",
-        "可选会话：",
-        lookups.sessions.slice(0, 8).map(function (session, index) {
-            return indexedLine(index, joinNonEmpty([
-                lookups.sessionName(session),
-                "sid=" + session.id,
-                compactDateTime(session.updatedAt || ""),
-                compactText(session.lastMessagePreview, 120)
-            ], " | "));
-        }).join("\\n") || "无"
-    ].join("\\n");
+function matchRank(session) {
+    if (exactSessionId) return session.id === exactSessionId ? 0 : Infinity;
+    if (!query) return Infinity;
+    if (session.id === target) return 0;
+    var character = lookups.charById.get(session.contactId) || {};
+    var contact = lookups.contactByCharacterId.get(session.contactId) || {};
+    var names = (session.isGroup ? [session.groupName, session.alias] : [character.name, character.wechatID, contact.nickname, session.alias])
+        .filter(Boolean).map(function (name) { return String(name).toLowerCase(); });
+    if (!session.isGroup && String(session.contactId || "").toLowerCase() === query) return 1;
+    if (names.includes(query)) return session.isGroup ? 2 : 1;
+    if (names.some(function (name) { return name.includes(query); })) return session.isGroup ? 4 : 3;
+    if (session.isGroup && lookups.participantNames(session).some(function (name) { return name.toLowerCase().includes(query); })) return 5;
+    return Infinity;
+}
+var matches = lookups.sessions.map(function (session) { return { session: session, rank: matchRank(session) }; })
+    .filter(function (match) { return Number.isFinite(match.rank); });
+var bestRank = matches.length ? Math.min.apply(null, matches.map(function (match) { return match.rank; })) : Infinity;
+matches = matches.filter(function (match) { return match.rank === bestRank; }).map(function (match) { return match.session; });
+function candidateLine(session) {
+    return joinNonEmpty([lookups.sessionName(session), session.isGroup ? "群聊" : "私聊", "sid=" + session.id, compactDateTime(session.updatedAt || "")], " | ");
 }
 
+if (!target) {
+    return formatRecords("需要提供 target 或 sessionId；可选会话", lookups.sessions.slice(0, 8).map(candidateLine), lookups.sessions.length);
+}
 if (matches.length === 0) {
-    return [
-        "没有找到匹配的微信会话：target=" + target,
-        "可选会话：",
-        lookups.sessions.slice(0, 8).map(function (session, index) {
-            return indexedLine(index, joinNonEmpty([
-                lookups.sessionName(session),
-                "sid=" + session.id,
-                compactDateTime(session.updatedAt || ""),
-                compactText(session.lastMessagePreview, 120)
-            ], " | "));
-        }).join("\\n") || "无"
-    ].join("\\n");
+    return formatRecords("没有找到匹配的微信会话；可选会话", lookups.sessions.slice(0, 8).map(candidateLine), lookups.sessions.length, "target=" + target);
+}
+if (matches.length > 1 || bestRank === 5) {
+    return formatRecords("请指定 sessionId，尚未读取聊天；候选会话", matches.map(candidateLine), matches.length, "target=" + target);
 }
 
 var session = matches[0];
 var allMessages = await readSessionMessages(session.id);
 var includeSystem = Boolean(input.includeSystem);
 var filtered = allMessages.filter(function (message) {
-    if (!message) return false;
-    if (!includeSystem && (message.role === "system" || message.role === "tool" || message.mediaType === "tool_call" || message.mediaType === "tool_result")) return false;
+    if (!message || message.silentUpdate) return false;
+    if (!includeSystem && (message.role === "system" || message.role === "tool"
+        || ["tool_call", "tool_result", "tool_notice", "memory_write_request"].includes(message.mediaType)
+        || message.nativeToolCalls && message.nativeToolCalls.length || message.nativeToolResult)) return false;
     return true;
 }).sort(function (a, b) {
     var orderA = Number.isFinite(Number(a.order)) ? Number(a.order) : Number.MAX_SAFE_INTEGER;
@@ -556,14 +568,7 @@ var filtered = allMessages.filter(function (message) {
 });
 
 var selected = filtered.slice(-limit);
-return [
-    countHeader("聊天记录", selected.length, filtered.length, joinNonEmpty([
-        lookups.sessionName(session),
-        session.isGroup ? "群聊" : "私聊",
-        "sid=" + session.id,
-        lookups.participantNames(session).length ? "成员=" + lookups.participantNames(session).join("/") : ""
-    ], " | ")),
-    selected.map(function (message) {
+var lines = selected.map(function (message) {
         var media = message.mediaType ? "[" + message.mediaType + "]" : "";
         return joinNonEmpty([
             compactDateTime(message.createdAt || ""),
@@ -571,8 +576,8 @@ return [
             media,
             messagePreview(message)
         ], " ");
-    }).join("\\n") || "无"
-].filter(Boolean).join("\\n");
+    });
+return formatRecords("聊天记录", lines, filtered.length, joinNonEmpty([lookups.sessionName(session), session.isGroup ? "群聊" : "私聊", "sid=" + session.id], " | "), true);
 `;
 
 const PEOPLE_SCRIPT = `
@@ -598,9 +603,7 @@ var rows = characters.map(function (character) {
 });
 
 var selected = rows.slice(0, limit);
-return [
-    countHeader("身边人物", selected.length, rows.length, query ? "query=" + query : ""),
-    selected.map(function (row, index) {
+var lines = selected.map(function (row, index) {
         var meta = joinNonEmpty([
             row.wechatID ? "wx=" + row.wechatID : "",
             row.characterId ? "cid=" + row.characterId : "",
@@ -612,8 +615,8 @@ return [
             meta ? "(" + meta + ")" : "",
             row.personality
         ], " | "));
-    }).join("\\n") || "无"
-].filter(Boolean).join("\\n");
+    });
+return formatRecords("身边人物", lines, rows.length, query ? "query=" + query : "", false);
 `;
 
 const CALENDAR_SCRIPT = `
@@ -621,14 +624,14 @@ ${COMMON_HELPERS}
 
 var anchor = parseIsoDate(input.date) || parseIsoDate(input.weekStart) || new Date();
 var weekStart = parseIsoDate(input.weekStart) ? String(input.weekStart).slice(0, 10) : getWeekStartIso(anchor);
-var weekDates = getWeekDates(weekStart);
 var raw = await readPhoneKv("ai_phone_calendar_plans_v1");
 var store = parseJsonText(raw, { plans: [] });
 var plans = Array.isArray(store.plans) ? store.plans : [];
 var plan = plans.find(function (item) {
     return item && item.ownerType === "user" && item.ownerId === "self" && item.weekStart === weekStart;
 }) || null;
-var items = Array.isArray(plan && plan.items) ? plan.items.slice() : [];
+if (plan && !Array.isArray(plan.items)) throw new Error("日程条目结构损坏，请检查数据。");
+var items = plan ? plan.items.slice() : [];
 
 items.sort(function (a, b) {
     if (String(a.date || "") !== String(b.date || "")) return String(a.date || "").localeCompare(String(b.date || ""));
@@ -636,40 +639,11 @@ items.sort(function (a, b) {
     return String(a.title || "").localeCompare(String(b.title || ""));
 });
 
-var grouped = weekDates.map(function (date) {
-    var dayItems = items.filter(function (item) { return item.date === date; }).map(function (item) {
-        return {
-            id: item.id || "",
-            date: item.date || date,
-            weekday: item.weekday || "",
-            startTime: item.startTime || "",
-            endTime: item.endTime || "",
-            location: item.location || "",
-            title: item.title || "",
-            source: item.source || ""
-        };
-    });
-    return {
-        date: date,
-        items: dayItems
-    };
+var lines = items.map(function (item) {
+    return joinNonEmpty([item.date, joinNonEmpty([item.startTime, item.endTime ? "-" + item.endTime : ""], ""), item.title,
+        item.location ? "@" + item.location : "", item.source ? "(" + item.source + ")" : ""], " ");
 });
-
-return [
-    "本周日程 weekStart=" + weekStart + " total=" + items.length,
-    grouped.map(function (day) {
-        if (!day.items.length) return day.date + ": 无";
-        return day.date + ": " + day.items.map(function (item) {
-            var time = joinNonEmpty([item.startTime, item.endTime ? "-" + item.endTime : ""], "");
-            return joinNonEmpty([
-                time,
-                item.title,
-                item.location ? "@" + item.location : "",
-                item.source ? "(" + item.source + ")" : ""
-            ], " ");
-        }).join("; ");
-    }).join("\\n")
-].join("\\n");
+return formatRecords("本周日程", lines, items.length, "weekStart=" + weekStart + "（设备本地日期与时间）" + (raw === null ? "；尚未创建日程数据" : ""));
 `;
 
 const ORDERS_SCRIPT = `
@@ -709,9 +683,7 @@ var rows = orders.map(function (order) {
 });
 
 var selected = rows.slice(0, limit);
-return [
-    countHeader("购物订单", selected.length, rows.length, status ? "status=" + status : ""),
-    selected.map(function (row, index) {
+var lines = selected.map(function (row, index) {
         var items = row.items.map(function (item) {
             return joinNonEmpty([
                 item.title,
@@ -724,7 +696,7 @@ return [
             row.latestShipping.label || ""
         ], " ") : "";
         return indexedLine(index, joinNonEmpty([
-            row.timeLabel || compactDateTime(row.paidAt),
+            row.paidAt ? compactDateTime(row.paidAt) : row.timeLabel,
             row.statusLabel,
             row.totalLabel,
             row.merchantLabel,
@@ -735,8 +707,8 @@ return [
             row.paymentCardLabel ? "支付=" + row.paymentCardLabel : "",
             row.orderId ? "oid=" + row.orderId : ""
         ], " | "));
-    }).join("\\n") || "无"
-].filter(Boolean).join("\\n");
+    });
+return formatRecords("购物订单", lines, rows.length, joinNonEmpty([status ? "status=" + status : "", raw === null ? "尚未创建订单数据" : ""], " | "), false);
 `;
 
 export const BUILTIN_PHONE_WORKFLOWS: CompositeToolConfig[] = [
@@ -769,12 +741,12 @@ export const BUILTIN_PHONE_WORKFLOWS: CompositeToolConfig[] = [
     workflow(
         "builtin_phone_lookup_chat_history",
         "查看{{user}}聊天记录",
-        "查看{{user}}和某个联系人或会话的聊天记录。适合在消息列表里发现可疑对象、{{user}}提到某个人、或者你想进一步确认两人关系时使用。需要指定联系人、会话名或会话 ID，并限制读取条数。",
+        "查看{{user}}和某个联系人或会话的聊天记录。适合在消息列表里发现可疑对象、{{user}}提到某个人、或者你想进一步确认两人关系时使用。需要指定联系人、会话名或会话 ID，并限制读取条数。同名或多会话时先返回候选，请用 sessionId 确认。",
         schema({
             target: { type: "string", description: "角色原名、联系人备注名、微信号、群名、会话名、角色 id 或 sessionId。优先使用消息列表结果里的 sessionId。" },
             sessionId: { type: "string", description: "可选。微信会话 id；提供后优先按 sessionId 精确查找。" },
             limit: { type: "number", description: "可选。读取最近多少条聊天记录，默认 30，最大 80。" },
-            includeSystem: { type: "boolean", description: "可选。是否包含系统/工具类隐藏消息，默认 false。" },
+            includeSystem: { type: "boolean", description: "可选。是否包含系统/工具类消息，默认 false；沉默状态更新始终排除。" },
         }),
         [
             ...CHAT_LOOKUP_STEPS,
