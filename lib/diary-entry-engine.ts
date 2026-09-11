@@ -27,6 +27,8 @@ async function resolveDiaryEntryGeneration(
 ): Promise<ResolvedDiaryEntryGeneration> {
   const character = loadCharacters().find(entry => entry.id === characterId);
   if (!character) throw new ChatEngineError("找不到要写日记的角色。");
+  // 调用方传的是整张日记表，这里统一收窄，别的角色的日记不能进「过往日记」
+  const ownEntries = entries.filter(entry => entry.characterId === characterId);
 
   const bindings = loadBindingConfig();
   const slot = resolveBinding(bindings, character.id, "diary");
@@ -75,7 +77,7 @@ async function resolveDiaryEntryGeneration(
     worldBookActivationContext: prepared.wbActivationContext,
     recentBlocks: prepared.recentBlocks,
     unifiedRecentItems: prepared.unifiedRecentItems,
-    diaryEntryContext: formatDiaryEntryContext(entries),
+    diaryEntryContext: formatDiaryEntryContext(ownEntries),
   });
 
   return { character, apiConfig, preset, regexes, messages, userName };
