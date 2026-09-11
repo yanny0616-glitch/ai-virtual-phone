@@ -44,6 +44,7 @@ export type ChatSession = {
     backgroundImage?: string; // Add support for custom background
     autoReplied?: boolean; // Whether the initial greeting auto-reply has been triggered
     alias?: string;
+    chatAvatar?: string; // 仅聊天里显示的角色头像（data URL），空则用角色卡头像
     videoBackground?: string;
     voiceBackground?: string;
     isBlacklisted?: boolean;

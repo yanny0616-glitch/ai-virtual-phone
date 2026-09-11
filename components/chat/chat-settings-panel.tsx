@@ -295,6 +295,7 @@ export function ChatSettingsPanel({
 }: ChatSettingsPanelProps) {
     const [backgroundImage, setBackgroundImage] = useState<string>(session.backgroundImage || "");
     const [alias, setAlias] = useState<string>(session.alias || "");
+    const [chatAvatar, setChatAvatar] = useState<string>(session.chatAvatar || "");
     const [videoBackground, setVideoBackground] = useState<string>(session.videoBackground || "");
     const [voiceBackground, setVoiceBackground] = useState<string>(session.voiceBackground || "");
     const [isPinned, setIsPinned] = useState(session.isPinned || false);
@@ -676,6 +677,20 @@ export function ChatSettingsPanel({
             offlineBilingualTranslationPrompt: offlineBilingualPromptDraft,
         });
         setEditingBilingualPrompt(false);
+    };
+
+    const handleChatAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        try {
+            const { imageFileToDataUrl } = await import("@/lib/image-data-url");
+            const dataUrl = await imageFileToDataUrl(file, 320, 0.82);
+            setChatAvatar(dataUrl);
+            updateSession({ chatAvatar: dataUrl });
+        } catch (error) {
+            console.error("Failed to read avatar image", error);
+        }
     };
 
     const handleImageUpload = async (
@@ -1164,6 +1179,19 @@ export function ChatSettingsPanel({
                         </div>
                         <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setBackgroundImage, "backgroundImage")} className="hidden" />
                     </label>
+                    {!session.isGroup && (
+                        <label className="menu-item">
+                            <div className="w-[24px] h-[24px] rounded-full overflow-hidden bg-[var(--c-input)] shrink-0">
+                                {chatAvatar ? <img src={chatAvatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
+                            </div>
+                            <div className="menu-label-group"><span className="menu-label">聊天头像</span><span className="menu-desc">只换这个聊天里的头像，角色卡不动</span></div>
+                            <div className="menu-right">
+                                {chatAvatar && <button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setChatAvatar(""); updateSession({ chatAvatar: "" }); }}>恢复</button>}
+                                <ChevronRight size={16} />
+                            </div>
+                            <input type="file" accept="image/*" onChange={handleChatAvatarUpload} className="hidden" />
+                        </label>
+                    )}
                     {session.isGroup ? (
                         <>
                             <div className="menu-item" style={{ cursor: "default" }}>

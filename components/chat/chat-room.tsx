@@ -1085,10 +1085,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [transientMessages, setTransientMessages] = useState<ChatMessage[]>([]);
     const [stickerReady, setStickerReady] = useState(false);
-    const [character, setCharacter] = useState<Character | null>(() => {
+    const [storedCharacter] = useState<Character | null>(() => {
         const chars = loadCharacters();
         return chars.find(c => c.id === session.contactId) || null;
     });
+    // 聊天里单独设过头像就盖掉角色卡的，只影响本页展示，不写回角色卡
+    const character = useMemo(
+        () => storedCharacter && session.chatAvatar ? { ...storedCharacter, avatar: session.chatAvatar } : storedCharacter,
+        [storedCharacter, session.chatAvatar],
+    );
     const [isGenerating, setIsGenerating] = useState(false);
     const [offlineMode, setOfflineMode] = useState(false);
     const [theaterMode, setTheaterMode] = useState(() => kvGet(CHAT_THEATER_MODE_PREFIX + session.id) === "1");

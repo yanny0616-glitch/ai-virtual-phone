@@ -6,6 +6,7 @@ import { SettingsContext } from "../phone-settings-app";
 import { loadUserIdentities, saveUserIdentities } from "@/lib/settings-storage";
 import { Input } from "@/components/ui/form";
 import { ConfirmDialog } from "@/components/ui/modal";
+import { imageFileToDataUrl } from "@/lib/image-data-url";
 
 export type UserIdentity = {
     id: string;
@@ -38,28 +39,6 @@ const DEFAULT_IDENTITIES: UserIdentity[] = [
         customSettings: "说话简短，带有神秘色彩。",
     }
 ];
-
-function fileToDataUrl(file: File, maxSize = 400, quality = 0.8): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
-                canvas.width = img.width * scale;
-                canvas.height = img.height * scale;
-                const ctx = canvas.getContext("2d")!;
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                resolve(canvas.toDataURL("image/webp", quality));
-            };
-            img.onerror = reject;
-            img.src = reader.result as string;
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
-}
 
 export function UserIdentitySettings() {
     const { setSubpageRightAction } = useContext(SettingsContext);
@@ -231,7 +210,7 @@ export function UserIdentitySettings() {
                                                         const file = input.files?.[0];
                                                         if (!file) return;
                                                         try {
-                                                            const dataUrl = await fileToDataUrl(file);
+                                                            const dataUrl = await imageFileToDataUrl(file);
                                                             updateIdentity(identity.id, { avatarUrl: dataUrl });
                                                         } catch { /* ignore */ }
                                                     };
