@@ -11,7 +11,14 @@ import {
     UNSUPPORTED_IMPORT_FORMAT,
 } from "@/lib/settings-storage";
 import { loadCharacters } from "@/lib/character-storage";
-import type { WorldBookConfig, WorldBookEntry } from "@/lib/settings-types";
+import type { WorldBookConfig, WorldBookEntry, WorldBookMode } from "@/lib/settings-types";
+import {
+    getWorldBookEntryTagGroups,
+    getTagsLabel,
+    normalizeTags,
+    areTagsEqual,
+    worldBookModeMatches,
+} from "@/lib/content-tag-utils";
 import { SettingsContext } from "../phone-settings-app";
 import { BottomSheet, ConfirmDialog, TextExpandModal } from "@/components/ui/modal";
 import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
@@ -396,6 +403,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
             useProbability: !!obj.useProbability,
             role: typeof obj.role === "number" ? obj.role : 0,
             insertion_order: typeof obj.insertion_order === "number" ? obj.insertion_order : 50,
+            tags: normalizeTags(obj.tags),
         };
     };
 
@@ -576,6 +584,23 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                         className="ui-textarea resize-none"
                                     />
                                 </div>
+
+                                <div className="flex flex-col gap-2">
+                                    <label className="menu-label ts-13 font-semibold ml-1">生效范围</label>
+                                    <select
+                                        value={activeBook.mode ?? "all"}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            updateBook(activeBook.id, { mode: v === "all" ? undefined : (v as WorldBookMode) });
+                                        }}
+                                        className="ui-select ts-13"
+                                    >
+                                        <option value="all">线上线下都生效</option>
+                                        <option value="online">仅线上</option>
+                                        <option value="offline">仅线下</option>
+                                    </select>
+                                    <span className="menu-desc ts-11 ml-1">整本书的粗范围，条目里还能按场景再细分。</span>
+                                </div>
                             </div>
 
                             {/* Entries Section */}
@@ -591,6 +616,14 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                 ) : (
                                     visibleEntries.map(entry => {
                                         const isEditing = editingUid === entry.uid;
+                                        const entryTags = entry.tags ?? [];
+                                        // 书级 mode 收窄后仍带着相反场景标签的条目：引擎会跳过，这里标出来
+                                        const tagConflict = entryTags.length > 0
+                                            && !worldBookModeMatches(activeBook.mode, entryTags.includes("offline") ? ["offline"] : []);
+                                        const tagGroups = getWorldBookEntryTagGroups(activeBook.mode);
+                                        const selectedGroup = tagGroups.find(g => g.minors.some(m => areTagsEqual(m.tags, entryTags)));
+                                        const selectedMinor = selectedGroup?.minors.find(m => areTagsEqual(m.tags, entryTags));
+                                        const isCustomTags = entryTags.length > 0 && !selectedMinor;
 
                                         return (
                                             <SwipeActionRow
@@ -682,6 +715,8 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                                                 {entry.constant && <span className="ui-status-tag" data-variant="warning">常驻激活</span>}
                                                                 {entry.use_regex && !entry.constant && <span className="ui-status-tag" data-variant="action">正则触发</span>}
                                                                 {!entry.constant && !entry.use_regex && <span className="ui-status-tag" data-variant="success">关键词触发</span>}
+                                                                {entryTags.length > 0 && <span className="ui-status-tag" data-variant="action">{getTagsLabel(entryTags)}</span>}
+                                                                {tagConflict && <span className="ui-status-tag" data-variant="warning">与生效范围冲突</span>}
                                                                 {entry.disable && <span className="ui-status-tag">已禁用</span>}
                                                             </div>
                                                         </div>
@@ -803,6 +838,44 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                                                     style={{ opacity: !entry.useProbability ? 0.5 : 1 }}
                                                                 />
                                                             </div>
+                                                        </div>
+
+                                                        <div className="flex flex-col gap-1">
+                                                            <label className="menu-desc">适用场景</label>
+                                                            <div className="grid grid-cols-2 gap-3">
+                                                                <select
+                                                                    value={isCustomTags ? "__custom__" : (selectedGroup?.id ?? "universal")}
+                                                                    onChange={(e) => {
+                                                                        const group = tagGroups.find(g => g.id === e.target.value);
+                                                                        const first = group?.minors[0];
+                                                                        if (!first) return;
+                                                                        updateEntry(entry.uid, { tags: first.tags.length > 0 ? [...first.tags] : undefined });
+                                                                    }}
+                                                                    className="ui-select ts-13"
+                                                                >
+                                                                    {isCustomTags && <option value="__custom__">自定义</option>}
+                                                                    {tagGroups.map(g => <option key={g.id} value={g.id}>{g.label}</option>)}
+                                                                </select>
+                                                                <select
+                                                                    value={isCustomTags ? "__custom__" : (selectedMinor?.id ?? "universal_common")}
+                                                                    onChange={(e) => {
+                                                                        const minor = selectedGroup?.minors.find(m => m.id === e.target.value);
+                                                                        if (!minor) return;
+                                                                        updateEntry(entry.uid, { tags: minor.tags.length > 0 ? [...minor.tags] : undefined });
+                                                                    }}
+                                                                    className="ui-select ts-13"
+                                                                    disabled={!selectedGroup || selectedGroup.minors.length <= 1}
+                                                                    style={{ opacity: !selectedGroup || selectedGroup.minors.length <= 1 ? 0.5 : 1 }}
+                                                                >
+                                                                    {isCustomTags && <option value="__custom__">自定义</option>}
+                                                                    {(selectedGroup?.minors ?? []).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                                                </select>
+                                                            </div>
+                                                            {tagConflict && (
+                                                                <span className="menu-desc ts-11" style={{ color: "var(--c-warning, #b45309)" }}>
+                                                                    此条目的场景与整本书的生效范围冲突，生成时会被跳过。改书的范围或重选场景。
+                                                                </span>
+                                                            )}
                                                         </div>
 
                                                         <div className="flex flex-col gap-1">

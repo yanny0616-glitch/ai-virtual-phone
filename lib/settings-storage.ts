@@ -495,6 +495,7 @@ function parseWorldBookEntry(e: any): WorldBookEntry {
         useProbability: Boolean(e.useProbability || false),
         role: Number(e.role) || 0,
         insertion_order: Number(e.order ?? e.insertion_order ?? 50),
+        tags: normalizeTags(e.tags),
     };
 }
 
@@ -506,6 +507,7 @@ export function parseWorldBookFromJson(text: string): WorldBookConfig | null {
         if (isUnsupportedWorldBookFormat(obj)) throw new Error(UNSUPPORTED_IMPORT_FORMAT);
 
         const wb = createWorldBook(obj.name || "导入的世界书");
+        if (obj.mode === "online" || obj.mode === "offline") wb.mode = obj.mode;
         if (Array.isArray(obj.entries)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const parsedEntries = obj.entries.map((e: any) => parseWorldBookEntry(e));

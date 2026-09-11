@@ -17,6 +17,14 @@
 
 ## B. 功能与修复
 
+### 世界书按场景生效（2026-09-11）
+
+- 世界书详情页新增「生效范围」：线上线下都生效 / 仅线上 / 仅线下，存为 `WorldBookConfig.mode`，缺省为全部。仅线下的书在线上请求里整本跳过，反之亦然；群聊算线上。
+- 条目面板新增「适用场景」二级选择器（大类 → 小类），复用预设条目那张 `CONTENT_SCOPE_TAG_GROUPS` 表，存为 `WorldBookEntry.tags`；不选 = 通用。选择器按书级范围收窄：仅线上时藏掉「聊天 → 线下」「群聊 → 线下」，仅线下时只剩通用和这两个小类。已选场景与书级范围冲突的条目在列表行标「与生效范围冲突」，引擎按书级范围为准跳过。
+- 过滤落在 `lib/llm-prompt-assembler.ts` 单聊、群聊共享书、群聊独享书三处激活循环的 `!entry.disable` 旁，新增 `isWorldBookEntryInScope`（`lib/content-tag-utils.ts`）；提示词查看器走同一条 `previewPromptRequestSnapshot` 路径，切「线下 ON」即可看到筛选结果。
+- 导入解析（`parseWorldBookFromJson`、条目 JSON 导入）保留 `mode` / `tags`；导出原样带出。角色卡内世界书、mascot 工具、自定义 APP host API 不写这两个字段，旧数据等于旧行为。
+- 验证：`tsc --noEmit` 通过；改动文件 lint 仅剩世界书管理页原有的 3 个 react-hooks 错误。未做真实模型验收。
+
 ### 聊天头像按会话覆盖（2026-09-10）
 
 - 追加：改为微信区域统一生效。`lib/chat-storage.ts` 新增 `loadWeixinCharacters()`（按单聊 `chatAvatar` 覆盖角色卡头像），聊天、通讯录、朋友圈、群聊建群/成员、通话、通知头像缓存共 11 个文件从 `loadCharacters()` 换过去；角色 APP 不换。

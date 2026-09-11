@@ -1,4 +1,4 @@
-import type { Prompt } from "./settings-types";
+import type { Prompt, WorldBookConfig, WorldBookEntry } from "./settings-types";
 import { CONTENT_APP_LABELS } from "./settings-types";
 import {
     CHECKPHONE_TAG_PROFILES,
@@ -293,4 +293,34 @@ export function getActiveAppTags(
 ): string[] {
     if (options?.appTags) return [...options.appTags];
     return [appId, ...((options?.followUpCount ?? 0) > 0 ? ["followup"] : [])];
+}
+
+/** 世界书 mode 与当前场景是否相容（线下 = activeTags 含 "offline"）。 */
+export function worldBookModeMatches(mode: WorldBookConfig["mode"], activeTags: string[]): boolean {
+    if (!mode) return true;
+    const isOffline = activeTags.includes("offline");
+    return mode === "offline" ? isOffline : !isOffline;
+}
+
+export function isWorldBookEntryInScope(
+    book: Pick<WorldBookConfig, "mode">,
+    entry: Pick<WorldBookEntry, "tags">,
+    activeTags: string[],
+): boolean {
+    return worldBookModeMatches(book.mode, activeTags) && matchesActiveTags(entry.tags, activeTags);
+}
+
+/** 条目选择器可选的标签组：书级 mode 收窄后，去掉与其冲突的小类。 */
+export function getWorldBookEntryTagGroups(mode: WorldBookConfig["mode"]): TagGroupProfile[] {
+    if (!mode) return CONTENT_SCOPE_TAG_GROUPS;
+    return CONTENT_SCOPE_TAG_GROUPS
+        .map((group) => ({
+            ...group,
+            minors: group.minors.filter((minor) => {
+                if (minor.tags.length === 0) return true;
+                const hasOffline = minor.tags.includes("offline");
+                return mode === "offline" ? hasOffline : !hasOffline;
+            }),
+        }))
+        .filter((group) => group.minors.length > 0);
 }

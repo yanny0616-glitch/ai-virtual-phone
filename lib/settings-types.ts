@@ -21,10 +21,16 @@ export type WorldBookEntry = {
     useProbability?: boolean;
     role?: number;
     insertion_order: number;
+    /** 场景标签，语义同 Prompt.tags：全部 ⊆ 当前 appTags 才生效；空 = 通用。 */
+    tags?: string[];
 };
+
+/** 世界书级粗范围：只收窄不放宽；缺省 = 线上线下都生效。 */
+export type WorldBookMode = "online" | "offline";
 
 export type WorldBookConfig = SettingItemMeta & {
     entries: WorldBookEntry[];
+    mode?: WorldBookMode;
 };
 
 // --- Preset ---

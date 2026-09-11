@@ -9,7 +9,7 @@ import { MacroEngine, postProcessTrim } from "./macro-engine";
 import type { RecentBlock, UnifiedRecentItem } from "./short-term-assembler";
 import { readDwellingLayoutCache } from "./dwelling-storage";
 import { formatDwellingContext } from "./dwelling-engine";
-import { matchesActiveTags } from "./content-tag-utils";
+import { matchesActiveTags, isWorldBookEntryInScope } from "./content-tag-utils";
 import { formatXiaohongshuShareForPrompt } from "./chat-share";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
 import { formatPromptTimestamp, getPromptTimestampOptionsForTimeContext, resolvePromptTimeAware, type PromptTimestampOptions } from "./prompt-time";
@@ -639,7 +639,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
     const activatedWBEntries: WorldBookEntry[] = [];
     worldBooks.forEach(wb => {
         (wb.entries || []).forEach(entry => {
-            if (entry.disable) return;
+            if (entry.disable || !isWorldBookEntryInScope(wb, entry, activeTags)) return;
             if (input.activateAllWorldBooks || isWorldBookEntryActivated(entry, recentHistoryStr)) {
                 activatedWBEntries.push(entry);
             }
@@ -1828,7 +1828,8 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
             const bookEngine = new MacroEngine((bookBinderNames.get(wb.id) ?? []).join("、"), resolvedUserName);
             applyTimeContextToMacroEngine(bookEngine, groupTimeContext);
             const activated = (wb.entries || []).filter(entry =>
-                !entry.disable && isWorldBookEntryActivated(entry, activationContext));
+                !entry.disable && isWorldBookEntryInScope(wb, entry, activeTags)
+                && isWorldBookEntryActivated(entry, activationContext));
             activated.filter(e => isWBAtDepthPosition(e)).forEach(entry => {
                 atDepthInjections.push({ entry, engine: bookEngine });
             });
@@ -1898,7 +1899,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
         m.worldBooks.forEach(wb => {
             if (isSharedBook(wb.id)) return;
             (wb.entries || []).forEach(entry => {
-                if (entry.disable) return;
+                if (entry.disable || !isWorldBookEntryInScope(wb, entry, activeTags)) return;
                 if (isWorldBookEntryActivated(entry, activationContext)) {
                     activatedEntries.push(entry);
                 }
