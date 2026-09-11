@@ -3,7 +3,7 @@
 // verify_jwt 必须关闭；请求改用用户自己的 service_role key 做逐次校验。
 
 // BEGIN PERSONAL PUSH VERSION
-const PERSONAL_PUSH_FUNCTIONS_VERSION = 2;
+const PERSONAL_PUSH_FUNCTIONS_VERSION = 3;
 // END PERSONAL PUSH VERSION
 
 type SubscriptionRow = { endpoint: string; p256dh: string; auth: string };
@@ -337,6 +337,25 @@ async function decryptPayload(payload: EncryptedPayload, secret: string): Promis
     combined as unknown as BufferSource,
   );
   return new TextDecoder().decode(plain);
+}
+
+// 诊断只暴露归属与任务类别，不回传请求快照或模型凭据。
+function jobDiagnosticFields(triggerKey: string, plain: {
+  notify?: { characterId?: unknown };
+  merge?: { sessionId?: unknown; cooldownRounds?: unknown; armAt?: unknown; guanianPromise?: unknown };
+} | null) {
+  const wakeId = triggerKey.startsWith("timedwake:") ? triggerKey.slice(10) : "";
+  const template = /^timed_wake_capp_(?:app_)?gua\.nian_/.test(wakeId) && /_sentinel_\d+_[a-z0-9]+$/i.test(wakeId);
+  const cd = Number(plain?.merge?.cooldownRounds), arm = Number(plain?.merge?.armAt);
+  return {
+    detailsAvailable: plain !== null,
+    characterId: typeof plain?.notify?.characterId === "string" ? plain.notify.characterId : "",
+    sessionId: typeof plain?.merge?.sessionId === "string" ? plain.merge.sessionId : "",
+    taskType: template ? "template" : plain?.merge?.guanianPromise ? "promise" : plain ? "message" : "unknown",
+    cooldownRounds: Number.isFinite(cd) && cd > 0 ? cd : 0,
+    cooldownConfigured: plain?.merge?.cooldownRounds != null && Number.isFinite(cd) && cd >= 0,
+    armAt: Number.isFinite(arm) && arm > 0 ? arm : 0,
+  };
 }
 
 Deno.serve(async (request: Request) => {
@@ -683,7 +702,7 @@ Deno.serve(async (request: Request) => {
           ...(schemaVersion >= 5 ? ["recheck-plan"] : []),
           ...(schemaVersion >= 6 ? ["usage"] : []),
           // 部署了本版网关即支持（纯代码能力，不依赖 schema）
-          "job-status", "guanian-history-read", "guanian-presence-days",
+          "job-status", "job-diagnostics-v2", "guanian-history-read", "guanian-presence-days",
         ],
       });
     }
@@ -911,21 +930,13 @@ Deno.serve(async (request: Request) => {
       const config = await loadConfig();
       const jobs = [];
       for (const row of Array.isArray(rows) ? rows : []) {
-        let sessionId = "";
-        let cooldownRounds = 0;
-        let armAt = 0;
+        let details = jobDiagnosticFields(row.trigger_key, null);
         try {
           if (config.payload_key) {
-            const plain = JSON.parse(await decryptPayload(row.payload, config.payload_key)) as {
-              merge?: { sessionId?: unknown; cooldownRounds?: unknown; armAt?: unknown };
-            };
-            if (typeof plain.merge?.sessionId === "string") sessionId = plain.merge.sessionId;
-            const cd = Number(plain.merge?.cooldownRounds);
-            if (Number.isFinite(cd) && cd > 0) cooldownRounds = cd;
-            const arm = Number(plain.merge?.armAt);
-            if (Number.isFinite(arm) && arm > 0) armAt = arm;
+            const plain = JSON.parse(await decryptPayload(row.payload, config.payload_key));
+            if (plain && typeof plain === "object") details = jobDiagnosticFields(row.trigger_key, plain);
           }
-        } catch { /* 解不开（旧格式/密钥轮换）就只报状态字段 */ }
+        } catch { /* 无法读取时保持未知，不当成未启用降速或旧预约。 */ }
         jobs.push({
           triggerKey: row.trigger_key,
           kind: row.kind,
@@ -933,9 +944,7 @@ Deno.serve(async (request: Request) => {
           status: row.status,
           resultNote: row.result_note || "",
           updatedAt: row.updated_at,
-          sessionId,
-          cooldownRounds,
-          armAt,
+          ...details,
         });
       }
       return json({ ok: true, jobs, ...(triggerKeys ? { queriedTriggerKeys: triggerKeys } : {}) });

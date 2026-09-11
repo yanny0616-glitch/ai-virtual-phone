@@ -4839,15 +4839,87 @@ return Object.freeze(exports);
     // 自己在管是常态，只在「连接与聊天镜像」里占一行；别的设备在管才单独出一张（要动手的状态）
     { id: "lock", title: "今天谁在管", cloud: true, when: (cx) => !!(cx.owner && cx.owner.id) && !owns(cx) },
     { id: "cloud", title: "连接与聊天镜像", cloud: true },
-    { id: "jobs", title: "预约与降速", cloud: true },
+    { id: "jobs", title: "消息任务与后台模板", cloud: true },
     { id: "recheck", title: "动态复核", cloud: true },
-    { id: "wakes", title: "系统唤醒对照" },
+    { id: "wakes", title: "本机今日登记", info: true },
     { id: "echo", title: "念头的回音", info: true },
     { id: "logs", title: "运行日志", info: true },
     { id: "preview", title: "此刻预览", info: true },
   ];
   const CLOUD_DIAG_IDS = { lock: 1, cloud: 1, jobs: 1, recheck: 1 };
   const DIAG_TTL = 60000;
+
+  function diagnosticJobGroups(jobs, characterId, items, sentinels, sessionId) {
+    const groups = { waiting: [], templates: [], history: [], others: [], unknown: [] };
+    const templateOwners = new Map();
+    for (const [owner, template] of Object.entries(sentinels || {})) {
+      for (const id of [template && template.wakeId, ...(template && template.previousWakeIds || [])]) {
+        if (id) templateOwners.set("timedwake:" + id, owner);
+      }
+    }
+    for (const job of jobs) {
+      const item = items.find(w => w.wakeId && job.triggerKey === "timedwake:" + w.wakeId);
+      const templateOwner = templateOwners.get(job.triggerKey);
+      const markedTemplate = /^timedwake:timed_wake_capp_(?:app_)?gua\.nian_.*_sentinel_\d+_[a-z0-9]+$/i.test(job.triggerKey || "");
+      const type = templateOwner || markedTemplate || job.taskType === "template" ? "template"
+        : item && item.kind === "promise" || job.taskType === "promise" ? "promise"
+        : item || job.taskType === "message" ? "message" : "unknown";
+      const owner = job.characterId || templateOwner || (item ? characterId : "");
+      const ours = owner ? owner === characterId : !!(sessionId && job.sessionId === sessionId);
+      const row = { ...job, type, item, owner };
+      if (owner && !ours) groups.others.push(row);
+      else if (!ours || type === "unknown") groups.unknown.push(row);
+      else if (type === "template") groups.templates.push(row);
+      else if (job.status === "pending" || job.status === "running") groups.waiting.push(row);
+      else groups.history.push(row);
+    }
+    for (const rows of Object.values(groups)) rows.sort((a, b) => Date.parse(a.executeAt) - Date.parse(b.executeAt));
+    return groups;
+  }
+
+  function diagnosticCooldownLabel(job) {
+    if (job.type === "template") return "后台复核使用，不生成聊天";
+    if (job.type === "promise") return "约定任务，不适用普通降速";
+    if (job.cooldownRounds > 0) return "连续未回应达到 " + job.cooldownRounds + " 轮时降速";
+    if (job.cooldownConfigured) return "未启用普通降速";
+    return "降速配置未确认";
+  }
+
+  function diagnosticJobsView(groups, total, characters) {
+    const status = { pending: "待执行", running: "处理中", done: "已结束", cancelled: "已取消", failed: "执行失败" };
+    const sections = [
+      ["waiting", "当前角色 · 消息任务", "执行时仍会判断是否回应，并不保证发出消息。"],
+      ["templates", "当前角色 · 后台模板", "这些是云端复核使用的模板，不计入待发消息；旧模板可能保留给已有计划使用。"],
+      ["history", "当前角色 · 历史记录", "已结束不等于已发送，实际成文请看「云端发送记录」。"],
+      ["others", "其他角色的记录", "不计入当前角色的消息任务。"],
+      ["unknown", "归属或类型未确认", "资料不足，暂不计入消息任务，也不判断为旧预约。旧云服务可重新部署后再刷新。"],
+    ];
+    let html = '<div class="archive-note">本次读取 ' + total + ' 条云端记录，包含当前计划的定向查询；不是全账号任务总数。日期按手机本地时区显示。</div>';
+    if (!groups.waiting.length) html += '<div class="diag-item">本次查询未发现当前角色待执行或处理中的消息任务。</div>';
+    for (const [key, title, note] of sections) {
+      const rows = groups[key];
+      if (!rows.length) continue;
+      html += '<details class="fold"' + (key === "waiting" ? ' open' : '') + '><summary><span class="t">' + title + '</span><span class="sm">' + rows.length + ' 条</span><span class="cv">›</span></summary><div class="archive-note">' + note + '</div>';
+      html += rows.map(j => {
+        const date = new Date(j.executeAt);
+        const when = Number.isFinite(+date) ? date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "时间未确认";
+        const owner = characters.find(c => c.id === j.owner);
+        const kind = { template: "后台模板", promise: "约定", message: "消息任务", unknown: "类型未确认" }[j.type];
+        let row = '<div class="diag-item"><b>' + esc(when) + '</b> ' + esc(kind) + ' · ' + esc(status[j.status] || "状态未确认");
+        if (key === "others") row += ' · ' + esc(owner ? owner.name : "其他角色");
+        if (j.item && j.item.source) row += '<br>' + esc(j.item.source);
+        row += '<br>' + diagnosticCooldownLabel(j);
+        const reason = j.resultNote || "";
+        if (/^promise changed or settled/.test(reason)) row += '<br>约定已变更或了结，原任务已取消';
+        else if (/^cooldown skip/.test(reason)) row += '<br>本次因连续未回应而跳过';
+        else if (reason) row += '<details><summary>执行记录</summary>' + esc(reason) + '</details>';
+        return row + '</div>';
+      }).join("") + '</details>';
+    }
+    const pending = groups.waiting.filter(j => j.status === "pending").length;
+    const running = groups.waiting.filter(j => j.status === "running").length;
+    return { html, summary: "本次查到：待执行 " + pending + (running ? " · 处理中 " + running : "") + " · 模板 " + groups.templates.length };
+  }
 
   async function renderUsage(force) {
     const v = $("#subview") || $("#view");
@@ -4932,7 +5004,7 @@ return Object.freeze(exports);
       } else if (pending.length) {
         dot = ""; head = "检查中…"; sub = "已看完 " + (status.length - pending.length) + " / " + status.length + " 项";
       } else {
-        dot = "ok"; head = "一切正常"; sub = "本机" + (cloudCfg() ? "和云端" : "") + "都在正常跑";
+        dot = "ok"; head = "检查完成，未发现明确故障"; sub = "仅反映已查询项目，不保证消息一定发出";
       }
       if (!cloudCfg()) sub += (sub ? "；" : "") + "没接云连接，云端复核、浏览器关着也生成、设备锁都停着";
       box.innerHTML = '<div class="row"><span class="dot ' + dot + '"></span><span class="head">' + head + "</span>"
@@ -4952,7 +5024,7 @@ return Object.freeze(exports);
     };
     // 云端那几张卡每进一次诊断页就各发一次请求，页签来回切就重复发。
     // 结果连同摘要缓存 60 秒；计划一变（uploadPlanCloud）或接管过就整份作废。
-    const ckey = (id) => id + ":" + cx.character.id;
+    const ckey = (id) => id + ":" + cx.character.id + ":" + (cloudCfg() || {}).url;
     const fill = (id, html, sum, tone) => {
       if (CLOUD_DIAG_IDS[id]) S._diagCache[ckey(id)] = { at: Date.now(), html: html, sum: sum, tone: tone };
       fillRaw(id, html, sum, tone);
@@ -4969,7 +5041,7 @@ return Object.freeze(exports);
     const planItems = (cx.plan && cx.plan.items) || [];
 
     // 没接云连接时云端那几块不画，结论卡里说一句、留个去设置的入口
-    v.innerHTML = '<div class="card dg-sum" id="dg-sum"></div>'
+    v.innerHTML = '<div class="dg-act"><span class="archive-note">' + esc(cx.character.name) + ' · 结果最多缓存 60 秒</span><button class="tgl" id="btn-diag-refresh">刷新诊断</button></div><div class="card dg-sum" id="dg-sum"></div>'
       + '<div class="card dg" id="dg-attn" hidden></div>'
       + '<div class="card dg" id="dg-ok">'
       + shown.map((c) =>
@@ -4981,6 +5053,8 @@ return Object.freeze(exports);
       + "</div>"
       + '<div class="archive-note">日志最多保留 120 条，只存在本地，不上传。</div>';
     summarize();
+    const refresh = $("#btn-diag-refresh");
+    if (refresh) refresh.onclick = () => { S._diagCache = {}; renderDiag(); };
 
     v.querySelectorAll(".dg-hd").forEach((b) => {
       b.onclick = () => {
@@ -5058,15 +5132,20 @@ return Object.freeze(exports);
       let wakes = null;
       try {
         const all = await AiPhone.push.listWakes();
-        const d0 = timeToMs("00:00"), d1 = d0 + 86400000;
+        const start = new Date(); start.setHours(0, 0, 0, 0);
+        const end = new Date(start); end.setDate(end.getDate() + 1);
+        const d0 = +start, d1 = +end;
         wakes = (all || [])
-          .filter((w) => w.characterId === cx.character.id && w.fireAt >= d0 && w.fireAt < d1)
+          .filter((w) => w.characterId === cx.character.id && w.fireAt >= d0 && w.fireAt < d1 && !/_sentinel_\d+_[a-z0-9]+$/i.test(w.id) && !/挂念后台复核模板/.test(w.intent || ""))
           .sort((a, b) => a.fireAt - b.fireAt);
       } catch (e) { /* wakes 保持 null = 读取失败 */ }
       if (!alive()) return;
       // 云端点亮的时刻只存在于云上，本地唤醒表里查不到，不说清楚会被当成「预约没挂上」
-      const cloudArmed = planItems.filter((it) => it.act && it.adj === "cloud" && it.wakeId && it.fireAt > Date.now());
-      const localPending = planItems.filter((it) => it.act && it.fireAt > Date.now() && !cloudArmed.includes(it)).length;
+      const start = new Date(); start.setHours(0, 0, 0, 0);
+      const end = new Date(start); end.setDate(end.getDate() + 1);
+      const todayItems = planItems.filter(it => it.fireAt >= +start && it.fireAt < +end);
+      const cloudArmed = todayItems.filter((it) => it.act && it.adj === "cloud" && it.wakeId && it.fireAt > Date.now());
+      const localPending = todayItems.filter((it) => it.act && it.fireAt > Date.now() && !cloudArmed.includes(it)).length;
       let html, sum, tone;
       if (wakes === null) {
         html = '<div class="archive-note">读取系统唤醒列表失败。</div>';
@@ -5074,17 +5153,17 @@ return Object.freeze(exports);
       } else if (!wakes.length) {
         html = '<div class="archive-note">本机今天没有登记的唤醒。云端创建的预约不在这张本机列表中，实际状态请打开时刻详情刷新回执。</div>';
         const missing = localPending > 0;
-        sum = missing ? "本机 0 个 · " + localPending + " 个待核实" : "本机 0 个" + (cloudArmed.length ? " · 云端记录 " + cloudArmed.length + " 个" : " · 无待发记录");
-        tone = missing ? "bad" : "";
+        sum = missing ? "本机 0 个 · " + localPending + " 个待核实" : "本机 0 个" + (cloudArmed.length ? " · 云端记录 " + cloudArmed.length + " 个" : " · 本机计划无待发记录");
+        tone = "";
       } else {
         const extra = wakes.filter((w) => !planItems.some((it) => it.wakeId === w.id)).length;
         html = wakes.map((w) => {
           const inPlan = planItems.some((it) => it.wakeId === w.id);
           return '<div class="diag-item"><b>' + fmtHM(w.fireAt) + "</b> " + esc(w.intent || "") +
-            (inPlan ? "" : ' <span class="badge cool">计划外</span>') + "</div>";
+            (inPlan ? "" : ' <span class="badge cool">未关联当前计划</span>') + "</div>";
         }).join("");
-        sum = wakes.length + " 个 · " + (extra ? extra + " 个计划外" : "都在计划里");
-        tone = extra ? "warn" : "ok";
+        sum = wakes.length + " 个 · " + (extra ? extra + " 个未关联计划" : "都在计划里");
+        tone = "";
       }
       if (cloudArmed.length) {
         html += '<details class="fold"><summary><span class="t">云端点亮</span><span class="sm">' +
@@ -5111,13 +5190,13 @@ return Object.freeze(exports);
       try {
         const h = await cloudFetch("health", { method: "GET" });
         caps = h.capabilities || [];
-        const ver = "云函数 v" + String(h.schemaVersion || "?");
+        const ver = h.functionsVersion ? "部署包 v" + h.functionsVersion : "部署包版本未提供";
         const mir = caps.indexOf("chat-mirror") >= 0;
         // 设备锁的常态（自己在管 / 还没定）就在这里占一行，不单独占一张卡
         const lockLine = !cx.owner || !cx.owner.id
           ? '<div class="diag-item"><b>今天谁在管</b> 还没定 · 谁先生成或编排就归谁</div>'
           : owns(cx) ? '<div class="diag-item"><b>今天谁在管</b> 这台（' + esc(myDevName()) + "）</div>" : "";
-        let mHtml = lockLine + '<div class="diag-item"><b>连接</b> 正常 · ' + esc(ver) + "</div>";
+        let mHtml = lockLine + '<div class="diag-item"><b>连接</b> 正常 · ' + esc(ver) + ' · 数据库结构 v' + esc(String(h.schemaVersion || "?")) + "</div>";
         if (!mir) {
           mHtml += '<div class="diag-item"><b>镜像</b> 云函数版本偏旧，还不支持聊天镜像。去小手机「设置 → 云服务部署」重新部署一次离线推送。</div>';
           fill("cloud", mHtml, ver + " · 镜像不支持", "warn");
@@ -5135,7 +5214,7 @@ return Object.freeze(exports);
             const a = any.entries && any.entries[0];
             mHtml += a
               ? '<div class="diag-item"><b>镜像</b> 云端有镜像消息，但和当前角色对不上号。云端最新一条的角色ID：<br>' + esc(a.character_id || "（空）") +
-                "<br>当前角色ID：<br>" + esc(String(cx.character.id)) + "<br>把这两个ID截图反馈。</div>"
+                "<br>当前角色ID：<br>" + esc(String(cx.character.id)) + "<br>检查聊天镜像是否开启，刷新后仍不一致可用这些编号核对。</div>"
               : '<div class="diag-item"><b>镜像</b> 云端一条镜像都没有。到小手机「设置 → 云服务部署」确认「聊天镜像」已勾选（勾选动作本身会补传最近聊天），然后随便发一条消息，等半分钟再回这页看。</div>';
             fill("cloud", mHtml, ver + " · " + (a ? "镜像角色对不上" : "镜像是空的"), "bad");
           }
@@ -5144,42 +5223,33 @@ return Object.freeze(exports);
         fill("cloud", '<div class="archive-note">云端查询失败：' + esc(String(e && e.message || e)) + "</div>", "连不上", "bad");
       }
 
-      // 预约带没带降速阈值、到点后拦没拦
+      // 云端任务与后台模板分开；不把跨角色样本或零阈值当作当前角色故障。
       try {
         if (caps.indexOf("job-status") < 0) {
-          fill("jobs", '<div class="archive-note">云函数版本偏旧，还看不了预约状态。去小手机「设置 → 云服务部署」重新部署一次离线推送。</div>', "云函数版本偏旧", "warn");
+          fill("jobs", '<div class="archive-note">个人云尚不支持任务查询。到小手机「设置 → 云服务部署」重新部署后刷新诊断。</div>', "需要更新云服务", "warn");
         } else {
-          const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", limit: "8" });
-          const jobs = jr.jobs || [];
-          if (!jobs.length) {
-            fill("jobs", '<div class="archive-note">云端目前没有定时预约的记录。到「今天」页点「' + replanLabel() + '」挂一个再来看。</div>', "0 条记录", "");
-          } else {
-            const stName = { pending: "待触发", running: "生成中", done: "已完成", cancelled: "已取消", failed: "失败" };
-            let jHtml = jobs.map((j) => {
-              const t = new Date(j.executeAt);
-              const cooled = /^cooldown skip/.test(j.resultNote || "");
-              let line = '<div class="diag-item"><b>' +
-                esc(t.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })) + "</b> " +
-                esc(stName[j.status] || j.status) +
-                (mySession && j.sessionId === mySession ? "" : (j.sessionId ? ' <span class="badge cool">其他角色</span>' : "")) +
-                (j.cooldownRounds > 0
-                  ? " · 降速阈值 " + j.cooldownRounds + " 轮"
-                  : ' · <span class="badge cool">未带阈值</span>');
-              if (cooled) line += '<br><span class="badge cool">已降速拦截</span> ' + esc(j.resultNote || "");
-              else if (j.resultNote) line += "<br>" + esc(j.resultNote);
-              return line + "</div>";
-            }).join("");
-            const sentinelKeys = Object.values(S.settings.sentinels || {}).map((x) => x && x.wakeId ? "timedwake:" + x.wakeId : "");
-            const stale = jobs.some((j) => j.status === "pending" && !(j.cooldownRounds > 0) && sentinelKeys.indexOf(j.triggerKey) < 0) && S.settings.maxUnanswered > 0;
-            if (stale) jHtml += '<div class="archive-note">有预约没带降速阈值（旧版挂的）。到「今天」页点「' + replanLabel() + '」重挂一次就带上了。</div>';
-            const pendingN = jobs.filter((j) => j.status === "pending").length;
-            fill("jobs", jHtml,
-              "待触发 " + pendingN + " · 共 " + jobs.length + (stale ? " · 有旧预约" : ""),
-              stale ? "warn" : "ok");
+          const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", limit: "20" });
+          if (!Array.isArray(jr.jobs)) throw new Error("云端未返回有效的任务列表");
+          const found = new Map(jr.jobs.map(j => [j.triggerKey, j]));
+          // 最晚执行的全账号样本可能被模板挤满，补查本角色计划中的确切任务。
+          const keys = [...new Set(planItems.filter(w => w.act && w.wakeId).map(w => "timedwake:" + w.wakeId))].filter(key => !found.has(key));
+          let missing = 0;
+          for (let i = 0; i < keys.length; i += 20) {
+            const batch = keys.slice(i, i + 20);
+            const r = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", triggerKeys: JSON.stringify(batch) });
+            if (!Array.isArray(r.jobs) || !Array.isArray(r.queriedTriggerKeys) || batch.some(key => !r.queriedTriggerKeys.includes(key))) throw new Error("云端未确认定向查询，请更新云服务后重试");
+            for (const j of r.jobs) if (batch.includes(j.triggerKey)) found.set(j.triggerKey, j);
+            missing += batch.filter(key => !found.has(key)).length;
           }
+          const jobs = [...found.values()];
+          const groups = diagnosticJobGroups(jobs, cx.character.id, planItems, S.settings.sentinels, mySession);
+          const view = diagnosticJobsView(groups, jobs.length, S.characters || []);
+          if (caps.indexOf("job-diagnostics-v2") < 0) view.html += '<div class="archive-note">云服务尚未提供完整的任务分类；无法确认的记录已单列。更新个人云后可显示更多归属信息。</div>';
+          if (missing) view.html += '<div class="archive-note">当前计划有 ' + missing + ' 条未查到云端记录，可能未上传或历史已清理。请在时刻详情刷新回执，不需要重置今天。</div>';
+          fill("jobs", view.html, view.summary + (missing ? " · " + missing + " 条待核实" : ""), "");
         }
       } catch (e) {
-        fill("jobs", '<div class="archive-note">预约查询失败：' + esc(String(e && e.message || e)) + "</div>", "查询失败", "bad");
+        fill("jobs", '<div class="archive-note">任务查询失败：' + esc(String(e && e.message || e)) + "。点击「刷新诊断」重试。</div>", "查询失败", "bad");
       }
 
       if (!cloudRecheckOn()) {
@@ -5195,10 +5265,10 @@ return Object.freeze(exports);
         const rr = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() });
         const pl = rr.plan;
         if (!pl) {
-          fill("recheck", '<div class="archive-note">今天的计划还没寄存到云上。到「今天」页点「' + replanLabel() + '」上传一次。</div>', "计划还没寄存", "warn");
+          fill("recheck", '<div class="archive-note">未查到今天的云端计划。若已生成今天的日程，请在「云端同步」区域重试同步；尚未生成时先到「今天」页生成日程。</div>', "今日计划未查到", cx.day ? "warn" : "");
           return;
         }
-        const pend = (pl.items || []).filter((it) => it.fireAt > Date.now()).length;
+        const pend = (pl.items || []).filter((it) => it.act && it.fireAt > Date.now()).length;
         const count = pl.recheck_count || 0;
         const configuredCap = Number((pl.context || {}).gateDailyCap);
         const cap = Number.isFinite(configuredCap) && configuredCap >= 0 ? configuredCap : 8;
@@ -5206,13 +5276,13 @@ return Object.freeze(exports);
         const ran = judgedAt
           ? new Date(judgedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
           : "";
-        let rHtml = '<div class="diag-item"><b>寄存</b> ' + (pl.items || []).length + " 个时刻（还没到点 " + pend + " 个）</div>" +
+        let rHtml = '<div class="diag-item"><b>寄存</b> ' + (pl.items || []).length + " 个计划时刻（启用且未到点 " + pend + " 个）</div>" +
           '<div class="diag-item"><b>复核</b> ' + (ran ? esc(ran) : count > 0 ? "时间未记录" : "还没判断过") + " · 今天已判 " + count + "/" + cap + " 次</div>" +
-          '<div class="diag-item"><b>待取裁决</b> ' + ((pl.decisions || []).length || "无") + "</div>";
+          '<div class="diag-item"><b>待同步的计划调整</b> ' + ((pl.decisions || []).length || "无") + "</div>";
         if (!pend) rHtml += '<div class="archive-note">当前寄存列表没有未来时刻；是否继续复核还取决于起念模式、约定和门禁。</div>';
         fill("recheck", rHtml,
           count > 0 ? "已判 " + count + "/" + cap + (ran ? " · 上次 " + ran : " · 时间未记录") : "已寄存 · 还没判断过",
-          count > 0 ? "ok" : "warn");
+          count > 0 ? "ok" : "");
       } catch (e) {
         fill("recheck", '<div class="archive-note">云端复核查询失败：' + esc(String(e && e.message || e)) + "</div>", "查询失败", "bad");
       }

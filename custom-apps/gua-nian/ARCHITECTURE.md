@@ -339,3 +339,11 @@ editThreadLedger 使用现有 _planLock，成功拉取后再修改账本并上�
 `planning/threads.js` 的 `threadTextKey` / `findThreadUpdate` 与云端 `push-recheck` 同名函数保持同一匹配规则：显式已有 ID 优先，禁止未知 ID 静默新建及跨类型改写；无 ID 时规范化标点、空白、全半角，以同类唯一文本匹配为后备，多个候选不擅自选择。`applyThreads` 更新原条并保存刷新时间，保留 ID、since、nudge 与日程关联；已了结条目不被自动重开，同批 settle 优先。
 
 `threadLines` 追加最近 7 天内至多 8 条已了结话头/日子作判重参考，提示明确不再新建或安排；活动列表原 12 条上限保留。相同语义的新措辞由模型提供原 ID，程序不使用额外模型请求或宽泛相似度合并旧记录。`check-gua-nian-thread-updates.mjs` 覆盖本地/云端匹配结果一致、ID/关联保留、刷新持久化、已了结保护及提示范围；约定分支继续使用独立 promise 更新器。
+
+## 诊断任务分类（0.9.33）
+
+网关 jobs GET 增加只读的 characterId、taskType、detailsAvailable、cooldownConfigured；只从已解密快照白名单提取，原有回执字段和查询语义保留。解密失败保持未知，不伪装成降速关闭；health 增加 job-diagnostics-v2 能力标记。
+
+ui/diagnostics.js 的 diagnosticJobGroups 先判角色，再分消息任务、后台模板、历史、其他角色和未确认。模板识别使用云端类别、哨兵编号与本机 sentinels 的当前/previousWakeIds；约定类别可由当前计划补全。先取 20 条账号样本，再用 triggerKeys 分批补查当前计划，严格核验回显，避免样本被远期模板占满。计数限定本次查询，未知信息不做故障推断。缓存按角色/云地址隔离，可手动刷新。
+
+展示按手机本地时区，后台模板不计消息待执行数，约定不套普通降速标签；本机登记只作参考，未复核不报警，总览不承诺整条发送链路正常。scripts/check-gua-nian-diagnostics.mjs 验证网关字段隐私、分类及实际 renderDiag 查询流程；不改动发送逻辑和云端任务。
