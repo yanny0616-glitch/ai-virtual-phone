@@ -221,12 +221,6 @@
   .empty p { font-size: 13px; color: var(--tx2); line-height: 1.8; margin-bottom: 20px; }
 
   /* 诊断 */
-  details.diag { margin-top: 4px; }
-  details.diag summary {
-    list-style: none; cursor: pointer; font-size: 12px; color: var(--tx3);
-    text-align: center; padding: 6px; letter-spacing: 2px;
-  }
-  details.diag summary::-webkit-details-marker { display: none; }
   .diag-item { font-size: 11px; color: var(--tx3); line-height: 1.7; padding: 7px 10px; border-left: 2px solid var(--line); margin: 6px 0; }
   .diag-item b { color: var(--tx2); font-weight: 600; }
 
@@ -472,9 +466,11 @@
   .stats.four .stat { padding: 11px 3px 9px; }
   .stats.four .stat .num { font-size: 21px; }
   .stats.four .stat .cap { letter-spacing: 1px; }
-  /* 诊断页：分组折叠。收起时每行只留「名称 + 一句结论」，展开才铺细节，
-     否则五块内容一起摊在页上，真出问题那一块反而看不见。 */
-  .dg-sum { padding: 14px 16px; }
+  /* 诊断页：三张卡（状态 / 记录 / 工具），每块是 <details>，收起时一行「名称 + 结论」，
+     展开才铺细节。展开体只有 diag-item 行、卡尾 archive-note、最后一行 dg-act 按钮。 */
+  .card.dg { padding: 0; overflow: hidden; }
+  .card.dg .sec-head { padding: 14px 16px 0; margin-bottom: 6px; }
+  .dg-sum { padding: 6px 16px 12px; }
   .dg-sum .row { display: flex; align-items: center; gap: 10px; }
   .dg-sum .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--tx3); flex: none; }
   .dg-sum .dot.ok { background: var(--good); box-shadow: 0 0 0 4px rgba(42, 168, 118, .14); }
@@ -482,12 +478,11 @@
   .dg-sum .dot.bad { background: var(--acc2); box-shadow: 0 0 0 4px rgba(245, 107, 156, .16); }
   .dg-sum .head { flex: 1; font-size: 15px; font-weight: 700; }
   .dg-sum .sub { margin-top: 6px; font-size: 12px; color: var(--tx2); line-height: 1.5; }
-  .dg-item.bad .dg-hd { box-shadow: inset 3px 0 0 var(--acc2); }
-  .dg-item.warn .dg-hd { box-shadow: inset 3px 0 0 var(--warn); }
-  .card.dg { padding: 0; overflow: hidden; }
-  .dg-item + .dg-item { border-top: 1px solid var(--line); }
-  .dg-hd { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 16px;
-    background: none; border: 0; font: inherit; text-align: left; cursor: pointer; color: inherit; }
+  .dg-item { border-top: 1px solid var(--line); }
+  .dg-item.bad > .dg-hd { box-shadow: inset 3px 0 0 var(--acc2); }
+  .dg-item.warn > .dg-hd { box-shadow: inset 3px 0 0 var(--warn); }
+  .dg-hd { display: flex; align-items: center; gap: 10px; padding: 14px 16px; list-style: none; cursor: pointer; user-select: none; }
+  .dg-hd::-webkit-details-marker { display: none; }
   .dg-hd .nm { font-size: 12.5px; font-weight: 600; color: var(--tx); white-space: nowrap; }
   .dg-hd .sm { flex: 1; min-width: 0; font-size: 11px; color: var(--tx3); text-align: right;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -495,10 +490,12 @@
   .dg-hd .sm.warn { color: var(--warn); }
   .dg-hd .sm.bad { color: var(--acc2); }
   .dg-hd .cv { font-size: 12px; color: var(--tx3); transition: transform .18s ease; flex-shrink: 0; }
-  .dg-item.open .dg-hd .cv { transform: rotate(90deg); }
+  .dg-item[open] > .dg-hd .cv { transform: rotate(90deg); }
   .dg-bd { padding: 2px 15px 14px; }
   .dg-bd .diag-item:first-child { margin-top: 0; }
-  .dg-act { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+  .dg-bd .archive-note { text-align: left; padding: 6px 10px 0; }
+  .dg-bd .preview-btn { margin-top: 2px; }
+  .dg-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
   .panel-act { display: flex; justify-content: flex-end; margin-top: 11px; }
   /* 英雄卡：角色条 + 此刻状态 */
   .hero-hd { display: flex; align-items: center; gap: 12px; margin: -2px 0 14px; padding-bottom: 14px; border-bottom: 1px dashed var(--line); cursor: pointer; }

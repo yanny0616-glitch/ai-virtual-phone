@@ -1,20 +1,38 @@
-  /* ================= 诊断页：结论 + 要处理 + 其余 =================
-     加一块诊断 = 往 DIAG_ITEMS 里加一条，再在下面 fill 一次。
+  /* ================= 诊断页：状态 / 记录 / 工具 三张卡 =================
+     加一块诊断 = 往 DIAG_ITEMS 里加一条（sec 决定进哪张卡），再在下面 fill 一次。
      fill 同时写「展开后的细节」和「收起时那一行结论」，tone 决定颜色；
-     warn / bad 的挪进「要处理」那张卡并自动展开，其余按表里的顺序收在下面一张；
-     顶上的结论卡按各块的 tone 算。info 类（日志、预览）不参与结论。
-     手动点过的记在 S._diagOpen，云端结果陆续回来时不会把它又合上。 */
-  const DIAG_ITEMS = [
-    // 自己在管是常态，只在「连接与聊天镜像」里占一行；别的设备在管才单独出一张（要动手的状态）
-    { id: "lock", title: "今天谁在管", cloud: true, when: (cx) => !!(cx.owner && cx.owner.id) && !owns(cx) },
-    { id: "cloud", title: "连接与聊天镜像", cloud: true },
-    { id: "jobs", title: "消息任务与后台模板", cloud: true },
-    { id: "recheck", title: "动态复核", cloud: true },
-    { id: "wakes", title: "本机今日登记", info: true },
-    { id: "echo", title: "念头的回音", info: true },
-    { id: "logs", title: "运行日志", info: true },
-    { id: "preview", title: "此刻预览", info: true },
+     warn / bad 原地高亮并自动展开，位置固定不搬家；顶上的结论按状态卡各块的 tone 算。
+     手动点过的记在 S._diagOpen，云端结果陆续回来时不会把它又合上。
+     展开体里只放两种东西：diag-item 行、卡尾一段 archive-note；按钮统一收在最后一行 dg-act。 */
+  const DIAG_SECTIONS = [
+    { id: "status", title: "状 态" },
+    { id: "record", title: "记 录" },
+    { id: "tool", title: "工 具" },
   ];
+  const DIAG_ITEMS = [
+    // 自己在管是常态，只在「连接与聊天镜像」里占一行；别的设备在管才单独出一块（要动手的状态）
+    { id: "lock", sec: "status", title: "今天谁在管", cloud: true, when: (cx) => !!(cx.owner && cx.owner.id) && !owns(cx) },
+    { id: "cloud", sec: "status", title: "连接与聊天镜像", cloud: true },
+    { id: "jobs", sec: "status", title: "消息任务与后台模板", cloud: true },
+    { id: "recheck", sec: "status", title: "动态复核", cloud: true },
+    { id: "sync", sec: "status", title: "云端同步", cloud: true, ext: true },
+    { id: "wakes", sec: "record", title: "本机今日登记", info: true },
+    { id: "echo", sec: "record", title: "念头的回音", info: true },
+    { id: "logs", sec: "record", title: "运行日志", info: true },
+    { id: "preview", sec: "tool", title: "此刻预览", info: true },
+    { id: "history", sec: "tool", title: "云端发送记录", cloud: true, info: true, ext: true },
+  ];
+  // ext：正文不由 renderDiag 画，而是 renderCloudSync / renderCloudHistory 往 #dg-ext-<id> 里画
+  function dgItem(id, title, body, sum, tone, open) {
+    return '<details class="dg-item' + (tone ? " " + tone : "") + '" id="dgi-' + id + '"' + (open ? " open" : "") + '>' +
+      '<summary class="dg-hd"><span class="nm">' + esc(title) + '</span><span class="sm' + (tone ? " " + tone : "") + '" id="dgs-' + id + '">' + esc(sum || "") + '</span><span class="cv">›</span></summary>' +
+      '<div class="dg-bd" id="diag-' + id + '">' + body + "</div></details>";
+  }
+  function dgBindToggle(root) {
+    root.querySelectorAll(".dg-item > .dg-hd").forEach((h) => {
+      h.onclick = () => { S._diagOpen = S._diagOpen || {}; S._diagOpen[h.parentNode.id.replace(/^dgi-/, "")] = !h.parentNode.open; };
+    });
+  }
   const CLOUD_DIAG_IDS = { lock: 1, cloud: 1, jobs: 1, recheck: 1 };
   const DIAG_TTL = 60000;
 
@@ -63,7 +81,7 @@
       ["others", "其他角色的记录", "不计入当前角色的消息任务。"],
       ["unknown", "归属或类型未确认", "资料不足，暂不计入消息任务，也不判断为旧预约。旧云服务可重新部署后再刷新。"],
     ];
-    let html = '<div class="archive-note">本次读取 ' + total + ' 条云端记录，包含当前计划的定向查询；不是全账号任务总数。日期按手机本地时区显示。</div>';
+    let html = "";
     if (!groups.waiting.length) html += '<div class="diag-item">本次查询未发现当前角色待执行或处理中的消息任务。</div>';
     for (const [key, title, note] of sections) {
       const rows = groups[key];
@@ -87,6 +105,7 @@
     }
     const pending = groups.waiting.filter(j => j.status === "pending").length;
     const running = groups.waiting.filter(j => j.status === "running").length;
+    html += '<div class="archive-note">本次读取 ' + total + ' 条云端记录，包含当前计划的定向查询；不是全账号任务总数。日期按手机本地时区显示。</div>';
     return { html, summary: "本次查到：待执行 " + pending + (running ? " · 处理中 " + running : "") + " · 模板 " + groups.templates.length };
   }
 
@@ -139,37 +158,20 @@
     const alive = () => S.tab === "back" && S.sub === "diag" && req === S._diagReq;
     S._diagOpen = S._diagOpen || {};
 
-    const setOpen = (id, on) => {
-      const it = $("#dgi-" + id), bd = $("#diag-" + id);
-      if (!it || !bd) return;
-      it.classList.toggle("open", !!on);
-      bd.hidden = !on;
-    };
+    const setOpen = (id, on) => { const it = $("#dgi-" + id); if (it) it.open = !!on; };
     const tones = {};
     const shown = DIAG_ITEMS.filter((c) => !c.when || c.when(cx)).filter((c) => !c.cloud || cloudCfg());
-    // 要处理的挪到上面那张卡（bad 在 warn 前），其余按表里的顺序留在下面
-    const layout = () => {
-      const attn = $("#dg-attn"), rest = $("#dg-ok");
-      if (!attn || !rest) return;
-      const rank = (c) => tones[c.id] === "bad" ? 0 : tones[c.id] === "warn" ? 1 : 2;
-      for (const c of shown.slice().sort((a, b) => rank(a) - rank(b))) {
-        const el = $("#dgi-" + c.id); if (!el) continue;
-        el.classList.toggle("bad", tones[c.id] === "bad");
-        el.classList.toggle("warn", tones[c.id] === "warn");
-        (rank(c) < 2 ? attn : rest).appendChild(el);
-      }
-      attn.hidden = !attn.querySelector(".dg-item");
-    };
     const summarize = () => {
       const box = $("#dg-sum"); if (!box) return;
-      const status = shown.filter((c) => !c.info);
+      const status = shown.filter((c) => !c.info && !c.ext);
       const pending = status.filter((c) => !(c.id in tones));
       const bad = status.filter((c) => tones[c.id] === "bad"), warn = status.filter((c) => tones[c.id] === "warn");
+      const sync = cloudCfg() && cloudSyncIssues().unfinished ? [{ title: "云端同步" }] : [];
       let dot = "", head = "", sub = "";
-      if (bad.length || warn.length) {
+      if (bad.length || warn.length || sync.length) {
         dot = bad.length ? "bad" : "warn";
-        head = (bad.length + warn.length) + " 处要处理";
-        sub = bad.concat(warn).map((c) => c.title).join(" · ") + (pending.length ? "（还在查 " + pending.length + " 项）" : "");
+        head = (bad.length + warn.length + sync.length) + " 处要处理";
+        sub = bad.concat(warn, sync).map((c) => c.title).join(" · ") + (pending.length ? "（还在查 " + pending.length + " 项）" : "");
       } else if (pending.length) {
         dot = ""; head = "检查中…"; sub = "已看完 " + (status.length - pending.length) + " / " + status.length + " 项";
       } else {
@@ -181,17 +183,20 @@
         + (sub ? '<div class="sub">' + esc(sub) + "</div>" : "");
       const cs = $("#btn-diag-cloudset"); if (cs) cs.onclick = () => { S._setTab = "cloud"; openSheet(); };
     };
+    S._diagSummarize = summarize;
     const fillRaw = (id, html, sum, tone) => {
       if (!alive()) return;
-      const bd = $("#diag-" + id), sm = $("#dgs-" + id);
-      if (!bd) return;
+      const it = $("#dgi-" + id), bd = $("#diag-" + id), sm = $("#dgs-" + id);
+      if (!it || !bd) return;
       bd.innerHTML = html;
       if (sm) { sm.className = "sm" + (tone ? " " + tone : ""); sm.textContent = sum || ""; }
+      it.classList.toggle("bad", tone === "bad");
+      it.classList.toggle("warn", tone === "warn");
       tones[id] = tone || "";
       setOpen(id, id in S._diagOpen ? S._diagOpen[id] : (tone === "warn" || tone === "bad"));
-      layout(); summarize();
+      summarize();
     };
-    // 云端那几张卡每进一次诊断页就各发一次请求，页签来回切就重复发。
+    // 云端那几块每进一次诊断页就各发一次请求，页签来回切就重复发。
     // 结果连同摘要缓存 60 秒；计划一变（uploadPlanCloud）或接管过就整份作废。
     const ckey = (id) => id + ":" + cx.character.id + ":" + (cloudCfg() || {}).url;
     const fill = (id, html, sum, tone) => {
@@ -209,35 +214,27 @@
     const logItems = (S.logs && S.logs.items || []).slice().reverse();
     const planItems = (cx.plan && cx.plan.items) || [];
 
-    // 没接云连接时云端那几块不画，结论卡里说一句、留个去设置的入口
-    v.innerHTML = '<div class="dg-act"><span class="archive-note">' + esc(cx.character.name) + ' · 结果最多缓存 60 秒</span><button class="tgl" id="btn-diag-refresh">刷新诊断</button></div><div class="card dg-sum" id="dg-sum"></div>'
-      + '<div class="card dg" id="dg-attn" hidden></div>'
-      + '<div class="card dg" id="dg-ok">'
-      + shown.map((c) =>
-          '<div class="dg-item" id="dgi-' + c.id + '">' +
-            '<button class="dg-hd" data-dg="' + c.id + '"><span class="nm">' + esc(c.title) + "</span>" +
-            '<span class="sm" id="dgs-' + c.id + '">读取中…</span><span class="cv">›</span></button>' +
-            '<div class="dg-bd" id="diag-' + c.id + '" hidden><div class="archive-note">读取中…</div></div>' +
-          "</div>").join("")
-      + "</div>"
-      + '<div class="archive-note">日志最多保留 120 条，只存在本地，不上传。</div>';
+    // 没接云连接时云端那几块不画，结论里说一句、留个去设置的入口
+    v.innerHTML = DIAG_SECTIONS.map((sec) => {
+      const items = shown.filter((c) => c.sec === sec.id);
+      if (!items.length && sec.id !== "status") return ""; // 结论和「去设置」入口在状态卡里，没接云也得留
+      return '<div class="card dg"><div class="sec-head"><span class="t">' + sec.title + "</span>" +
+        (sec.id === "status" ? '<button class="act" id="btn-diag-refresh">刷新</button>' : "") + "</div>" +
+        (sec.id === "status" ? '<div class="dg-sum" id="dg-sum"></div>' : "") +
+        items.map((c) => c.ext ? '<div id="dg-ext-' + c.id + '" hidden></div>' : dgItem(c.id, c.title, '<div class="diag-item">读取中…</div>', "读取中…", "", S._diagOpen[c.id])).join("") +
+        "</div>";
+    }).join("");
     summarize();
     const refresh = $("#btn-diag-refresh");
     if (refresh) refresh.onclick = () => { S._diagCache = {}; renderDiag(); };
-
-    v.querySelectorAll(".dg-hd").forEach((b) => {
-      b.onclick = () => {
-        const id = b.dataset.dg;
-        const on = !$("#dgi-" + id).classList.contains("open");
-        S._diagOpen[id] = on;
-        setOpen(id, on);
-      };
-    });
+    dgBindToggle(v);
+    renderCloudSync();
+    renderCloudHistory();
 
     // 拿此刻的状态让TA说一句，只显示不发送：用来核对注入的状态对不对
     fill("preview", cx.day
-      ? '<div class="archive-note">按TA此刻的状态生成一句话，不发送、不进聊天、不占额度，花一次模型调用。</div>' + previewZone()
-      : '<div class="archive-note">TA的今天还没生成，没有状态可看。</div>', cx.day ? "" : "没状态", "");
+      ? previewZone() + '<div class="archive-note">按TA此刻的状态生成一句话，不发送、不进聊天、不占额度，花一次模型调用。</div>'
+      : '<div class="diag-item">TA的今天还没生成，没有状态可看。</div>', cx.day ? "" : "没状态", "");
     { const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur()); }
     // 云端回音账只给有限正反馈，不把用户忙碌、睡眠或未读造成的沉默当负面偏好。
     {
@@ -253,21 +250,21 @@
             return '<div class="diag-item"><b>' + esc(KIND_LABEL[k] || k) + "</b> 发过 " + sent + " 次 · 之后接话 " + rep + " 次" +
               (m > 1 ? ' <span class="badge">正向参考 ×' + m.toFixed(2) + "</span>" : ' <span class="badge cool">保持中性</span>') + "</div>";
           }).join("") + '<div class="archive-note">按实际发送后的 3 小时窗口统计是否有后续接话（若启用你的睡眠时段，会跳过该时段计时），不代表对这条消息的明确喜好。你可能在忙、睡觉或没看到：未接话不扣分，也不会被告诉模型是「不喜欢」。至少 3 次接话后才给轻微正向参考，最多 ×1.20；未回应降速仍独立生效，避免连续打扰。</div>'
-        : '<div class="archive-note">还没有账。云端复核会在TA每条主动消息发出、累计等待 3 小时后记一笔（启用的用户睡眠时段不计时）：之后有接话就记一笔正向参考，没有接话保持中性。</div>',
+        : '<div class="diag-item">还没有账。</div><div class="archive-note">云端复核会在TA每条主动消息发出、累计等待 3 小时后记一笔（启用的用户睡眠时段不计时）：之后有接话就记一笔正向参考，没有接话保持中性。</div>',
         total ? total + " 条 · " + rows.length + " 类" : "还没有", "");
     }
     // 日志是本地现成的，先画上，别让整页都在等云端
     if (!logItems.length) {
-      fill("logs", '<div class="archive-note">还没有日志。生成、编排、复核、预约的每一步都会记在这里。</div>', "还没有", "");
+      fill("logs", '<div class="diag-item">还没有日志。</div><div class="archive-note">生成、编排、复核、预约的每一步都会记在这里。最多保留 120 条，只存在本地，不上传。</div>', "还没有", "");
     } else {
       const today = todayStr();
       fill("logs",
-        '<div class="dg-act"><button class="tgl" id="btn-clear-log">清空</button></div>' +
         logItems.map((l) => {
           const d = new Date(l.at);
           const ds = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
           return '<div class="diag-item"><b>' + (ds === today ? "" : ds.slice(5).replace("-", "/") + " ") + fmtHM(l.at) + "</b> " + esc(l.text) + "</div>";
-        }).join(""),
+        }).join("") + '<div class="archive-note">最多保留 120 条，只存在本地，不上传。</div>' +
+        '<div class="dg-act"><button class="tgl" id="btn-clear-log">清空</button></div>',
         logItems.length + " 条 · 最近 " + fmtHM(logItems[0].at), "");
       const clr = $("#btn-clear-log");
       if (clr) clr.onclick = async () => {
@@ -277,14 +274,14 @@
     }
 
     // 设备锁：今天由哪台设备负责编排和预约。自己在管时那行由「连接与聊天镜像」带出来，
-    // 别的设备在管才单独出一张卡（这是唯一需要动手的状态）。
+    // 别的设备在管才单独出一块（这是唯一需要动手的状态）。
     (async () => {
       if (!cloudCfg() || diagRestore("lock")) return;
       const before = cx.owner && cx.owner.id || "";
       cx._ownAt = Date.now();
       await readOwner(cx);
       if (!alive()) return;
-      // 锁换了主：这张卡在不在都是按旧值渲染的，整页重画一次
+      // 锁换了主：这一块在不在都是按旧值渲染的，整页重画一次
       if ((cx.owner && cx.owner.id || "") !== before) { S._diagCache = {}; renderDiag(); return; }
       if (owns(cx)) return;
       fill("lock", '<div class="diag-item"><b>' + esc(ownerLabel(cx)) + " 在管</b> 这台只看不动</div>" +
@@ -317,10 +314,10 @@
       const localPending = todayItems.filter((it) => it.act && it.fireAt > Date.now() && !cloudArmed.includes(it)).length;
       let html, sum, tone;
       if (wakes === null) {
-        html = '<div class="archive-note">读取系统唤醒列表失败。</div>';
+        html = '<div class="diag-item">读取系统唤醒列表失败。</div>';
         sum = "读不到"; tone = "bad";
       } else if (!wakes.length) {
-        html = '<div class="archive-note">本机今天没有登记的唤醒。云端创建的预约不在这张本机列表中，实际状态请打开时刻详情刷新回执。</div>';
+        html = '<div class="diag-item">本机今天没有登记的唤醒。</div>' + (cloudArmed.length ? "" : '<div class="archive-note">云端创建的预约不在这张本机列表中，实际状态请打开时刻详情刷新回执。</div>');
         const missing = localPending > 0;
         sum = missing ? "本机 0 个 · " + localPending + " 个待核实" : "本机 0 个" + (cloudArmed.length ? " · 云端记录 " + cloudArmed.length + " 个" : " · 本机计划无待发记录");
         tone = "";
@@ -334,17 +331,16 @@
         sum = wakes.length + " 个 · " + (extra ? extra + " 个未关联计划" : "都在计划里");
         tone = "";
       }
+      // 云端点亮的时刻本机列表里查不到，和本机的排在一起、打个标就行，不再套一层折叠
       if (cloudArmed.length) {
-        html += '<details class="fold"><summary><span class="t">云端点亮</span><span class="sm">' +
-          cloudArmed.length + " 个 · " + esc(cloudArmed.map((it) => wakeTimeLabel(it)).join("、")) +
-          '</span><span class="cv">›</span></summary>' +
-          '<div class="archive-note">这几个时刻记录为云端创建，本机列表里查不到。当前是否仍待执行，以时刻详情里的云端回执为准。</div></details>';
+        html += cloudArmed.map((it) => '<div class="diag-item"><b>' + esc(wakeTimeLabel(it)) + "</b> " + esc(it.intent || "") + ' <span class="badge cool">云端点亮</span></div>').join("") +
+          '<div class="archive-note">标「云端点亮」的记录为云端创建，本机列表里查不到。当前是否仍待执行，以时刻详情里的云端回执为准。</div>';
       }
       fill("wakes", html, sum, tone);
     })();
 
     if (!cloudCfg()) {
-      const none = '<div class="archive-note">未配置云连接。到设置里填你的个人云地址与密钥后，这里会有内容。</div>';
+      const none = '<div class="diag-item">未配置云连接。</div><div class="archive-note">到设置里填你的个人云地址与密钥后，这里会有内容。</div>';
       fill("cloud", none, "未配置", "");
       fill("jobs", none, "未配置", "");
       fill("recheck", none, "未配置", "");
@@ -389,13 +385,13 @@
           }
         }
       } catch (e) {
-        fill("cloud", '<div class="archive-note">云端查询失败：' + esc(String(e && e.message || e)) + "</div>", "连不上", "bad");
+        fill("cloud", '<div class="diag-item"><b>连接</b> 云端查询失败：' + esc(String(e && e.message || e)) + "</div>", "连不上", "bad");
       }
 
       // 云端任务与后台模板分开；不把跨角色样本或零阈值当作当前角色故障。
       try {
         if (caps.indexOf("job-status") < 0) {
-          fill("jobs", '<div class="archive-note">个人云尚不支持任务查询。到小手机「设置 → 云服务部署」重新部署后刷新诊断。</div>', "需要更新云服务", "warn");
+          fill("jobs", '<div class="diag-item">个人云尚不支持任务查询。</div><div class="archive-note">到小手机「设置 → 云服务部署」重新部署后刷新诊断。</div>', "需要更新云服务", "warn");
         } else {
           const jr = await cloudFetch("jobs", { method: "GET" }, { kind: "timed_task", limit: "20" });
           if (!Array.isArray(jr.jobs)) throw new Error("云端未返回有效的任务列表");
@@ -418,23 +414,23 @@
           fill("jobs", view.html, view.summary + (missing ? " · " + missing + " 条待核实" : ""), "");
         }
       } catch (e) {
-        fill("jobs", '<div class="archive-note">任务查询失败：' + esc(String(e && e.message || e)) + "。点击「刷新诊断」重试。</div>", "查询失败", "bad");
+        fill("jobs", '<div class="diag-item">任务查询失败：' + esc(String(e && e.message || e)) + "。点击「刷新诊断」重试。</div>", "查询失败", "bad");
       }
 
       if (!cloudRecheckOn()) {
-        fill("recheck", '<div class="archive-note">「浏览器关着也复核」没打开。开了之后，今天的计划会寄存到你的个人云，' +
+        fill("recheck", '<div class="diag-item">「浏览器关着也复核」没打开。</div><div class="archive-note">开了之后，今天的计划会寄存到你的个人云，' +
           "浏览器关着时云端每 5 分钟醒一次，按最近的聊天重判。</div>", "没打开", "");
         return;
       }
       try {
         if (caps.indexOf("recheck-plan") < 0) {
-          fill("recheck", '<div class="archive-note">云函数版本偏旧，还不支持云端复核。去小手机「设置 → 云服务部署」重新部署一次离线推送。</div>', "云函数版本偏旧", "warn");
+          fill("recheck", '<div class="diag-item">云函数版本偏旧，还不支持云端复核。</div><div class="archive-note">去小手机「设置 → 云服务部署」重新部署一次离线推送。</div>', "云函数版本偏旧", "warn");
           return;
         }
         const rr = await cloudFetch("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: todayStr() });
         const pl = rr.plan;
         if (!pl) {
-          fill("recheck", '<div class="archive-note">未查到今天的云端计划。若已生成今天的日程，请在「云端同步」区域重试同步；尚未生成时先到「今天」页生成日程。</div>', "今日计划未查到", cx.day ? "warn" : "");
+          fill("recheck", '<div class="diag-item">未查到今天的云端计划。</div><div class="archive-note">若已生成今天的日程，请在上面「云端同步」里重试同步；尚未生成时先到「今天」页生成日程。</div>', "今日计划未查到", cx.day ? "warn" : "");
           return;
         }
         const pend = (pl.items || []).filter((it) => it.act && it.fireAt > Date.now()).length;
@@ -453,7 +449,7 @@
           count > 0 ? "已判 " + count + "/" + cap + (ran ? " · 上次 " + ran : " · 时间未记录") : "已寄存 · 还没判断过",
           count > 0 ? "ok" : "");
       } catch (e) {
-        fill("recheck", '<div class="archive-note">云端复核查询失败：' + esc(String(e && e.message || e)) + "</div>", "查询失败", "bad");
+        fill("recheck", '<div class="diag-item">云端复核查询失败：' + esc(String(e && e.message || e)) + "</div>", "查询失败", "bad");
       }
     })();
   }

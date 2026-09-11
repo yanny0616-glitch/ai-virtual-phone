@@ -31,6 +31,7 @@ const context = vm.createContext({ console, Date, Map, Set, S: { tab: 'back', su
   cur: () => cx, $: el, esc: s => String(s ?? '').replaceAll('<', '&lt;').replaceAll('>', '&gt;'), cloudCfg: () => ({ url: 'https://test.invalid' }), owns: () => true,
   todayStr: () => '2026-09-11', fmtHM: () => '08:00', timeToMs: () => 0, cloudRecheckOn: () => true, replanLabel: () => '重置今天', readOwner: async () => {},
   AiPhone: { push: { listWakes: async () => [] } },
+  cloudSyncIssues: () => ({ rows: [], genRows: [], unfinished: false }), renderCloudSync() {}, renderCloudHistory() {},
   cloudFetch: async (action, _init, params) => {
     calls.push({ action, params });
     if (action === 'health') return { functionsVersion: 3, schemaVersion: 12, capabilities: ['job-status', 'job-diagnostics-v2', 'chat-mirror', 'recheck-plan'] };

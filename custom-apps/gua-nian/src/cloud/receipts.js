@@ -40,27 +40,29 @@
 
   // 手动查询实际成文记录：不需要当前计划仍保留 wakeId，也不确认领取或改写聊天。
   function renderCloudHistory() {
-    const box = $("#cloud-history"), cx = cur();
+    const box = $("#dg-ext-history"), cx = cur();
     if (!box || !cx.character || !cloudCfg()) return;
+    box.hidden = false;
     const source = cloudCfg().url;
     const state = cx._cloudHistory && cx._cloudHistory.source === source ? cx._cloudHistory : null;
     const stamp = (value) => {
       const d = new Date(value);
       return Number.isFinite(d.getTime()) ? d.toLocaleString() : "未知";
     };
-    box.innerHTML = '<details class="card fold"' + (cx._cloudHistoryOpen ? ' open' : '') + '><summary><span class="t">云端发送记录</span><span class="sm">' + esc(cx.character.name) + '</span><span class="cv" aria-hidden="true">›</span></summary>'
-      + '<div class="archive-note">最近 50 条挂念成文，包含已收取、当前计划未关联的消息。云端已清理的记录无法恢复；收取时间不代表已读。</div>'
-      + '<button class="tgl" id="cloud-history-refresh"' + (cx._cloudHistoryLoading ? ' disabled' : '') + '>' + (cx._cloudHistoryLoading ? '查询中…' : '查询发送记录') + '</button>'
-      + (state && state.error ? '<div class="d-why">' + esc(state.error) + '</div>' : '')
+    const body = (state && state.error ? '<div class="diag-item">' + esc(state.error) + '</div>' : '')
       + (state ? (state.entries || []).map(entry => {
         const wakeId = String(entry.trigger_key || '').replace(/^timedwake:/, '');
         const linked = ((cx.plan || {}).items || []).some(w => w.wakeId === wakeId);
         return '<details class="diag-item skip-fold"><summary>' + esc(stamp(entry.created_at)) + ' · ' + (linked ? '当前计划内' : '当前计划未关联') + '</summary>'
-          + '<div class="archive-note">任务：' + esc(entry.job_id || '未知') + '<br>触发来源：' + esc(entry.trigger_key || '未知')
+          + '<div class="d-why">任务：' + esc(entry.job_id || '未知') + '<br>触发来源：' + esc(entry.trigger_key || '未知')
           + '<br>客户端收取：' + esc(entry.consumed_at ? stamp(entry.consumed_at) : '未确认') + '</div>'
           + '<div class="d-why" style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(entry.raw_text || '') + '</div></details>';
-      }).join('') + (!state.error && !state.entries.length ? '<div class="archive-note">云端现存记录中未查到消息。</div>' : '') : '') + '</details>';
-    box.querySelector('details').ontoggle = (event) => { cx._cloudHistoryOpen = event.target.open; };
+      }).join('') + (!state.error && !state.entries.length ? '<div class="diag-item">云端现存记录中未查到消息。</div>' : '') : '<div class="diag-item">还没查过。</div>')
+      + '<div class="archive-note">最近 50 条挂念成文，包含已收取、当前计划未关联的消息。云端已清理的记录无法恢复；收取时间不代表已读。</div>'
+      + '<div class="dg-act"><button class="tgl" id="cloud-history-refresh"' + (cx._cloudHistoryLoading ? ' disabled' : '') + '>' + (cx._cloudHistoryLoading ? '查询中…' : '查询发送记录') + '</button></div>';
+    const sum = cx._cloudHistoryLoading ? '查询中…' : state ? (state.error ? '查询失败' : (state.entries || []).length + ' 条') : esc(cx.character.name);
+    box.innerHTML = dgItem("history", "云端发送记录", body, sum, state && state.error ? "bad" : "", cx._cloudHistoryOpen);
+    box.querySelector('.dg-item > .dg-hd').onclick = () => { cx._cloudHistoryOpen = !box.querySelector('.dg-item').open; };
     $("#cloud-history-refresh").onclick = async () => {
       cx._cloudHistoryOpen = true; cx._cloudHistoryLoading = true; renderCloudHistory();
       let entries = state && state.entries || [], error = '';
