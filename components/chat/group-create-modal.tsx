@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { loadChatContacts } from "@/lib/chat-storage";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { Character } from "@/lib/character-types";
 import { Input } from "@/components/ui/form";
@@ -20,7 +20,7 @@ export function GroupCreateModal({ onClose, onCreate }: GroupCreateModalProps) {
     const [isSpectator, setIsSpectator] = useState(false);
 
     const contacts = loadChatContacts();
-    const chars = loadCharacters();
+    const chars = loadWeixinCharacters();
 
     const enriched = contacts
         .map(c => ({ ...c, char: chars.find(ch => ch.id === c.characterId) }))

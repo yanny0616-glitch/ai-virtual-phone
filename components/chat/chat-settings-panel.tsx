@@ -35,7 +35,7 @@ import {
 import { clearChatOfflineTurns } from "@/lib/chat-offline-storage";
 import { removeChatSessionCompletely } from "@/lib/chat-session-remove";
 import { triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { isAgentComputerConfigured } from "@/lib/agent-computer";
 import { CharacterComputerPage } from "./character-computer-page";
 import { resolveUserIdentity, loadBindingConfig, loadPresets, resolveBinding } from "@/lib/settings-storage";
@@ -516,7 +516,7 @@ export function ChatSettingsPanel({
 
     const [groupName, setGroupName] = useState(session.groupName || "");
 
-    const characters = loadCharacters();
+    const characters = loadWeixinCharacters();
     const character = characters.find(c => c.id === session.contactId);
 
     const characterName = session.isGroup

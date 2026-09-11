@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { loadChatContacts } from "@/lib/chat-storage";
 import { addMomentPost } from "@/lib/moments-storage";
 import { onUserPost } from "@/lib/moments-engine";
@@ -30,7 +30,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
 
     const [visibility, setVisibility] = useState<Record<string, boolean>>(() => {
         const contacts = loadChatContacts();
-        const chars = loadCharacters();
+        const chars = loadWeixinCharacters();
         const map: Record<string, boolean> = {};
         contacts.forEach(c => {
             const char = chars.find(ch => ch.id === c.characterId);
@@ -43,7 +43,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     const contacts = loadChatContacts();
-    const chars = loadCharacters();
+    const chars = loadWeixinCharacters();
 
     const enrichedContacts = contacts
         .map(c => ({ ...c, char: chars.find(ch => ch.id === c.characterId) }))

@@ -21,7 +21,7 @@ import { ChatPluginPageBoundary } from "./chat-plugin-page-boundary";
 import { WalletPanel } from "./wallet-panel";
 import { loadMomentsConfig, saveMomentsConfig, DEFAULT_MOMENTS_CONFIG, type MomentsInteractionConfig, getAllPosts } from "@/lib/moments-storage";
 import { loadChatContacts } from "@/lib/chat-storage";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { triggerImmediatePost } from "@/lib/moments-engine";
 import type { Character } from "@/lib/character-types";
 import { requestNotificationPermission } from "@/lib/browser-notification";
@@ -849,7 +849,7 @@ function InlineMomentsSettings({ onBack }: { onBack: () => void }) {
     const [showAutoPostList, setShowAutoPostList] = useState(false);
 
     const contacts = loadChatContacts();
-    const chars = loadCharacters();
+    const chars = loadWeixinCharacters();
     const enriched = contacts
         .map(c => ({ ...c, char: chars.find(ch => ch.id === c.characterId) }))
         .filter(c => c.char) as (typeof contacts[number] & { char: Character })[];
@@ -1491,7 +1491,7 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                                 onChange={e => setTmCharId(e.target.value)}
                             >
                                 <option value="">选择角色...</option>
-                                {loadCharacters().map(character => (
+                                {loadWeixinCharacters().map(character => (
                                     <option key={character.id} value={character.id}>{character.name}</option>
                                 ))}
                             </select>
@@ -1565,7 +1565,7 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                         <p className="menu-group-desc mx-2">已排期</p>
                         <div className="menu-group">
                             {idleRules.map(rule => {
-                                const charName = loadCharacters().find(c => c.id === rule.characterId)?.name ?? "未知角色";
+                                const charName = loadWeixinCharacters().find(c => c.id === rule.characterId)?.name ?? "未知角色";
                                 const hours = Math.floor(rule.intervalMinutes / 60);
                                 const minutes = rule.intervalMinutes % 60;
                                 const intervalLabel = `${hours ? `${hours}小时` : ""}${minutes ? `${minutes}分钟` : hours ? "" : "0分钟"}`;
@@ -1580,7 +1580,7 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                                 );
                             })}
                             {timedSchedules.filter(schedule => !schedule.id.startsWith("timed_wake_capp_")).map(schedule => {
-                                const charName = loadCharacters().find(c => c.id === schedule.characterId)?.name ?? "未知角色";
+                                const charName = loadWeixinCharacters().find(c => c.id === schedule.characterId)?.name ?? "未知角色";
                                 return (
                                     <div key={schedule.id} className="menu-item">
                                         <div className="menu-label-group" style={{ minWidth: 0, flex: 1 }}>

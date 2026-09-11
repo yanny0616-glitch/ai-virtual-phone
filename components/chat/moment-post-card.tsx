@@ -13,7 +13,7 @@ import {
     updateMomentComment,
     deleteMomentCommentThread,
 } from "@/lib/moments-storage";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { buildTwoLevelMomentThreads } from "@/lib/moments-comment-threading";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
@@ -80,7 +80,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
         };
     }, [post.photoUrl]);
 
-    const chars = loadCharacters();
+    const chars = loadWeixinCharacters();
     // 角色帖子下，用户名用该角色绑定的用户人设；用户自己的帖子用默认人设
     const contextCharId = post.authorType === "character" ? post.authorId : undefined;
     const userIdentity = resolveUserIdentity(contextCharId, "chat");

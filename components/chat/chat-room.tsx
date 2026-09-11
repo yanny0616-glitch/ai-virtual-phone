@@ -27,7 +27,7 @@ import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import { createPortal } from "react-dom";
 
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { Character } from "@/lib/character-types";
 import { loadCustomAppChatPlusActions, type RegisteredCustomAppChatPlusAction } from "@/lib/custom-app-chat-directives";
 import { CUSTOM_APPS_UPDATED_EVENT, getInstalledCustomApp } from "@/lib/custom-app-storage";
@@ -1086,7 +1086,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [transientMessages, setTransientMessages] = useState<ChatMessage[]>([]);
     const [stickerReady, setStickerReady] = useState(false);
     const [storedCharacter] = useState<Character | null>(() => {
-        const chars = loadCharacters();
+        const chars = loadWeixinCharacters();
         return chars.find(c => c.id === session.contactId) || null;
     });
     // 聊天里单独设过头像就盖掉角色卡的，只影响本页展示，不写回角色卡
@@ -1598,7 +1598,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // Group chat: map of characterId → Character for quick lookup
     const groupCharMap = useMemo(() => {
         if (!session.isGroup) return new Map<string, Character>();
-        const chars = loadCharacters();
+        const chars = loadWeixinCharacters();
         const map = new Map<string, Character>();
         for (const id of session.participantIds || []) {
             const c = chars.find(ch => ch.id === id);

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MomentComment, MomentPost } from "@/lib/moments-types";
 import { getAllPosts } from "@/lib/moments-storage";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
 import { kvGet, kvSet } from "@/lib/kv-db";
@@ -57,7 +57,7 @@ function storeCover(file: File): Promise<string | null> {
 
 export function MomentProfilePage({ authorType, authorId, onBack, onUpdate, onRequestDelete, onOpenCommentComposer, onOpenReplyComposer }: Props) {
     const isUser = authorType === "user";
-    const character = useMemo(() => isUser ? null : loadCharacters().find(c => c.id === authorId) ?? null, [isUser, authorId]);
+    const character = useMemo(() => isUser ? null : loadWeixinCharacters().find(c => c.id === authorId) ?? null, [isUser, authorId]);
     const userIdentity = resolveUserIdentity(undefined, "chat");
     const name = isUser ? (userIdentity?.name ?? "我") : (character?.name ?? "TA");
     const avatar = isUser ? (userIdentity?.avatarUrl ?? null) : (character?.avatar ?? null);

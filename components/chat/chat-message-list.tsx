@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useSyncExternalStore } from "react";
 import { ChevronLeft } from "lucide-react";
 import { loadChatSessions, loadChatContacts, ChatSession, createOrGetSession, createGroupSession, pushChatMessage, addChatContact, loadChatMessages, getLastVisibleSessionMessage, getChatMessagePreview, CHAT_UNREAD_UPDATED_EVENT } from "@/lib/chat-storage";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { Character } from "@/lib/character-types";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import type { UserIdentity } from "@/components/settings/user-identity";
@@ -289,7 +289,7 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                 <div className="px-5 pt-2 flex flex-col">
                     {(() => {
                             const contactIds = new Set(loadChatContacts().map(c => c.characterId));
-                            const allChars = loadCharacters();
+                            const allChars = loadWeixinCharacters();
                             const keyword = listFilter.trim().toLowerCase();
                             const showMascot = mascotSettings.chatEnabled
                                 && listTab !== "group"
@@ -374,7 +374,7 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                                     <button
                                         className="menu-item"
                                         onClick={() => {
-                                            const chars = loadCharacters();
+                                            const chars = loadWeixinCharacters();
                                             const found = chars.find(c => c.wechatID === searchQuery.trim() || c.id === searchQuery.trim());
                                             setSearchResult(found || null);
                                         }}
@@ -392,7 +392,7 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                             {/* 备选：已有角色卡但还不在联系人里，点击直接填入号码 */}
                             {(() => {
                                 const contactIds = new Set(loadChatContacts().map(c => c.characterId));
-                                const candidates = loadCharacters().filter(c => !contactIds.has(c.id));
+                                const candidates = loadWeixinCharacters().filter(c => !contactIds.has(c.id));
                                 if (candidates.length === 0 && mascotSettings.chatEnabled) return null;
                                 return (
                                     <div className="menu-group" style={{ marginTop: 12 }}>
@@ -643,7 +643,7 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                     onCreate={(groupName, participantIds, isSpectator) => {
                         const newSession = createGroupSession(groupName, participantIds, { isSpectator });
                         const userName = resolveUserIdentity()?.name ?? "用户";
-                        const allChars = loadCharacters();
+                        const allChars = loadWeixinCharacters();
                         const memberNames = participantIds
                             .map(id => allChars.find(c => c.id === id)?.name ?? "未知")
                             .join("、");
@@ -719,7 +719,7 @@ function MascotSessionItem({
 
 function ContactPicker({ onClose, onSelect }: { onClose: () => void; onSelect: (charId: string) => void }) {
     const contacts = loadChatContacts();
-    const chars = loadCharacters();
+    const chars = loadWeixinCharacters();
 
     const enrichedContacts = contacts
         .map(c => ({ ...c, char: chars.find(ch => ch.id === c.characterId) }))
@@ -757,7 +757,7 @@ function ContactPicker({ onClose, onSelect }: { onClose: () => void; onSelect: (
 }
 
 function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, onSelect: () => void, isPinned?: boolean }) {
-    const chars = loadCharacters();
+    const chars = loadWeixinCharacters();
     const character = chars.find(c => c.id === session.contactId);
     const lastVisibleMessage = getLastVisibleSessionMessage(session.id);
     const lastOfflineTurn = getLastChatOfflineTurn(session.id);

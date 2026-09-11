@@ -9,6 +9,7 @@ import {
 } from "./chat-db";
 import { resolveUserIdentity } from "./settings-storage";
 import { loadCharacters } from "./character-storage";
+import type { Character } from "./character-types";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { emitChatPluginEvent, runChatPluginTransformSync } from "./chat-plugin-hooks";
 import { parseAIResponse } from "./rich-message-parser";
@@ -1068,6 +1069,18 @@ export function removeChatContact(characterId: string) {
 }
 
 // ── CRUD for Sessions ─────────────────────────
+/** 微信区域（聊天、通讯录、朋友圈、通话、通知）用的角色列表：单聊里设了聊天头像的，
+ *  替换掉角色卡头像。角色 APP 本身仍用 loadCharacters。 */
+export function loadWeixinCharacters(): Character[] {
+    const overrides = new Map<string, string>();
+    for (const s of _sessionsCache) {
+        if (!s.isGroup && s.chatAvatar && s.contactId) overrides.set(s.contactId, s.chatAvatar);
+    }
+    const chars = loadCharacters();
+    if (overrides.size === 0) return chars;
+    return chars.map(c => overrides.has(c.id) ? { ...c, avatar: overrides.get(c.id)! } : c);
+}
+
 export function loadChatSessions(): ChatSession[] {
     const normalized = normalizeChatSessions(_sessionsCache);
     const redirectedMessages = redirectMessagesToPreferredSessions(normalized.redirects);

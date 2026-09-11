@@ -1,7 +1,7 @@
 // 把角色头像缩成小图写进 Cache Storage，供 SW 弹推送通知时取用作 icon（对应 sw.js 的 AVATAR_CACHE / AVATAR_PATH_PREFIX）。
 // 头像原图可能是几 MB 的 data URI，通知 icon 用不到也扛不动，统一缩到 192px。
 
-import { loadCharacters } from "./character-storage";
+import { loadWeixinCharacters } from "./chat-storage";
 
 const AVATAR_CACHE = "notif-avatar-v1";
 const AVATAR_PATH_PREFIX = "/notif-avatar/";
@@ -35,7 +35,7 @@ export async function syncNotificationAvatarCache(): Promise<void> {
     try {
         const cache = await caches.open(AVATAR_CACHE);
         const wanted = new Set<string>();
-        for (const character of loadCharacters()) {
+        for (const character of loadWeixinCharacters()) {
             const avatar = (character.avatar || "").trim();
             if (!avatar || !character.id) continue;
             const key = AVATAR_PATH_PREFIX + encodeURIComponent(character.id);

@@ -10,7 +10,7 @@ import { UserProfilePanel } from "./user-profile-panel";
 import { MessageCircle, Users, Aperture, UserRound } from "lucide-react";
 import { ChatSession, loadChatSessions, pushChatMessage, hydrateChatStorage } from "@/lib/chat-storage";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
-import { loadCharacters } from "@/lib/character-storage";
+import { loadWeixinCharacters } from "@/lib/chat-storage";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { kvGet } from "@/lib/kv-db";
 import { formatXiaohongshuShareForPrompt, type ChatSharePayload } from "@/lib/chat-share";
@@ -141,7 +141,7 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
                 return next;
             });
             // Push session info to mascot context so 小卷 can access sessionId
-            const chars = loadCharacters();
+            const chars = loadWeixinCharacters();
             const char = chars.find(c => c.id === activeSession.contactId);
             notifyMascotPageContext({
                 page: "chat",

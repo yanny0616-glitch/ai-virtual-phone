@@ -19,6 +19,7 @@
 
 ### 聊天头像按会话覆盖（2026-09-10）
 
+- 追加：改为微信区域统一生效。`lib/chat-storage.ts` 新增 `loadWeixinCharacters()`（按单聊 `chatAvatar` 覆盖角色卡头像），聊天、通讯录、朋友圈、群聊建群/成员、通话、通知头像缓存共 11 个文件从 `loadCharacters()` 换过去；角色 APP 不换。
 - 追加：选图后先弹 `components/ui/avatar-crop-dialog.tsx` 裁剪（260px 圆形取景框，单指拖动、双指捏合、滚轮缩放，最大 5 倍），确定后按框内区域出 320px webp。组件独立于聊天，角色卡、用户头像还没接。
 
 - 聊天设置的「聊天背景」下新增「聊天头像」（仅单聊）：选图后缩到 320px webp 存进 `session.chatAvatar`，聊天页所有角色头像位与会话列表优先读它，角色卡 `character.avatar` 不写回；「恢复」清空后回落到角色卡头像。
