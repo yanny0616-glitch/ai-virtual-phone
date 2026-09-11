@@ -17,6 +17,12 @@
 
 ## B. 功能与修复
 
+### 聊天头像按会话覆盖（2026-09-10）
+
+- 聊天设置的「聊天背景」下新增「聊天头像」（仅单聊）：选图后缩到 320px webp 存进 `session.chatAvatar`，聊天页所有角色头像位与会话列表优先读它，角色卡 `character.avatar` 不写回；「恢复」清空后回落到角色卡头像。
+- `ChatRoom` 里 `character` 改为按 `storedCharacter` + `session.chatAvatar` 派生的 memo，页内引用点零改动。用户身份页的图片缩放函数抽到 `lib/image-data-url.ts` 共用。
+- 验证：`tsc --noEmit` 干净；六个文件 eslint 报的错都在改动范围之外（chat-room 既有的 react-hooks 规则）。未在手机端验收。
+
 ### 挂念诊断分类（0.9.33，2026-09-11）
 
 - 云端消息任务、后台模板、历史记录及其他角色分开显示；无法确认的记录单列，旧模板和约定零阈值不再制造“有旧预约”误报。
