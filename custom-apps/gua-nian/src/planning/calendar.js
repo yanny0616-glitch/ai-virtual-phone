@@ -1,4 +1,9 @@
   /* ================= 系统日程互通 ================= */
+  // 挂念写回的日程是可重新生成的结果，不是下一次生成的固定约束。
+  // 只按本 APP 的 ID 前缀排除；其他来源（包括日历自身生成的安排）仍保留。
+  function fixedCalendarItems(items) {
+    return items.filter((it) => !/^guanian_/.test(it.id));
+  }
   async function readTodayCalendar(cx) { return readCalendarOn(cx, todayStr()); }
   // 日程表条目标题末尾写「·忙」或「·闲」，就是你替TA定死了做这件事时顾不顾得上看手机
   function lockOfTitle(title) {

@@ -142,7 +142,8 @@
     if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要改用这台就去诊断页「今天谁在管」"); render(); return; }
     cx.busy = true; cx._planLock = true; render();
     try {
-      const existing = await readTodayCalendar(cx); // 日程 app 里TA今天已定的安排
+      const calendarItems = await readTodayCalendar(cx);
+      const existing = fixedCalendarItems(calendarItems); // 排除挂念上次生成的结果
       const cal = calendarReality(new Date());
       const past = await recentDaysBrief(cx, 7);
       const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing, S.settings.threadsOn ? threadLines(cx) : []);
@@ -155,7 +156,7 @@
       const sched = parsed.schedule, wake = parsed.wake, bed = parsed.bed, bodyConds = parsed.conds;
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
         Object.assign({ date: todayStr(), characterId: cx.character.id, by: "local" }, parsed));
-      const wrote = await syncCalendar(cx, existing);
+      const wrote = await syncCalendar(cx, calendarItems); // 清理旧产物仍需要完整日历
       await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "")
         + (cx.day.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）"));
       cx.busy = false; cx._planLock = false;

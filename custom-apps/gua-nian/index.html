@@ -2173,7 +2173,7 @@ return Object.freeze(exports);
         const remote = await cloudFetchBounded("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: date });
         if (remote.plan && remote.plan.context && remote.plan.context.generatedBy === "cloud") continue;
         const expectedVersion = remote.plan ? remote.plan.state_version : 0;
-        const existing = await readCalendarOn(cx, date);
+        const existing = fixedCalendarItems(await readCalendarOn(cx, date));
         const cal = calendarReality(dateOf(date));
         const past = await recentDaysBrief(cx, 7, date);
         const ctx = cloudContext(cx);
@@ -2534,6 +2534,11 @@ return Object.freeze(exports);
     cx.threads = row && Array.isArray(row.items) ? row.items : [];
   }
   /* ================= 系统日程互通 ================= */
+  // 挂念写回的日程是可重新生成的结果，不是下一次生成的固定约束。
+  // 只按本 APP 的 ID 前缀排除；其他来源（包括日历自身生成的安排）仍保留。
+  function fixedCalendarItems(items) {
+    return items.filter((it) => !/^guanian_/.test(it.id));
+  }
   async function readTodayCalendar(cx) { return readCalendarOn(cx, todayStr()); }
   // 日程表条目标题末尾写「·忙」或「·闲」，就是你替TA定死了做这件事时顾不顾得上看手机
   function lockOfTitle(title) {
@@ -3095,7 +3100,8 @@ return Object.freeze(exports);
     if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要改用这台就去诊断页「今天谁在管」"); render(); return; }
     cx.busy = true; cx._planLock = true; render();
     try {
-      const existing = await readTodayCalendar(cx); // 日程 app 里TA今天已定的安排
+      const calendarItems = await readTodayCalendar(cx);
+      const existing = fixedCalendarItems(calendarItems); // 排除挂念上次生成的结果
       const cal = calendarReality(new Date());
       const past = await recentDaysBrief(cx, 7);
       const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing, S.settings.threadsOn ? threadLines(cx) : []);
@@ -3108,7 +3114,7 @@ return Object.freeze(exports);
       const sched = parsed.schedule, wake = parsed.wake, bed = parsed.bed, bodyConds = parsed.conds;
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
         Object.assign({ date: todayStr(), characterId: cx.character.id, by: "local" }, parsed));
-      const wrote = await syncCalendar(cx, existing);
+      const wrote = await syncCalendar(cx, calendarItems); // 清理旧产物仍需要完整日历
       await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "")
         + (cx.day.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）"));
       cx.busy = false; cx._planLock = false;

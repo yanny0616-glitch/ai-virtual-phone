@@ -141,3 +141,9 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 | `node scripts/check-<feature>.mjs` | 其余 60 来个单项脚本，各自的名字见 `scripts/`，changelog 每段末尾写了对应哪个 |
 
 目前没有一条命令跑全部；CI 只跑 `check:push` / `check:apps-dist` / `check:sdk`。`check-fork-regressions.mjs` 里「网关保留用户睡眠设置」一项在 2026-09-10 已知失败（recheck-plan 返回 409，设备锁改动后测试没跟上），不是新问题。
+
+## 0.9.35：重新生成不再锁住挂念旧日程
+
+本地整天生成与云端生成原料使用 `fixedCalendarItems` 排除 ID 以 `guanian_` 开头的挂念写回条目，避免旧产物成为必须原样保留的约束或在模型漏写时被补回。其他来源的日历安排继续保留；聊天与惦记仍参与模型判断，因此重新生成不保证所有内容不同。日历同步继续读取完整旧列表，以清理并替换挂念自己的旧条目。
+
+随宿主发布后，已安装用户打开挂念点击「立即更新」升级至 0.9.35，再重新生成即可生效；无需手动导入 ZIP，不自动改写已有日程。云端在下次上传生成原料后使用新筛选结果，无需更改云函数。专项检查：`node scripts/check-gua-nian-calendar-regeneration.mjs`；未做手机端完整实测。
