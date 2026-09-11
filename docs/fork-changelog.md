@@ -19,6 +19,8 @@
 
 ### 聊天头像按会话覆盖（2026-09-10）
 
+- 追加：选图后先弹 `components/ui/avatar-crop-dialog.tsx` 裁剪（260px 圆形取景框，单指拖动、双指捏合、滚轮缩放，最大 5 倍），确定后按框内区域出 320px webp。组件独立于聊天，角色卡、用户头像还没接。
+
 - 聊天设置的「聊天背景」下新增「聊天头像」（仅单聊）：选图后缩到 320px webp 存进 `session.chatAvatar`，聊天页所有角色头像位与会话列表优先读它，角色卡 `character.avatar` 不写回；「恢复」清空后回落到角色卡头像。
 - `ChatRoom` 里 `character` 改为按 `storedCharacter` + `session.chatAvatar` 派生的 memo，页内引用点零改动。用户身份页的图片缩放函数抽到 `lib/image-data-url.ts` 共用。
 - 验证：`tsc --noEmit` 干净；六个文件 eslint 报的错都在改动范围之外（chat-room 既有的 react-hooks 规则）。未在手机端验收。

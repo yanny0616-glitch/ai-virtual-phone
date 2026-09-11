@@ -48,6 +48,7 @@ import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, User
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
+import { AvatarCropDialog } from "@/components/ui/avatar-crop-dialog";
 import { CHAT_SESSION_CSS_EXAMPLE } from "@/lib/css-examples";
 import { Toggle, Input } from "@/components/ui/form";
 import { PageShell } from "@/components/ui/page-shell";
@@ -296,6 +297,7 @@ export function ChatSettingsPanel({
     const [backgroundImage, setBackgroundImage] = useState<string>(session.backgroundImage || "");
     const [alias, setAlias] = useState<string>(session.alias || "");
     const [chatAvatar, setChatAvatar] = useState<string>(session.chatAvatar || "");
+    const [chatAvatarCropSrc, setChatAvatarCropSrc] = useState<string | null>(null);
     const [videoBackground, setVideoBackground] = useState<string>(session.videoBackground || "");
     const [voiceBackground, setVoiceBackground] = useState<string>(session.voiceBackground || "");
     const [isPinned, setIsPinned] = useState(session.isPinned || false);
@@ -679,18 +681,14 @@ export function ChatSettingsPanel({
         setEditingBilingualPrompt(false);
     };
 
-    const handleChatAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleChatAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         e.target.value = "";
-        if (!file) return;
-        try {
-            const { imageFileToDataUrl } = await import("@/lib/image-data-url");
-            const dataUrl = await imageFileToDataUrl(file, 320, 0.82);
-            setChatAvatar(dataUrl);
-            updateSession({ chatAvatar: dataUrl });
-        } catch (error) {
-            console.error("Failed to read avatar image", error);
-        }
+        if (file) setChatAvatarCropSrc(URL.createObjectURL(file));
+    };
+    const closeChatAvatarCrop = () => {
+        if (chatAvatarCropSrc) URL.revokeObjectURL(chatAvatarCropSrc);
+        setChatAvatarCropSrc(null);
     };
 
     const handleImageUpload = async (
@@ -1502,6 +1500,13 @@ export function ChatSettingsPanel({
             {showScreenEffects && <ScreenEffectSettingsModal onClose={() => setShowScreenEffects(false)} />}
 
             {/* Modal: Confirm Clear History */}
+            {chatAvatarCropSrc && (
+                <AvatarCropDialog
+                    src={chatAvatarCropSrc}
+                    onCancel={closeChatAvatarCrop}
+                    onConfirm={(dataUrl) => { setChatAvatar(dataUrl); updateSession({ chatAvatar: dataUrl }); closeChatAvatarCrop(); }}
+                />
+            )}
             {showConfirmClear && (
                 <ConfirmDialog
                     title="确定要清空线上聊天记录吗？"
