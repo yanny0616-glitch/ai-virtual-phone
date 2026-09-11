@@ -71,12 +71,13 @@ export async function findOfficialCustomAppUpdate(app: InstalledCustomApp): Prom
 }
 
 async function loadOfficialCustomAppPackage(entry: OfficialCustomAppEntry): Promise<InstalledCustomApp> {
-  const res = await fetch(`/custom-apps/${entry.file}`, { cache: "no-store" });
+  const res = await fetch(`/custom-apps/${entry.file}?v=${encodeURIComponent(entry.version)}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`下载安装包失败（HTTP ${res.status}）`);
   const blob = await res.blob();
   const file = new File([blob], entry.file, { type: blob.type || "application/zip" });
   const app = await loadCustomAppPackage(file);
   if (app.manifest?.id !== entry.id) throw new Error("安装包里的 APP 标识与官方目录不符。");
+  if (app.version !== entry.version) throw new Error("安装包版本与官方目录不符，请刷新后重试。");
   return app;
 }
 

@@ -21,6 +21,8 @@ const PUBLIC_ROUTE_PREFIXES = [
 ];
 
 const STATIC_ROUTE_PREFIXES = [
+  // 官方 APP 安装包是公开发布产物，不能重写成登录首页。
+  "/custom-apps/",
   "/_next/",
   "/birds/",
   "/diary/",

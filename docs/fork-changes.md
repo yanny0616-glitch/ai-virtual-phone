@@ -95,6 +95,8 @@
 
 挂念惦记账本按已有 ID 更新话头/日子，保留关联；无 ID 时按同类规范化文字判重，近期已了结事项供模型参考但不自动恢复。已有重复记录不自动合并。
 
+官方 `/custom-apps/` 安装包无需登录即可下载，目录及 ZIP 响应禁止缓存；更新请求携带版本号并校验包内版本，避免误取首页或旧包。
+
 zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾光源码在 `src/` 分文件，`scripts/build-<app>.mjs` 合成单 HTML + 打 zip。
 
 **随宿主自动升级**：`scripts/build-custom-apps-dist.mjs` 把四个目录打成 `public/custom-apps/<目录名>.zip` + `index.json`（打包口径统一在 `scripts/lib/custom-app-package.mjs`，文件时间固定，内容不变字节不变，已进 `npm run build`）。宿主 `lib/custom-app-official.ts` 按 `manifest.id` 对照 index：启动巡检一次、打开 APP 时再查一次，落后就复用市场更新那个弹窗提示「立即更新」，本机运行时 id、数据、设置原地保留。用户不再需要下载 zip 手动导入；`releases/` 里的 zip 只剩给没装过的人首次安装用。
