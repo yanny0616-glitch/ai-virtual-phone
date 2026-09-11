@@ -321,12 +321,34 @@ function threadPace(t: Thread, nowMs: number): string {
   return "";
 }
 function threadLines(context: PlanContext, nowMs: number, tz: number): string[] {
-  return liveThreads(context, nowMs).slice(0, 12).map(t => {
+  const active = liveThreads(context, nowMs).slice(0, 12).map(t => {
     const notes = [threadWhen(t, nowMs, tz), threadPace(t, nowMs)].filter(Boolean);
     return `[${t.id}] ${THREAD_KIND[t.kind] || "话头"}·${t.text}${notes.length ? "（" + notes.join("，") + "）" : ""}`;
   });
+  const settled = (context.threads || []).filter(t => t.done && t.kind !== "promise" && threadAlive(t, nowMs, Number(context.threadDays) || 3))
+    .slice().sort((a, b) => (+b.at || 0) - (+a.at || 0)).slice(0, 8)
+    .map(t => `[${t.id}] 已了结·${THREAD_KIND[t.kind] || "话头"}·${t.text}（仅供判重，不再新建或安排）`);
+  return active.concat(settled);
 }
-const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。" + promiseAgreementRule();
+function threadTextKey(text: unknown): string {
+  return String(text || "").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+}
+function findThreadUpdate(list: Thread[], k: Keep, kind: string, text: string, nowMs: number, days: number): Thread | false | null {
+  const id = String(k.id || "").replace(/[\[\]\s]/g, "");
+  if (id) {
+    const found = list.find(t => t.id === id);
+    return found && found.kind === kind ? found : false;
+  }
+  const key = threadTextKey(text);
+  const candidates = list.filter(t => t.kind === kind && threadAlive(t, nowMs, days));
+  const exact = candidates.filter(t => threadTextKey(t.text) === key);
+  const matches = exact.length ? exact : candidates.filter(t => {
+    const old = threadTextKey(t.text);
+    return Math.min(old.length, key.length) >= 6 && (old.includes(key) || key.includes(old));
+  });
+  return matches.length === 1 ? matches[0] : matches.length > 1 ? false : null;
+}
+const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头和日子也必须先核对已有及已了结条目：同一件事换措辞仍是同一件事，keep.id 必须填原编号，系统更新原条而不是新建。只有真正的新事项才留空 id；已了结的同一件事不要再次 keep、settle 或安排，恢复由用户操作。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。" + promiseAgreementRule();
 // 用户一句话把约定 / 话头了结：只认稳的词，宁可漏（漏的下一轮模型 settle 兜底）也不误伤。
 // 约定认「做完」和「作废」，话头只认「作废」，日子不碰（到日子自己过期）
 const DONE_WORDS = ["好了", "搞定", "解决了", "完成了", "弄完了", "做完了", "办好了", "交了", "买到了", "看完了", "结束了"];
@@ -384,6 +406,7 @@ function parseWhen(when: unknown, nowMs: number, tz: number): number {
 // 复核回来的 keep / settle 并进账本；返回 null 表示没动
 function applyThreads(context: PlanContext, keep: Keep[], settle: string[], nowMs: number, tz: number, log: (s: string) => void, messages = null): Thread[] | null {
   let list: Thread[] = (Array.isArray(context.threads) ? context.threads : []).map(t => ({ ...t }));
+  keep = keep.slice(0, 2).filter(k => k && typeof k === "object").map(k => ({ ...k, id: String(k.id || "").replace(/[\[\]\s]/g, "") }));
   const promises = keep.filter(k => k && (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
   const before = JSON.stringify(list);
   list = updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs, tz) })), nowMs, "cloud", messages);
@@ -396,10 +419,17 @@ function applyThreads(context: PlanContext, keep: Keep[], settle: string[], nowM
     if (promises.includes(k)) continue;
     const text = String(k?.text || "").trim().slice(0, 60);
     if (!text) continue;
-    const kind = THREAD_KIND[String(k?.kind)] ? String(k?.kind) : "topic";
-    const dup = list.find(x => !x.done && (x.text === text || x.text.includes(text) || text.includes(x.text)));
-    if (dup) { dup.at = nowMs; continue; }
-    const due = parseWhen(k?.when, nowMs, tz);
+    const referenced = k.id && list.find(t => t.id === k.id);
+    const kind = THREAD_KIND[String(k?.kind)] ? String(k?.kind) : referenced ? referenced.kind : "topic";
+    const existing = findThreadUpdate(list, k, kind, text, nowMs, Number(context.threadDays) || 3);
+    if (existing === false || existing && existing.done) continue;
+    const due = k.when ? parseWhen(k.when, nowMs, tz) : existing ? (+existing.due || 0) : 0;
+    if (existing) {
+      if (kind !== "topic" && !due) continue;
+      Object.assign(existing, { text, due, at: nowMs, by: "cloud" }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
+      notes.push(`更新${THREAD_KIND[kind]}「${text}」`);
+      continue;
+    }
     if (kind !== "topic" && !due) continue;
     list.push({ id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by: "cloud", done: false, why: String(k?.why || "").slice(0, 40) });
     notes.push(`记下${THREAD_KIND[kind]}「${text}」`);
@@ -912,7 +942,7 @@ function buildImpulseInstruction(day: { mood: string; energy: number; schedule: 
     JSON.stringify(outlook),
     lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
     lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
-    threads.length ? "\nTA心里还挂着这些事（约定快到点想打个气、过了点想问结果、到日子的想说一句、话头没接完想续上，都是很自然的由头）：\n" + threads.join("\n") : null,
+    threads.length ? "\n惦记账本（已了结项仅供判重，不再安排；未了结事项：约定快到点想打个气、过了点想问结果、到日子的想说一句、话头没接完想续上，都是很自然的由头）：\n" + threads.join("\n") : null,
     anchors.length ? "\n用户希望留意这几段：" + anchors.join("；") + "。想不起来就不用勉强。" : null,
     "", "约束：最多给 " + (settings.quota + 3) + " 个念头，今天最多真的发 " + settings.quota + " 条（多出来的会被记成「想过但没发」）；"
       + "时刻必须晚于 " + nowHM + "；免打扰时段 " + settings.quietStart + "–" + settings.quietEnd + " 内不要排"
@@ -1902,7 +1932,7 @@ Deno.serve(async (req: Request) => {
       judge ? "今天剩下的计划时刻：" : (selfReason ? "" : "今天排好的时刻都已经过点了，没有要重判的。"),
       judge ? planLines : "",
       "",
-      threadsOn && threadLinesNow.length ? "你心里还挂着的事：\n" + threadLinesNow.join("\n") : "",
+      threadsOn && threadLinesNow.length ? "惦记账本（已了结项仅供判重）：\n" + threadLinesNow.join("\n") : "",
       selfReason
         ? selfBrief(selfKind, selfReason) + fbLine(context.fb, selfKind) + "不想说就老实写 []，不要为了发而发。真要发的话时刻定在接下来 5 到 40 分钟之间。已经说过或已经解决的事不要重复起念。"
         : canJudge

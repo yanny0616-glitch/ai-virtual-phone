@@ -91,7 +91,9 @@
 - 推送通知带 `characterId`，SW 用缓存头像当 icon；iOS 主屏 Web App 忽略自定义 icon（WebKit 280162 未解决）。
 - Supabase 新版 `sb_secret_*` 密钥只作 `apikey` 头发送（`lib/server/supabase-rest.ts`、云备份两处）。
 
-## 7. 自定义 APP（zip 交付，手机手动装，不进构建）
+## 7. 自定义 APP（ZIP 首次安装，随宿主发布提供一键升级）
+
+挂念惦记账本按已有 ID 更新话头/日子，保留关联；无 ID 时按同类规范化文字判重，近期已了结事项供模型参考但不自动恢复。已有重复记录不自动合并。
 
 zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾光源码在 `src/` 分文件，`scripts/build-<app>.mjs` 合成单 HTML + 打 zip。
 
@@ -99,7 +101,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 | APP | 版本 | 做什么 | 说明文档 |
 | --- | --- | --- | --- |
-| 挂念 `gua-nian` | 0.9.31 | 生成角色一天 → 心动时刻 → 云端复核 → 定时主动消息；精力/情绪衰减模型；约定账本；可同时挂念多人；信息页按日程自动同步在线状态 | `custom-apps/gua-nian/ARCHITECTURE.md`、`docs/gua-nian-*.md`、`docs/archive/gua-nian/` |
+| 挂念 `gua-nian` | 0.9.32 | 生成角色一天 → 心动时刻 → 云端复核 → 定时主动消息；精力/情绪衰减模型；约定账本；可同时挂念多人；信息页按日程自动同步在线状态 | `custom-apps/gua-nian/ARCHITECTURE.md`、`docs/gua-nian-*.md`、`docs/archive/gua-nian/` |
 | 拾光 `shiguang` | 2.1.1 | 重要记忆：每 20 轮整理、关键词三档召回、当轮同步注入。宿主侧原管线已删，只留只读接口 | `custom-apps/shiguang/ARCHITECTURE.md` |
 | 用量 `usage-dashboard` | 2.8.1 | 按角色/来源看 token 与缓存、日志分页筛选、保留条数设置。来源名由宿主 `lib/usage-source-names.ts` 下发 | — |
 | `online-plaza` | 1.1.0 | 上游原有 | — |

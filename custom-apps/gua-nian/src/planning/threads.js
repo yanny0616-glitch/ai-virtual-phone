@@ -51,12 +51,34 @@
   }
   function threadLines(cx, nowMs) {
     const now = nowMs || Date.now();
-    return liveThreads(cx, now).slice(0, 12).map((t) => {
+    const active = liveThreads(cx, now).slice(0, 12).map((t) => {
       const notes = [threadWhen(t, now), threadPace(t, now)].filter(Boolean);
       return "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + (t.kind === "promise" ? "·" + GuaNianPromises.promiseSubjectLabel(t.subject) : "") + "·" + t.text + (notes.length ? "（" + notes.join("，") + "）" : "");
     });
+    const settled = (cx.threads || []).filter(t => t.done && t.kind !== "promise" && threadAlive(t, now, S.settings.threadDays))
+      .slice().sort((a, b) => (+b.at || 0) - (+a.at || 0)).slice(0, 8)
+      .map(t => "[" + t.id + "] 已了结·" + (THREAD_KIND[t.kind] || "话头") + "·" + t.text + "（仅供判重，不再新建或安排）");
+    return active.concat(settled);
   }
-  const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。" + GuaNianPromises.promiseAgreementRule();
+  function threadTextKey(text) {
+    return String(text || "").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+  }
+  function findThreadUpdate(list, k, kind, text, nowMs, days) {
+    const id = String(k.id || "").replace(/[\[\]\s]/g, "");
+    if (id) {
+      const found = list.find(t => t.id === id);
+      return found && found.kind === kind ? found : false;
+    }
+    const key = threadTextKey(text);
+    const candidates = list.filter(t => t.kind === kind && threadAlive(t, nowMs, days));
+    const exact = candidates.filter(t => threadTextKey(t.text) === key);
+    const matches = exact.length ? exact : candidates.filter(t => {
+      const old = threadTextKey(t.text);
+      return Math.min(old.length, key.length) >= 6 && (old.includes(key) || key.includes(old));
+    });
+    return matches.length === 1 ? matches[0] : matches.length > 1 ? false : null;
+  }
+  const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头和日子也必须先核对已有及已了结条目：同一件事换措辞仍是同一件事，keep.id 必须填原编号，系统更新原条而不是新建。只有真正的新事项才留空 id；已了结的同一件事不要再次 keep、settle 或安排，恢复由用户操作。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。" + GuaNianPromises.promiseAgreementRule();
   // 时刻上的 from 指向账本某条：模型给的 id 可能带方括号或是编的，这里核一遍
   function threadIdOf(cx, raw) {
     const id = String(raw || "").replace(/[\[\]\s]/g, "");

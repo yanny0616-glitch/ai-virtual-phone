@@ -2,7 +2,9 @@
     if (!S.settings.threadsOn || !parsed) return 0;
     let list = (cx.threads || []).map(t => ({ ...t }));
     const notes = [];
-    const promises = (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2).filter(k => k && (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
+    const keep = (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2).filter(k => k && typeof k === "object")
+      .map(k => ({ ...k, id: String(k.id || "").replace(/[\[\]\s]/g, "") }));
+    const promises = keep.filter(k => (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
     const before = list;
     list = GuaNianPromises.updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs) })), nowMs, by, messages);
     for (const t of list.filter(t => t.kind === "promise")) {
@@ -15,14 +17,21 @@
       if (t) await dropThreadSlots(cx, t.id, "这件事你说了结了", planItems);
       if (t && !t.done) { t.done = true; t.at = nowMs; t.by = by; notes.push("了结「" + t.text + "」"); }
     }
-    for (const k of (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2)) {
+    for (const k of keep) {
       if (promises.includes(k)) continue;
       const text = String((k && k.text) || "").trim().slice(0, 60);
       if (!text) continue;
-      const kind = THREAD_KIND[k.kind] ? k.kind : "topic";
-      const dup = list.find((x) => !x.done && (x.text === text || x.text.includes(text) || text.includes(x.text)));
-      if (dup) { dup.at = nowMs; continue; } // 又提起了：续命，不重复记
-      const due = parseWhen(k.when, nowMs);
+      const referenced = k.id && list.find(t => t.id === k.id);
+      const kind = THREAD_KIND[k.kind] ? k.kind : referenced ? referenced.kind : "topic";
+      const existing = findThreadUpdate(list, k, kind, text, nowMs, S.settings.threadDays);
+      if (existing === false || existing && existing.done) continue;
+      const due = k.when ? parseWhen(k.when, nowMs) : existing ? (+existing.due || 0) : 0;
+      if (existing) {
+        if (kind !== "topic" && !due) continue;
+        Object.assign(existing, { text, due, at: nowMs, by }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
+        notes.push("更新" + THREAD_KIND[kind] + "「" + text + "」");
+        continue;
+      }
       if (kind !== "topic" && !due) continue; // 约定和日子没时间就不算
       list.push(newThread(kind, text, due, nowMs, by, (k && k.why) || ""));
       notes.push("记下" + THREAD_KIND[kind] + "「" + text + "」");
@@ -62,7 +71,7 @@
       "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + nowHM + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
       past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵；跨好几天的事——项目、备考、排练、等结果——按筹备、进行、收尾、余波的顺序往下走，让这几天连成线）：\n" + past.lines.join("\n") : null,
       past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
-      threads && threads.length ? "TA心里还挂着这些事（约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + threads.join("\n") : null,
+      threads && threads.length ? "惦记账本（已了结项仅供判重，不再安排；未了结事项：约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + threads.join("\n") : null,
       "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
       "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
       '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-8到8的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-15到15的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
@@ -179,7 +188,7 @@
       JSON.stringify(outlook),
       lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
       lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
-      threads && threads.length ? "\nTA心里还挂着这些事（约定快到点想打个气、过了点想问结果、到日子的想说一句、话头没接完想续上，都是很自然的由头）：\n" + threads.join("\n") : null,
+      threads && threads.length ? "\n惦记账本（已了结项仅供判重，不再安排；未了结事项：约定快到点想打个气、过了点想问结果、到日子的想说一句、话头没接完想续上，都是很自然的由头）：\n" + threads.join("\n") : null,
       anchors.length ? "\n用户希望留意这几段：" + anchors.join("；") + "。想不起来就不用勉强。" : null,
       "", "约束：最多给 " + (settings.quota + 3) + " 个念头，今天最多真的发 " + settings.quota + " 条（多出来的会被记成「想过但没发」）；"
         + "时刻必须晚于 " + nowHM + "；免打扰时段 " + settings.quietStart + "–" + settings.quietEnd + " 内不要排"

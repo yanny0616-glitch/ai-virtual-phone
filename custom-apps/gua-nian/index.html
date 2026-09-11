@@ -2653,12 +2653,34 @@ return Object.freeze(exports);
   }
   function threadLines(cx, nowMs) {
     const now = nowMs || Date.now();
-    return liveThreads(cx, now).slice(0, 12).map((t) => {
+    const active = liveThreads(cx, now).slice(0, 12).map((t) => {
       const notes = [threadWhen(t, now), threadPace(t, now)].filter(Boolean);
       return "[" + t.id + "] " + (THREAD_KIND[t.kind] || "话头") + (t.kind === "promise" ? "·" + GuaNianPromises.promiseSubjectLabel(t.subject) : "") + "·" + t.text + (notes.length ? "（" + notes.join("，") + "）" : "");
     });
+    const settled = (cx.threads || []).filter(t => t.done && t.kind !== "promise" && threadAlive(t, now, S.settings.threadDays))
+      .slice().sort((a, b) => (+b.at || 0) - (+a.at || 0)).slice(0, 8)
+      .map(t => "[" + t.id + "] 已了结·" + (THREAD_KIND[t.kind] || "话头") + "·" + t.text + "（仅供判重，不再新建或安排）");
+    return active.concat(settled);
   }
-  const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头 topic 和日子 date 沿用原规则。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。" + GuaNianPromises.promiseAgreementRule();
+  function threadTextKey(text) {
+    return String(text || "").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+  }
+  function findThreadUpdate(list, k, kind, text, nowMs, days) {
+    const id = String(k.id || "").replace(/[\[\]\s]/g, "");
+    if (id) {
+      const found = list.find(t => t.id === id);
+      return found && found.kind === kind ? found : false;
+    }
+    const key = threadTextKey(text);
+    const candidates = list.filter(t => t.kind === kind && threadAlive(t, nowMs, days));
+    const exact = candidates.filter(t => threadTextKey(t.text) === key);
+    const matches = exact.length ? exact : candidates.filter(t => {
+      const old = threadTextKey(t.text);
+      return Math.min(old.length, key.length) >= 6 && (old.includes(key) || key.includes(old));
+    });
+    return matches.length === 1 ? matches[0] : matches.length > 1 ? false : null;
+  }
+  const THREAD_TASK = "惦记账本：只记录聊天里明确成立的事。promise 是用户、角色自己或双方明确答应的约定，subject 分别为 user、character、both；角色说「三点半回来一趟」也必须记录。所有有时间的约定（包括今天）都进 keep，系统直接按 when 挂约定任务，不再放入 extra 随机起念。when 必须含 YYYY-MM-DD HH:MM，按原话的日期，不因现在已过点而顺移到明天。sourceMessageId 填证据消息编号；已有同一件事必须填 id，改期更新 when，不创建第二件事。确认完成时 status=completed，明确取消时 status=cancelled；只是发过进展不等于完成。不明确的猜测不记账；话头和日子也必须先核对已有及已了结条目：同一件事换措辞仍是同一件事，keep.id 必须填原编号，系统更新原条而不是新建。只有真正的新事项才留空 id；已了结的同一件事不要再次 keep、settle 或安排，恢复由用户操作。settle 填已了结的话头或日子 id，约定的完成取消通过 keep 更新。每次最多 2 条，没有给空数组。" + GuaNianPromises.promiseAgreementRule();
   // 时刻上的 from 指向账本某条：模型给的 id 可能带方括号或是编的，这里核一遍
   function threadIdOf(cx, raw) {
     const id = String(raw || "").replace(/[\[\]\s]/g, "");
@@ -2934,7 +2956,9 @@ return Object.freeze(exports);
     if (!S.settings.threadsOn || !parsed) return 0;
     let list = (cx.threads || []).map(t => ({ ...t }));
     const notes = [];
-    const promises = (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2).filter(k => k && (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
+    const keep = (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2).filter(k => k && typeof k === "object")
+      .map(k => ({ ...k, id: String(k.id || "").replace(/[\[\]\s]/g, "") }));
+    const promises = keep.filter(k => (k.kind === "promise" || list.some(t => t.kind === "promise" && t.id === k.id)));
     const before = list;
     list = GuaNianPromises.updatePromiseThreads(list, promises.map(k => ({ ...k, due: parseWhen(k.when, nowMs) })), nowMs, by, messages);
     for (const t of list.filter(t => t.kind === "promise")) {
@@ -2947,14 +2971,21 @@ return Object.freeze(exports);
       if (t) await dropThreadSlots(cx, t.id, "这件事你说了结了", planItems);
       if (t && !t.done) { t.done = true; t.at = nowMs; t.by = by; notes.push("了结「" + t.text + "」"); }
     }
-    for (const k of (Array.isArray(parsed.keep) ? parsed.keep : []).slice(0, 2)) {
+    for (const k of keep) {
       if (promises.includes(k)) continue;
       const text = String((k && k.text) || "").trim().slice(0, 60);
       if (!text) continue;
-      const kind = THREAD_KIND[k.kind] ? k.kind : "topic";
-      const dup = list.find((x) => !x.done && (x.text === text || x.text.includes(text) || text.includes(x.text)));
-      if (dup) { dup.at = nowMs; continue; } // 又提起了：续命，不重复记
-      const due = parseWhen(k.when, nowMs);
+      const referenced = k.id && list.find(t => t.id === k.id);
+      const kind = THREAD_KIND[k.kind] ? k.kind : referenced ? referenced.kind : "topic";
+      const existing = findThreadUpdate(list, k, kind, text, nowMs, S.settings.threadDays);
+      if (existing === false || existing && existing.done) continue;
+      const due = k.when ? parseWhen(k.when, nowMs) : existing ? (+existing.due || 0) : 0;
+      if (existing) {
+        if (kind !== "topic" && !due) continue;
+        Object.assign(existing, { text, due, at: nowMs, by }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
+        notes.push("更新" + THREAD_KIND[kind] + "「" + text + "」");
+        continue;
+      }
       if (kind !== "topic" && !due) continue; // 约定和日子没时间就不算
       list.push(newThread(kind, text, due, nowMs, by, (k && k.why) || ""));
       notes.push("记下" + THREAD_KIND[kind] + "「" + text + "」");
@@ -2994,7 +3025,7 @@ return Object.freeze(exports);
       "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + nowHM + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
       past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵；跨好几天的事——项目、备考、排练、等结果——按筹备、进行、收尾、余波的顺序往下走，让这几天连成线）：\n" + past.lines.join("\n") : null,
       past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
-      threads && threads.length ? "TA心里还挂着这些事（约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + threads.join("\n") : null,
+      threads && threads.length ? "惦记账本（已了结项仅供判重，不再安排；未了结事项：约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + threads.join("\n") : null,
       "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
       "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
       '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-8到8的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-15到15的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
@@ -3111,7 +3142,7 @@ return Object.freeze(exports);
       JSON.stringify(outlook),
       lines.length ? "\n最近和用户的聊天（「我」=用户，「TA」=角色，从旧到新）：\n" + lines.join("\n") : null,
       lines.length ? "结合聊天氛围判断：正聊得火热就不必刻意再约时刻；有没接完的话头、刚闹过别扭、或很久没联系，都会真实影响TA想不想主动、以及动机的内容。动机要能接上最近聊的事，不要凭空另起炉灶。" : null,
-      threads && threads.length ? "\nTA心里还挂着这些事（约定快到点想打个气、过了点想问结果、到日子的想说一句、话头没接完想续上，都是很自然的由头）：\n" + threads.join("\n") : null,
+      threads && threads.length ? "\n惦记账本（已了结项仅供判重，不再安排；未了结事项：约定快到点想打个气、过了点想问结果、到日子的想说一句、话头没接完想续上，都是很自然的由头）：\n" + threads.join("\n") : null,
       anchors.length ? "\n用户希望留意这几段：" + anchors.join("；") + "。想不起来就不用勉强。" : null,
       "", "约束：最多给 " + (settings.quota + 3) + " 个念头，今天最多真的发 " + settings.quota + " 条（多出来的会被记成「想过但没发」）；"
         + "时刻必须晚于 " + nowHM + "；免打扰时段 " + settings.quietStart + "–" + settings.quietEnd + " 内不要排"
@@ -3507,7 +3538,7 @@ return Object.freeze(exports);
               ? "sched 只在聊天里确实出现了会改变TA今天安排的事才给：约好了几点做什么、临时被叫走、说了某件事不去了。最多 2 条，时间必须晚于现在（" + fmtHM(nowMs) + "）；只是随口聊到、没有落实的事不要写进来，没有就给空数组。"
               : "sched 必须是空数组（用户关掉了聊天改日程）。"),
             "TA今天还没到点的日程：" + JSON.stringify(((cx.day && cx.day.schedule) || []).filter((x) => x.time > fmtHM(nowMs)).map((x) => ({ time: x.time, title: x.title }))),
-            S.settings.threadsOn && threadLines(cx, nowMs).length ? "TA心里还挂着的事：\n" + threadLines(cx, nowMs).join("\n") : null,
+            S.settings.threadsOn && threadLines(cx, nowMs).length ? "惦记账本（已了结项仅供判重）：\n" + threadLines(cx, nowMs).join("\n") : null,
             S.settings.threadsOn ? THREAD_TASK : "keep 和 settle 一律空数组。",
             canPost
               ? "post：如果此刻更想发一条朋友圈而不是私聊（晒一下刚做的事、随手记一句、发个感慨——给所有人看的，不是说给用户听的），就在 post.hint 里写想发的由头或大意（30字内），由系统按人设成文。这周已发 " + moState(cx).weekN + " 条。私聊和发圈可以只要一个，也可以都不要；不想发就写 null。"

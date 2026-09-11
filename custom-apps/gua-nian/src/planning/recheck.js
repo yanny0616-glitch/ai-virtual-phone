@@ -122,7 +122,7 @@
               ? "sched 只在聊天里确实出现了会改变TA今天安排的事才给：约好了几点做什么、临时被叫走、说了某件事不去了。最多 2 条，时间必须晚于现在（" + fmtHM(nowMs) + "）；只是随口聊到、没有落实的事不要写进来，没有就给空数组。"
               : "sched 必须是空数组（用户关掉了聊天改日程）。"),
             "TA今天还没到点的日程：" + JSON.stringify(((cx.day && cx.day.schedule) || []).filter((x) => x.time > fmtHM(nowMs)).map((x) => ({ time: x.time, title: x.title }))),
-            S.settings.threadsOn && threadLines(cx, nowMs).length ? "TA心里还挂着的事：\n" + threadLines(cx, nowMs).join("\n") : null,
+            S.settings.threadsOn && threadLines(cx, nowMs).length ? "惦记账本（已了结项仅供判重）：\n" + threadLines(cx, nowMs).join("\n") : null,
             S.settings.threadsOn ? THREAD_TASK : "keep 和 settle 一律空数组。",
             canPost
               ? "post：如果此刻更想发一条朋友圈而不是私聊（晒一下刚做的事、随手记一句、发个感慨——给所有人看的，不是说给用户听的），就在 post.hint 里写想发的由头或大意（30字内），由系统按人设成文。这周已发 " + moState(cx).weekN + " 条。私聊和发圈可以只要一个，也可以都不要；不想发就写 null。"
