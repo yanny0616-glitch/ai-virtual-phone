@@ -545,6 +545,7 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                             });
                         }
                         const prompt = { ...prompts[promptIdx] };
+                        const previousIdentifier = prompt.identifier;
                         if (subfield === "identifier") {
                             prompt.identifier = value;
                             handled = true;
@@ -593,8 +594,22 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                         for (let pi = 0; pi < prompts.length; pi++) {
                             prompts[pi] = { ...prompts[pi], system_prompt: pi === firstSystemIdx };
                         }
-                        // Auto-generate prompt_order from array order
-                        preset.prompt_order = prompts.filter(p => p.identifier && !p.identifier.startsWith("_placeholder")).map(p => ({ identifier: p.identifier, enabled: true }));
+                        // 页面填入也保留用户排序和开关；改名沿用原位置，新增条目追加末尾。
+                        const validIds = new Set(prompts.filter(p => p.identifier && !p.identifier.startsWith("_placeholder")).map(p => p.identifier));
+                        const seenIds = new Set<string>();
+                        const nextOrder: PromptOrderEntry[] = [];
+                        for (const entry of preset.prompt_order ?? []) {
+                            const id = entry.identifier === previousIdentifier ? prompt.identifier : entry.identifier;
+                            if (!validIds.has(id) || seenIds.has(id)) continue;
+                            seenIds.add(id);
+                            nextOrder.push({ identifier: id, enabled: entry.enabled !== false });
+                        }
+                        for (const p of prompts) {
+                            if (!validIds.has(p.identifier) || seenIds.has(p.identifier)) continue;
+                            seenIds.add(p.identifier);
+                            nextOrder.push({ identifier: p.identifier, enabled: true });
+                        }
+                        preset.prompt_order = nextOrder;
                     }
                 }
 

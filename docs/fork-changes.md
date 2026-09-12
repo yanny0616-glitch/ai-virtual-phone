@@ -147,3 +147,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 本地整天生成与云端生成原料使用 `fixedCalendarItems` 排除 ID 以 `guanian_` 开头的挂念写回条目，避免旧产物成为必须原样保留的约束或在模型漏写时被补回。其他来源的日历安排继续保留；聊天与惦记仍参与模型判断，因此重新生成不保证所有内容不同。日历同步继续读取完整旧列表，以清理并替换挂念自己的旧条目。
 
 随宿主发布后，已安装用户打开挂念点击「立即更新」升级至 0.9.35，再重新生成即可生效；无需手动导入 ZIP，不自动改写已有日程。云端在下次上传生成原料后使用新筛选结果，无需更改云函数。专项检查：`node scripts/check-gua-nian-calendar-regeneration.mjs`；未做手机端完整实测。
+
+## 预设页面填入保留排序与开关
+
+补入上游 `1cd5c1b` 的页面填入修复：小卷通过 `mascot-fill-field` 修改预设条目时保留已有 `prompt_order` 及关闭状态；identifier 改名沿用原位置，新增项追加，失效/占位/重复顺序项剔除。底部直接创建、JSON 导入和小卷专用工具已有排序修复保持原样。专项验证：`node scripts/check-preset-page-fill-order.mjs`。
