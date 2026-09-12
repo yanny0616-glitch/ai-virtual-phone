@@ -705,6 +705,10 @@ function guessMime(path: string): string {
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html;charset=utf-8";
   if (lower.endsWith(".woff2")) return "font/woff2";
   if (lower.endsWith(".woff")) return "font/woff";
+  if (lower.endsWith(".mp3")) return "audio/mpeg";
+  if (lower.endsWith(".m4a")) return "audio/mp4";
+  if (lower.endsWith(".wav")) return "audio/wav";
+  if (lower.endsWith(".ogg")) return "audio/ogg";
   return "application/octet-stream";
 }
 

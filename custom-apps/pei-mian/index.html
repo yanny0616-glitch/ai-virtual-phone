@@ -1,0 +1,2045 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>陪眠</title><style>/* 陪眠自己的视觉：整页夜空、细线分隔、宋体标题与数字、一种强调色（月光琥珀）、底部 5 个 tab */
+#app { --bg0: #070812; --bg1: #12163a; --tx: #ece7dc; --tx2: #9c98ab; --tx3: #5f5c70; --line: rgba(236, 231, 220, .12); --surface: rgba(236, 231, 220, .045);
+  --acc: #e8c07a; --acc-rgb: 232, 192, 122; --warn: #e07a6a; --good: #7fc8a5;
+  --moon-a: #fff3d0; --moon-b: #e9b96a; --glow: rgba(232, 192, 122, .28);
+  --sheet-bg: #141838; --toast: rgba(236, 231, 220, .94); --toast-tx: #12163a; --bar-bg: rgba(7, 8, 18, .86); --scheme: dark; }
+#app[data-theme="day"] { --bg0: #f4efe5; --bg1: #fcf9f2; --tx: #2a2730; --tx2: #6f6a78; --tx3: #aca7b0; --line: rgba(42, 39, 48, .12); --surface: rgba(42, 39, 48, .045);
+  --acc: #b07d2e; --acc-rgb: 176, 125, 46; --moon-a: #ffe6a8; --moon-b: #dfa03c; --glow: rgba(223, 160, 60, .22);
+  --sheet-bg: #fcf9f2; --toast: rgba(42, 39, 48, .92); --toast-tx: #fff; --bar-bg: rgba(244, 239, 229, .88); --scheme: light; }
+#app[data-theme="candle"] { --bg0: #150e0a; --bg1: #2c1b12; --tx: #f3e6d6; --tx2: #ab937f; --tx3: #6d5747; --line: rgba(243, 230, 214, .12); --surface: rgba(243, 230, 214, .045);
+  --acc: #f0a860; --acc-rgb: 240, 168, 96; --moon-a: #ffe0b0; --moon-b: #f09a4c; --glow: rgba(240, 154, 76, .3);
+  --sheet-bg: #24160f; --toast: rgba(243, 230, 214, .94); --toast-tx: #2c1b12; --bar-bg: rgba(21, 14, 10, .86); --scheme: dark; }
+#app[data-theme="mist"] { --bg0: #e5e9ed; --bg1: #f3f5f7; --tx: #2b3440; --tx2: #6f7b8a; --tx3: #a6afba; --line: rgba(43, 52, 64, .12); --surface: rgba(43, 52, 64, .045);
+  --acc: #4f7d95; --acc-rgb: 79, 125, 149; --moon-a: #f4f7f9; --moon-b: #a9b7c4; --glow: rgba(169, 183, 196, .3);
+  --sheet-bg: #f3f5f7; --toast: rgba(43, 52, 64, .92); --toast-tx: #fff; --bar-bg: rgba(229, 233, 237, .88); --scheme: light; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; }
+body { font-family: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif; min-height: 100%; overflow-x: hidden; font-size: 14px; }
+.serif { font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", Georgia, serif; font-weight: 500; }
+#app { min-height: 100vh; min-height: 100dvh; color: var(--tx); color-scheme: var(--scheme);
+  background: radial-gradient(90% 40% at 50% -6%, var(--bg1), transparent 70%), var(--bg0); background-attachment: fixed; transition: background .5s, color .5s; }
+button, input, select, textarea { font-family: inherit; color: inherit; }
+button { cursor: pointer; }
+[hidden] { display: none !important; }
+
+.view { display: none; max-width: 520px; margin: 0 auto; padding: 0 22px calc(var(--ai-phone-app-safe-bottom, 0px) + 96px); }
+.view.on { display: block; animation: rise .35s ease both; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+.top { padding-top: calc(var(--ai-phone-app-safe-top, 0px) + 26px); margin-bottom: 8px; display: flex; flex-wrap: wrap; align-items: baseline; }
+.top .eyebrow { flex: 0 0 100%; }
+.top h1 { font-size: 30px; line-height: 1.2; margin-top: 4px; letter-spacing: 1px; }
+.top-acts { margin-left: auto; display: flex; gap: 16px; }
+.eyebrow { font-size: 12px; letter-spacing: 3px; color: var(--tx3); }
+.txt-btn { background: none; border: 0; color: var(--acc); font-size: 13px; padding: 0; }
+.txt-btn:disabled { color: var(--tx3); }
+.note { font-size: 13px; color: var(--tx2); line-height: 1.6; margin: 8px 0 12px; }
+.foot { text-align: center; color: var(--tx3); font-size: 12px; margin-top: 18px; letter-spacing: 1px; }
+.empty { font-size: 13px; color: var(--tx3); text-align: center; padding: 22px 0; line-height: 1.7; }
+
+/* 段落标题（细线） */
+.sec-h, .sec-head, .grp-t { display: flex; align-items: baseline; gap: 10px; margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 12px; letter-spacing: 3px; color: var(--tx2); font-weight: 600; }
+.sec-h > span:first-child, .sec-head .t { color: var(--tx2); }
+.sec-sub, .grp-sub { font-size: 12px; letter-spacing: 0; color: var(--tx3); font-weight: 400; }
+.sec-acts, .sec-head .act { margin-left: auto; display: flex; gap: 16px; letter-spacing: 0; font-weight: 400; }
+.sec-head .act { background: none; border: 0; color: var(--acc); font-size: 13px; padding: 0; }
+.sec-head .act + .act { margin-left: 0; }
+.card { margin-bottom: 8px; }
+
+/* 首页：拨盘 */
+.dial { position: relative; width: 250px; height: 250px; margin: 10px auto 0; }
+.ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.ring-bg { fill: none; stroke: var(--line); stroke-width: 1; }
+.ring-arc { fill: none; stroke: var(--acc); stroke-width: 2; stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(var(--acc-rgb), .6)); transition: d .3s; }
+.ring-stop { fill: var(--bg0); stroke: var(--tx3); stroke-width: 1; transition: all .2s; }
+.ring-stop.on { fill: var(--acc); stroke: var(--acc); }
+.ring-hit { fill: transparent; cursor: pointer; }
+.ring-lbl { font-size: 11px; fill: var(--tx3); text-anchor: middle; font-family: inherit; letter-spacing: .5px; pointer-events: none; }
+.ring-lbl.on { fill: var(--acc); }
+.moon-wrap { position: absolute; left: 50%; top: 50%; width: 118px; height: 118px; transform: translate(-50%, -54%); }
+.moon-glow { position: absolute; inset: -34px; border-radius: 50%; background: radial-gradient(circle, var(--glow), transparent 62%); animation: breathe 5s ease-in-out infinite; }
+.moon { position: relative; width: 100%; height: 100%; filter: drop-shadow(0 0 14px var(--glow)); }
+@keyframes breathe { 0%, 100% { opacity: .55 } 50% { opacity: 1 } }
+.dial-cap { position: absolute; left: 0; right: 0; bottom: 34px; text-align: center; color: var(--tx3); font-size: 12px; letter-spacing: 1px; }
+.dial-cap b { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 500; font-size: 18px; color: var(--tx); margin-right: 4px; }
+.who-line { text-align: center; color: var(--tx2); font-size: 13px; letter-spacing: 1px; margin: 4px 0 18px; }
+.who-line .live { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--good); margin-right: 8px; vertical-align: 2px; animation: breathe 2.4s ease-in-out infinite; }
+.modes { display: flex; gap: 26px; justify-content: center; }
+.modes button { background: none; border: 0; padding: 6px 0; font-size: 14px; color: var(--tx3); border-bottom: 1px solid transparent; letter-spacing: 1px; transition: color .2s; }
+.modes button.on { color: var(--tx); border-bottom-color: var(--acc); }
+.open-night { margin-top: 18px; padding: 12px 14px; border: 1px dashed rgba(var(--acc-rgb), .45); border-radius: 12px; display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--tx2); align-items: center; }
+.rows { margin-top: 22px; border-top: 1px solid var(--line); }
+.row { width: 100%; display: flex; align-items: center; gap: 14px; padding: 14px 0; border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left; }
+.row .rk { font-size: 12px; letter-spacing: 3px; color: var(--tx3); width: 46px; flex: none; }
+.row .rv { flex: 1; min-width: 0; }
+.row .rv b { display: block; font-size: 15px; font-weight: 500; color: var(--tx); }
+.row .rv small { display: block; font-size: 12px; color: var(--tx2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .arr, .arr { color: var(--tx3); font-size: 18px; line-height: 1; }
+.big-btn { display: block; width: 100%; margin: 28px 0 26px; padding: 15px; border-radius: 999px; border: 1px solid rgba(var(--acc-rgb), .55); background: rgba(var(--acc-rgb), .09); color: var(--acc);
+  font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 500; font-size: 18px; letter-spacing: 8px; text-indent: 8px; box-shadow: 0 10px 40px rgba(var(--acc-rgb), .14); transition: all .2s; }
+.big-btn:active { transform: scale(.985); }
+.big-btn:disabled { opacity: .5; }
+.last { border-left: 1px solid var(--line); padding-left: 16px; margin-top: 4px; }
+.last .lk { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.last .lk .txt-btn { margin-left: auto; }
+.last .l1 { font-size: 14px; color: var(--tx); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.last .l2 { font-size: 12px; color: var(--tx2); margin-top: 3px; }
+.bubble { margin-top: 14px; padding: 12px 14px; border-left: 2px solid rgba(var(--acc-rgb), .6); background: var(--surface); border-radius: 0 12px 12px 0; font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-size: 15px; line-height: 1.75; color: var(--tx); }
+.bubble .from { font-family: -apple-system, "PingFang SC", "Noto Sans SC", sans-serif; font-size: 11px; letter-spacing: 2px; color: var(--tx3); margin-bottom: 4px; }
+.moons { display: inline-flex; gap: 1px; vertical-align: -1px; }
+.moons svg { width: 12px; height: 12px; fill: var(--acc); stroke: none; }
+
+/* 声景：推子 */
+.faders { display: flex; gap: 6px; align-items: flex-end; min-height: 236px; padding: 10px 0 4px; overflow-x: auto; scrollbar-width: none; }
+.faders::-webkit-scrollbar { display: none; }
+.faders .empty { flex: 1; align-self: center; }
+.fader { flex: 1 0 58px; min-width: 58px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.fader .track { position: relative; width: 40px; height: 150px; }
+.fader .track input { position: absolute; left: 50%; top: 50%; width: 150px; height: 2px; transform: translate(-50%, -50%) rotate(-90deg); }
+.fader .ico { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--tx2); background: var(--surface); }
+.fader .ico svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.fader .nm { font-size: 12px; color: var(--tx2); white-space: nowrap; }
+.fader .drift { font-size: 10px; color: var(--tx3); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; background: none; }
+.fader .drift.on { color: var(--acc); border-color: rgba(var(--acc-rgb), .5); }
+.fader .x { background: none; border: 0; color: var(--tx3); font-size: 15px; line-height: 1; padding: 2px 6px; }
+.fader.master { border-left: 1px solid var(--line); margin-left: 6px; padding-left: 8px; }
+.fader.master .ico { border-style: dashed; }
+.fader .val { font-family: "Noto Serif SC", "Songti SC", serif; font-size: 13px; color: var(--tx); }
+.presets { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 6px; }
+.presets button { background: none; border: 0; padding: 4px 0; font-size: 13px; color: var(--tx3); border-bottom: 1px solid transparent; }
+.presets button.on { color: var(--tx); border-bottom-color: var(--acc); }
+.cats { display: flex; gap: 20px; overflow-x: auto; scrollbar-width: none; margin-bottom: 14px; }
+.cats::-webkit-scrollbar { display: none; }
+.cats button { flex: none; background: none; border: 0; padding: 4px 0; font-size: 13px; color: var(--tx3); border-bottom: 1px solid transparent; }
+.cats button.on { color: var(--tx); border-bottom-color: var(--acc); }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.tile { aspect-ratio: 1; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--tx2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; font-size: 12px; transition: all .2s; }
+.tile svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.tile.on { border-color: rgba(var(--acc-rgb), .7); color: var(--tx); background: rgba(var(--acc-rgb), .10); box-shadow: 0 0 18px rgba(var(--acc-rgb), .12); }
+.tile.on svg { color: var(--acc); }
+.tile.mine { border-style: dashed; }
+
+/* 表单行 */
+.frow { display: flex; align-items: center; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.frow .fl { font-size: 14px; color: var(--tx); }
+.frow .fu { font-size: 12px; color: var(--tx3); margin-top: 3px; line-height: 1.5; }
+.frow input[type="range"] { flex: 1; }
+.frow > b { font-family: "Noto Serif SC", "Songti SC", serif; font-weight: 500; font-size: 14px; min-width: 48px; text-align: right; }
+input[type="range"] { -webkit-appearance: none; appearance: none; height: 2px; background: var(--line); border-radius: 2px; outline: none; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--acc); border: 3px solid var(--bg0); box-shadow: 0 0 0 1px rgba(var(--acc-rgb), .6), 0 0 10px rgba(var(--acc-rgb), .4); }
+input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--acc); border: 3px solid var(--bg0); }
+.curve { display: flex; align-items: flex-end; gap: 3px; height: 44px; margin: 6px 0 4px; }
+.curve i { background: rgba(var(--acc-rgb), .5); border-radius: 2px 2px 0 0; min-width: 6px; }
+.tgl-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.tgl { padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--tx2); font-size: 13px; transition: all .2s; }
+.tgl.on { color: var(--acc); border-color: rgba(var(--acc-rgb), .6); background: rgba(var(--acc-rgb), .08); }
+.txt-in { width: 100%; margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 14px; line-height: 1.6; resize: none; outline: none; }
+.txt-in::placeholder, .field::placeholder { color: var(--tx3); }
+.sw { position: relative; width: 44px; height: 26px; flex: none; margin-left: auto; }
+.sw input { opacity: 0; width: 0; height: 0; position: absolute; }
+.sw i { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .2s; }
+.sw i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--tx2); transition: all .2s; }
+.sw input:checked + i { background: rgba(var(--acc-rgb), .35); }
+.sw input:checked + i::after { transform: translateX(18px); background: var(--acc); }
+.select, .field { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 14px; outline: none; }
+.field.time { width: 108px; } .field.num { width: 72px; }
+.mini { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 12px; color: var(--tx2); }
+.mini.warn { color: var(--warn); border-color: rgba(224, 122, 106, .4); }
+.mini:disabled { opacity: .5; }
+.hint { font-size: 13px; color: var(--tx2); line-height: 1.6; margin-bottom: 12px; }
+.chip { display: inline-block; font-size: 11px; color: var(--tx2); padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; }
+
+/* 夜记 */
+.week-nav { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 6px; }
+.week-nav .lbl { font-family: "Noto Serif SC", "Songti SC", serif; font-size: 16px; letter-spacing: 1px; }
+.week-nav .mini { width: 32px; height: 32px; padding: 0; border-radius: 50%; }
+.tl { margin-top: 8px; }
+.tl-row { display: grid; grid-template-columns: 26px 1fr 50px; align-items: center; gap: 10px; padding: 8px 0; }
+.tl-row.axis { padding: 2px 0 6px; }
+.tl-d { font-size: 12px; color: var(--tx3); }
+.tl-row.today .tl-d { color: var(--acc); }
+.tl-track { position: relative; height: 14px; border-radius: 7px; background: var(--surface); }
+.tl-bar { position: absolute; top: 0; bottom: 0; border-radius: 7px; background: linear-gradient(90deg, rgba(var(--acc-rgb), .45), var(--acc)); opacity: .55; cursor: pointer; }
+.tl-bar[data-r="1"] { opacity: .3 } .tl-bar[data-r="2"] { opacity: .45 } .tl-bar[data-r="3"] { opacity: .6 } .tl-bar[data-r="4"] { opacity: .8 } .tl-bar[data-r="5"] { opacity: 1 }
+.tl-bar.goal { box-shadow: 0 0 12px rgba(var(--acc-rgb), .45); }
+.tl-goal { position: absolute; top: -3px; bottom: -3px; width: 0; border-left: 1px dashed rgba(var(--acc-rgb), .55); }
+.tl-dur { font-family: "Noto Serif SC", "Songti SC", serif; font-size: 13px; text-align: right; color: var(--tx); }
+.tl-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--tx3); }
+.bar-note { font-size: 12px; color: var(--tx3); margin-top: 10px; line-height: 1.6; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 22px 0 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.stat { padding: 16px 4px; text-align: center; border-right: 1px solid var(--line); }
+.stat:nth-child(3n) { border-right: 0; }
+.stat:nth-child(n+4) { border-top: 1px solid var(--line); }
+.stat .num { font-family: "Noto Serif SC", "Songti SC", serif; font-weight: 500; font-size: 26px; line-height: 1; color: var(--tx); }
+.stat .num small { font-size: 13px; color: var(--tx3); }
+.stat .cap { font-size: 11px; letter-spacing: 2px; color: var(--tx3); margin-top: 8px; }
+.stat .delta { font-size: 11px; color: var(--acc); margin-top: 5px; }
+.day-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.day-card { border-bottom: 1px solid var(--line); }
+.day-sum { list-style: none; display: grid; grid-template-columns: 46px 1fr 16px; gap: 12px; align-items: center; padding: 14px 0; cursor: pointer; }
+.day-sum::-webkit-details-marker { display: none; }
+.dnum b { display: block; font-family: "Noto Serif SC", "Songti SC", serif; font-weight: 500; font-size: 24px; line-height: 1; }
+.dnum span { font-size: 10px; color: var(--tx3); letter-spacing: 1px; }
+.d1 { font-size: 14px; color: var(--tx); display: flex; gap: 8px; align-items: center; }
+.d2 { display: block; font-size: 12px; color: var(--tx2); margin-top: 3px; }
+.day-body { padding: 0 0 16px 58px; }
+.acts { display: flex; gap: 16px; margin-top: 12px; }
+.acts .mini { border: 0; padding: 0; color: var(--acc); font-size: 13px; }
+.acts .mini.warn { color: var(--warn); }
+.rate { display: flex; gap: 8px; }
+.rate button { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: none; color: var(--tx3); display: flex; align-items: center; justify-content: center; }
+.rate button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.rate button.on { color: var(--acc); border-color: rgba(var(--acc-rgb), .6); }
+.rate button.on svg { fill: var(--acc); }
+.month { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 8px; }
+.month-h { font-size: 11px; color: var(--tx3); text-align: center; padding: 6px 0; }
+.day { aspect-ratio: 1; border-radius: 10px; border: 1px solid transparent; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; color: var(--tx3); }
+.day i { width: 12px; height: 12px; border-radius: 50%; background: var(--moon-b); opacity: var(--o, .12); box-shadow: 0 0 8px rgba(var(--acc-rgb), calc(var(--o, .12) * .6)); }
+.day.hit { border-color: rgba(var(--acc-rgb), .5); }
+.day.today span { color: var(--acc); }
+.day.empty { visibility: hidden; }
+
+/* 配置 */
+.grp { margin-bottom: 4px; }
+.grp-hint { font-size: 12px; color: var(--tx3); margin-top: 10px; line-height: 1.6; }
+.themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+.themes button { background: none; border: 1px solid var(--line); border-radius: 14px; padding: 14px 6px 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.themes button.on { border-color: rgba(var(--acc-rgb), .7); background: rgba(var(--acc-rgb), .07); }
+.themes span { font-size: 13px; color: var(--tx); } .themes small { font-size: 11px; color: var(--tx3); }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); }
+.swatch.auto { background: linear-gradient(135deg, #12163a 50%, #f4efe5 50%); }
+.swatch.candle { background: radial-gradient(circle at 40% 40%, #f0a860, #2c1b12 75%); }
+.swatch.mist { background: radial-gradient(circle at 40% 40%, #f3f5f7, #4f7d95 80%); }
+.seg { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg button { padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--tx2); font-size: 13px; }
+.seg button.on { color: var(--acc); border-color: rgba(var(--acc-rgb), .6); background: rgba(var(--acc-rgb), .08); }
+.char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; }
+.char-cell { text-align: center; padding: 10px 4px; border-radius: 14px; border: 1px solid transparent; background: none; }
+.char-cell.sel { border-color: rgba(var(--acc-rgb), .6); background: rgba(var(--acc-rgb), .07); }
+.char-cell .ava { width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 6px; background: var(--surface); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--tx); font-family: "Noto Serif SC", "Songti SC", serif; font-size: 18px; overflow: hidden; }
+.char-cell.sel .ava { border-color: var(--acc); box-shadow: 0 0 14px rgba(var(--acc-rgb), .35); }
+.char-cell .ava img { width: 100%; height: 100%; object-fit: cover; }
+.char-cell .nm { display: block; font-size: 11px; color: var(--tx2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.credit { font-size: 12px; color: var(--tx2); line-height: 1.6; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.credit b { color: var(--tx); font-weight: 500; }
+.search { display: flex; gap: 8px; }
+.search .field { flex: 1; }
+.list { margin-top: 12px; }
+.list-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.list-item > div:first-child { flex: 1; min-width: 0; }
+.list-item p { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list-item small { font-size: 12px; color: var(--tx3); }
+.list-item .acts { margin: 0; gap: 8px; }
+.list-item .acts .mini { border: 1px solid var(--line); padding: 5px 10px; color: var(--tx2); }
+
+/* 底部 tab */
+.tabbar { position: fixed; left: 50%; bottom: 0; transform: translateX(-50%); width: min(100%, 520px); display: flex; padding: 8px 8px calc(var(--ai-phone-app-safe-bottom, 0px) + 8px); background: var(--bar-bg); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border-top: 1px solid var(--line); z-index: 20; }
+.tb { flex: 1; background: none; border: 0; color: var(--tx3); display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; padding: 4px 0; letter-spacing: 1px; transition: color .2s; }
+.tb svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.tb.on { color: var(--acc); }
+.tb.on svg { filter: drop-shadow(0 0 6px rgba(var(--acc-rgb), .5)); }
+
+/* 底部弹层 */
+.sheet-mask { position: fixed; inset: 0; background: rgba(4, 5, 12, .55); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); opacity: 0; pointer-events: none; transition: opacity .25s ease; z-index: 40; }
+.sheet { position: fixed; left: 50%; bottom: 0; transform: translate(-50%, 105%); width: min(100%, 520px); z-index: 41; background: var(--sheet-bg); border-radius: 22px 22px 0 0; border: 1px solid var(--line); border-bottom: 0; padding: 20px 22px calc(var(--ai-phone-app-safe-bottom, 0px) + 24px); visibility: hidden; transition: transform .3s cubic-bezier(.22, 1, .36, 1), visibility 0s .3s; max-height: 84vh; overflow-y: auto; }
+#app.sheet-open .sheet-mask { opacity: 1; pointer-events: auto; }
+#app.sheet-open .sheet { transform: translate(-50%, 0); visibility: visible; transition: transform .3s cubic-bezier(.22, 1, .36, 1); }
+.sheet-hd { display: flex; align-items: center; margin-bottom: 14px; }
+.sheet-hd h3 { font-size: 20px; letter-spacing: 1px; }
+.sheet-x { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: none; color: var(--tx2); font-size: 13px; }
+.sheet .big-btn { margin: 20px 0 0; }
+.sheet .grp-t { margin-top: 18px; }
+
+/* 入睡画面 */
+.overlay { position: fixed; inset: 0; z-index: 60; background: radial-gradient(70% 45% at 50% 30%, var(--bg1), var(--bg0) 80%); display: flex; flex-direction: column; align-items: center; padding: calc(var(--ai-phone-app-safe-top, 0px) + 20px) 28px calc(var(--ai-phone-app-safe-bottom, 0px) + 40px); transition: filter .8s; }
+.overlay.dim { filter: brightness(.45); }
+.ov-top { width: 100%; display: flex; justify-content: space-between; font-size: 13px; color: var(--tx3); letter-spacing: 1px; }
+.ov-moon { position: static; transform: none; width: 150px; height: 150px; margin: 90px auto 76px; }
+.ov-sub { font-size: 18px; line-height: 1.9; text-align: center; color: var(--tx); max-width: 340px; transition: opacity .5s; min-height: 3.8em; }
+.ov-sub.fading { opacity: 0; }
+.ov-status { margin-top: 14px; font-size: 12px; color: var(--tx3); letter-spacing: 2px; min-height: 1.2em; }
+.ov-actions { margin-top: auto; display: flex; gap: 22px; align-items: center; }
+.round { width: 58px; height: 58px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--tx2); display: flex; align-items: center; justify-content: center; }
+.round svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.round.stop { width: 70px; height: 70px; color: var(--acc); border-color: rgba(var(--acc-rgb), .5); box-shadow: 0 0 24px rgba(var(--acc-rgb), .18); }
+.round.rec { color: var(--warn); border-color: var(--warn); box-shadow: 0 0 20px rgba(224, 122, 106, .4); }
+
+#toast { position: fixed; left: 50%; bottom: calc(var(--ai-phone-app-safe-bottom, 0px) + 84px); transform: translate(-50%, 12px); background: var(--toast); color: var(--toast-tx); padding: 9px 16px; border-radius: 999px; font-size: 13px; opacity: 0; pointer-events: none; transition: all .25s; z-index: 80; max-width: 86vw; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* 编辑感：英文小标、tab 下的英文 */
+.en { font-family: "Bodoni Moda", "Didot", "Georgia", "Times New Roman", serif; font-style: italic; letter-spacing: 3px; font-size: 11px; }
+.tb small { font-family: "Georgia", "Times New Roman", serif; font-size: 7px; letter-spacing: 2px; opacity: .55; margin-top: -2px; }
+.top h1 { display: flex; align-items: baseline; gap: 12px; }
+.top h1::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.sec-h > span:first-child::before, .grp-t::before, .sec-head .t::before { content: "— "; color: var(--tx3); }
+
+/* ── 动效 ── */
+/* 进场：每个区块依次浮起 */
+.view.on { animation: none; }
+.view.on > * { animation: rise .55s cubic-bezier(.22, 1, .36, 1) both; }
+.view.on > *:nth-child(1) { animation-delay: 45ms; }
+.view.on > *:nth-child(2) { animation-delay: 90ms; }
+.view.on > *:nth-child(3) { animation-delay: 135ms; }
+.view.on > *:nth-child(4) { animation-delay: 180ms; }
+.view.on > *:nth-child(5) { animation-delay: 225ms; }
+.view.on > *:nth-child(6) { animation-delay: 270ms; }
+.view.on > *:nth-child(7) { animation-delay: 315ms; }
+.view.on > *:nth-child(8) { animation-delay: 360ms; }
+.view.on > *:nth-child(9) { animation-delay: 405ms; }
+.view.on > *:nth-child(10) { animation-delay: 450ms; }
+.view.on > *:nth-child(11) { animation-delay: 495ms; }
+.view.on > *:nth-child(12) { animation-delay: 540ms; }
+.view.on > *:nth-child(13) { animation-delay: 585ms; }
+.view.on > *:nth-child(14) { animation-delay: 630ms; }
+/* 星点：慢慢明灭 */
+.stars { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
+#view-home { position: relative; }
+#view-home > *:not(.stars) { position: relative; z-index: 1; }
+.stars i { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: var(--tx); opacity: 0; animation: twinkle 5s ease-in-out infinite; }
+.stars i:nth-child(3n) { width: 1.5px; height: 1.5px; } .stars i:nth-child(4n) { background: var(--acc); }
+@keyframes twinkle { 0%, 100% { opacity: 0; transform: scale(.6) } 50% { opacity: .75; transform: scale(1) } }
+.stars i:nth-child(1) { left: 8%; top: 12%; animation-delay: -0.8s; animation-duration: 5.5s; }
+.stars i:nth-child(2) { left: 22%; top: 30%; animation-delay: -5.7s; animation-duration: 5.1s; }
+.stars i:nth-child(3) { left: 35%; top: 8%; animation-delay: -1.4s; animation-duration: 5.2s; }
+.stars i:nth-child(4) { left: 48%; top: 22%; animation-delay: -1.4s; animation-duration: 4.4s; }
+.stars i:nth-child(5) { left: 62%; top: 6%; animation-delay: -3.7s; animation-duration: 3.9s; }
+.stars i:nth-child(6) { left: 75%; top: 18%; animation-delay: -4.8s; animation-duration: 6.9s; }
+.stars i:nth-child(7) { left: 88%; top: 28%; animation-delay: -1.9s; animation-duration: 4.8s; }
+.stars i:nth-child(8) { left: 14%; top: 46%; animation-delay: -1.4s; animation-duration: 5.3s; }
+.stars i:nth-child(9) { left: 30%; top: 58%; animation-delay: -2.8s; animation-duration: 4.1s; }
+.stars i:nth-child(10) { left: 70%; top: 52%; animation-delay: -3.4s; animation-duration: 5.9s; }
+.stars i:nth-child(11) { left: 85%; top: 44%; animation-delay: -2.7s; animation-duration: 6.7s; }
+.stars i:nth-child(12) { left: 55%; top: 40%; animation-delay: -2.8s; animation-duration: 4.1s; }
+
+#app[data-theme="day"] .stars, #app[data-theme="mist"] .stars { display: none; }
+/* 月亮：极慢地浮 */
+.moon-wrap .moon { animation: floaty 7s ease-in-out infinite; }
+@keyframes floaty { 0%, 100% { transform: translateY(0) rotate(-2deg) } 50% { transform: translateY(-5px) rotate(2deg) } }
+/* 拨盘：弧线滑到新刻度，选中的点弹一下 */
+.ring-arc { stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .6s cubic-bezier(.22, 1, .36, 1), opacity .3s; }
+.ring-stop.on { animation: popdot .45s cubic-bezier(.22, 1.4, .36, 1); transform-box: fill-box; transform-origin: center; }
+@keyframes popdot { 0% { transform: scale(.4) } 100% { transform: scale(1) } }
+.dial.tick .dial-cap b { animation: rise .4s ease both; }
+/* 大按钮：呼吸光晕 */
+.big-btn { animation: glow 4s ease-in-out infinite; }
+@keyframes glow { 0%, 100% { box-shadow: 0 10px 40px rgba(var(--acc-rgb), .10) } 50% { box-shadow: 0 10px 46px rgba(var(--acc-rgb), .28) } }
+/* 页签：选中图标弹一下 */
+.tb.on svg { animation: popdot .4s cubic-bezier(.22, 1.4, .36, 1); }
+/* 推子：播放时图标发光呼吸，逐个错开；合成中转圈 */
+.faders.playing .fader .ico { animation: pulse 2.4s ease-in-out infinite; border-color: rgba(var(--acc-rgb), .5); color: var(--acc); }
+.faders.playing .fader:nth-child(2) .ico { animation-delay: .4s } .faders.playing .fader:nth-child(3) .ico { animation-delay: .8s } .faders.playing .fader:nth-child(4) .ico { animation-delay: 1.2s } .faders.playing .fader:nth-child(5) .ico { animation-delay: 1.6s }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(var(--acc-rgb), 0) } 50% { box-shadow: 0 0 0 6px rgba(var(--acc-rgb), .18), 0 0 18px rgba(var(--acc-rgb), .35) } }
+.faders.busy .fader.master .ico { animation: spin 1.2s linear infinite; border-top-color: var(--acc); }
+@keyframes spin { to { transform: rotate(360deg) } }
+.fader { animation: rise .45s cubic-bezier(.22, 1, .36, 1) both; }
+.fader:nth-child(2) { animation-delay: 60ms } .fader:nth-child(3) { animation-delay: 120ms } .fader:nth-child(4) { animation-delay: 180ms } .fader:nth-child(5) { animation-delay: 240ms } .fader:nth-child(6) { animation-delay: 300ms }
+/* 声音块：点下去弹一下 */
+.tile.pop { animation: tilepop .35s cubic-bezier(.22, 1.4, .36, 1); }
+@keyframes tilepop { 0% { transform: scale(.92) } 100% { transform: scale(1) } }
+/* 时间轴：条从左长出来，逐行错开 */
+.tl-bar { animation: grow .7s cubic-bezier(.22, 1, .36, 1) both; transform-origin: left center; }
+@keyframes grow { from { transform: scaleX(0); opacity: 0 } to { transform: scaleX(1); opacity: 1 } }
+.tl-bar { opacity: 1; }
+.tl-bar[data-r="1"] { animation-name: grow1 } .tl-bar[data-r="2"] { animation-name: grow2 } .tl-bar[data-r="3"] { animation-name: grow3 } .tl-bar[data-r="4"] { animation-name: grow4 } .tl-bar[data-r="5"] { animation-name: grow5 }
+@keyframes grow1 { from { transform: scaleX(0); opacity: 0 } to { transform: scaleX(1); opacity: .3 } }
+@keyframes grow2 { from { transform: scaleX(0); opacity: 0 } to { transform: scaleX(1); opacity: .45 } }
+@keyframes grow3 { from { transform: scaleX(0); opacity: 0 } to { transform: scaleX(1); opacity: .6 } }
+@keyframes grow4 { from { transform: scaleX(0); opacity: 0 } to { transform: scaleX(1); opacity: .8 } }
+@keyframes grow5 { from { transform: scaleX(0); opacity: 0 } to { transform: scaleX(1); opacity: 1 } }
+.tl-row:nth-child(1) .tl-bar { animation-delay: 70ms; }
+.tl-row:nth-child(2) .tl-bar { animation-delay: 140ms; }
+.tl-row:nth-child(3) .tl-bar { animation-delay: 210ms; }
+.tl-row:nth-child(4) .tl-bar { animation-delay: 280ms; }
+.tl-row:nth-child(5) .tl-bar { animation-delay: 350ms; }
+.tl-row:nth-child(6) .tl-bar { animation-delay: 420ms; }
+.tl-row:nth-child(7) .tl-bar { animation-delay: 490ms; }
+/* 统计数字与月历点：依次亮起 */
+.stat { animation: rise .5s ease both; }
+.stat:nth-child(1) { animation-delay: 360ms; }
+.stat:nth-child(2) { animation-delay: 420ms; }
+.stat:nth-child(3) { animation-delay: 480ms; }
+.stat:nth-child(4) { animation-delay: 540ms; }
+.stat:nth-child(5) { animation-delay: 600ms; }
+.stat:nth-child(6) { animation-delay: 660ms; }
+.day i { animation: dot .6s ease both; }
+@keyframes dot { from { transform: scale(.3); opacity: 0 } to { transform: scale(1); opacity: var(--o, .12) } }
+.month .day:nth-child(8) i { animation-delay: 18ms; }
+.month .day:nth-child(9) i { animation-delay: 36ms; }
+.month .day:nth-child(10) i { animation-delay: 54ms; }
+.month .day:nth-child(11) i { animation-delay: 72ms; }
+.month .day:nth-child(12) i { animation-delay: 90ms; }
+.month .day:nth-child(13) i { animation-delay: 108ms; }
+.month .day:nth-child(14) i { animation-delay: 126ms; }
+.month .day:nth-child(15) i { animation-delay: 144ms; }
+.month .day:nth-child(16) i { animation-delay: 162ms; }
+.month .day:nth-child(17) i { animation-delay: 180ms; }
+.month .day:nth-child(18) i { animation-delay: 198ms; }
+.month .day:nth-child(19) i { animation-delay: 216ms; }
+.month .day:nth-child(20) i { animation-delay: 234ms; }
+.month .day:nth-child(21) i { animation-delay: 252ms; }
+.month .day:nth-child(22) i { animation-delay: 270ms; }
+.month .day:nth-child(23) i { animation-delay: 288ms; }
+.month .day:nth-child(24) i { animation-delay: 306ms; }
+.month .day:nth-child(25) i { animation-delay: 324ms; }
+.month .day:nth-child(26) i { animation-delay: 342ms; }
+.month .day:nth-child(27) i { animation-delay: 360ms; }
+.month .day:nth-child(28) i { animation-delay: 378ms; }
+.month .day:nth-child(29) i { animation-delay: 396ms; }
+.month .day:nth-child(30) i { animation-delay: 414ms; }
+.month .day:nth-child(31) i { animation-delay: 432ms; }
+.month .day:nth-child(32) i { animation-delay: 450ms; }
+.month .day:nth-child(33) i { animation-delay: 468ms; }
+.month .day:nth-child(34) i { animation-delay: 486ms; }
+.month .day:nth-child(35) i { animation-delay: 504ms; }
+.month .day:nth-child(36) i { animation-delay: 522ms; }
+.month .day:nth-child(37) i { animation-delay: 540ms; }
+.month .day:nth-child(38) i { animation-delay: 558ms; }
+.month .day:nth-child(39) i { animation-delay: 576ms; }
+.month .day:nth-child(40) i { animation-delay: 594ms; }
+.month .day:nth-child(41) i { animation-delay: 612ms; }
+.month .day:nth-child(42) i { animation-delay: 630ms; }
+.month .day:nth-child(43) i { animation-delay: 648ms; }
+.month .day:nth-child(44) i { animation-delay: 666ms; }
+.month .day:nth-child(45) i { animation-delay: 684ms; }
+.month .day:nth-child(46) i { animation-delay: 702ms; }
+.month .day:nth-child(47) i { animation-delay: 720ms; }
+.month .day:nth-child(48) i { animation-delay: 738ms; }
+.month .day:nth-child(49) i { animation-delay: 756ms; }
+/* 入睡画面：光环极慢转，星点漂 */
+.overlay { overflow: hidden; }
+.overlay .stars { z-index: 0; }
+.overlay > *:not(.stars) { position: relative; z-index: 1; }
+.ov-moon .moon-glow, .ov-moon .moon { position: relative; z-index: 1; }
+.halo { position: absolute; left: 50%; top: 50%; width: 270px; height: 270px; margin: -135px 0 0 -135px; z-index: 0; border-radius: 50%; border: 1px solid rgba(var(--acc-rgb), .10); box-shadow: inset 0 0 60px rgba(var(--acc-rgb), .05); animation: halo 40s linear infinite; pointer-events: none; }
+.halo::before { content: ""; position: absolute; inset: 22px; border-radius: 50%; border: 1px dashed rgba(var(--acc-rgb), .12); }
+@keyframes halo { to { transform: rotate(360deg) } }
+.ov-moon .moon { animation: floaty 9s ease-in-out infinite; }
+.ov-sub { animation: rise .8s ease both; }
+/* 弹层：内容随弹层浮起 */
+#app.sheet-open #sheet-content > * { animation: rise .45s cubic-bezier(.22, 1, .36, 1) both; }
+#app.sheet-open #sheet-content > *:nth-child(2) { animation-delay: 60ms } #app.sheet-open #sheet-content > *:nth-child(3) { animation-delay: 120ms } #app.sheet-open #sheet-content > *:nth-child(4) { animation-delay: 180ms }
+/* 开关、chip：顺滑 */
+.tgl, .tile, .modes button, .row, .tb { transition: all .22s ease; }
+.tgl:active, .tile:active, .mini:active, .round:active { transform: scale(.94); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+.overlay .ov-moon { position: relative; left: auto; top: auto; transform: none; }
+/* 表单行：右侧控件一律靠右对齐 */
+.frow > .select, .frow > .field, .frow > .mini, .frow > span:last-child, .frow > .txt-btn { margin-left: auto; }
+.frow > span:last-child { display: inline-flex; align-items: center; gap: 6px; }
+.frow.col { flex-direction: column; align-items: stretch; gap: 8px; }
+.frow.col > .field { margin-left: 0; width: 100%; }
+</style></head>
+<body><div id="app" data-theme="night">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <linearGradient id="mg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--moon-a)"/><stop offset="1" stop-color="var(--moon-b)"/></linearGradient>
+  </defs></svg>
+
+  <div id="view-home" class="view on" data-view="home">
+    <div class="stars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <header class="top"><span class="eyebrow en" id="hdr-date"></span><h1 class="serif" id="home-greet">晚安</h1></header>
+    <div class="dial" id="dial">
+      <svg class="ring" viewBox="0 0 300 300" aria-hidden="true">
+        <circle class="ring-bg" cx="150" cy="150" r="128"/>
+        <path class="ring-arc" id="ring-arc" d=""/>
+        <g id="ring-stops"></g>
+      </svg>
+      <div class="moon-wrap"><div class="moon-glow"></div><svg class="moon" viewBox="0 0 200 200" aria-hidden="true"><path d="M118 34a70 70 0 1 0 50 120 56 56 0 0 1-50-120z" fill="url(#mg)"/></svg></div>
+      <div class="dial-cap"><b id="dial-val">45 分</b><span>后停</span></div>
+    </div>
+    <p class="who-line" id="hero-who"></p>
+    <div class="modes" id="mode-seg"><button type="button" data-mode="lull" class="on">哄睡</button><button type="button" data-mode="insomnia">失眠</button><button type="button" data-mode="sound">只要声音</button></div>
+    <div class="open-night" id="open-night" hidden><span id="open-night-text"></span><button class="txt-btn" id="btn-wake" type="button">我醒了 ›</button></div>
+    <div class="rows">
+      <button class="row" id="home-mix" type="button"><span class="rk">声景</span><span class="rv"><b id="home-mix-name">安静</b><small id="home-mix-layers">没有开任何声音</small></span><span class="arr">›</span></button>
+      <button class="row" id="home-script" type="button"><span class="rk">话术</span><span class="rv"><b id="home-script-name">轻柔</b><small id="home-script-desc"></small></span><span class="arr">›</span></button>
+    </div>
+    <button class="big-btn" id="btn-sleep" type="button">睡了</button>
+    <div id="last-night"></div>
+    <p class="foot" id="home-foot"></p>
+  </div>
+
+  <div id="view-sounds" class="view" data-view="sounds">
+    <header class="top"><span class="eyebrow en">SOUNDSCAPE</span><h1 class="serif" id="mix-title">安静</h1><div class="top-acts"><button class="txt-btn" id="btn-mix-preview" type="button">试听</button><button class="txt-btn" id="btn-mix-save" type="button">存组合</button></div></header>
+    <div class="faders" id="layers"></div>
+    <div class="presets" id="mix-presets"></div>
+    <div class="sec-h"><span>声音</span><span class="sec-acts"><button class="txt-btn" id="btn-import" type="button">导入录音</button><button class="txt-btn" id="btn-store" type="button">商店 ＋</button></span></div>
+    <div class="cats" id="sound-cats"></div>
+    <div class="tiles" id="sound-tiles"></div>
+    <p class="foot" id="sounds-credit"></p>
+  </div>
+
+  <div id="view-script" class="view" data-view="script">
+    <header class="top"><span class="eyebrow en">THE VOICE</span><h1 class="serif">TA 怎么说</h1></header>
+    <div class="sec-h"><span>节奏</span></div>
+    <div class="modes" id="rhythm-presets"></div>
+    <p class="note" id="rhythm-desc"></p>
+    <div class="curve" id="rhythm-curve" aria-hidden="true"></div>
+    <div class="frow"><div class="fl">说几段</div><input id="r-segments" type="range" min="1" max="12"><b></b></div>
+    <div class="frow"><div class="fl">第一段字数</div><input id="r-firstChars" type="range" min="10" max="300" step="5"><b></b></div>
+    <div class="frow"><div class="fl">最后一段字数</div><input id="r-lastChars" type="range" min="5" max="300" step="5"><b></b></div>
+    <div class="frow"><div class="fl">起始间隔</div><input id="r-firstGapSec" type="range" min="5" max="600" step="5"><b></b></div>
+    <div class="frow"><div class="fl">最长间隔</div><input id="r-lastGapSec" type="range" min="5" max="1800" step="15"><b></b></div>
+    <div class="sec-h"><span>内容方向</span><span class="sec-sub">可多选</span></div>
+    <div class="tgl-row" id="directions"></div>
+    <textarea id="forbid" class="txt-in" rows="2" placeholder="禁止项：不要叫我宝贝；不提工作；不讲鬼故事"></textarea>
+    <div class="sec-h"><span>失眠模式</span><span class="sec-sub">半夜再打开走这一套</span></div>
+    <p class="note">不问原因，不给建议。</p>
+    <div class="tgl-row" id="insomnia-directions"></div>
+    <textarea id="insomnia-forbid" class="txt-in" rows="2" placeholder="失眠时的禁止项"></textarea>
+    <div class="sec-h"><span>语音</span><span class="sec-acts"><button class="txt-btn" id="btn-try-line" type="button">试一句</button></span></div>
+    <div class="frow"><div><div class="fl">朗读</div><div class="fu" id="tts-hint">用小手机里给角色配的语音</div></div><label class="sw"><input id="tts-on" type="checkbox" checked><i></i></label></div>
+    <div class="bubble" id="try-line" hidden></div>
+  </div>
+
+  <div id="view-journal" class="view" data-view="journal">
+    <header class="top"><span class="eyebrow en">NIGHT JOURNAL</span><h1 class="serif" id="journal-title">这一周</h1></header>
+    <div class="modes" id="journal-seg"><button class="stab" type="button" data-range="day">每天</button><button class="stab on" type="button" data-range="week">每周</button><button class="stab" type="button" data-range="month">每月</button></div>
+    <div id="journal-day" hidden></div>
+    <div id="journal-week"></div>
+    <div id="journal-month" hidden></div>
+  </div>
+
+  <div id="view-settings" class="view" data-view="settings">
+    <header class="top"><span class="eyebrow en">SETTINGS</span><h1 class="serif">陪眠</h1></header>
+    <div id="settings-body"></div>
+  </div>
+
+  <nav class="tabbar" id="tabbar">
+    <button class="tb on" type="button" data-view="home"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg><span>今夜</span><small>TONIGHT</small></button>
+    <button class="tb" type="button" data-view="sounds"><svg viewBox="0 0 24 24"><path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2"/></svg><span>声景</span><small>SOUND</small></button>
+    <button class="tb" type="button" data-view="script"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg><span>话术</span><small>VOICE</small></button>
+    <button class="tb" type="button" data-view="journal"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>夜记</span><small>JOURNAL</small></button>
+    <button class="tb" type="button" data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>配置</span><small>SETUP</small></button>
+  </nav>
+
+  <div class="sheet-mask" id="sheet-mask"></div>
+  <div class="sheet" id="sheet">
+    <div class="sheet-hd"><h3 class="serif" id="sheet-title"></h3><button class="sheet-x" id="sheet-close" type="button" aria-label="关闭">✕</button></div>
+    <div id="sheet-content"></div>
+  </div>
+
+  <div class="overlay" id="sleep" hidden>
+    <div class="stars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="ov-top"><span id="sleep-clock"></span><span id="sleep-remain"></span></div>
+    <div class="moon-wrap ov-moon"><div class="halo" aria-hidden="true"></div><div class="moon-glow"></div><svg class="moon" viewBox="0 0 200 200" aria-hidden="true"><path d="M118 34a70 70 0 1 0 50 120 56 56 0 0 1-50-120z" fill="url(#mg)"/></svg></div>
+    <p class="ov-sub serif" id="sleep-sub"></p>
+    <p class="ov-status" id="sleep-status"></p>
+    <div class="ov-actions">
+      <button class="round" id="btn-mic" type="button" aria-label="按住说话"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" stroke="none"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4"/></svg></button>
+      <button class="round stop" id="btn-stop" type="button" aria-label="停止"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg></button>
+      <button class="round" id="btn-dim" type="button" aria-label="更暗"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg></button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>(function () {
+"use strict";
+const api = window.AiPhone;
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const state = {
+  settings: null, characters: [], character: null, nights: [], mixes: [], library: [],
+  mode: "lull", timerMin: 45, view: "home", session: null, voiceReady: null,
+};
+const bus = new EventTarget();
+const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { detail }));
+const on = (name, fn) => bus.addEventListener(name, e => fn(e.detail));
+
+let toastTimer = 0;
+function toast(text, ms = 2200) {
+  const node = $("toast"); node.textContent = text; node.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove("show"), ms);
+}
+function fail(error) { const msg = error && error.message ? error.message : String(error); toast(msg, 3200); console.warn("[陪眠]", error); }
+
+let sheetOnClose = null;
+function openSheet(title, build, onClose) {
+  const box = $("sheet-content"); box.innerHTML = "";
+  $("sheet-title").textContent = title || "";
+  sheetOnClose = onClose || null;
+  build(box);
+  $("app").classList.add("sheet-open");
+  $("sheet").scrollTop = 0;
+}
+function closeSheet() { $("app").classList.remove("sheet-open"); const fn = sheetOnClose; sheetOnClose = null; if (fn) fn(); setTimeout(() => { if (!$("app").classList.contains("sheet-open")) $("sheet-content").innerHTML = ""; }, 300); }
+$("sheet-mask").onclick = closeSheet; $("sheet-close").onclick = closeSheet;
+
+function switchView(name) {
+  state.view = name;
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.dataset.view === name));
+  document.querySelectorAll("#tabbar .tb").forEach(b => b.classList.toggle("on", b.dataset.view === name));
+  window.scrollTo(0, 0);
+  emit("view", name);
+}
+document.querySelectorAll("#tabbar .tb").forEach(b => { b.onclick = () => switchView(b.dataset.view); });
+
+const fmtClock = d => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+const moonsHtml = n => n ? `<span class="moons">${iconSvg("moon").repeat(n)}</span>` : "";
+  const PmRhythm = (() => {
+const exports = Object.create(null);
+const require = id => { const m = ({  })[id]; if (!m) throw new Error("unknown module " + id); return m; };
+"use strict";
+// 哄睡节奏：把「说几段、每段多少字、间隔从多少秒拉到多少分钟」算成一张时间表。
+// 纯函数，Node 测试直接 import。
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DIRECTIONS = exports.RHYTHM_PRESETS = void 0;
+exports.clampInt = clampInt;
+exports.normalizeRhythm = normalizeRhythm;
+exports.buildSchedule = buildSchedule;
+exports.totalScheduleSeconds = totalScheduleSeconds;
+exports.describeSchedule = describeSchedule;
+exports.RHYTHM_PRESETS = Object.freeze({
+    gentle: { id: "gentle", name: "轻柔", segments: 5, firstChars: 90, lastChars: 20, firstGapSec: 40, lastGapSec: 300 },
+    brief: { id: "brief", name: "简短", segments: 3, firstChars: 60, lastChars: 15, firstGapSec: 30, lastGapSec: 180 },
+    long: { id: "long", name: "漫长", segments: 8, firstChars: 120, lastChars: 12, firstGapSec: 45, lastGapSec: 480 },
+});
+exports.DIRECTIONS = Object.freeze([
+    { id: "today", label: "讲今天", hint: "回顾今天发生的事，捡安静的说" },
+    { id: "self", label: "讲TA自己", hint: "TA自己的小事、TA的一天" },
+    { id: "trivia", label: "无关的小事", hint: "和你们都无关的、没有意义的小画面" },
+    { id: "breath", label: "数呼吸", hint: "带着数呼吸、放松身体" },
+    { id: "scene", label: "描述安静的画面", hint: "一个静止的、缓慢的场景" },
+    { id: "hum", label: "只是陪着", hint: "几乎不说什么，只是在" },
+]);
+function clampInt(value, min, max, fallback) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n))
+        return fallback;
+    return Math.min(max, Math.max(min, n));
+}
+function normalizeRhythm(input) {
+    const base = exports.RHYTHM_PRESETS.gentle;
+    const r = input && typeof input === "object" ? input : {};
+    return {
+        segments: clampInt(r.segments, 1, 12, base.segments),
+        firstChars: clampInt(r.firstChars, 10, 300, base.firstChars),
+        lastChars: clampInt(r.lastChars, 5, 300, base.lastChars),
+        firstGapSec: clampInt(r.firstGapSec, 5, 1800, base.firstGapSec),
+        lastGapSec: clampInt(r.lastGapSec, 5, 3600, base.lastGapSec),
+    };
+}
+// 段与段之间用缓出曲线：前面密、后面疏。返回每段 { index, chars, gapAfterSec }。
+function buildSchedule(rhythmInput) {
+    const r = normalizeRhythm(rhythmInput);
+    const n = r.segments;
+    const steps = [];
+    for (let i = 0; i < n; i += 1) {
+        const t = n === 1 ? 1 : i / (n - 1);
+        const eased = 1 - Math.pow(1 - t, 2);
+        const chars = Math.round(r.firstChars + (r.lastChars - r.firstChars) * eased);
+        const gapAfterSec = i === n - 1 ? 0 : Math.round(r.firstGapSec + (r.lastGapSec - r.firstGapSec) * eased);
+        steps.push({ index: i, chars: Math.max(5, chars), gapAfterSec });
+    }
+    return steps;
+}
+function totalScheduleSeconds(rhythmInput) {
+    return buildSchedule(rhythmInput).reduce((sum, step) => sum + step.gapAfterSec, 0);
+}
+function describeSchedule(rhythmInput) {
+    const sec = totalScheduleSeconds(rhythmInput);
+    const r = normalizeRhythm(rhythmInput);
+    const mins = Math.round(sec / 60);
+    return `${r.segments} 段 · 约 ${mins} 分钟说完 · 从 ${r.firstChars} 字降到 ${r.lastChars} 字`;
+}
+
+return Object.freeze(exports);
+})();
+  const PmStats = (() => {
+const exports = Object.create(null);
+const require = id => { const m = ({ "./rhythm.mjs": PmRhythm })[id]; if (!m) throw new Error("unknown module " + id); return m; };
+"use strict";
+// 夜记统计：每晚一条记录 → 每天/每周/每月的汇总。纯函数。
+// 记录字段：date(YYYY-MM-DD，按入睡当晚算)、sleepAt/wakeAt(ISO)、durationMin、rating(1-5|0)、wakeups、mode、mixName、lastLine、note、morningLine
+Object.defineProperty(exports, "__esModule", { value: true });
+exports._internal = void 0;
+exports.pad2 = pad2;
+exports.localDateKey = localDateKey;
+exports.nightKeyFor = nightKeyFor;
+exports.minutesBetween = minutesBetween;
+exports.bedtimeMinutes = bedtimeMinutes;
+exports.formatBedtime = formatBedtime;
+exports.formatDuration = formatDuration;
+exports.weekStartKey = weekStartKey;
+exports.addDays = addDays;
+exports.weekDays = weekDays;
+exports.summarizeWeek = summarizeWeek;
+exports.compareWeeks = compareWeeks;
+exports.streakDays = streakDays;
+exports.monthGrid = monthGrid;
+const DAY_MS = 86400000;
+function pad2(n) { return String(n).padStart(2, "0"); }
+function localDateKey(date) {
+    const d = date instanceof Date ? date : new Date(date);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+// 凌晨 6 点前入睡算前一晚
+function nightKeyFor(date) {
+    const d = date instanceof Date ? new Date(date.getTime()) : new Date(date);
+    if (d.getHours() < 6)
+        d.setDate(d.getDate() - 1);
+    return localDateKey(d);
+}
+function minutesBetween(startIso, endIso) {
+    const a = new Date(startIso).getTime();
+    const b = new Date(endIso).getTime();
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a)
+        return 0;
+    return Math.round((b - a) / 60000);
+}
+// 入睡时刻换成「相对 18:00 的分钟数」，这样 23:30 和 01:10 能平均
+function bedtimeMinutes(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime()))
+        return null;
+    let m = d.getHours() * 60 + d.getMinutes() - 18 * 60;
+    if (m < 0)
+        m += 24 * 60;
+    return m;
+}
+function formatBedtime(minutesFrom18) {
+    if (minutesFrom18 == null)
+        return "--:--";
+    const abs = (minutesFrom18 + 18 * 60) % (24 * 60);
+    return `${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
+}
+function formatDuration(min) {
+    if (!min)
+        return "--";
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return h ? `${h}h${m ? pad2(m) : ""}` : `${m}m`;
+}
+function average(values) {
+    const list = values.filter(v => typeof v === "number" && Number.isFinite(v));
+    if (!list.length)
+        return null;
+    return list.reduce((a, b) => a + b, 0) / list.length;
+}
+function weekStartKey(date, weekStartsOn = 1) {
+    const d = date instanceof Date ? new Date(date.getTime()) : new Date(date);
+    const diff = (d.getDay() - weekStartsOn + 7) % 7;
+    d.setDate(d.getDate() - diff);
+    return localDateKey(d);
+}
+function addDays(key, days) {
+    const [y, m, d] = key.split("-").map(Number);
+    const date = new Date(y, m - 1, d + days);
+    return localDateKey(date);
+}
+function weekDays(startKey) {
+    return Array.from({ length: 7 }, (_, i) => addDays(startKey, i));
+}
+function summarizeWeek(nights, startKey, goal) {
+    const days = weekDays(startKey);
+    const byDate = new Map(nights.map(n => [n.date, n]));
+    const rows = days.map(date => ({ date, night: byDate.get(date) || null }));
+    const present = rows.filter(r => r.night && r.night.durationMin > 0).map(r => r.night);
+    const durations = present.map(n => n.durationMin);
+    const bedtimes = present.map(n => bedtimeMinutes(n.sleepAt)).filter(v => v != null);
+    const goalMin = goal && goal.hours ? Math.round(goal.hours * 60) : null;
+    const goalBed = goal && goal.bedtime ? bedtimeMinutes(`1970-01-02T${goal.bedtime}:00`) : null;
+    const mixCount = new Map();
+    for (const n of present)
+        if (n.mixName)
+            mixCount.set(n.mixName, (mixCount.get(n.mixName) || 0) + 1);
+    let topMix = null;
+    for (const [name, count] of mixCount)
+        if (!topMix || count > topMix.count)
+            topMix = { name, count };
+    return {
+        startKey,
+        days: rows,
+        nightsLogged: present.length,
+        avgDurationMin: average(durations),
+        avgBedtime: average(bedtimes),
+        bedtimeSpread: bedtimes.length > 1 ? Math.max(...bedtimes) - Math.min(...bedtimes) : 0,
+        totalWakeups: present.reduce((s, n) => s + (n.wakeups || 0), 0),
+        avgRating: average(present.map(n => n.rating || null)),
+        topMix,
+        goalDurationHits: goalMin ? durations.filter(d => d >= goalMin).length : null,
+        goalBedtimeHits: goalBed != null ? bedtimes.filter(b => b <= goalBed + 15).length : null,
+    };
+}
+function compareWeeks(current, previous) {
+    const dur = current.avgDurationMin != null && previous.avgDurationMin != null ? Math.round(current.avgDurationMin - previous.avgDurationMin) : null;
+    const bed = current.avgBedtime != null && previous.avgBedtime != null ? Math.round(current.avgBedtime - previous.avgBedtime) : null;
+    return { durationDeltaMin: dur, bedtimeDeltaMin: bed };
+}
+function streakDays(nights, todayKey) {
+    const set = new Set(nights.filter(n => n.durationMin > 0).map(n => n.date));
+    let key = set.has(todayKey) ? todayKey : addDays(todayKey, -1);
+    let count = 0;
+    while (set.has(key)) {
+        count += 1;
+        key = addDays(key, -1);
+    }
+    return count;
+}
+function monthGrid(year, month /* 1-12 */, weekStartsOn = 1) {
+    const first = new Date(year, month - 1, 1);
+    const lead = (first.getDay() - weekStartsOn + 7) % 7;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < lead; i += 1)
+        cells.push(null);
+    for (let d = 1; d <= daysInMonth; d += 1)
+        cells.push(`${year}-${pad2(month)}-${pad2(d)}`);
+    while (cells.length % 7)
+        cells.push(null);
+    return cells;
+}
+exports._internal = { DAY_MS, average };
+
+return Object.freeze(exports);
+})();
+  const PmMixer = (() => {
+const exports = Object.create(null);
+const require = id => { const m = ({ "./rhythm.mjs": PmRhythm, "./stats.mjs": PmStats })[id]; if (!m) throw new Error("unknown module " + id); return m; };
+"use strict";
+// 多层声景混音：把若干已解码的单声道 Float32Array 叠成一段无缝循环。纯函数，不碰 Web Audio。
+// 每层：随机起点 + 首尾等功率交叉淡化 + 可选起伏(慢 LFO)。输出 Float32Array(loopSeconds*sampleRate)。
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MAX_LAYERS = exports.MIX_SAMPLE_RATE = void 0;
+exports.equalPowerFade = equalPowerFade;
+exports.loopSamples = loopSamples;
+exports.mulberry32 = mulberry32;
+exports.peakOf = peakOf;
+exports.rmsOf = rmsOf;
+exports.mixLayers = mixLayers;
+exports.fadeTail = fadeTail;
+exports.toMono = toMono;
+exports.resample = resample;
+exports.MIX_SAMPLE_RATE = 32000;
+exports.MAX_LAYERS = 6;
+function equalPowerFade(t) {
+    // t∈[0,1] → (out, in)
+    const a = Math.cos(t * Math.PI / 2);
+    const b = Math.sin(t * Math.PI / 2);
+    return [a, b];
+}
+// 把一段样本做成长度 targetLen 的循环：起点随机（由 seed 决定），拼接处交叉淡化 fadeLen。
+function loopSamples(src, targetLen, fadeLen, seed) {
+    const out = new Float32Array(targetLen);
+    const n = src.length;
+    if (n === 0)
+        return out;
+    const rand = mulberry32(seed);
+    const useFade = Math.min(fadeLen, Math.floor(n / 4));
+    // 有效周期 = n - useFade（重叠部分算一次）
+    const period = Math.max(1, n - useFade);
+    let start = Math.floor(rand() * n);
+    for (let i = 0; i < targetLen; i += 1) {
+        const pos = (start + i) % period;
+        let v = src[pos];
+        if (useFade > 0 && pos < useFade) {
+            // 周期开头的 useFade 段：和上一圈的尾巴交叉
+            const [a, b] = equalPowerFade(pos / useFade);
+            v = src[period + pos] * a + src[pos] * b;
+        }
+        out[i] = v;
+    }
+    return out;
+}
+function mulberry32(seed) {
+    let a = (seed >>> 0) || 1;
+    return function () {
+        a |= 0;
+        a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+function peakOf(samples) {
+    let peak = 0;
+    for (let i = 0; i < samples.length; i += 1) {
+        const v = Math.abs(samples[i]);
+        if (v > peak)
+            peak = v;
+    }
+    return peak;
+}
+function rmsOf(samples) {
+    let sum = 0;
+    for (let i = 0; i < samples.length; i += 1)
+        sum += samples[i] * samples[i];
+    return Math.sqrt(sum / Math.max(1, samples.length));
+}
+// layers: [{ samples: Float32Array(单声道, sampleRate 已统一), volume: 0..1, drift: bool, seed }]
+// 返回 { samples, peak }；各层先按 RMS 拉平到同一响度再按 volume 混，最后软限幅。
+function mixLayers(layers, { sampleRate = exports.MIX_SAMPLE_RATE, loopSeconds = 90, master = 1 } = {}) {
+    const len = Math.max(1, Math.floor(loopSeconds * sampleRate));
+    const out = new Float32Array(len);
+    const fadeLen = Math.floor(sampleRate * 3);
+    const targetRms = 0.08;
+    layers.slice(0, exports.MAX_LAYERS).forEach((layer, index) => {
+        if (!layer || !layer.samples || !layer.samples.length || !(layer.volume > 0))
+            return;
+        const looped = loopSamples(layer.samples, len, fadeLen, (layer.seed ?? 1) * 7919 + index);
+        const rms = rmsOf(looped) || 1;
+        const gain = (targetRms / rms) * layer.volume;
+        if (layer.drift) {
+            // 慢起伏：两条不同周期的正弦叠加，幅度 ±35%
+            const p1 = (17 + index * 3) * sampleRate, p2 = (41 + index * 5) * sampleRate;
+            for (let i = 0; i < len; i += 1) {
+                const lfo = 1 + 0.35 * (0.6 * Math.sin(2 * Math.PI * i / p1) + 0.4 * Math.sin(2 * Math.PI * i / p2 + index));
+                out[i] += looped[i] * gain * lfo;
+            }
+        }
+        else {
+            for (let i = 0; i < len; i += 1)
+                out[i] += looped[i] * gain;
+        }
+    });
+    const m = Math.max(0, Math.min(1, master));
+    for (let i = 0; i < len; i += 1) {
+        const v = out[i] * m * 2.2;
+        out[i] = Math.tanh(v); // 软限幅
+    }
+    return { samples: out, peak: peakOf(out) };
+}
+// 结束前的渐弱尾巴：把循环体重复到 fadeSeconds 长，再整体乘以从 1 到 0 的曲线。
+function fadeTail(loop, fadeSeconds, sampleRate = exports.MIX_SAMPLE_RATE) {
+    const len = Math.max(1, Math.floor(fadeSeconds * sampleRate));
+    const out = new Float32Array(len);
+    const n = loop.length || 1;
+    for (let i = 0; i < len; i += 1) {
+        const t = i / len;
+        const g = Math.pow(1 - t, 1.6);
+        out[i] = loop[i % n] * g;
+    }
+    return out;
+}
+// 立体声/多声道 → 单声道；不同采样率 → 线性重采样
+function toMono(channels) {
+    if (!channels.length)
+        return new Float32Array(0);
+    if (channels.length === 1)
+        return channels[0];
+    const len = channels[0].length;
+    const out = new Float32Array(len);
+    for (let c = 0; c < channels.length; c += 1) {
+        const ch = channels[c];
+        for (let i = 0; i < len; i += 1)
+            out[i] += ch[i] / channels.length;
+    }
+    return out;
+}
+function resample(samples, fromRate, toRate) {
+    if (fromRate === toRate)
+        return samples;
+    const ratio = fromRate / toRate;
+    const len = Math.floor(samples.length / ratio);
+    const out = new Float32Array(len);
+    for (let i = 0; i < len; i += 1) {
+        const pos = i * ratio;
+        const i0 = Math.floor(pos);
+        const i1 = Math.min(samples.length - 1, i0 + 1);
+        const t = pos - i0;
+        out[i] = samples[i0] * (1 - t) + samples[i1] * t;
+    }
+    return out;
+}
+
+return Object.freeze(exports);
+})();
+  const PmWav = (() => {
+const exports = Object.create(null);
+const require = id => { const m = ({ "./rhythm.mjs": PmRhythm, "./stats.mjs": PmStats, "./mixer.mjs": PmMixer })[id]; if (!m) throw new Error("unknown module " + id); return m; };
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.encodeWav = encodeWav;
+exports.bytesToBase64 = bytesToBase64;
+exports.wavDataUrl = wavDataUrl;
+// Float32 单声道 → 16-bit PCM WAV（Uint8Array）。纯函数。
+function encodeWav(samples, sampleRate) {
+    const dataLen = samples.length * 2;
+    const buffer = new ArrayBuffer(44 + dataLen);
+    const view = new DataView(buffer);
+    const str = (offset, s) => { for (let i = 0; i < s.length; i += 1)
+        view.setUint8(offset + i, s.charCodeAt(i)); };
+    str(0, "RIFF");
+    view.setUint32(4, 36 + dataLen, true);
+    str(8, "WAVE");
+    str(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    str(36, "data");
+    view.setUint32(40, dataLen, true);
+    let o = 44;
+    for (let i = 0; i < samples.length; i += 1, o += 2) {
+        const v = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(o, v < 0 ? v * 0x8000 : v * 0x7FFF, true);
+    }
+    return new Uint8Array(buffer);
+}
+function bytesToBase64(bytes) {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk)
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    return btoa(binary);
+}
+function wavDataUrl(samples, sampleRate) {
+    return "data:audio/wav;base64," + bytesToBase64(encodeWav(samples, sampleRate));
+}
+
+return Object.freeze(exports);
+})();
+  const SOUND_SOURCES = {"rain_light":{"id":725603,"name":"Rain Falling On The Greenhouse","author":"WhiteNoiseSleeper","duration":232},"rain_heavy":{"id":592996,"name":"heavy rain on a small tent hq","author":"Petrosilia","duration":67},"rain_window":{"id":648529,"name":"RAIN on glass window.wav","author":"nicoproson","duration":174},"thunder":{"id":158692,"name":"Distant Thunder and Rain from Half Open Window 1.aif","author":"RutgerMuller","duration":88},"waves":{"id":803679,"name":"Ocean Waves Crashing on the Coast of Big Lagoon, Redwoods","author":"CVLTIV8R","duration":80},"stream":{"id":588179,"name":"Mountain River 001.wav","author":"Auxide_Audio","duration":47},"wind":{"id":217506,"name":"Wind blowing in a field in Texas, USA","author":"felix.blume","duration":212},"night_crickets":{"id":425425,"name":"AMB_Rural_Summer_Night.wav","author":"AnthonyRamirez","duration":125},"fire":{"id":717579,"name":"Fireplace Fire Crackling","author":"RyanKingArt","duration":61},"fan":{"id":457551,"name":"Computer Fan Noise","author":"Fabrizio84","duration":121},"aircon":{"id":637930,"name":"vent air conditioner clean rattle hum.flac","author":"kyles","duration":43},"clock":{"id":840291,"name":"thsha1_wall_clock_tick_20251229","author":"thsha1","duration":47},"cat_purr":{"id":424355,"name":"purring happy cat.mp3","author":"Minscer","duration":49},"train":{"id":219233,"name":"DC Metro - Interior 1","author":"crashoverride6","duration":218},"airplane":{"id":456092,"name":"Airplane cabin ambience / atmosphere Airbus A330-300","author":"FillSoko","duration":155},"brown_noise":{"id":242513,"name":"brownnoise.aiff","author":"Hinoirocks","duration":34},"pink_noise":{"id":470754,"name":"Pink Noise Filtered.wav","author":"Zrte","duration":38},"white_noise":{"id":249313,"name":"White Noise -20dBFS 30 Second.wav","author":"JarredGibb","duration":30},"singing_bowl":{"id":204915,"name":"Singing Bowl a tuned","author":"brodjaman","duration":94}};
+// ── 存储：settings 一行、nights 每晚一行、mixes 每个组合一行、library 用户自己加的声音每个一行 ──
+const DEFAULT_SETTINGS = Object.freeze({
+  theme: "auto", autoBy: "system", characterId: "", ttsOn: true, sttOn: true, emotion: "calm",
+  timerMin: 45, fadeMin: 5, syncChat: true, morningOn: true, freesoundKey: "",
+  goal: { bedtime: "23:30", hours: 7.5 },
+  rhythmPreset: "gentle", rhythm: null, directions: ["today", "scene"], forbid: "",
+  insomniaDirections: ["breath", "trivia"], insomniaForbid: "",
+  currentMix: { name: "", layers: [], master: 0.7 }, dimLevel: 0,
+});
+
+async function loadSettings() {
+  const rows = await api.db.list("settings", { limit: 5 });
+  const row = rows && rows[0];
+  const merged = { ...DEFAULT_SETTINGS, ...(row || {}) };
+  merged.goal = { ...DEFAULT_SETTINGS.goal, ...(merged.goal || {}) };
+  merged.currentMix = { ...DEFAULT_SETTINGS.currentMix, ...(merged.currentMix || {}) };
+  if (!row) { const created = await api.db.create("settings", { ...DEFAULT_SETTINGS }); merged.id = created.id; }
+  state.settings = merged;
+  return merged;
+}
+let saveTimer = 0;
+function saveSettings(patch) {
+  Object.assign(state.settings, patch || {});
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      const { id, ...data } = state.settings;
+      await api.db.update("settings", id, data);
+    } catch (e) { fail(e); }
+  }, 250);
+}
+
+async function loadNights() {
+  const rows = await api.db.list("nights", { limit: 500 });
+  state.nights = (rows || []).filter(n => n && n.date).sort((a, b) => (a.date < b.date ? 1 : -1));
+  return state.nights;
+}
+async function upsertNight(night) {
+  if (night.id) { await api.db.update("nights", night.id, night); }
+  else { const created = await api.db.create("nights", night); night.id = created.id; }
+  const idx = state.nights.findIndex(n => n.id === night.id);
+  if (idx >= 0) state.nights[idx] = night; else state.nights.unshift(night);
+  state.nights.sort((a, b) => (a.date < b.date ? 1 : -1));
+  emit("nights");
+  return night;
+}
+async function loadMixes() { state.mixes = (await api.db.list("mixes", { limit: 100 })) || []; return state.mixes; }
+async function loadLibrary() { state.library = (await api.db.list("library", { limit: 200 })) || []; return state.library; }
+
+async function resetAll() {
+  for (const table of ["nights", "mixes", "library"]) {
+    const rows = await api.db.list(table, { limit: 500 });
+    for (const row of rows || []) {
+      if (row.mediaRef) { try { await api.media.delete({ ref: row.mediaRef }); } catch { /* ignore */ } }
+      await api.db.delete(table, row.id);
+    }
+  }
+  const { id } = state.settings;
+  await api.db.update("settings", id, { ...DEFAULT_SETTINGS });
+  state.settings = { ...DEFAULT_SETTINGS, id };
+  state.nights = []; state.mixes = []; state.library = [];
+}
+// ── 内置声音目录：文件在 assets/sounds/<key>.mp3，来源见 assets/sources.json ──
+const SOUND_CATEGORIES = [
+  { id: "rain", name: "雨" }, { id: "water", name: "水" }, { id: "nature", name: "风与林" },
+  { id: "room", name: "室内" }, { id: "travel", name: "旅途" }, { id: "noise", name: "纯噪" }, { id: "mine", name: "我的" },
+];
+const SOUND_ICONS = {
+  rain_light: '<path d="M7 14a4 4 0 1 1 1-7.9A5 5 0 0 1 17.5 8 3.5 3.5 0 0 1 17 15H7z"/><path d="M9 17l-1 3M13 17l-1 3M17 17l-1 3" stroke-linecap="round"/>',
+  rain_heavy: '<path d="M7 13a4 4 0 1 1 1-7.9A5 5 0 0 1 17.5 7 3.5 3.5 0 0 1 17 14H7z"/><path d="M8 16l-2 5M12 16l-2 5M16 16l-2 5M20 16l-2 5" stroke-linecap="round"/>',
+  rain_window: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M12 3v18M4 12h16"/><path d="M8 7l-1 2.5M16 15l-1 2.5M9 16l-1 2.5M16 6l-1 2.5" stroke-linecap="round"/>',
+  thunder: '<path d="M7 13a4 4 0 1 1 1-7.9A5 5 0 0 1 17.5 7 3.5 3.5 0 0 1 17 14h-3"/><path d="M13 11l-3 5h3l-2 5 5-7h-3l2-3z" stroke-linejoin="round"/>',
+  waves: '<path d="M3 10c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 15c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 20c2-2 4-2 6 0s4 2 6 0 4-2 6 0" stroke-linecap="round"/>',
+  stream: '<path d="M4 6c3 0 3 3 6 3s3-3 6-3 3 3 6 3"/><path d="M4 12c3 0 3 3 6 3s3-3 6-3 3 3 6 3"/><path d="M4 18c3 0 3 3 6 3s3-3 6-3 3 3 6 3"/><path d="M8 4l2-1M14 20l2 1" stroke-linecap="round"/>',
+  wind: '<path d="M3 8h10a3 3 0 1 0-3-3M3 13h15a3 3 0 1 1-3 3M3 18h8a2 2 0 1 1-2 2" stroke-linecap="round"/>',
+  night_crickets: '<path d="M14 4a8 8 0 1 0 6 12 6.5 6.5 0 0 1-6-12z"/><path d="M4 20c2-3 5-3 7 0M6 20l-1 2M9 20l1 2" stroke-linecap="round"/>',
+  fire: '<path d="M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-9z" stroke-linejoin="round"/><path d="M5 21h14" stroke-linecap="round"/>',
+  fan: '<circle cx="12" cy="12" r="2"/><path d="M12 10c0-4-2-6-4-6s-2 3 0 5M14 12c4 0 6-2 6-4s-3-2-5 0M12 14c0 4 2 6 4 6s2-3 0-5M10 12c-4 0-6 2-6 4s3 2 5 0"/>',
+  aircon: '<rect x="3" y="5" width="18" height="9" rx="2"/><path d="M6 11h12M7 17l-1 3M12 17v3M17 17l1 3" stroke-linecap="round"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/>',
+  cat_purr: '<path d="M5 9l1-5 4 3h4l4-3 1 5a7 7 0 1 1-14 0z" stroke-linejoin="round"/><path d="M9 13h.5M14.5 13h.5M11 16c.5.6 1.5.6 2 0" stroke-linecap="round"/>',
+  train: '<rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 10h14M9 14h.5M14.5 14h.5M8 17l-2 4M16 17l2 4" stroke-linecap="round"/>',
+  airplane: '<path d="M10 20l1-6-7-2v-2l7 1 3-8h2l-1 8 6 2v2l-6-1-1 6h-1l-1-5-2 5z" stroke-linejoin="round"/>',
+  brown_noise: '<path d="M3 14c2-6 4-6 6 0s4 6 6 0 4-6 6 0" stroke-linecap="round"/>',
+  pink_noise: '<path d="M3 13c1-4 2-4 3 0s2 4 3 0 2-4 3 0 2 4 3 0 2-4 3 0 2 4 3 0" stroke-linecap="round"/>',
+  white_noise: '<path d="M3 12l2-5 2 9 2-8 2 7 2-9 2 8 2-6 2 7 2-5" stroke-linecap="round" stroke-linejoin="round"/>',
+  singing_bowl: '<path d="M4 10h16a8 8 0 0 1-16 0z"/><path d="M8 10V7M3 6l1 1M21 6l-1 1" stroke-linecap="round"/><path d="M6 20h12" stroke-linecap="round"/>',
+  headphones: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="13" width="4" height="7" rx="1.5"/><rect x="17" y="13" width="4" height="7" rx="1.5"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4" stroke-linecap="round"/>',
+  moon: '<path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z" stroke-linejoin="round"/>',
+};
+const iconSvg = key => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${SOUND_ICONS[key] || SOUND_ICONS.headphones}</svg>`;
+const BUILTIN_SOUNDS = [
+  { key: "rain_light", name: "小雨", cat: "rain", drift: false },
+  { key: "rain_heavy", name: "大雨", cat: "rain", drift: true },
+  { key: "rain_window", name: "雨打窗", cat: "rain", drift: false },
+  { key: "thunder", name: "远雷", cat: "rain", drift: true },
+  { key: "waves", name: "海浪", cat: "water", drift: true },
+  { key: "stream", name: "溪流", cat: "water", drift: false },
+  { key: "wind", name: "旷野的风", cat: "nature", drift: true },
+  { key: "night_crickets", name: "夏夜虫鸣", cat: "nature", drift: true },
+  { key: "fire", name: "篝火", cat: "nature", drift: true },
+  { key: "fan", name: "风扇", cat: "room", drift: false },
+  { key: "aircon", name: "空调", cat: "room", drift: false },
+  { key: "clock", name: "挂钟", cat: "room", drift: false },
+  { key: "cat_purr", name: "猫呼噜", cat: "room", drift: true },
+  { key: "train", name: "地铁车厢", cat: "travel", drift: true },
+  { key: "airplane", name: "飞机舱", cat: "travel", drift: false },
+  { key: "brown_noise", name: "棕噪", cat: "noise", drift: false },
+  { key: "pink_noise", name: "粉噪", cat: "noise", drift: false },
+  { key: "white_noise", name: "白噪", cat: "noise", drift: false },
+  { key: "singing_bowl", name: "颂钵", cat: "noise", drift: true },
+];
+const MIX_PRESETS = [
+  { name: "雨夜壁炉", layers: [{ key: "rain_window", volume: .7 }, { key: "fire", volume: .5 }, { key: "thunder", volume: .25 }] },
+  { name: "机舱", layers: [{ key: "airplane", volume: .8 }, { key: "brown_noise", volume: .3 }] },
+  { name: "海边帐篷", layers: [{ key: "waves", volume: .7 }, { key: "wind", volume: .35 }, { key: "night_crickets", volume: .3 }] },
+  { name: "林间小屋", layers: [{ key: "stream", volume: .5 }, { key: "night_crickets", volume: .5 }, { key: "fire", volume: .35 }] },
+  { name: "深夜自习室", layers: [{ key: "clock", volume: .4 }, { key: "fan", volume: .6 }, { key: "rain_light", volume: .4 }] },
+  { name: "猫和雨", layers: [{ key: "cat_purr", volume: .6 }, { key: "rain_light", volume: .5 }] },
+  { name: "纯棕噪", layers: [{ key: "brown_noise", volume: .8 }] },
+];
+function findSound(key) {
+  return BUILTIN_SOUNDS.find(s => s.key === key) || state.library.find(s => s.key === key) || null;
+}
+function allSounds() {
+  return BUILTIN_SOUNDS.concat(state.library.map(s => ({ key: s.key, name: s.name, icon: s.icon || "headphones", cat: "mine", drift: false, user: true, mediaRef: s.mediaRef })));
+}
+// ── 音频引擎：解码 → 混音（domain/mixer）→ WAV → media.put → 宿主 ambience 通道循环播放 ──
+// 宿主环境音只有一条通道且播放中改不了音量，所以每次改层/改音量都重新合成一段再切。
+const engine = (() => {
+  const decoded = new Map();          // key → Float32Array(mono @ MIX_SAMPLE_RATE)
+  let decodeCtx = null;
+  let currentRef = null;              // 正在播的循环体 media ref
+  let playing = false;
+  let renderSeq = 0;
+  let renderedSig = "";
+  let lastLoop = null;                // 上一次合成的 Float32Array，渐弱尾巴用
+
+  function ctx() {
+    if (!decodeCtx) {
+      const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      decodeCtx = new AC(1, 1, 44100);
+    }
+    return decodeCtx;
+  }
+  async function fetchBytes(source) {
+    if (source.startsWith("media-store://")) {
+      const media = await api.media.get({ ref: source });
+      return (await fetch(media.dataUrl)).arrayBuffer();
+    }
+    return (await fetch(source)).arrayBuffer();
+  }
+  function sourceFor(sound) {
+    if (sound.user) return sound.mediaRef;
+    return api.app.getAssetUrl(`assets/sounds/${sound.key}.mp3`);
+  }
+  async function decode(sound) {
+    if (decoded.has(sound.key)) return decoded.get(sound.key);
+    const src = await sourceFor(sound);
+    if (!src) throw new Error(`找不到声音文件：${sound.name}`);
+    const bytes = await fetchBytes(src);
+    const buffer = await new Promise((resolve, reject) => {
+      const p = ctx().decodeAudioData(bytes.slice(0), resolve, reject);
+      if (p && p.then) p.then(resolve, reject);
+    });
+    const channels = [];
+    for (let c = 0; c < buffer.numberOfChannels; c += 1) channels.push(buffer.getChannelData(c));
+    const mono = PmMixer.resample(PmMixer.toMono(channels), buffer.sampleRate, PmMixer.MIX_SAMPLE_RATE);
+    decoded.set(sound.key, mono);
+    return mono;
+  }
+  function signature(mix) {
+    return JSON.stringify({ l: (mix.layers || []).map(l => [l.key, Math.round(l.volume * 100), !!l.drift]), m: Math.round((mix.master ?? .7) * 100) });
+  }
+  async function render(mix, { loopSeconds = 90 } = {}) {
+    const layers = [];
+    for (const layer of mix.layers || []) {
+      const sound = findSound(layer.key); if (!sound) continue;
+      const samples = await decode(sound.user ? { ...sound, user: true, mediaRef: sound.mediaRef } : sound);
+      layers.push({ samples, volume: layer.volume, drift: layer.drift ?? sound.drift, seed: hashKey(layer.key) });
+    }
+    const { samples } = PmMixer.mixLayers(layers, { loopSeconds, master: mix.master ?? .7 });
+    return samples;
+  }
+  async function putWav(samples) {
+    const dataUrl = PmWav.wavDataUrl(samples, PmMixer.MIX_SAMPLE_RATE);
+    const stored = await api.media.put({ dataUrl });
+    return stored.ref;
+  }
+  async function swapRef(ref) {
+    const old = currentRef; currentRef = ref;
+    if (old && old !== ref) { try { await api.media.delete({ ref: old }); } catch { /* ignore */ } }
+  }
+  // 播放（或切换）当前声景。空层 → 停。
+  async function play(mix) {
+    const seq = ++renderSeq;
+    if (!mix.layers || !mix.layers.length) { await stop(); return; }
+    const sig = signature(mix);
+    if (playing && sig === renderedSig && currentRef) return;
+    emit("engine", { busy: true });
+    try {
+      const samples = await render(mix);
+      if (seq !== renderSeq) return;
+      lastLoop = samples;
+      const ref = await putWav(samples);
+      if (seq !== renderSeq) { try { await api.media.delete({ ref }); } catch { /* ignore */ } return; }
+      await api.voice.play({ channel: "ambience", dataUrl: ref, loop: true, volume: 1 });
+      playing = true; renderedSig = sig; emit("engine", { busy: false, playing: true });
+      await swapRef(ref);
+    } finally { if (seq === renderSeq) emit("engine", { busy: false }); }
+  }
+  async function stop() {
+    renderSeq += 1; const was = playing; playing = false; renderedSig = "";
+    if (was) emit("engine", { busy: false, playing: false });
+    try { await api.voice.stopPlayback({ channel: "ambience" }); } catch { /* ignore */ }
+    if (currentRef) { const ref = currentRef; currentRef = null; try { await api.media.delete({ ref }); } catch { /* ignore */ } }
+  }
+  // 渐弱：把循环体做成一段递减的尾巴，非循环播放；播完 resolve，声音自然结束。
+  async function fadeOut(seconds) {
+    if (!playing || !lastLoop) { await stop(); return; }
+    const tail = PmMixer.fadeTail(lastLoop, seconds);
+    const ref = await putWav(tail);
+    playing = false; renderedSig = "";
+    try { await api.voice.play({ channel: "ambience", dataUrl: ref, loop: false, volume: 1 }); }
+    finally { try { await api.media.delete({ ref }); } catch { /* ignore */ } await stop(); }
+  }
+  // 单个声音试听 10 秒
+  async function preview(sound) {
+    const samples = await decode(sound);
+    const clip = samples.subarray(0, Math.min(samples.length, PmMixer.MIX_SAMPLE_RATE * 10));
+    const out = new Float32Array(clip.length);
+    const rms = PmMixer.rmsOf(clip) || 1; const g = Math.min(4, .12 / rms);
+    for (let i = 0; i < clip.length; i += 1) out[i] = Math.tanh(clip[i] * g * 2);
+    await api.voice.play({ channel: "ambience", dataUrl: PmWav.wavDataUrl(out, PmMixer.MIX_SAMPLE_RATE), loop: false, volume: 1 });
+  }
+  function hashKey(s) { let h = 2166136261; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  return { decode, play, stop, fadeOut, preview, isPlaying: () => playing, forget: key => decoded.delete(key) };
+})();
+// ── 声音商店：Freesound API（CC0），搜索走浏览器直连，下载走宿主代理拿二进制 ──
+const store = (() => {
+  const MAX_SECONDS = 170; // 64k 预览 ≈ 8KB/s，宿主代理二进制上限约 1.5MB
+  function key() { return (state.settings.freesoundKey || "").trim(); }
+  async function search(query, page = 1) {
+    if (!key()) throw new Error("先在「配置」里填 Freesound API Key");
+    const params = new URLSearchParams({
+      query, page: String(page), page_size: "15", sort: "rating_desc",
+      filter: `license:"Creative Commons 0" duration:[10 TO ${MAX_SECONDS}]`,
+      fields: "id,name,username,duration,avg_rating,num_ratings,previews,license,url",
+    });
+    const res = await api.network.fetch({ url: `https://freesound.org/apiv2/search/text/?${params}`, headers: { Authorization: `Token ${key()}` }, timeoutMs: 20000 });
+    if (!res.ok) throw new Error(res.status === 401 ? "Key 不对或已失效" : `Freesound 返回 ${res.status}`);
+    const json = res.json || JSON.parse(res.text || "{}");
+    return { results: json.results || [], next: !!json.next, count: json.count || 0 };
+  }
+  async function download(item) {
+    const url = item.previews && item.previews["preview-lq-mp3"];
+    if (!url) throw new Error("这条没有预览音频");
+    const res = await api.network.fetch({ url, proxy: true, timeoutMs: 90000 });
+    if (!res.ok || !res.binary || !res.data) throw new Error("下载失败，可能超过体积上限");
+    const dataUrl = `data:${res.contentType || "audio/mpeg"};base64,${res.data}`;
+    const stored = await api.media.put({ dataUrl });
+    const row = await api.db.create("library", {
+      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound",
+      author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), mediaRef: stored.ref,
+    });
+    state.library.push(row);
+    return row;
+  }
+  async function importFile() {
+    const picked = await api.media.pick({ accept: "audio/*" });
+    if (!picked || !picked.file || !picked.file.dataUrl) return null;
+    const stored = await api.media.put({ dataUrl: picked.file.dataUrl });
+    const name = (picked.file.name || "我的录音").replace(/\.[a-z0-9]+$/i, "").slice(0, 24);
+    const row = await api.db.create("library", { key: `my_${Date.now().toString(36)}`, name, icon: "mic", source: "import", mediaRef: stored.ref });
+    state.library.push(row);
+    return row;
+  }
+  async function remove(row) {
+    if (row.mediaRef) { try { await api.media.delete({ ref: row.mediaRef }); } catch { /* ignore */ } }
+    await api.db.delete("library", row.id);
+    state.library = state.library.filter(r => r.id !== row.id);
+    engine.forget(row.key);
+  }
+  return { search, download, importFile, remove, MAX_SECONDS };
+})();
+// ── 入睡会话：开声景 → 角色分段说话（越说越少）→ 定时渐弱 → 落夜记 ──
+const session = (() => {
+  let run = null;   // { cancelled, night, mode, timer, startedAt, lines[] }
+  let clockTimer = 0;
+
+  const userName = async () => { try { const p = await api.user.getProfile({ characterId: state.character?.id }); return p?.name || "你"; } catch { return "你"; } };
+  const wait = async (sec) => { const until = Date.now() + sec * 1000; while (Date.now() < until) { if (!run || run.cancelled) return false; await sleep(Math.min(500, until - Date.now())); } return !!run && !run.cancelled; };
+
+  function mixLabel() {
+    const mix = state.settings.currentMix;
+    if (!mix.layers.length) return "";
+    return mix.name || mix.layers.map(l => findSound(l.key)?.name).filter(Boolean).join("+");
+  }
+  async function voiceAvailable() {
+    if (state.voiceReady != null) return state.voiceReady;
+    try { const v = await api.voice.readProfiles({ characterId: state.character?.id }); state.voiceReady = !!(v && v.selected); }
+    catch { state.voiceReady = false; }
+    return state.voiceReady;
+  }
+  function setSub(text) {
+    const node = $("sleep-sub"); node.classList.add("fading");
+    setTimeout(() => { node.textContent = text; node.classList.remove("fading"); }, 500);
+  }
+  function setStatus(text) { $("sleep-status").textContent = text || ""; }
+
+  async function speak(text) {
+    if (!run || run.cancelled) return;
+    setSub(text);
+    run.lines.push(text);
+    if (state.settings.ttsOn && await voiceAvailable()) {
+      try {
+        const tts = await api.voice.tts({ characterId: state.character.id, text, emotion: state.settings.emotion || undefined });
+        if (!run || run.cancelled) return;
+        await api.voice.play({ dataUrl: tts.dataUrl, volume: 1 });
+      } catch (e) { setStatus("语音没成功，只显示字幕"); console.warn(e); }
+    }
+  }
+  function instructionFor(step, total, dirs, forbid) {
+    const now = new Date();
+    const chosen = PmRhythm.DIRECTIONS.filter(d => dirs.includes(d.id));
+    const parts = [
+      `现在是 ${fmtClock(now)}。这是第 ${step.index + 1} 段，共 ${total} 段，这一段大约 ${step.chars} 字${step.index === total - 1 ? "，是最后一段，只留一句收尾" : ""}。`,
+      chosen.length ? `内容方向（任选其一或融合）：${chosen.map(d => `${d.label}（${d.hint}）`).join("；")}。` : "",
+      mixLabel() ? `房间里放着的声音：${mixLabel()}，可以偶尔提到，也可以不提。` : "",
+      forbid ? `用户的禁止项，必须遵守：${forbid}` : "",
+      "只输出要说的话。",
+    ];
+    return parts.filter(Boolean).join("\n");
+  }
+  async function generate(tags, instruction) {
+    const result = await api.ai.generate({
+      characterId: state.character.id, appTags: ["peimian", tags],
+      messages: run.lines.slice(-6).map(t => ({ role: "assistant", content: t })),
+      instruction,
+    });
+    return String(result && result.text || "").replace(/^["“「]+|["”」]+$/g, "").trim();
+  }
+  async function talkLoop() {
+    const mode = run.mode;
+    const s = state.settings;
+    const rhythm = mode === "insomnia" ? { ...PmRhythm.normalizeRhythm(s.rhythm), segments: Math.max(2, Math.min(4, PmRhythm.normalizeRhythm(s.rhythm).segments)) } : s.rhythm;
+    const steps = PmRhythm.buildSchedule(rhythm);
+    const dirs = mode === "insomnia" ? s.insomniaDirections : s.directions;
+    const forbid = mode === "insomnia" ? s.insomniaForbid : s.forbid;
+    if (!await wait(4)) return;
+    for (const step of steps) {
+      if (!run || run.cancelled) return;
+      setStatus("TA 在想怎么说…");
+      let text = "";
+      try { text = await generate(mode === "insomnia" ? "insomnia" : "lull", instructionFor(step, steps.length, dirs, forbid)); }
+      catch (e) { setStatus("这一段没生成出来，先陪着"); console.warn(e); }
+      setStatus("");
+      if (text) await speak(text);
+      run.night.segments = run.lines.length;
+      if (step.gapAfterSec && !await wait(step.gapAfterSec)) return;
+    }
+    setStatus("");
+  }
+  async function timerLoop() {
+    if (!run.timerMin) return;
+    const fadeSec = Math.min(run.timerMin * 60 - 10, (state.settings.fadeMin || 5) * 60);
+    const untilFade = run.timerMin * 60 - fadeSec;
+    if (!await wait(untilFade)) return;
+    setStatus("声音慢慢变小…");
+    try { await engine.fadeOut(fadeSec); } catch (e) { console.warn(e); }
+    if (!run || run.cancelled) return;
+    setStatus("声音停了，晚安");
+  }
+  function tickClock() {
+    const now = new Date();
+    $("sleep-clock").textContent = fmtClock(now);
+    if (run && run.timerMin) {
+      const left = Math.max(0, Math.round((run.startedAt + run.timerMin * 60000 - now.getTime()) / 60000));
+      $("sleep-remain").textContent = left ? `还有 ${left} 分钟` : "";
+    } else $("sleep-remain").textContent = "到天亮";
+  }
+  async function writeChat(text) {
+    if (!state.settings.syncChat || !state.character) return;
+    try { await api.chat.writeHistory({ characterId: state.character.id, role: "user", content: text }); } catch (e) { console.warn(e); }
+  }
+
+  async function start({ mode, timerMin }) {
+    if (run) return;
+    if (!state.character && mode !== "sound") throw new Error("先选一个角色");
+    const now = new Date();
+    const key = PmStats.nightKeyFor(now);
+    let night = state.nights.find(n => n.date === key && !n.wakeAt);
+    const reopened = !!night;
+    if (!night) night = { date: key, sleepAt: now.toISOString(), wakeAt: "", durationMin: 0, rating: 0, note: "", wakeups: 0, segments: 0, lastLine: "", morningLine: "", characterId: state.character?.id || "", characterName: state.character?.name || "" };
+    night.mode = mode; night.mixName = mixLabel();
+    if (reopened) night.wakeups = (night.wakeups || 0) + 1;
+    await upsertNight(night);
+    run = { cancelled: false, night, mode, timerMin, startedAt: now.getTime(), lines: [] };
+    $("sleep").hidden = false; $("sleep").classList.toggle("dim", !!state.settings.dimLevel);
+    $("btn-mic").hidden = !(state.settings.sttOn && state.character && mode !== "sound");
+    setSub(mode === "sound" ? "" : "……"); setStatus(""); tickClock(); clockTimer = setInterval(tickClock, 15000);
+    const mix = state.settings.currentMix;
+    if (mix.layers.length) { setStatus("声音准备中…"); try { await engine.play(mix); setStatus(""); } catch (e) { setStatus("声音没放出来：" + (e.message || e)); } }
+    const name = await userName();
+    writeChat(reopened
+      ? `[陪眠：${name}半夜醒了又躺下，${fmtClock(now)}，${state.character?.name || "TA"}在枕边陪着。]`
+      : `[陪眠：${name}在 ${fmtClock(now)} 准备睡了${mixLabel() ? `，房间里放着${mixLabel()}` : ""}${state.character ? `，${state.character.name}在枕边陪着` : ""}。]`);
+    timerLoop().catch(console.warn);
+    if (mode !== "sound") talkLoop().catch(console.warn);
+  }
+  async function stop() {
+    if (!run) return;
+    run.cancelled = true;
+    const night = run.night;
+    night.segments = run.lines.length; night.lastLine = run.lines[run.lines.length - 1] || night.lastLine || "";
+    run = null; clearInterval(clockTimer);
+    $("sleep").hidden = true;
+    try { await api.voice.stopPlayback({ channel: "voice" }); } catch { /* ignore */ }
+    await engine.stop();
+    await upsertNight(night);
+  }
+  // 躺着说话：按住识别，松开发出去
+  let listening = false;
+  async function listen() {
+    if (!run || listening || !state.character) return;
+    listening = true; $("btn-mic").classList.add("rec"); setStatus("在听…");
+    try {
+      const stt = await api.voice.stt({ lang: "zh-CN", timeoutMs: 12000 });
+      const heard = stt && stt.text ? stt.text.trim() : "";
+      if (!heard) { setStatus("没听清"); return; }
+      setStatus(`你说：${heard}`);
+      const text = await generate("reply", `用户刚刚小声说：「${heard}」。现在是 ${fmtClock(new Date())}。只回一两句，不超过 40 字。`);
+      setStatus("");
+      if (text) await speak(text);
+    } catch (e) { setStatus("没听到，再试一次"); console.warn(e); }
+    finally { listening = false; $("btn-mic").classList.remove("rec"); }
+  }
+  async function stopListening() { try { await api.voice.stopRecord(); } catch { /* ignore */ } }
+
+  // 醒来：补时长、自评、早安一句
+  async function wake(night, { rating, note }) {
+    const now = new Date();
+    night.wakeAt = now.toISOString();
+    night.durationMin = PmStats.minutesBetween(night.sleepAt, night.wakeAt);
+    night.rating = rating || 0; night.note = note || "";
+    await upsertNight(night);
+    const name = await userName();
+    writeChat(`[陪眠：${name}在 ${fmtClock(now)} 醒了，昨晚睡了 ${PmStats.formatDuration(night.durationMin)}${night.rating ? `，自评 ${night.rating}/5` : ""}${night.note ? `，说：${night.note}` : ""}。]`);
+    if (state.settings.morningOn && state.character) {
+      try {
+        const result = await api.ai.generate({
+          characterId: state.character.id, appTags: ["peimian", "morning"],
+          instruction: `昨晚数据：${fmtClock(new Date(night.sleepAt))} 睡，${fmtClock(now)} 醒，睡了 ${PmStats.formatDuration(night.durationMin)}；声音：${night.mixName || "没开"}；你最后说的：「${night.lastLine || "（没说话）"}」；起夜 ${night.wakeups || 0} 次；用户自评 ${night.rating || "未评"}/5${night.note ? `；用户说：${night.note}` : ""}。说一句早安。`,
+        });
+        night.morningLine = String(result?.text || "").trim().slice(0, 200);
+        await upsertNight(night);
+      } catch (e) { console.warn(e); }
+    }
+    return night;
+  }
+  return { start, stop, listen, stopListening, wake, active: () => !!run };
+})();
+// ── 主题：夜航（day/night 自动对）、暖烛、灰雾 ──
+const theme = (() => {
+  const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function resolve() {
+    const s = state.settings;
+    if (s.theme === "candle" || s.theme === "mist") return s.theme;
+    const by = s.autoBy || "system";
+    if (by === "day") return "day";
+    if (by === "night") return "night";
+    if (by === "time") { const h = new Date().getHours(); return h >= 7 && h < 19 ? "day" : "night"; }
+    return mq && !mq.matches ? "day" : "night";
+  }
+  function apply() { const name = resolve(); $("app").dataset.theme = name; emit("theme", name); }
+  if (mq && mq.addEventListener) mq.addEventListener("change", apply);
+  setInterval(() => { if (state.settings && state.settings.theme === "auto" && state.settings.autoBy === "time") apply(); }, 60000);
+  return { apply, resolve };
+})();
+// ── 今夜 ──
+const home = (() => {
+  const WD = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  const MON = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const STOPS = [{ min: 15, lbl: "15分" }, { min: 30, lbl: "30分" }, { min: 45, lbl: "45分" }, { min: 60, lbl: "1时" }, { min: 90, lbl: "1.5时" }, { min: 0, lbl: "天亮" }];
+  const R = 128, C = 150, A0 = -120, SWEEP = 240;
+  const pt = (deg, r = R) => { const t = deg * Math.PI / 180; return [C + r * Math.sin(t), C - r * Math.cos(t)]; };
+  const angleOf = i => A0 + SWEEP * i / (STOPS.length - 1);
+  function greeting() { const h = new Date().getHours(); if (h < 5) return "还醒着"; if (h < 11) return "早"; if (h < 18) return "午安"; if (h < 22) return "晚上好"; return "晚安"; }
+  function mixText() { const mix = state.settings.currentMix; return mix.layers.map(l => findSound(l.key)?.name).filter(Boolean); }
+  function openNight() { return state.nights.find(n => !n.wakeAt && Date.now() - new Date(n.sleepAt).getTime() < 20 * 3600000) || null; }
+
+  function renderDial() {
+    const idx = Math.max(0, STOPS.findIndex(s => s.min === state.timerMin));
+        const arc = $("ring-arc");
+    if (!arc.getAttribute("d")) { const [x0, y0] = pt(A0), [x1, y1] = pt(A0 + SWEEP); arc.setAttribute("d", `M${x0.toFixed(1)} ${y0.toFixed(1)} A${R} ${R} 0 1 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`); arc.setAttribute("pathLength", "1"); }
+    arc.style.strokeDashoffset = String(1 - idx / (STOPS.length - 1));
+    arc.style.opacity = idx === 0 ? "0" : "1";
+    const g = $("ring-stops"); g.innerHTML = "";
+    STOPS.forEach((s, i) => {
+      const a = angleOf(i); const [x, y] = pt(a); const [lx, ly] = pt(a, R + 22);
+      const on = i === idx;
+      const ns = "http://www.w3.org/2000/svg";
+      const dot = document.createElementNS(ns, "circle"); dot.setAttribute("class", "ring-stop" + (on ? " on" : "")); dot.setAttribute("cx", x); dot.setAttribute("cy", y); dot.setAttribute("r", on ? 5 : 3.5);
+      const lbl = document.createElementNS(ns, "text"); lbl.setAttribute("class", "ring-lbl" + (on ? " on" : "")); lbl.setAttribute("x", lx); lbl.setAttribute("y", ly + 4); lbl.textContent = s.lbl;
+      const hit = document.createElementNS(ns, "circle"); hit.setAttribute("class", "ring-hit"); hit.setAttribute("cx", x); hit.setAttribute("cy", y); hit.setAttribute("r", 22);
+      hit.onclick = () => { state.timerMin = s.min; saveSettings({ timerMin: s.min }); renderDial(); $("dial").classList.remove("tick"); void $("dial").offsetWidth; $("dial").classList.add("tick"); };
+      g.append(dot, lbl, hit);
+    });
+    $("dial-val").textContent = state.timerMin ? STOPS[idx].lbl.replace("分", " 分").replace("时", " 小时") : "到天亮";
+    $("dial-val").nextElementSibling.textContent = state.timerMin ? "后停" : "";
+  }
+  function renderTop() {
+    const d = new Date();
+    $("hdr-date").textContent = `${WD[d.getDay()]} · ${String(d.getDate()).padStart(2, "0")} ${MON[d.getMonth()]}`;
+    $("home-greet").textContent = greeting();
+    const open = openNight(); const c = state.character;
+    $("hero-who").innerHTML = !c ? "去配置里选一个陪你的人" : open ? `<span class="live"></span>${esc(c.name)} 从 ${esc(fmtClock(new Date(open.sleepAt)))} 起一直陪着你` : `${esc(c.name)} · 今晚在${state.voiceReady === false ? " · 还没配语音，只出字幕" : ""}`;
+  }
+  function renderRows() {
+    const mix = state.settings.currentMix; const names = mixText();
+    $("home-mix-name").textContent = mix.layers.length ? (mix.name || `${mix.layers.length} 层`) : "安静";
+    $("home-mix-layers").textContent = names.length ? names.join(" · ") : "没有开任何声音";
+    const preset = PmRhythm.RHYTHM_PRESETS[state.settings.rhythmPreset];
+    $("home-script-name").textContent = preset ? preset.name : "自定义";
+    $("home-script-desc").textContent = PmRhythm.describeSchedule(state.settings.rhythm);
+    const open = openNight();
+    $("open-night").hidden = !open;
+    if (open) $("open-night-text").textContent = `${fmtClock(new Date(open.sleepAt))} 睡的${open.mixName ? `，听着${open.mixName}` : ""}${open.wakeups ? `，起夜 ${open.wakeups} 次` : ""}，还没记醒来`;
+    document.querySelectorAll("#mode-seg button").forEach(b => b.classList.toggle("on", b.dataset.mode === state.mode));
+    $("btn-sleep").textContent = state.mode === "sound" ? "开始" : "睡了";
+    const streak = PmStats.streakDays(state.nights, PmStats.nightKeyFor(new Date()));
+    $("home-foot").textContent = streak ? `已连续记录 ${streak} 晚` : "第一晚，从今天开始";
+    renderLastNight();
+  }
+  function renderLastNight() {
+    const box = $("last-night"); box.innerHTML = "";
+    const last = state.nights.find(n => n.wakeAt && n.durationMin);
+    if (!last) return;
+    const card = el("div", "last");
+    card.innerHTML = `<div class="lk"><span class="eyebrow">昨晚 · ${esc(last.date.slice(5).replace("-", "/"))}</span><button class="txt-btn" type="button" data-go="journal">全部夜记 ›</button></div>
+      <div class="l1"><span>${esc(fmtClock(new Date(last.sleepAt)))} → ${esc(fmtClock(new Date(last.wakeAt)))}</span><span>${esc(PmStats.formatDuration(last.durationMin))}</span>${moonsHtml(last.rating)}</div>
+      ${last.mixName ? `<div class="l2">听着 ${esc(last.mixName)}</div>` : ""}
+      ${last.lastLine ? `<div class="bubble"><div class="from">${esc(last.characterName || "TA")} · 最后一句</div>${esc(last.lastLine)}</div>` : ""}${last.morningLine ? `<div class="bubble"><div class="from">早安</div>${esc(last.morningLine)}</div>` : ""}`;
+    card.querySelector("[data-go]").onclick = () => switchView("journal");
+    box.appendChild(card);
+  }
+  function render() { renderTop(); renderDial(); renderRows(); }
+
+  function openWakeSheet(night) {
+    openSheet("醒了", box => {
+      let rating = 0;
+      box.innerHTML = `<p class="hint">${esc(fmtClock(new Date(night.sleepAt)))} 睡的，现在 ${esc(fmtClock(new Date()))}，约 ${esc(PmStats.formatDuration(PmStats.minutesBetween(night.sleepAt, new Date().toISOString())))}</p>
+        <div class="grp"><div class="grp-t">睡得怎么样</div><div class="rate" id="wake-rate">${[1, 2, 3, 4, 5].map(n => `<button type="button" data-n="${n}">${iconSvg("moon")}</button>`).join("")}</div></div>
+        <div class="grp"><div class="grp-t">一句话 <span class="grp-sub">可以不写</span></div><textarea id="wake-note" class="txt-in" rows="2" placeholder="做了什么梦？"></textarea></div>
+        <button class="big-btn" id="wake-ok" type="button">记下</button>`;
+      box.querySelectorAll("#wake-rate button").forEach(b => { b.onclick = () => { rating = Number(b.dataset.n); box.querySelectorAll("#wake-rate button").forEach(x => x.classList.toggle("on", Number(x.dataset.n) <= rating)); }; });
+      box.querySelector("#wake-ok").onclick = async () => {
+        const btn = box.querySelector("#wake-ok"); btn.disabled = true; btn.textContent = "记着…";
+        try {
+          const saved = await session.wake(night, { rating, note: box.querySelector("#wake-note").value.trim() });
+          closeSheet(); render();
+          if (saved.morningLine) setTimeout(() => openSheet(`${state.character?.name || "TA"} 说`, b2 => { b2.innerHTML = `<div class="bubble" style="margin-top:0">${esc(saved.morningLine)}</div><button class="big-btn" type="button" id="m-ok">早安</button>`; b2.querySelector("#m-ok").onclick = closeSheet; }), 350);
+          else toast("记下了");
+        } catch (e) { fail(e); btn.disabled = false; btn.textContent = "记下"; }
+      };
+    });
+  }
+
+  function bind() {
+    document.querySelectorAll("#mode-seg button").forEach(b => { b.onclick = () => { state.mode = b.dataset.mode; renderRows(); }; });
+    $("home-mix").onclick = () => switchView("sounds");
+    $("home-script").onclick = () => switchView("script");
+    $("btn-wake").onclick = () => { const open = openNight(); if (open) openWakeSheet(open); };
+    $("btn-sleep").onclick = async () => {
+      const btn = $("btn-sleep"); btn.disabled = true;
+      try { await session.start({ mode: state.mode, timerMin: state.timerMin }); }
+      catch (e) { fail(e); }
+      finally { btn.disabled = false; }
+    };
+    $("btn-stop").onclick = async () => { await session.stop(); render(); const open = openNight(); if (open) openWakeSheet(open); };
+    $("btn-dim").onclick = () => { const on = !$("sleep").classList.contains("dim"); $("sleep").classList.toggle("dim", on); saveSettings({ dimLevel: on ? 1 : 0 }); };
+    const mic = $("btn-mic");
+    mic.addEventListener("pointerdown", e => { e.preventDefault(); session.listen(); });
+    mic.addEventListener("pointerup", () => session.stopListening());
+    mic.addEventListener("pointercancel", () => session.stopListening());
+    on("nights", renderRows); on("view", v => { if (v === "home") render(); }); on("character", render);
+  }
+  return { render, bind, renderWho: renderTop };
+})();
+// ── 声景：瓷砖开关、层列表、组合、商店、导入 ──
+const sounds = (() => {
+  let cat = "rain";
+  const mix = () => state.settings.currentMix;
+  function layerOf(key) { return mix().layers.find(l => l.key === key); }
+  function toggle(key) {
+    const m = mix();
+    if (layerOf(key)) m.layers = m.layers.filter(l => l.key !== key);
+    else {
+      if (m.layers.length >= PmMixer.MAX_LAYERS) { toast(`最多叠 ${PmMixer.MAX_LAYERS} 层`); return; }
+      const sound = findSound(key);
+      m.layers.push({ key, volume: .6, drift: !!(sound && sound.drift) });
+    }
+    m.name = "";
+    commit();
+  }
+  let commitTimer = 0;
+  function commit() {
+    saveSettings({ currentMix: mix() });
+    renderLayers(); renderTiles(); renderPresets();
+    if (session.active() || engine.isPlaying()) { clearTimeout(commitTimer); commitTimer = setTimeout(() => engine.play(mix()).catch(fail), 400); }
+  }
+  function renderLayers() {
+    const box = $("layers"); box.innerHTML = "";
+    const m = mix();
+    $("mix-title").textContent = m.layers.length ? (m.name || `${m.layers.length} 层叠加`) : "安静";
+    if (!m.layers.length) { box.appendChild(el("p", "empty", "下面点几个声音，它们会在这里变成一排推子")); return; }
+    for (const layer of m.layers) {
+      const s = findSound(layer.key); if (!s) continue;
+      const f = el("div", "fader");
+      f.innerHTML = `<button class="x" type="button" aria-label="移除">×</button><div class="track"><input type="range" min="0" max="100" value="${Math.round(layer.volume * 100)}"></div><div class="ico">${iconSvg(s.user ? s.icon : s.key)}</div><div class="nm">${esc(s.name)}</div><button class="drift${layer.drift ? " on" : ""}" type="button" title="音量慢慢起伏">起伏</button>`;
+      f.querySelector(".drift").onclick = () => { layer.drift = !layer.drift; m.name = ""; commit(); };
+      const range = f.querySelector("input");
+      range.oninput = () => { layer.volume = Number(range.value) / 100; };
+      range.onchange = () => { m.name = ""; commit(); };
+      f.querySelector(".x").onclick = () => toggle(layer.key);
+      box.appendChild(f);
+    }
+    const master = el("div", "fader master");
+    master.innerHTML = `<span class="val" id="master-val">${Math.round((m.master ?? .7) * 100)}</span><div class="track"><input id="master" type="range" min="0" max="100" value="${Math.round((m.master ?? .7) * 100)}"></div><div class="ico">${iconSvg("headphones")}</div><div class="nm">总音量</div>`;
+    const mr = master.querySelector("input");
+    mr.oninput = () => { master.querySelector(".val").textContent = mr.value; };
+    mr.onchange = () => { m.master = Number(mr.value) / 100; commit(); };
+    box.appendChild(master);
+  }
+  function renderTiles() {
+    const box = $("sound-tiles"); box.innerHTML = ""; box.classList.toggle("playing", engine.isPlaying());
+    const list = allSounds().filter(s => s.cat === cat);
+    if (!list.length) box.appendChild(el("p", "empty", cat === "mine" ? "还没有自己的声音。点「＋ 商店」搜，或者导入一段录音。" : ""));
+    for (const s of list) {
+      const t = el("button", "tile" + (layerOf(s.key) ? " on" : "") + (s.user ? " mine" : ""));
+      t.type = "button"; t.innerHTML = `${iconSvg(s.user ? s.icon : s.key)}<span>${esc(s.name)}</span>`;
+      t.onclick = () => { t.classList.add("pop"); toggle(s.key); };
+      let pressTimer = 0;
+      t.addEventListener("pointerdown", () => { pressTimer = setTimeout(() => { pressTimer = 0; longPress(s); }, 550); });
+      const clear = () => { if (pressTimer) clearTimeout(pressTimer); };
+      t.addEventListener("pointerup", clear); t.addEventListener("pointerleave", clear); t.addEventListener("pointercancel", clear);
+      box.appendChild(t);
+    }
+    document.querySelectorAll("#sound-cats button").forEach(b => b.classList.toggle("on", b.dataset.cat === cat));
+  }
+  function longPress(s) {
+    const src = s.user ? state.library.find(r => r.key === s.key) : null;
+    const credit = src ? (src.source === "freesound" ? `来自 Freesound · ${src.author} · CC0` : "自己导入的录音") : (SOUND_SOURCES[s.key] ? `来自 Freesound · ${SOUND_SOURCES[s.key].author} · CC0` : "");
+    openSheet(s.name, box => {
+      box.innerHTML = `<p class="hint">${esc(credit)}</p><div class="grp"><div class="frow"><div class="fl">试听 10 秒</div><button class="mini" type="button" id="sp-prev">播放</button></div>${src ? `<div class="frow"><div class="fl">从我的声音里删除</div><button class="mini warn" type="button" id="sp-del">删除</button></div>` : ""}</div>`;
+      box.querySelector("#sp-prev").onclick = async () => { try { toast("试听中…", 1500); await engine.preview(s); } catch (e) { fail(e); } };
+      const del = box.querySelector("#sp-del");
+      if (del) del.onclick = async () => { try { await store.remove(src); mix().layers = mix().layers.filter(l => l.key !== s.key); closeSheet(); commit(); toast("删了"); } catch (e) { fail(e); } };
+    });
+  }
+  function renderCats() {
+    const box = $("sound-cats"); box.innerHTML = "";
+    for (const c of SOUND_CATEGORIES) { const b = el("button", c.id === cat ? "on" : "", c.name); b.type = "button"; b.dataset.cat = c.id; b.onclick = () => { cat = c.id; renderTiles(); }; box.appendChild(b); }
+  }
+  function renderPresets() {
+    const box = $("mix-presets"); box.innerHTML = "";
+    const m = mix();
+    const all = state.mixes.map(x => ({ ...x, user: true })).concat(MIX_PRESETS);
+    for (const p of all) {
+      const b = el("button", m.name === p.name ? "on" : "", p.name); b.type = "button";
+      b.onclick = () => { m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit(); };
+      if (p.user) { let t = 0; b.addEventListener("pointerdown", () => { t = setTimeout(async () => { t = 0; if (confirm(`删除组合「${p.name}」？`)) { await api.db.delete("mixes", p.id); state.mixes = state.mixes.filter(x => x.id !== p.id); renderPresets(); } }, 600); }); const c = () => t && clearTimeout(t); b.addEventListener("pointerup", c); b.addEventListener("pointerleave", c); }
+      box.appendChild(b);
+    }
+  }
+  function saveMix() {
+    const m = mix();
+    if (!m.layers.length) { toast("先叠几层"); return; }
+    openSheet("存这个组合", box => {
+      box.innerHTML = `<input id="mix-name" class="field" style="width:100%" placeholder="给它起个名字" value="${esc(m.name)}"><button class="big-btn" id="mix-ok" type="button">保存</button>`;
+      box.querySelector("#mix-ok").onclick = async () => {
+        const name = box.querySelector("#mix-name").value.trim(); if (!name) return;
+        try {
+          const existing = state.mixes.find(x => x.name === name);
+          const data = { name, layers: m.layers.map(l => ({ ...l })), master: m.master ?? .7 };
+          if (existing) { await api.db.update("mixes", existing.id, data); Object.assign(existing, data); }
+          else { const row = await api.db.create("mixes", data); state.mixes.push(row); }
+          m.name = name; closeSheet(); commit(); toast("存好了");
+        } catch (e) { fail(e); }
+      };
+      setTimeout(() => box.querySelector("#mix-name").focus(), 50);
+    });
+  }
+  function openStore() {
+    openSheet("声音商店", box => {
+      box.innerHTML = `<p class="hint">Freesound 上的 CC0 录音，搜到就能下。只列 ${store.MAX_SECONDS} 秒以内的。${state.settings.freesoundKey ? "" : "先在配置里填 API Key。"}</p>
+        <div class="search"><input id="st-q" class="field" placeholder="rain / ocean / cafe / cat…"><button class="mini" id="st-go" type="button">搜</button></div>
+        <div class="tgl-row" id="st-quick" style="margin-top:10px">${["rain", "ocean", "forest", "fireplace", "wind", "cafe", "train", "birds", "thunder", "snow"].map(q => `<button type="button" class="tgl">${q}</button>`).join("")}</div>
+        <div class="list" id="st-list"></div>`;
+      const list = box.querySelector("#st-list"); const input = box.querySelector("#st-q");
+      async function go(q) {
+        if (!q) return; input.value = q; list.innerHTML = `<p class="empty">搜索中…</p>`;
+        try {
+          const { results, count } = await store.search(q);
+          list.innerHTML = results.length ? "" : `<p class="empty">没搜到</p>`;
+          for (const r of results) {
+            const owned = state.library.some(x => x.key === `fs_${r.id}`);
+            const item = el("div", "list-item");
+            item.innerHTML = `<div><p>${esc(r.name.replace(/\.[a-z0-9]+$/i, ""))}</p><small>${esc(r.username)} · ${Math.round(r.duration)}s · ★${(r.avg_rating || 0).toFixed(1)}</small></div><div class="acts"><button class="mini" type="button" data-a="p">听</button><button class="mini" type="button" data-a="d" ${owned ? "disabled" : ""}>${owned ? "已有" : "下载"}</button></div>`;
+            item.querySelector('[data-a="p"]').onclick = async () => { try { toast("正在拉预览…", 1500); const row = await previewRemote(r); await engine.preview(row); } catch (e) { fail(e); } };
+            item.querySelector('[data-a="d"]').onclick = async ev => {
+              const btn = ev.currentTarget; btn.disabled = true; btn.textContent = "下载中…";
+              try { await store.download(r); btn.textContent = "已有"; toast("下好了，在「我的」里"); renderTiles(); }
+              catch (e) { fail(e); btn.disabled = false; btn.textContent = "下载"; }
+            };
+            list.appendChild(item);
+          }
+          if (count > results.length) list.appendChild(el("p", "archive-note", `共 ${count} 条，只显示前 ${results.length} 条，换个词再搜`));
+        } catch (e) { list.innerHTML = `<p class="empty">${esc(e.message || e)}</p>`; }
+      }
+      box.querySelector("#st-go").onclick = () => go(input.value.trim());
+      input.onkeydown = e => { if (e.key === "Enter") go(input.value.trim()); };
+      box.querySelectorAll("#st-quick button").forEach(b => { b.onclick = () => go(b.textContent); });
+      setTimeout(() => input.focus(), 50);
+    });
+  }
+  const previewCache = new Map();
+  async function previewRemote(r) {
+    if (previewCache.has(r.id)) return previewCache.get(r.id);
+    const res = await api.network.fetch({ url: r.previews["preview-lq-mp3"], proxy: true, timeoutMs: 60000 });
+    if (!res.ok || !res.binary) throw new Error("拉不到预览");
+    const stored = await api.media.put({ dataUrl: `data:${res.contentType || "audio/mpeg"};base64,${res.data}` });
+    const fake = { key: `tmp_${r.id}`, name: r.name, icon: "headphones", user: true, mediaRef: stored.ref };
+    previewCache.set(r.id, fake);
+    return fake;
+  }
+  function bind() {
+    $("btn-mix-save").onclick = saveMix;
+    $("btn-mix-preview").onclick = async () => {
+      if (engine.isPlaying()) { await engine.stop(); $("btn-mix-preview").textContent = "试听"; return; }
+      if (!mix().layers.length) { toast("先叠几层"); return; }
+      $("btn-mix-preview").textContent = "合成中…";
+      try { await engine.play(mix()); $("btn-mix-preview").textContent = "停"; } catch (e) { fail(e); $("btn-mix-preview").textContent = "试听"; }
+    };
+    $("btn-store").onclick = openStore;
+    $("btn-import").onclick = async () => { try { const row = await store.importFile(); if (row) { toast("导入了"); cat = "mine"; renderTiles(); } } catch (e) { fail(e); } };
+    on("engine", ({ busy }) => { if (!session.active()) $("btn-mix-preview").textContent = busy ? "合成中…" : (engine.isPlaying() ? "停" : "试听"); $("layers").classList.toggle("playing", engine.isPlaying()); $("layers").classList.toggle("busy", !!busy); });
+    on("view", v => { if (v !== "sounds" && !session.active() && engine.isPlaying()) engine.stop(); if (v === "sounds") render(); });
+    $("sounds-credit").textContent = "内置声音来自 Freesound · CC0 · 长按一块试听或看来源";
+  }
+  function render() { renderCats(); renderTiles(); renderLayers(); renderPresets(); $("layers").classList.toggle("playing", engine.isPlaying()); }
+  return { render, bind };
+})();
+// ── 话术 ──
+const script = (() => {
+  const FIELDS = ["segments", "firstChars", "lastChars", "firstGapSec", "lastGapSec"];
+  const fmtGap = s => s >= 60 ? `${Math.round(s / 60 * 10) / 10} 分` : `${s} 秒`;
+  function rhythm() { return PmRhythm.normalizeRhythm(state.settings.rhythm || PmRhythm.RHYTHM_PRESETS[state.settings.rhythmPreset]); }
+  function renderRhythm() {
+    const r = rhythm();
+    for (const f of FIELDS) { const input = $(`r-${f}`); input.value = r[f]; input.nextElementSibling.textContent = f.endsWith("Sec") ? fmtGap(r[f]) : (f === "segments" ? `${r[f]} 段` : `${r[f]} 字`); }
+    $("rhythm-desc").textContent = PmRhythm.describeSchedule(r);
+    const box = $("rhythm-presets"); box.innerHTML = "";
+    for (const p of Object.values(PmRhythm.RHYTHM_PRESETS)) {
+      const b = el("button", state.settings.rhythmPreset === p.id ? "on" : "", p.name); b.type = "button";
+      b.onclick = () => { saveSettings({ rhythmPreset: p.id, rhythm: { ...p } }); renderRhythm(); };
+      box.appendChild(b);
+    }
+    const b = el("button", state.settings.rhythmPreset === "custom" ? "on" : "", "自定义"); b.type = "button"; b.onclick = () => { saveSettings({ rhythmPreset: "custom" }); renderRhythm(); }; box.appendChild(b);
+    const curve = $("rhythm-curve"); curve.innerHTML = "";
+    const steps = PmRhythm.buildSchedule(r); const max = Math.max(...steps.map(s => s.chars));
+    for (const s of steps) { const i = el("i"); i.style.height = `${Math.max(6, s.chars / max * 100)}%`; i.style.flex = String(1 + s.gapAfterSec / 60); curve.appendChild(i); }
+  }
+  function renderChips(boxId, key) {
+    const box = $(boxId); box.innerHTML = "";
+    const chosen = state.settings[key] || [];
+    for (const d of PmRhythm.DIRECTIONS) {
+      const b = el("button", "tgl check" + (chosen.includes(d.id) ? " on" : ""), d.label); b.type = "button"; b.title = d.hint;
+      b.onclick = () => { const next = chosen.includes(d.id) ? chosen.filter(x => x !== d.id) : chosen.concat(d.id); saveSettings({ [key]: next }); renderChips(boxId, key); };
+      box.appendChild(b);
+    }
+  }
+  async function tryLine() {
+    if (!state.character) { toast("先在配置里选个陪你的人"); return; }
+    const btn = $("btn-try-line"); btn.disabled = true; btn.textContent = "生成中…"; $("try-line").hidden = true;
+    try {
+      const steps = PmRhythm.buildSchedule(rhythm());
+      const chosen = PmRhythm.DIRECTIONS.filter(d => (state.settings.directions || []).includes(d.id));
+      const result = await api.ai.generate({ characterId: state.character.id, appTags: ["peimian", "lull"], instruction: `现在是 ${fmtClock(new Date())}。这是第 1 段，共 ${steps.length} 段，这一段大约 ${steps[0].chars} 字。${chosen.length ? `内容方向：${chosen.map(d => d.label).join("、")}。` : ""}${state.settings.forbid ? `禁止项：${state.settings.forbid}` : ""}只输出要说的话。` });
+      const text = String(result?.text || "").trim();
+      $("try-line").innerHTML = `<div class="from">${esc(state.character.name)} · 第一段</div>${esc(text)}`; $("try-line").hidden = !text;
+      if (text && state.settings.ttsOn) {
+        btn.textContent = "朗读中…";
+        try { const tts = await api.voice.tts({ characterId: state.character.id, text, emotion: state.settings.emotion || undefined }); await api.voice.play({ dataUrl: tts.dataUrl }); }
+        catch (e) { toast("语音没成功：" + (e.message || e), 3000); }
+      }
+    } catch (e) { fail(e); }
+    finally { btn.disabled = false; btn.textContent = "试一句"; }
+  }
+  function bind() {
+    for (const f of FIELDS) {
+      const input = $(`r-${f}`);
+      input.oninput = () => { const r = { ...rhythm(), [f]: Number(input.value) }; state.settings.rhythm = r; state.settings.rhythmPreset = "custom"; renderRhythm(); };
+      input.onchange = () => saveSettings({ rhythm: rhythm(), rhythmPreset: "custom" });
+    }
+    $("forbid").onchange = () => saveSettings({ forbid: $("forbid").value.trim() });
+    $("insomnia-forbid").onchange = () => saveSettings({ insomniaForbid: $("insomnia-forbid").value.trim() });
+    $("tts-on").onchange = () => saveSettings({ ttsOn: $("tts-on").checked });
+    $("btn-try-line").onclick = tryLine;
+    on("view", v => { if (v === "script") render(); });
+  }
+  async function render() {
+    renderRhythm(); renderChips("directions", "directions"); renderChips("insomnia-directions", "insomniaDirections");
+    $("forbid").value = state.settings.forbid || ""; $("insomnia-forbid").value = state.settings.insomniaForbid || ""; $("tts-on").checked = !!state.settings.ttsOn;
+    if (state.character) {
+      try { const v = await api.voice.readProfiles({ characterId: state.character.id }); state.voiceReady = !!(v && v.selected); $("tts-hint").textContent = state.voiceReady ? `${state.character.name}的语音：${v.selected.provider || ""} ${v.selected.model || v.selected.name || ""}`.trim() : `${state.character.name}还没配语音，会只显示字幕`; }
+      catch { state.voiceReady = false; $("tts-hint").textContent = "读不到语音配置，会只显示字幕"; }
+    }
+  }
+  return { render, bind };
+})();
+// ── 夜记：每天 / 每周 / 每月 ──
+const journal = (() => {
+  let range = "week";
+  let weekStart = PmStats.weekStartKey(new Date());
+  let month = (() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; })();
+  const WD = ["一", "二", "三", "四", "五", "六", "日"];
+  const goal = () => state.settings.goal;
+
+  function nightCard(n) {
+    const d = new Date(n.date + "T12:00:00");
+    const card = el("details", "day-card");
+    card.innerHTML = `<summary class="day-sum"><div class="dnum"><b>${d.getDate()}</b><span>${d.getMonth() + 1} 月</span></div>
+      <div class="mid"><div class="d1">${n.durationMin ? esc(PmStats.formatDuration(n.durationMin)) : "还没醒"} ${moonsHtml(n.rating)}</div>
+      <span class="d2">${esc(fmtClock(new Date(n.sleepAt)))} → ${n.wakeAt ? esc(fmtClock(new Date(n.wakeAt))) : "…"}${n.mixName ? ` · ${esc(n.mixName)}` : ""}${n.wakeups ? ` · 起夜 ${n.wakeups}` : ""}</span></div><span class="arr">›</span></summary>
+      <div class="day-body"><div class="day-meta">${[n.characterName, n.mode === "insomnia" ? "失眠模式" : n.mode === "sound" ? "只开了声音" : "哄睡", n.segments ? `说了 ${n.segments} 段` : ""].filter(Boolean).map(t => `<span class="chip">${esc(t)}</span>`).join("")}</div>
+      ${n.lastLine ? `<div class="bubble"><div class="from">最后一句</div>${esc(n.lastLine)}</div>` : ""}${n.morningLine ? `<div class="bubble"><div class="from">早安</div>${esc(n.morningLine)}</div>` : ""}${n.note ? `<div class="bubble"><div class="from">你</div>${esc(n.note)}</div>` : ""}
+      <div class="acts"><button class="mini" type="button" data-a="edit">改自评 / 备注</button><button class="mini warn" type="button" data-a="del">删除</button></div></div>`;
+    card.querySelector('[data-a="edit"]').onclick = () => editNight(n);
+    card.querySelector('[data-a="del"]').onclick = async () => { if (!confirm("删掉这一晚的记录？")) return; try { await api.db.delete("nights", n.id); state.nights = state.nights.filter(x => x.id !== n.id); emit("nights"); render(); } catch (e) { fail(e); } };
+    return card;
+  }
+  function editNight(n) {
+    openSheet(n.date.replace(/-/g, " / "), box => {
+      let rating = n.rating || 0;
+      box.innerHTML = `<div class="grp"><div class="grp-t">睡得怎么样</div><div class="rate" id="e-rate">${[1, 2, 3, 4, 5].map(k => `<button type="button" data-n="${k}" class="${k <= rating ? "on" : ""}">${iconSvg("moon")}</button>`).join("")}</div></div>
+        <div class="grp"><div class="grp-t">一句话</div><textarea id="e-note" class="txt-in" rows="2">${esc(n.note || "")}</textarea></div>
+        <button class="big-btn" id="e-ok" type="button">保存</button>`;
+      box.querySelectorAll("#e-rate button").forEach(b => { b.onclick = () => { rating = Number(b.dataset.n); box.querySelectorAll("#e-rate button").forEach(x => x.classList.toggle("on", Number(x.dataset.n) <= rating)); }; });
+      box.querySelector("#e-ok").onclick = async () => { n.rating = rating; n.note = box.querySelector("#e-note").value.trim(); try { await upsertNight(n); closeSheet(); render(); } catch (e) { fail(e); } };
+    });
+  }
+  function renderDay() {
+    const box = $("journal-day"); box.innerHTML = "";
+    if (!state.nights.length) { box.innerHTML = `<p class="empty">还没有记录。<br>今晚点「睡了」，明早点「我醒了」，这里就有第一条。</p>`; return; }
+    for (const n of state.nights.slice(0, 60)) box.appendChild(nightCard(n));
+  }
+  function stat(value, cap, delta) { const s = el("div", "stat"); s.innerHTML = `<div class="num">${value}</div><div class="cap">${esc(cap)}</div>${delta ? `<div class="delta">${esc(delta)}</div>` : ""}`; return s; }
+  function renderWeek() {
+    const box = $("journal-week"); box.innerHTML = "";
+    const cur = PmStats.summarizeWeek(state.nights, weekStart, goal());
+    const prev = PmStats.summarizeWeek(state.nights, PmStats.addDays(weekStart, -7), goal());
+    const cmp = PmStats.compareWeeks(cur, prev);
+    const chart = el("div", "card");
+    const end = PmStats.addDays(weekStart, 6);
+    const nav = el("div", "week-nav");
+    nav.innerHTML = `<button type="button" class="mini" id="w-prev">‹</button><span class="lbl">${esc(weekStart.slice(5).replace("-", "/"))} – ${esc(end.slice(5).replace("-", "/"))}</span><button type="button" class="mini" id="w-next" ${weekStart >= PmStats.weekStartKey(new Date()) ? "disabled" : ""}>›</button>`;
+    nav.querySelector("#w-prev").onclick = () => { weekStart = PmStats.addDays(weekStart, -7); renderWeek(); };
+    nav.querySelector("#w-next").onclick = () => { weekStart = PmStats.addDays(weekStart, 7); renderWeek(); };
+    chart.appendChild(nav);
+    // 一夜时间轴：20:00 → 10:00 横着躺
+    const T0 = 20 * 60, SPAN = 14 * 60;
+    const minOf = iso => { const d = new Date(iso); let m = d.getHours() * 60 + d.getMinutes(); if (m < 12 * 60) m += 24 * 60; return m; };
+    const pct = m => Math.min(100, Math.max(0, (m - T0) / SPAN * 100));
+    const goalBed = (() => { const [h, mm] = goal().bedtime.split(":").map(Number); let m = h * 60 + mm; if (m < 12 * 60) m += 24 * 60; return m; })();
+    const tl = el("div", "tl");
+    const todayKey = PmStats.nightKeyFor(new Date());
+    cur.days.forEach((d, i) => {
+      const row = el("div", "tl-row" + (d.date === todayKey ? " today" : ""));
+      row.appendChild(el("span", "tl-d", WD[i]));
+      const track = el("div", "tl-track");
+      const gl = el("i", "tl-goal"); gl.style.left = `${pct(goalBed)}%`; track.appendChild(gl);
+      const n = d.night;
+      if (n && n.durationMin) {
+        const a = minOf(n.sleepAt), z = Math.max(a + 10, n.wakeAt ? minOf(n.wakeAt) : a + n.durationMin);
+        const bar = el("i", "tl-bar" + (n.durationMin >= goal().hours * 60 ? " goal" : "")); bar.style.left = `${pct(a)}%`; bar.style.width = `${Math.max(2, pct(z) - pct(a))}%`;
+        if (n.rating) bar.dataset.r = String(n.rating);
+        bar.onclick = () => editNight(n);
+        track.appendChild(bar);
+      }
+      row.appendChild(track);
+      row.appendChild(el("span", "tl-dur", n && n.durationMin ? PmStats.formatDuration(n.durationMin) : ""));
+      tl.appendChild(row);
+    });
+    const axis = el("div", "tl-row axis"); axis.appendChild(el("span")); const ax = el("div", "tl-axis"); ["20", "22", "0", "2", "4", "6", "8", "10"].forEach(t => ax.appendChild(el("span", null, t))); axis.appendChild(ax); axis.appendChild(el("span")); tl.appendChild(axis);
+    chart.appendChild(tl);
+    chart.appendChild(el("p", "bar-note", `虚线 = 目标 ${goal().bedtime} 入睡；条越亮自评越高；发光 = 睡够 ${goal().hours} 小时`));
+    box.appendChild(chart);
+    const grid = el("div", "stats");
+    grid.appendChild(stat(cur.avgDurationMin ? esc(PmStats.formatDuration(Math.round(cur.avgDurationMin))) : "--", "平均时长", cmp.durationDeltaMin != null ? `比上周 ${cmp.durationDeltaMin >= 0 ? "+" : ""}${cmp.durationDeltaMin} 分` : ""));
+    grid.appendChild(stat(esc(PmStats.formatBedtime(cur.avgBedtime == null ? null : Math.round(cur.avgBedtime))), "平均入睡", cmp.bedtimeDeltaMin != null ? (cmp.bedtimeDeltaMin <= 0 ? `比上周早 ${-cmp.bedtimeDeltaMin} 分` : `比上周晚 ${cmp.bedtimeDeltaMin} 分`) : ""));
+    grid.appendChild(stat(cur.bedtimeSpread ? `±${Math.round(cur.bedtimeSpread / 2)}<small>分</small>` : "--", "作息波动", cur.bedtimeSpread > 90 ? "有点乱" : (cur.nightsLogged > 1 ? "挺规律" : "")));
+    grid.appendChild(stat(String(cur.totalWakeups), "起夜"));
+    grid.appendChild(stat(cur.goalDurationHits != null ? `${cur.goalDurationHits}<small>/7</small>` : "--", "睡够了"));
+    grid.appendChild(stat(cur.goalBedtimeHits != null ? `${cur.goalBedtimeHits}<small>/7</small>` : "--", `${goal().bedtime} 前睡`));
+    box.appendChild(grid);
+    const review = el("div", "card");
+    const key = `weekly_${weekStart}`;
+    const saved = state.settings.weeklyLines && state.settings.weeklyLines[key];
+    review.innerHTML = `<div class="sec-head"><span class="t">TA 的一周观察</span><button class="act" id="wk-go" type="button" ${cur.nightsLogged && state.character ? "" : "disabled"}>${saved ? "再说一次" : "让 TA 说说"}</button></div>
+      ${cur.topMix ? `<div class="day-meta"><span class="chip">最常听：${esc(cur.topMix.name)} · ${cur.topMix.count} 晚</span><span class="chip">记了 ${cur.nightsLogged} 晚</span></div>` : ""}
+      <div id="wk-text">${saved ? `<div class="bubble">${esc(saved)}</div>` : `<p class="archive-note">${cur.nightsLogged ? "这周的数据 TA 还没看" : "这周还没有记录"}</p>`}</div>`;
+    review.querySelector("#wk-go").onclick = async ev => {
+      const btn = ev.currentTarget; btn.disabled = true; btn.textContent = "想着…";
+      try {
+        const lines = cur.days.filter(d => d.night).map(d => `${d.date}：${fmtClock(new Date(d.night.sleepAt))} 睡，${d.night.wakeAt ? fmtClock(new Date(d.night.wakeAt)) + " 醒" : "没记醒"}，${PmStats.formatDuration(d.night.durationMin)}，自评 ${d.night.rating || "无"}，起夜 ${d.night.wakeups || 0}`);
+        const result = await api.ai.generate({ characterId: state.character.id, appTags: ["peimian", "weekly"], instruction: `本周记录：\n${lines.join("\n")}\n作息目标：${goal().bedtime} 前睡，睡够 ${goal().hours} 小时。说几句你的观察。` });
+        const text = String(result?.text || "").trim();
+        saveSettings({ weeklyLines: { ...(state.settings.weeklyLines || {}), [key]: text } });
+        review.querySelector("#wk-text").innerHTML = `<div class="bubble">${esc(text)}</div>`;
+      } catch (e) { fail(e); } finally { btn.disabled = false; btn.textContent = "再说一次"; }
+    };
+    box.appendChild(review);
+  }
+  function renderMonth() {
+    const box = $("journal-month"); box.innerHTML = "";
+    const card = el("div", "card");
+    const nav = el("div", "week-nav");
+    nav.innerHTML = `<button type="button" class="mini" id="m-prev">‹</button><span class="lbl">${month.y} 年 ${month.m} 月</span><button type="button" class="mini" id="m-next">›</button>`;
+    nav.querySelector("#m-prev").onclick = () => { month.m -= 1; if (month.m < 1) { month.m = 12; month.y -= 1; } renderMonth(); };
+    nav.querySelector("#m-next").onclick = () => { month.m += 1; if (month.m > 12) { month.m = 1; month.y += 1; } renderMonth(); };
+    card.appendChild(nav);
+    const grid = el("div", "month");
+    for (const w of WD) grid.appendChild(el("div", "month-h", w));
+    const byDate = new Map(state.nights.map(n => [n.date, n]));
+    const todayKey = PmStats.nightKeyFor(new Date());
+    const goalMin = goal().hours * 60;
+    for (const key of PmStats.monthGrid(month.y, month.m)) {
+      if (!key) { grid.appendChild(el("div", "day empty")); continue; }
+      const n = byDate.get(key);
+      const cell = el("button", "day" + (key === todayKey ? " today" : "") + (n && n.durationMin >= goalMin ? " hit" : "")); cell.type = "button";
+      const dot = el("i"); dot.style.setProperty("--o", n && n.durationMin ? String(Math.min(1, .25 + n.durationMin / (goalMin * 1.2))) : ".12");
+      cell.appendChild(dot); cell.appendChild(el("span", null, String(Number(key.slice(8)))));
+      if (n) cell.onclick = () => editNight(n);
+      grid.appendChild(cell);
+    }
+    card.appendChild(grid);
+    const inMonth = state.nights.filter(n => n.date.startsWith(`${month.y}-${String(month.m).padStart(2, "0")}`) && n.durationMin);
+    card.appendChild(el("p", "bar-note", inMonth.length ? `记了 ${inMonth.length} 晚，${inMonth.filter(n => n.durationMin >= goalMin).length} 晚睡够 ${goal().hours} 小时。月亮越亮睡得越久，描边 = 达标。` : "这个月还没有记录"));
+    box.appendChild(card);
+  }
+  function render() {
+    document.querySelectorAll("#journal-seg .stab").forEach(b => b.classList.toggle("on", b.dataset.range === range));
+    $("journal-title").textContent = range === "day" ? "每一晚" : range === "week" ? "这一周" : "这个月";
+    $("journal-day").hidden = range !== "day"; $("journal-week").hidden = range !== "week"; $("journal-month").hidden = range !== "month";
+    if (range === "day") renderDay(); else if (range === "week") renderWeek(); else renderMonth();
+  }
+  function bind() {
+    document.querySelectorAll("#journal-seg .stab").forEach(b => { b.onclick = () => { range = b.dataset.range; render(); }; });
+    on("view", v => { if (v === "journal") render(); });
+    on("nights", () => { if (state.view === "journal") render(); });
+  }
+  return { render, bind };
+})();
+// ── 配置（右上角齿轮 → 底部弹层）──
+const settings = (() => {
+  function charGrid() {
+    return `<div class="char-grid">${state.characters.map(c => `<button type="button" class="char-cell${state.character && c.id === state.character.id ? " sel" : ""}" data-id="${esc(c.id)}"><span class="ava">${c.avatar ? `<img src="${esc(c.avatar)}" alt="">` : esc(c.name.slice(0, 1))}</span><span class="nm">${esc(c.name)}</span></button>`).join("") || `<p class="empty">还没有角色，先去角色 APP 建一个</p>`}</div>`;
+  }
+  function render() {
+    const s = state.settings;
+    const box = $("settings-body");
+    {
+      box.innerHTML = `
+        <div class="grp"><div class="grp-t">陪你的人 <span class="grp-sub">只选一个</span></div>${charGrid()}</div>
+        <div class="grp"><div class="grp-t">主题</div>
+          <div class="themes" id="theme-picker"><button type="button" data-theme="auto"><i class="swatch auto"></i><span>夜航</span><small>日夜切换</small></button><button type="button" data-theme="candle"><i class="swatch candle"></i><span>暖烛</span><small>固定</small></button><button type="button" data-theme="mist"><i class="swatch mist"></i><span>灰雾</span><small>固定</small></button></div>
+          <div class="seg" id="auto-by"><button type="button" data-by="system">跟随系统</button><button type="button" data-by="time">按时间</button><button type="button" data-by="day">一直白天</button><button type="button" data-by="night">一直夜晚</button></div>
+          <div class="grp-hint" id="auto-hint">按时间：7 点到 19 点是白天。</div></div>
+        <div class="grp"><div class="grp-t">语音</div>
+          <div class="frow"><div><div class="fl">情绪</div><div class="fu">Minimax 语音支持，其它供应商忽略</div></div><select id="tts-emotion" class="select"><option value="calm">平静</option><option value="neutral">中性</option><option value="fluent">流畅</option><option value="">不指定</option></select></div>
+          <div class="frow"><div><div class="fl">躺着说话</div><div class="fu">入睡画面长按麦克风，说一句 TA 回一句</div></div><label class="sw"><input id="stt-on" type="checkbox"><i></i></label></div></div>
+        <div class="grp"><div class="grp-t">作息目标</div>
+          <div class="frow"><div class="fl">目标入睡</div><input id="goal-bed" type="time" class="field time"></div>
+          <div class="frow"><div class="fl">目标时长</div><span><input id="goal-hours" type="number" class="field num" min="4" max="12" step="0.5"> <span class="fu" style="display:inline">小时</span></span></div></div>
+        <div class="grp"><div class="grp-t">声景</div>
+          <div class="frow"><div class="fl">结束前渐弱</div><select id="fade-min" class="select"><option value="1">1 分钟</option><option value="2">2 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option></select></div>
+          <div class="frow col"><div><div class="fl">Freesound API Key</div><div class="fu">声音商店要用。到 freesound.org/apiv2/apply 申请，只存在这台设备</div></div><input id="fs-key" type="password" class="field" placeholder="粘贴 key" autocomplete="off"></div></div>
+        <div class="grp"><div class="grp-t">和聊天的关系</div>
+          <div class="frow"><div><div class="fl">睡了 / 醒了写进聊天记录</div><div class="fu">TA 下次聊天知道你昨晚几点睡</div></div><label class="sw"><input id="sync-chat" type="checkbox"><i></i></label></div>
+          <div class="frow"><div><div class="fl">早安一句</div><div class="fu">点「我醒了」时让 TA 说一句</div></div><label class="sw"><input id="morning-on" type="checkbox"><i></i></label></div></div>
+        <div class="grp"><div class="frow"><div class="fl">声音来源与致谢</div><button class="mini" type="button" id="btn-credits">看</button></div><div class="frow"><div class="fl">清空陪眠的全部数据</div><button class="mini warn" type="button" id="btn-reset">清空</button></div></div>
+        <p class="foot">陪眠 · 第一版</p>`;
+      const q = sel => box.querySelector(sel);
+      const paint = () => {
+        box.querySelectorAll("#theme-picker button").forEach(b => b.classList.toggle("on", b.dataset.theme === s.theme));
+        q("#auto-by").hidden = s.theme !== "auto"; q("#auto-hint").hidden = s.theme !== "auto";
+        box.querySelectorAll("#auto-by button").forEach(b => b.classList.toggle("on", b.dataset.by === (s.autoBy || "system")));
+      };
+      paint();
+      box.querySelectorAll(".char-cell").forEach(b => { b.onclick = () => { const c = state.characters.find(x => x.id === b.dataset.id); if (!c) return; state.character = c; state.voiceReady = null; saveSettings({ characterId: c.id }); box.querySelectorAll(".char-cell").forEach(x => x.classList.toggle("sel", x.dataset.id === c.id)); emit("character", c); }; });
+      box.querySelectorAll("#theme-picker button").forEach(b => { b.onclick = () => { saveSettings({ theme: b.dataset.theme }); theme.apply(); paint(); }; });
+      box.querySelectorAll("#auto-by button").forEach(b => { b.onclick = () => { saveSettings({ autoBy: b.dataset.by }); theme.apply(); paint(); }; });
+      q("#tts-emotion").value = s.emotion ?? "calm"; q("#tts-emotion").onchange = e => saveSettings({ emotion: e.target.value });
+      q("#stt-on").checked = !!s.sttOn; q("#stt-on").onchange = e => saveSettings({ sttOn: e.target.checked });
+      q("#goal-bed").value = s.goal.bedtime; q("#goal-bed").onchange = e => saveSettings({ goal: { ...state.settings.goal, bedtime: e.target.value || "23:30" } });
+      q("#goal-hours").value = s.goal.hours; q("#goal-hours").onchange = e => saveSettings({ goal: { ...state.settings.goal, hours: Math.min(12, Math.max(4, Number(e.target.value) || 7.5)) } });
+      q("#fade-min").value = String(s.fadeMin || 5); q("#fade-min").onchange = e => saveSettings({ fadeMin: Number(e.target.value) });
+      q("#fs-key").value = s.freesoundKey || ""; q("#fs-key").onchange = e => saveSettings({ freesoundKey: e.target.value.trim() });
+      q("#sync-chat").checked = !!s.syncChat; q("#sync-chat").onchange = e => saveSettings({ syncChat: e.target.checked });
+      q("#morning-on").checked = !!s.morningOn; q("#morning-on").onchange = e => saveSettings({ morningOn: e.target.checked });
+      q("#btn-credits").onclick = credits;
+      q("#btn-reset").onclick = async () => { if (!confirm("清空陪眠的夜记、组合和下载的声音？不可恢复。")) return; try { await session.stop(); await resetAll(); theme.apply(); toast("清空了"); switchView("home"); } catch (e) { fail(e); } };
+    }
+  }
+  function credits() {
+    openSheet("声音来源", box => {
+      const rows = Object.entries(SOUND_SOURCES).map(([key, s]) => `<p class="credit"><b>${esc(findSound(key)?.name || key)}</b> — ${esc(s.name)} by ${esc(s.author)} · CC0 · freesound.org/s/${s.id}</p>`).join("");
+      const mine = state.library.filter(r => r.source === "freesound").map(r => `<p class="credit"><b>${esc(r.name)}</b> — ${esc(r.author)} · CC0 · freesound.org/s/${String(r.key).replace("fs_", "")}</p>`).join("");
+      box.innerHTML = `<p class="hint">全部为 Creative Commons 0，可自由使用；仍列出作者以示感谢。</p>${rows}${mine ? `<div class="grp-t" style="margin-top:14px">你下载的</div>${mine}` : ""}`;
+    });
+  }
+  function bind() { on("view", v => { if (v === "settings") render(); }); }
+  return { render, bind };
+})();
+// ── 启动 ──
+async function boot() {
+  try {
+    await loadSettings();
+    theme.apply();
+    const [chars] = await Promise.all([api.characters.list().catch(() => []), loadNights(), loadMixes(), loadLibrary()]);
+    state.characters = Array.isArray(chars) ? chars : (chars && chars.characters) || [];
+    let launch = null; try { launch = await api.app.getLaunchContext(); } catch { /* ignore */ }
+    const wantId = (launch && launch.characterId) || state.settings.characterId;
+    state.character = state.characters.find(c => c.id === wantId) || state.characters[0] || null;
+    if (state.character && state.settings.characterId !== state.character.id) saveSettings({ characterId: state.character.id });
+    state.timerMin = Number.isFinite(state.settings.timerMin) ? state.settings.timerMin : 45;
+    if (!state.settings.rhythm) state.settings.rhythm = { ...PmRhythm.RHYTHM_PRESETS[state.settings.rhythmPreset] || PmRhythm.RHYTHM_PRESETS.gentle };
+    home.bind(); sounds.bind(); script.bind(); journal.bind(); settings.bind();
+    home.render();
+    if (state.character) { api.voice.readProfiles({ characterId: state.character.id }).then(v => { state.voiceReady = !!(v && v.selected); home.renderWho(); }).catch(() => { state.voiceReady = false; home.renderWho(); }); }
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && state.view === "home") home.render(); });
+  } catch (e) { fail(e); }
+}
+boot();
+})();
+</script></body></html>

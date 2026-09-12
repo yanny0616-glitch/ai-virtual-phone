@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>陪眠</title><style>{{STYLES}}</style></head>
+<body><div id="app" data-theme="night">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <linearGradient id="mg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--moon-a)"/><stop offset="1" stop-color="var(--moon-b)"/></linearGradient>
+  </defs></svg>
+
+  <div id="view-home" class="view on" data-view="home">
+    <div class="stars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <header class="top"><span class="eyebrow en" id="hdr-date"></span><h1 class="serif" id="home-greet">晚安</h1></header>
+    <div class="dial" id="dial">
+      <svg class="ring" viewBox="0 0 300 300" aria-hidden="true">
+        <circle class="ring-bg" cx="150" cy="150" r="128"/>
+        <path class="ring-arc" id="ring-arc" d=""/>
+        <g id="ring-stops"></g>
+      </svg>
+      <div class="moon-wrap"><div class="moon-glow"></div><svg class="moon" viewBox="0 0 200 200" aria-hidden="true"><path d="M118 34a70 70 0 1 0 50 120 56 56 0 0 1-50-120z" fill="url(#mg)"/></svg></div>
+      <div class="dial-cap"><b id="dial-val">45 分</b><span>后停</span></div>
+    </div>
+    <p class="who-line" id="hero-who"></p>
+    <div class="modes" id="mode-seg"><button type="button" data-mode="lull" class="on">哄睡</button><button type="button" data-mode="insomnia">失眠</button><button type="button" data-mode="sound">只要声音</button></div>
+    <div class="open-night" id="open-night" hidden><span id="open-night-text"></span><button class="txt-btn" id="btn-wake" type="button">我醒了 ›</button></div>
+    <div class="rows">
+      <button class="row" id="home-mix" type="button"><span class="rk">声景</span><span class="rv"><b id="home-mix-name">安静</b><small id="home-mix-layers">没有开任何声音</small></span><span class="arr">›</span></button>
+      <button class="row" id="home-script" type="button"><span class="rk">话术</span><span class="rv"><b id="home-script-name">轻柔</b><small id="home-script-desc"></small></span><span class="arr">›</span></button>
+    </div>
+    <button class="big-btn" id="btn-sleep" type="button">睡了</button>
+    <div id="last-night"></div>
+    <p class="foot" id="home-foot"></p>
+  </div>
+
+  <div id="view-sounds" class="view" data-view="sounds">
+    <header class="top"><span class="eyebrow en">SOUNDSCAPE</span><h1 class="serif" id="mix-title">安静</h1><div class="top-acts"><button class="txt-btn" id="btn-mix-preview" type="button">试听</button><button class="txt-btn" id="btn-mix-save" type="button">存组合</button></div></header>
+    <div class="faders" id="layers"></div>
+    <div class="presets" id="mix-presets"></div>
+    <div class="sec-h"><span>声音</span><span class="sec-acts"><button class="txt-btn" id="btn-import" type="button">导入录音</button><button class="txt-btn" id="btn-store" type="button">商店 ＋</button></span></div>
+    <div class="cats" id="sound-cats"></div>
+    <div class="tiles" id="sound-tiles"></div>
+    <p class="foot" id="sounds-credit"></p>
+  </div>
+
+  <div id="view-script" class="view" data-view="script">
+    <header class="top"><span class="eyebrow en">THE VOICE</span><h1 class="serif">TA 怎么说</h1></header>
+    <div class="sec-h"><span>节奏</span></div>
+    <div class="modes" id="rhythm-presets"></div>
+    <p class="note" id="rhythm-desc"></p>
+    <div class="curve" id="rhythm-curve" aria-hidden="true"></div>
+    <div class="frow"><div class="fl">说几段</div><input id="r-segments" type="range" min="1" max="12"><b></b></div>
+    <div class="frow"><div class="fl">第一段字数</div><input id="r-firstChars" type="range" min="10" max="300" step="5"><b></b></div>
+    <div class="frow"><div class="fl">最后一段字数</div><input id="r-lastChars" type="range" min="5" max="300" step="5"><b></b></div>
+    <div class="frow"><div class="fl">起始间隔</div><input id="r-firstGapSec" type="range" min="5" max="600" step="5"><b></b></div>
+    <div class="frow"><div class="fl">最长间隔</div><input id="r-lastGapSec" type="range" min="5" max="1800" step="15"><b></b></div>
+    <div class="sec-h"><span>内容方向</span><span class="sec-sub">可多选</span></div>
+    <div class="tgl-row" id="directions"></div>
+    <textarea id="forbid" class="txt-in" rows="2" placeholder="禁止项：不要叫我宝贝；不提工作；不讲鬼故事"></textarea>
+    <div class="sec-h"><span>失眠模式</span><span class="sec-sub">半夜再打开走这一套</span></div>
+    <p class="note">不问原因，不给建议。</p>
+    <div class="tgl-row" id="insomnia-directions"></div>
+    <textarea id="insomnia-forbid" class="txt-in" rows="2" placeholder="失眠时的禁止项"></textarea>
+    <div class="sec-h"><span>语音</span><span class="sec-acts"><button class="txt-btn" id="btn-try-line" type="button">试一句</button></span></div>
+    <div class="frow"><div><div class="fl">朗读</div><div class="fu" id="tts-hint">用小手机里给角色配的语音</div></div><label class="sw"><input id="tts-on" type="checkbox" checked><i></i></label></div>
+    <div class="bubble" id="try-line" hidden></div>
+  </div>
+
+  <div id="view-journal" class="view" data-view="journal">
+    <header class="top"><span class="eyebrow en">NIGHT JOURNAL</span><h1 class="serif" id="journal-title">这一周</h1></header>
+    <div class="modes" id="journal-seg"><button class="stab" type="button" data-range="day">每天</button><button class="stab on" type="button" data-range="week">每周</button><button class="stab" type="button" data-range="month">每月</button></div>
+    <div id="journal-day" hidden></div>
+    <div id="journal-week"></div>
+    <div id="journal-month" hidden></div>
+  </div>
+
+  <div id="view-settings" class="view" data-view="settings">
+    <header class="top"><span class="eyebrow en">SETTINGS</span><h1 class="serif">陪眠</h1></header>
+    <div id="settings-body"></div>
+  </div>
+
+  <nav class="tabbar" id="tabbar">
+    <button class="tb on" type="button" data-view="home"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg><span>今夜</span><small>TONIGHT</small></button>
+    <button class="tb" type="button" data-view="sounds"><svg viewBox="0 0 24 24"><path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2"/></svg><span>声景</span><small>SOUND</small></button>
+    <button class="tb" type="button" data-view="script"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg><span>话术</span><small>VOICE</small></button>
+    <button class="tb" type="button" data-view="journal"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>夜记</span><small>JOURNAL</small></button>
+    <button class="tb" type="button" data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>配置</span><small>SETUP</small></button>
+  </nav>
+
+  <div class="sheet-mask" id="sheet-mask"></div>
+  <div class="sheet" id="sheet">
+    <div class="sheet-hd"><h3 class="serif" id="sheet-title"></h3><button class="sheet-x" id="sheet-close" type="button" aria-label="关闭">✕</button></div>
+    <div id="sheet-content"></div>
+  </div>
+
+  <div class="overlay" id="sleep" hidden>
+    <div class="stars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="ov-top"><span id="sleep-clock"></span><span id="sleep-remain"></span></div>
+    <div class="moon-wrap ov-moon"><div class="halo" aria-hidden="true"></div><div class="moon-glow"></div><svg class="moon" viewBox="0 0 200 200" aria-hidden="true"><path d="M118 34a70 70 0 1 0 50 120 56 56 0 0 1-50-120z" fill="url(#mg)"/></svg></div>
+    <p class="ov-sub serif" id="sleep-sub"></p>
+    <p class="ov-status" id="sleep-status"></p>
+    <div class="ov-actions">
+      <button class="round" id="btn-mic" type="button" aria-label="按住说话"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" stroke="none"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4"/></svg></button>
+      <button class="round stop" id="btn-stop" type="button" aria-label="停止"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg></button>
+      <button class="round" id="btn-dim" type="button" aria-label="更暗"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg></button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>{{SCRIPTS}}</script></body></html>

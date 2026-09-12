@@ -1,0 +1,31 @@
+{
+  "sdkVersion": "1.0",
+  "id": "float.peimian",
+  "name": "陪眠",
+  "version": "0.1.0",
+  "author": "Float",
+  "description": "睡前陪伴：角色用自己的声音哄你入睡，越说越轻；多层白噪音叠加成你的声景，可从 Freesound 搜更多；每晚一条夜记，周视图看作息。",
+  "icon": "icon.svg",
+  "entry": "index.html",
+  "permissions": [
+    "app.data.read",
+    "app.data.write",
+    "characters.read",
+    "user.profile.read",
+    "ai.generate",
+    "voice.readProfiles",
+    "voice.tts",
+    "voice.stt",
+    "media.pick",
+    "chat.write",
+    "network.fetch",
+    "ui.toast"
+  ],
+  "network": {
+    "allowedDomains": ["freesound.org", "cdn.freesound.org"]
+  },
+  "resources": {
+    "presets": ["presets.json"]
+  },
+  "primaryTags": []
+}

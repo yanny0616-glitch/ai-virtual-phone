@@ -7,6 +7,14 @@
 `git diff upstream/main...main` 共 139 个提交、130 个文件（2026-09-03 核对）。
 
 
+## 2026-09-12 陪眠 APP 第一版
+
+- 新增官方自定义 APP「陪眠」（`custom-apps/pei-mian/`，0.1.0）：哄睡 / 失眠 / 只要声音三种模式，节奏曲线可调，19 段内置声景可叠 6 层，Freesound 商店，夜记日 / 周 / 月视图，夜航（日夜自动）/ 暖烛 / 灰雾三套主题。
+- `scripts/lib/custom-app-package.mjs`：递归打包子目录（`assets/`），关闭 JSZip 自动目录条目保证 zip 字节稳定。
+- `lib/custom-app-storage.ts`：`guessMime` 识别 mp3 / m4a / wav / ogg，安装包里的音频拿到正确的 `data:audio/*`。
+- 新脚本 `pei-mian:build` / `pei-mian:check` / `pei-mian:test` / `check:pei-mian-app`。
+- 视觉走访谈 / 栖所那条线：墨色夜空、琥珀单强调色、宋体标题下挂英文小标、细线分区、底部 5 tab；定时是月亮外的圆环拨盘，声景是竖向推子，周记是一夜横躺的时间轴；进场 / 拨盘 / 推子 / 时间轴 / 入睡画面都有动效，跟随系统「减少动态效果」。
+
 ## A. 部署基础设施（upstream 没有，纯自建）
 
 - `.github/workflows/float-release.yml` — 构建+发布流水线（链路图见 CLAUDE.md 的「部署链路」）
