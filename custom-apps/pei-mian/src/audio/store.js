@@ -1,7 +1,56 @@
-// ── 声音商店：Freesound API（CC0），搜索走浏览器直连，下载走宿主代理拿二进制 ──
+// ── 声音下载：内置声景按需从 Freesound 拉 128k 高音质预览；商店搜索走 API；都存进宿主媒体库 ──
+// 预览地址带 Access-Control-Allow-Origin: *，iframe 里直接 fetch，不经宿主代理，没有体积上限。
 const store = (() => {
-  const MAX_SECONDS = 170; // 64k 预览 ≈ 8KB/s，宿主代理二进制上限约 1.5MB
+  const MAX_SECONDS = 240;
   function key() { return (state.settings.freesoundKey || "").trim(); }
+  const fmtMB = bytes => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
+
+  // 直连拉音频 → dataUrl，带进度
+  async function fetchAudio(url, onProgress) {
+    const res = await fetch(url, { mode: "cors", credentials: "omit" });
+    if (!res.ok) throw new Error(`下载失败（${res.status}）`);
+    const total = Number(res.headers.get("content-length")) || 0;
+    const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+    let blob;
+    if (!reader) blob = await res.blob();
+    else {
+      const chunks = []; let got = 0;
+      for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; if (onProgress) onProgress(total ? got / total : 0, got); }
+      blob = new Blob(chunks, { type: res.headers.get("content-type") || "audio/mpeg" });
+    }
+    const dataUrl = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(new Error("读取失败")); r.readAsDataURL(blob); });
+    return { dataUrl, bytes: blob.size };
+  }
+
+  const inflight = new Map();
+  // 内置声音：没下过就下，下过直接返回库里的行
+  function ensureBuiltin(sound, onProgress) {
+    const have = state.library.find(r => r.builtin && r.key === sound.key);
+    if (have) return Promise.resolve(have);
+    if (inflight.has(sound.key)) return inflight.get(sound.key);
+    const job = (async () => {
+      const src = SOUND_SOURCES[sound.key];
+      if (!src || !src.hq) throw new Error(`${sound.name} 没有下载地址`);
+      const { dataUrl, bytes } = await fetchAudio(src.hq, onProgress);
+      const stored = await api.media.put({ dataUrl });
+      const row = await api.db.create("library", { key: sound.key, builtin: true, name: sound.name, source: "freesound", quality: "hq", author: src.author, url: src.url, bytes, mediaRef: stored.ref });
+      state.library.push(row);
+      emit("library");
+      return row;
+    })().finally(() => inflight.delete(sound.key));
+    inflight.set(sound.key, job);
+    return job;
+  }
+  async function ensureAll(keys, onEach) {
+    const todo = keys.map(findSound).filter(s => s && !s.user && !s.ready);
+    for (let i = 0; i < todo.length; i += 1) { await ensureBuiltin(todo[i], p => onEach && onEach(i, todo.length, p, todo[i])); }
+    return todo.length;
+  }
+  function builtinStats() {
+    const rows = state.library.filter(r => r.builtin);
+    return { ready: rows.length, total: BUILTIN_SOUNDS.length, bytes: rows.reduce((s, r) => s + (r.bytes || 0), 0), allBytes: BUILTIN_SOUNDS.reduce((s, b) => s + ((SOUND_SOURCES[b.key] || {}).hqBytes || 0), 0) };
+  }
+
   async function search(query, page = 1) {
     if (!key()) throw new Error("先在「配置」里填 Freesound API Key");
     const params = new URLSearchParams({
@@ -14,18 +63,17 @@ const store = (() => {
     const json = res.json || JSON.parse(res.text || "{}");
     return { results: json.results || [], next: !!json.next, count: json.count || 0 };
   }
-  async function download(item) {
-    const url = item.previews && item.previews["preview-lq-mp3"];
+  async function download(item, onProgress) {
+    const url = item.previews && (item.previews["preview-hq-mp3"] || item.previews["preview-lq-mp3"]);
     if (!url) throw new Error("这条没有预览音频");
-    const res = await api.network.fetch({ url, proxy: true, timeoutMs: 90000 });
-    if (!res.ok || !res.binary || !res.data) throw new Error("下载失败，可能超过体积上限");
-    const dataUrl = `data:${res.contentType || "audio/mpeg"};base64,${res.data}`;
+    const { dataUrl, bytes } = await fetchAudio(url, onProgress);
     const stored = await api.media.put({ dataUrl });
     const row = await api.db.create("library", {
-      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound",
-      author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), mediaRef: stored.ref,
+      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound", quality: "hq",
+      author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), bytes, mediaRef: stored.ref,
     });
     state.library.push(row);
+    emit("library");
     return row;
   }
   async function importFile() {
@@ -35,6 +83,7 @@ const store = (() => {
     const name = (picked.file.name || "我的录音").replace(/\.[a-z0-9]+$/i, "").slice(0, 24);
     const row = await api.db.create("library", { key: `my_${Date.now().toString(36)}`, name, icon: "mic", source: "import", mediaRef: stored.ref });
     state.library.push(row);
+    emit("library");
     return row;
   }
   async function remove(row) {
@@ -42,6 +91,10 @@ const store = (() => {
     await api.db.delete("library", row.id);
     state.library = state.library.filter(r => r.id !== row.id);
     engine.forget(row.key);
+    emit("library");
   }
-  return { search, download, importFile, remove, MAX_SECONDS };
+  async function removeBuiltins() {
+    for (const row of state.library.filter(r => r.builtin)) await remove(row);
+  }
+  return { search, download, importFile, remove, removeBuiltins, ensureBuiltin, ensureAll, builtinStats, fetchAudio, fmtMB, MAX_SECONDS };
 })();

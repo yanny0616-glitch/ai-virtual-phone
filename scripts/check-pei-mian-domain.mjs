@@ -46,10 +46,11 @@ const tone = new Float32Array(sr * 2); for (let i = 0; i < tone.length; i += 1) 
 const looped = loopSamples(tone, sr * 5, sr, 7);
 assert.equal(looped.length, sr * 5);
 assert.ok(looped.reduce((m, v) => Math.max(m, Math.abs(v)), 0) <= .5 * Math.SQRT2 + 1e-6, "等功率交叉不超过 √2 倍峰值");
-const mixed = mixLayers([{ samples: tone, volume: .8, seed: 1 }, { samples: tone, volume: .3, drift: true, seed: 2 }], { loopSeconds: 4 });
-assert.equal(mixed.samples.length, sr * 4); assert.ok(mixed.peak > 0 && mixed.peak <= 1);
+const mixed = mixLayers([{ samples: tone, volume: .8, seed: 1 }, { samples: [tone, new Float32Array(tone.length)], volume: .3, drift: true, seed: 2 }], { loopSeconds: 4 });
+assert.equal(mixed.channels.length, 2); assert.equal(mixed.channels[0].length, sr * 4); assert.ok(mixed.peak > 0 && mixed.peak <= 1);
+assert.notEqual(mixed.channels[0][1000], mixed.channels[1][1000], "第二层右声道静音，左右应不同");
 assert.equal(mixLayers([], { loopSeconds: 1 }).peak, 0);
-const tail = fadeTail(mixed.samples, 2); assert.equal(tail.length, sr * 2); assert.ok(Math.abs(tail[tail.length - 1]) < 1e-3, "尾巴归零");
+const tail = fadeTail(mixed.channels, 2); assert.equal(tail.length, 2); assert.equal(tail[0].length, sr * 2); assert.ok(Math.abs(tail[1][tail[1].length - 1]) < 1e-3, "尾巴归零");
 assert.equal(resample(new Float32Array(44100), 44100, 22050).length, 22050);
 assert.equal(toMono([new Float32Array([1, 1]), new Float32Array([0, 0])])[0], .5);
 
@@ -57,5 +58,8 @@ assert.equal(toMono([new Float32Array([1, 1]), new Float32Array([0, 0])])[0], .5
 const wav = encodeWav(new Float32Array([0, 1, -1]), 8000);
 assert.equal(wav.length, 44 + 6); assert.equal(String.fromCharCode(...wav.slice(0, 4)), "RIFF");
 assert.equal(new DataView(wav.buffer).getInt16(46, true), 0x7FFF); assert.equal(new DataView(wav.buffer).getInt16(48, true), -0x8000);
+const wav2 = encodeWav([new Float32Array([1, 0]), new Float32Array([0, -1])], 44100);
+assert.equal(wav2.length, 44 + 8); assert.equal(new DataView(wav2.buffer).getUint16(22, true), 2, "双声道");
+assert.equal(new DataView(wav2.buffer).getInt16(44, true), 0x7FFF); assert.equal(new DataView(wav2.buffer).getInt16(46, true), 0); assert.equal(new DataView(wav2.buffer).getInt16(50, true), -0x8000, "交错存放");
 
 console.log("[pei-mian] 领域层检查通过。");

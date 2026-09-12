@@ -20,13 +20,14 @@ const settings = (() => {
           <div class="frow"><div class="fl">目标入睡</div><input id="goal-bed" type="time" class="field time"></div>
           <div class="frow"><div class="fl">目标时长</div><span><input id="goal-hours" type="number" class="field num" min="4" max="12" step="0.5"> <span class="fu" style="display:inline">小时</span></span></div></div>
         <div class="grp"><div class="grp-t">声景</div>
+          <div class="frow"><div><div class="fl">内置声音</div><div class="fu" id="bi-stat"></div></div><button class="mini" type="button" id="bi-all">全部下载</button><button class="mini warn" type="button" id="bi-clear">清掉</button></div>
           <div class="frow"><div class="fl">结束前渐弱</div><select id="fade-min" class="select"><option value="1">1 分钟</option><option value="2">2 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option></select></div>
           <div class="frow col"><div><div class="fl">Freesound API Key</div><div class="fu">声音商店要用。到 freesound.org/apiv2/apply 申请，只存在这台设备</div></div><input id="fs-key" type="password" class="field" placeholder="粘贴 key" autocomplete="off"></div></div>
         <div class="grp"><div class="grp-t">和聊天的关系</div>
           <div class="frow"><div><div class="fl">睡了 / 醒了写进聊天记录</div><div class="fu">TA 下次聊天知道你昨晚几点睡</div></div><label class="sw"><input id="sync-chat" type="checkbox"><i></i></label></div>
           <div class="frow"><div><div class="fl">早安一句</div><div class="fu">点「我醒了」时让 TA 说一句</div></div><label class="sw"><input id="morning-on" type="checkbox"><i></i></label></div></div>
         <div class="grp"><div class="frow"><div class="fl">声音来源与致谢</div><button class="mini" type="button" id="btn-credits">看</button></div><div class="frow"><div class="fl">清空陪眠的全部数据</div><button class="mini warn" type="button" id="btn-reset">清空</button></div></div>
-        <p class="foot">陪眠 · 第一版</p>`;
+        <p class="foot">陪眠 · 0.2.0</p>`;
       const q = sel => box.querySelector(sel);
       const paint = () => {
         box.querySelectorAll("#theme-picker button").forEach(b => b.classList.toggle("on", b.dataset.theme === s.theme));
@@ -46,14 +47,18 @@ const settings = (() => {
       q("#sync-chat").checked = !!s.syncChat; q("#sync-chat").onchange = e => saveSettings({ syncChat: e.target.checked });
       q("#morning-on").checked = !!s.morningOn; q("#morning-on").onchange = e => saveSettings({ morningOn: e.target.checked });
       q("#btn-credits").onclick = credits;
+      const biStat = () => { const st = store.builtinStats(); q("#bi-stat").textContent = `128 kbps 立体声，第一次用时自动下载。已下 ${st.ready}/${st.total}，占 ${store.fmtMB(st.bytes)}；全部约 ${store.fmtMB(st.allBytes)}`; q("#bi-clear").disabled = !st.ready; q("#bi-all").disabled = st.ready >= st.total; };
+      biStat();
+      q("#bi-all").onclick = async ev => { const btn = ev.currentTarget; btn.disabled = true; try { await store.ensureAll(BUILTIN_SOUNDS.map(b => b.key), (i, n, p, snd) => { btn.textContent = `${i + 1}/${n} ${Math.round(p * 100)}%`; }); toast("都下好了"); } catch (e) { fail(e); } finally { btn.textContent = "全部下载"; biStat(); } };
+      q("#bi-clear").onclick = async () => { if (!confirm("删掉已下载的内置声音？下次用会重新下载。")) return; try { await store.removeBuiltins(); toast("清掉了"); } catch (e) { fail(e); } biStat(); };
       q("#btn-reset").onclick = async () => { if (!confirm("清空陪眠的夜记、组合和下载的声音？不可恢复。")) return; try { await session.stop(); await resetAll(); theme.apply(); toast("清空了"); switchView("home"); } catch (e) { fail(e); } };
     }
   }
   function credits() {
     openSheet("声音来源", box => {
       const rows = Object.entries(SOUND_SOURCES).map(([key, s]) => `<p class="credit"><b>${esc(findSound(key)?.name || key)}</b> — ${esc(s.name)} by ${esc(s.author)} · CC0 · freesound.org/s/${s.id}</p>`).join("");
-      const mine = state.library.filter(r => r.source === "freesound").map(r => `<p class="credit"><b>${esc(r.name)}</b> — ${esc(r.author)} · CC0 · freesound.org/s/${String(r.key).replace("fs_", "")}</p>`).join("");
-      box.innerHTML = `<p class="hint">全部为 Creative Commons 0，可自由使用；仍列出作者以示感谢。</p>${rows}${mine ? `<div class="grp-t" style="margin-top:14px">你下载的</div>${mine}` : ""}`;
+      const mine = state.library.filter(r => r.source === "freesound" && !r.builtin).map(r => `<p class="credit"><b>${esc(r.name)}</b> — ${esc(r.author)} · CC0 · freesound.org/s/${String(r.key).replace("fs_", "")}</p>`).join("");
+      box.innerHTML = `<p class="hint">全部为 Creative Commons 0，可自由使用；仍列出作者以示感谢。</p>${rows}${mine ? `<div class="grp-t" style="margin-top:14px">商店里下的</div>${mine}` : ""}`;
     });
   }
   function bind() { on("view", v => { if (v === "settings") render(); }); }

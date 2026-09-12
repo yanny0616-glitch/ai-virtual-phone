@@ -17,5 +17,6 @@ async function boot() {
     document.addEventListener("visibilitychange", () => { if (!document.hidden && state.view === "home") home.render(); });
   } catch (e) { fail(e); }
 }
+if (api && api.__mock) window.__pm = { engine, store, state, PmMixer, PmWav, findSound };
 boot();
 })();

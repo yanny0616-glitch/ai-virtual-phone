@@ -7,8 +7,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/WhiteNoiseSleeper/sounds/725603/",
   "duration": 232,
-  "quality": "lq",
-  "bytes": 1944408
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/725/725603_15753134-hq.mp3",
+  "hqBytes": 5440298,
+  "orig": {
+   "sr": 44100.0,
+   "bd": 16,
+   "ch": 2
+  }
  },
  {
   "key": "rain_heavy",
@@ -18,8 +24,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/Petrosilia/sounds/592996/",
   "duration": 67,
-  "quality": "lq",
-  "bytes": 725736
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/592/592996_11710404-hq.mp3",
+  "hqBytes": 1858944,
+  "orig": {
+   "sr": 96000.0,
+   "bd": 24,
+   "ch": 2
+  }
  },
  {
   "key": "rain_window",
@@ -29,8 +41,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/nicoproson/sounds/648529/",
   "duration": 174,
-  "quality": "lq",
-  "bytes": 1457928
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/648/648529_457982-hq.mp3",
+  "hqBytes": 3997248,
+  "orig": {
+   "sr": 96000.0,
+   "bd": 32,
+   "ch": 2
+  }
  },
  {
   "key": "thunder",
@@ -40,8 +58,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/RutgerMuller/sounds/158692/",
   "duration": 88,
-  "quality": "lq",
-  "bytes": 738288
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/158/158692_179538-hq.mp3",
+  "hqBytes": 1941216,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 24,
+   "ch": 2
+  }
  },
  {
   "key": "waves",
@@ -51,8 +75,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/CVLTIV8R/sounds/803679/",
   "duration": 80,
-  "quality": "lq",
-  "bytes": 654360
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/803/803679_2520418-hq.mp3",
+  "hqBytes": 1833135,
+  "orig": {
+   "sr": 44100.0,
+   "bd": 32,
+   "ch": 2
+  }
  },
  {
   "key": "stream",
@@ -62,8 +92,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/Auxide_Audio/sounds/588179/",
   "duration": 47,
-  "quality": "lq",
-  "bytes": 389736
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/588/588179_13207434-hq.mp3",
+  "hqBytes": 1094496,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 16,
+   "ch": 2
+  }
  },
  {
   "key": "wind",
@@ -73,8 +109,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/felix.blume/sounds/217506/",
   "duration": 212,
-  "quality": "lq",
-  "bytes": 1800624
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/217/217506_1661766-hq.mp3",
+  "hqBytes": 4756032,
+  "orig": {
+   "sr": 96000.0,
+   "bd": 24,
+   "ch": 2
+  }
  },
  {
   "key": "night_crickets",
@@ -84,8 +126,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/AnthonyRamirez/sounds/425425/",
   "duration": 125,
-  "quality": "lq",
-  "bytes": 1041792
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/425/425425_7193358-hq.mp3",
+  "hqBytes": 2912400,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 24,
+   "ch": 2
+  }
  },
  {
   "key": "fire",
@@ -95,8 +143,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/RyanKingArt/sounds/717579/",
   "duration": 61,
-  "quality": "lq",
-  "bytes": 420024
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/717/717579_11069322-hq.mp3",
+  "hqBytes": 1126813,
+  "orig": {
+   "sr": 44100.0,
+   "bd": 0,
+   "ch": 2
+  }
  },
  {
   "key": "fan",
@@ -106,8 +160,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/Fabrizio84/sounds/457551/",
   "duration": 121,
-  "quality": "lq",
-  "bytes": 1031904
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/457/457551_2841496-hq.mp3",
+  "hqBytes": 2731080,
+  "orig": {
+   "sr": 44100.0,
+   "bd": 0,
+   "ch": 2
+  }
  },
  {
   "key": "aircon",
@@ -117,8 +177,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/kyles/sounds/637930/",
   "duration": 43,
-  "quality": "lq",
-  "bytes": 371112
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/637/637930_612689-hq.mp3",
+  "hqBytes": 963456,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 16,
+   "ch": 2
+  }
  },
  {
   "key": "clock",
@@ -128,8 +194,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/thsha1/sounds/840291/",
   "duration": 47,
-  "quality": "lq",
-  "bytes": 389904
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/840/840291_47392-hq.mp3",
+  "hqBytes": 1099344,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 24,
+   "ch": 1
+  }
  },
  {
   "key": "cat_purr",
@@ -139,8 +211,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/Minscer/sounds/424355/",
   "duration": 49,
-  "quality": "lq",
-  "bytes": 504840
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/424/424355_385405-hq.mp3",
+  "hqBytes": 1166448,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 0,
+   "ch": 2
+  }
  },
  {
   "key": "train",
@@ -150,8 +228,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/crashoverride6/sounds/219233/",
   "duration": 218,
-  "quality": "lq",
-  "bytes": 1860240
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/219/219233_1274078-hq.mp3",
+  "hqBytes": 4927200,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 24,
+   "ch": 2
+  }
  },
  {
   "key": "airplane",
@@ -161,8 +245,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/FillSoko/sounds/456092/",
   "duration": 155,
-  "quality": "lq",
-  "bytes": 1281672
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/456/456092_3025911-hq.mp3",
+  "hqBytes": 3525875,
+  "orig": {
+   "sr": 44100.0,
+   "bd": 16,
+   "ch": 2
+  }
  },
  {
   "key": "brown_noise",
@@ -172,8 +262,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/Hinoirocks/sounds/242513/",
   "duration": 34,
-  "quality": "lq",
-  "bytes": 273040
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/242/242513_2262598-hq.mp3",
+  "hqBytes": 778494,
+  "orig": {
+   "sr": 44100.0,
+   "bd": 16,
+   "ch": 1
+  }
  },
  {
   "key": "pink_noise",
@@ -183,8 +279,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/Zrte/sounds/470754/",
   "duration": 38,
-  "quality": "lq",
-  "bytes": 355416
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/470/470754_9989554-hq.mp3",
+  "hqBytes": 942144,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 24,
+   "ch": 2
+  }
  },
  {
   "key": "white_noise",
@@ -194,8 +296,14 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/JarredGibb/sounds/249313/",
   "duration": 30,
-  "quality": "lq",
-  "bytes": 248448
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/249/249313_4056007-hq.mp3",
+  "hqBytes": 697824,
+  "orig": {
+   "sr": 48000.0,
+   "bd": 24,
+   "ch": 1
+  }
  },
  {
   "key": "singing_bowl",
@@ -205,7 +313,13 @@
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/people/brodjaman/sounds/204915/",
   "duration": 94,
-  "quality": "lq",
-  "bytes": 829416
+  "quality": "hq",
+  "hq": "https://cdn.freesound.org/previews/204/204915_710671-hq.mp3",
+  "hqBytes": 2082884,
+  "orig": {
+   "sr": 44100.0,
+   "bd": 16,
+   "ch": 2
+  }
  }
 ]

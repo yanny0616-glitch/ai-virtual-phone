@@ -10,7 +10,7 @@
 |---|---|
 | `domain/rhythm` | 节奏预设、内容方向、把「段数 / 字数 / 间隔」算成时间表（缓出曲线：前密后疏） |
 | `domain/stats` | 夜记口径（凌晨 6 点前算前一晚）、入睡时刻相对 18:00 的分钟数（23:30 和 01:10 能平均）、周汇总、月历格 |
-| `domain/mixer` | 多层混音：随机起点 + 等功率交叉淡化循环 + RMS 拉平 + 可选慢 LFO 起伏 + tanh 软限幅；渐弱尾巴；单声道化与重采样 |
+| `domain/mixer` | 多层立体声混音（44.1k）：随机起点 + 等功率交叉淡化循环（左右声道共用起点）+ RMS 拉平 + 可选慢 LFO 起伏 + tanh 软限幅；渐弱尾巴；重采样 |
 | `domain/wav` | Float32 → 16-bit WAV dataURL |
 | `core/runtime` | `$`、toast、底部弹层、视图切换、事件总线 |
 | `data/storage` | `settings` 一行、`nights` 每晚一行、`mixes`、`library`（商店下载 / 导入的声音） |
@@ -22,9 +22,9 @@
 
 ## 关键决定
 
-- **声景在 APP 内合成**。宿主环境音只有一条通道、播放中改不了音量，所以叠加、音量、起伏、渐弱全部在 APP 里算成一段 90 秒 32kHz 单声道循环体交给宿主。改层后延迟 400ms 重合成，切换时有一下接缝，接受。
-- **声音文件走 assets，不走 db**。`app.getAssetUrl` 拿到 dataURL 后 `fetch` 解码；解码结果按 key 缓存在内存，不落库。用户下载 / 导入的声音存 `media.put` 引用。
-- **单个资源 ≤ 2MB** 是宿主限制，所以内置全部用 Freesound 64k 预览音；商店只列 ≤ 170 秒的（宿主代理二进制上限约 1.5MB）。
+- **声景在 APP 内合成**。宿主环境音只有一条通道、播放中改不了音量，所以叠加、音量、起伏、渐弱全部在 APP 里算成一段 48 秒 44.1kHz 立体声 16-bit 循环体（约 8MB WAV）交给宿主。改层后延迟 400ms 重合成，切换时有一下接缝，接受。
+- **内置声音不随包发，首次用时下载**。`assets/sources.json` 只记 Freesound id、作者和 `preview-hq-mp3`（128 kbps、44.1k 立体声）地址；第一次点某块声音时在 iframe 里直接 `fetch`（预览地址带 `Access-Control-Allow-Origin: *`，不经宿主代理，也就没有代理 2,000,000 字符 base64 的上限）→ `media.put` → `library` 表一行 `builtin:true`。解码结果按 key 缓存在内存。安装包因此只有 50KB，也能过市场 5MB 的门槛。
+- **为什么不用原始 WAV/FLAC**：Freesound 原文件要 OAuth2 才能下，API key 只给预览；而且 48k/24bit 一段就十几 MB，宿主 `media` 存 base64 也吃不消。128k mp3 对雨、风、噪音这类宽频声在睡眠音量下已听不出差别。
 - **夜记以「入睡当晚」为键**，凌晨 6 点前入睡归前一天；同一晚再点「睡了」不建新记录，起夜次数 +1。
 - **说话链路**：`ai.generate` 走 `presets.json` 的 `["peimian", lull|insomnia|reply|morning|weekly]`；前几段作为 `messages` 回传避免重复。TTS 失败只显示字幕。
 - **宿主打包脚本改成递归**（`scripts/lib/custom-app-package.mjs`），并关掉 JSZip 自动建目录条目（否则目录带当前时间，zip 字节不稳定）。宿主 `guessMime` 补了 mp3 / m4a / wav / ogg。

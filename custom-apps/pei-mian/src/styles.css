@@ -425,6 +425,18 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 .overlay .ov-moon { position: relative; left: auto; top: auto; transform: none; }
 /* 表单行：右侧控件一律靠右对齐 */
 .frow > .select, .frow > .field, .frow > .mini, .frow > span:last-child, .frow > .txt-btn { margin-left: auto; }
+.frow > .field + .mini { margin-left: 0; }
 .frow > span:last-child { display: inline-flex; align-items: center; gap: 6px; }
 .frow.col { flex-direction: column; align-items: stretch; gap: 8px; }
 .frow.col > .field { margin-left: 0; width: 100%; }
+/* 声音块：未下载角标、下载中 */
+.tile { position: relative; }
+.tile .badge { position: absolute; top: 7px; right: 7px; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--tx3); }
+.tile .badge::after { content: ""; position: absolute; left: 4px; top: 3px; width: 4px; height: 4px; border-right: 1px solid var(--tx3); border-bottom: 1px solid var(--tx3); transform: rotate(45deg); }
+.tile.busy { border-color: rgba(var(--acc-rgb), .5); }
+.tile.busy .badge { border-color: var(--acc); border-top-color: transparent; animation: spin 1s linear infinite; }
+.tile.busy .badge::after { display: none; }
+.tile.busy span { color: var(--acc); font-variant-numeric: tabular-nums; }
+/* 长按不要选中文字、不要弹系统菜单 */
+.tile, .fader, .presets button, .cats button, .modes button, .tb, .tgl, .rate button, .ring-hit, .big-btn, .row, .day, .tl-bar, .char-cell, .themes button { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.tile span, .fader .nm { pointer-events: none; }

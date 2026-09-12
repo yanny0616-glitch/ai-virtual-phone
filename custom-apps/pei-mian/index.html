@@ -426,9 +426,21 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 .overlay .ov-moon { position: relative; left: auto; top: auto; transform: none; }
 /* 表单行：右侧控件一律靠右对齐 */
 .frow > .select, .frow > .field, .frow > .mini, .frow > span:last-child, .frow > .txt-btn { margin-left: auto; }
+.frow > .field + .mini { margin-left: 0; }
 .frow > span:last-child { display: inline-flex; align-items: center; gap: 6px; }
 .frow.col { flex-direction: column; align-items: stretch; gap: 8px; }
 .frow.col > .field { margin-left: 0; width: 100%; }
+/* 声音块：未下载角标、下载中 */
+.tile { position: relative; }
+.tile .badge { position: absolute; top: 7px; right: 7px; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--tx3); }
+.tile .badge::after { content: ""; position: absolute; left: 4px; top: 3px; width: 4px; height: 4px; border-right: 1px solid var(--tx3); border-bottom: 1px solid var(--tx3); transform: rotate(45deg); }
+.tile.busy { border-color: rgba(var(--acc-rgb), .5); }
+.tile.busy .badge { border-color: var(--acc); border-top-color: transparent; animation: spin 1s linear infinite; }
+.tile.busy .badge::after { display: none; }
+.tile.busy span { color: var(--acc); font-variant-numeric: tabular-nums; }
+/* 长按不要选中文字、不要弹系统菜单 */
+.tile, .fader, .presets button, .cats button, .modes button, .tb, .tgl, .rate button, .ring-hit, .big-btn, .row, .day, .tl-bar, .char-cell, .themes button { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.tile span, .fader .nm { pointer-events: none; }
 </style></head>
 <body><div id="app" data-theme="night">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -799,28 +811,30 @@ return Object.freeze(exports);
 const exports = Object.create(null);
 const require = id => { const m = ({ "./rhythm.mjs": PmRhythm, "./stats.mjs": PmStats })[id]; if (!m) throw new Error("unknown module " + id); return m; };
 "use strict";
-// 多层声景混音：把若干已解码的单声道 Float32Array 叠成一段无缝循环。纯函数，不碰 Web Audio。
-// 每层：随机起点 + 首尾等功率交叉淡化 + 可选起伏(慢 LFO)。输出 Float32Array(loopSeconds*sampleRate)。
+// 多层声景混音：把若干已解码的声音叠成一段无缝立体声循环。纯函数，不碰 Web Audio。
+// 每层：随机起点 + 首尾等功率交叉淡化 + 可选起伏(慢 LFO)。左右声道共用同一个起点，声像不会散。
+// 输入的 samples 可以是 Float32Array（单声道）或 [L, R]；输出 { channels: [L, R], peak }。
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MAX_LAYERS = exports.MIX_SAMPLE_RATE = void 0;
+exports.LOOP_SECONDS = exports.MAX_LAYERS = exports.MIX_SAMPLE_RATE = void 0;
 exports.equalPowerFade = equalPowerFade;
 exports.loopSamples = loopSamples;
 exports.mulberry32 = mulberry32;
 exports.peakOf = peakOf;
 exports.rmsOf = rmsOf;
+exports.asStereo = asStereo;
 exports.mixLayers = mixLayers;
 exports.fadeTail = fadeTail;
 exports.toMono = toMono;
 exports.resample = resample;
-exports.MIX_SAMPLE_RATE = 32000;
+exports.MIX_SAMPLE_RATE = 44100;
 exports.MAX_LAYERS = 6;
+exports.LOOP_SECONDS = 48;
 function equalPowerFade(t) {
-    // t∈[0,1] → (out, in)
     const a = Math.cos(t * Math.PI / 2);
     const b = Math.sin(t * Math.PI / 2);
     return [a, b];
 }
-// 把一段样本做成长度 targetLen 的循环：起点随机（由 seed 决定），拼接处交叉淡化 fadeLen。
+// 把一段样本做成长度 targetLen 的循环：起点由 seed 决定，拼接处交叉淡化 fadeLen。
 function loopSamples(src, targetLen, fadeLen, seed) {
     const out = new Float32Array(targetLen);
     const n = src.length;
@@ -828,14 +842,12 @@ function loopSamples(src, targetLen, fadeLen, seed) {
         return out;
     const rand = mulberry32(seed);
     const useFade = Math.min(fadeLen, Math.floor(n / 4));
-    // 有效周期 = n - useFade（重叠部分算一次）
     const period = Math.max(1, n - useFade);
-    let start = Math.floor(rand() * n);
+    const start = Math.floor(rand() * n);
     for (let i = 0; i < targetLen; i += 1) {
         const pos = (start + i) % period;
         let v = src[pos];
         if (useFade > 0 && pos < useFade) {
-            // 周期开头的 useFade 段：和上一圈的尾巴交叉
             const [a, b] = equalPowerFade(pos / useFade);
             v = src[period + pos] * a + src[pos] * b;
         }
@@ -868,52 +880,61 @@ function rmsOf(samples) {
         sum += samples[i] * samples[i];
     return Math.sqrt(sum / Math.max(1, samples.length));
 }
-// layers: [{ samples: Float32Array(单声道, sampleRate 已统一), volume: 0..1, drift: bool, seed }]
-// 返回 { samples, peak }；各层先按 RMS 拉平到同一响度再按 volume 混，最后软限幅。
-function mixLayers(layers, { sampleRate = exports.MIX_SAMPLE_RATE, loopSeconds = 90, master = 1 } = {}) {
+function asStereo(samples) {
+    if (samples instanceof Float32Array)
+        return [samples, samples];
+    if (Array.isArray(samples))
+        return samples.length >= 2 ? [samples[0], samples[1]] : [samples[0], samples[0]];
+    return [new Float32Array(0), new Float32Array(0)];
+}
+// layers: [{ samples: Float32Array | [L, R], volume: 0..1, drift: bool, seed }]
+function mixLayers(layers, { sampleRate = exports.MIX_SAMPLE_RATE, loopSeconds = exports.LOOP_SECONDS, master = 1 } = {}) {
     const len = Math.max(1, Math.floor(loopSeconds * sampleRate));
-    const out = new Float32Array(len);
+    const out = [new Float32Array(len), new Float32Array(len)];
     const fadeLen = Math.floor(sampleRate * 3);
     const targetRms = 0.08;
     layers.slice(0, exports.MAX_LAYERS).forEach((layer, index) => {
-        if (!layer || !layer.samples || !layer.samples.length || !(layer.volume > 0))
+        if (!layer || !layer.samples || !(layer.volume > 0))
             return;
-        const looped = loopSamples(layer.samples, len, fadeLen, (layer.seed ?? 1) * 7919 + index);
-        const rms = rmsOf(looped) || 1;
+        const src = asStereo(layer.samples);
+        if (!src[0].length)
+            return;
+        const seed = (layer.seed ?? 1) * 7919 + index;
+        const looped = [loopSamples(src[0], len, fadeLen, seed), loopSamples(src[1], len, fadeLen, seed)];
+        const rms = (rmsOf(looped[0]) + rmsOf(looped[1])) / 2 || 1;
         const gain = (targetRms / rms) * layer.volume;
         if (layer.drift) {
-            // 慢起伏：两条不同周期的正弦叠加，幅度 ±35%
             const p1 = (17 + index * 3) * sampleRate, p2 = (41 + index * 5) * sampleRate;
             for (let i = 0; i < len; i += 1) {
                 const lfo = 1 + 0.35 * (0.6 * Math.sin(2 * Math.PI * i / p1) + 0.4 * Math.sin(2 * Math.PI * i / p2 + index));
-                out[i] += looped[i] * gain * lfo;
+                out[0][i] += looped[0][i] * gain * lfo;
+                out[1][i] += looped[1][i] * gain * lfo;
             }
         }
         else {
-            for (let i = 0; i < len; i += 1)
-                out[i] += looped[i] * gain;
+            for (let i = 0; i < len; i += 1) {
+                out[0][i] += looped[0][i] * gain;
+                out[1][i] += looped[1][i] * gain;
+            }
         }
     });
     const m = Math.max(0, Math.min(1, master));
-    for (let i = 0; i < len; i += 1) {
-        const v = out[i] * m * 2.2;
-        out[i] = Math.tanh(v); // 软限幅
-    }
-    return { samples: out, peak: peakOf(out) };
+    for (const ch of out)
+        for (let i = 0; i < len; i += 1)
+            ch[i] = Math.tanh(ch[i] * m * 2.2);
+    return { channels: out, peak: Math.max(peakOf(out[0]), peakOf(out[1])) };
 }
 // 结束前的渐弱尾巴：把循环体重复到 fadeSeconds 长，再整体乘以从 1 到 0 的曲线。
-function fadeTail(loop, fadeSeconds, sampleRate = exports.MIX_SAMPLE_RATE) {
+function fadeTail(channels, fadeSeconds, sampleRate = exports.MIX_SAMPLE_RATE) {
     const len = Math.max(1, Math.floor(fadeSeconds * sampleRate));
-    const out = new Float32Array(len);
-    const n = loop.length || 1;
-    for (let i = 0; i < len; i += 1) {
-        const t = i / len;
-        const g = Math.pow(1 - t, 1.6);
-        out[i] = loop[i % n] * g;
-    }
-    return out;
+    return asStereo(channels).map(loop => {
+        const out = new Float32Array(len);
+        const n = loop.length || 1;
+        for (let i = 0; i < len; i += 1)
+            out[i] = loop[i % n] * Math.pow(1 - i / len, 1.6);
+        return out;
+    });
 }
-// 立体声/多声道 → 单声道；不同采样率 → 线性重采样
 function toMono(channels) {
     if (!channels.length)
         return new Float32Array(0);
@@ -954,9 +975,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.encodeWav = encodeWav;
 exports.bytesToBase64 = bytesToBase64;
 exports.wavDataUrl = wavDataUrl;
-// Float32 单声道 → 16-bit PCM WAV（Uint8Array）。纯函数。
-function encodeWav(samples, sampleRate) {
-    const dataLen = samples.length * 2;
+// Float32（单声道或 [L, R]）→ 16-bit PCM WAV（Uint8Array）。纯函数。
+function encodeWav(input, sampleRate) {
+    const channels = input instanceof Float32Array ? [input] : input;
+    const nch = channels.length;
+    const frames = channels[0] ? channels[0].length : 0;
+    const dataLen = frames * nch * 2;
     const buffer = new ArrayBuffer(44 + dataLen);
     const view = new DataView(buffer);
     const str = (offset, s) => { for (let i = 0; i < s.length; i += 1)
@@ -967,17 +991,19 @@ function encodeWav(samples, sampleRate) {
     str(12, "fmt ");
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
+    view.setUint16(22, nch, true);
     view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
+    view.setUint32(28, sampleRate * nch * 2, true);
+    view.setUint16(32, nch * 2, true);
     view.setUint16(34, 16, true);
     str(36, "data");
     view.setUint32(40, dataLen, true);
     let o = 44;
-    for (let i = 0; i < samples.length; i += 1, o += 2) {
-        const v = Math.max(-1, Math.min(1, samples[i]));
-        view.setInt16(o, v < 0 ? v * 0x8000 : v * 0x7FFF, true);
+    for (let i = 0; i < frames; i += 1) {
+        for (let c = 0; c < nch; c += 1, o += 2) {
+            const v = Math.max(-1, Math.min(1, channels[c][i]));
+            view.setInt16(o, v < 0 ? v * 0x8000 : v * 0x7FFF, true);
+        }
     }
     return new Uint8Array(buffer);
 }
@@ -988,13 +1014,13 @@ function bytesToBase64(bytes) {
         binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
     return btoa(binary);
 }
-function wavDataUrl(samples, sampleRate) {
-    return "data:audio/wav;base64," + bytesToBase64(encodeWav(samples, sampleRate));
+function wavDataUrl(channels, sampleRate) {
+    return "data:audio/wav;base64," + bytesToBase64(encodeWav(channels, sampleRate));
 }
 
 return Object.freeze(exports);
 })();
-  const SOUND_SOURCES = {"rain_light":{"id":725603,"name":"Rain Falling On The Greenhouse","author":"WhiteNoiseSleeper","duration":232},"rain_heavy":{"id":592996,"name":"heavy rain on a small tent hq","author":"Petrosilia","duration":67},"rain_window":{"id":648529,"name":"RAIN on glass window.wav","author":"nicoproson","duration":174},"thunder":{"id":158692,"name":"Distant Thunder and Rain from Half Open Window 1.aif","author":"RutgerMuller","duration":88},"waves":{"id":803679,"name":"Ocean Waves Crashing on the Coast of Big Lagoon, Redwoods","author":"CVLTIV8R","duration":80},"stream":{"id":588179,"name":"Mountain River 001.wav","author":"Auxide_Audio","duration":47},"wind":{"id":217506,"name":"Wind blowing in a field in Texas, USA","author":"felix.blume","duration":212},"night_crickets":{"id":425425,"name":"AMB_Rural_Summer_Night.wav","author":"AnthonyRamirez","duration":125},"fire":{"id":717579,"name":"Fireplace Fire Crackling","author":"RyanKingArt","duration":61},"fan":{"id":457551,"name":"Computer Fan Noise","author":"Fabrizio84","duration":121},"aircon":{"id":637930,"name":"vent air conditioner clean rattle hum.flac","author":"kyles","duration":43},"clock":{"id":840291,"name":"thsha1_wall_clock_tick_20251229","author":"thsha1","duration":47},"cat_purr":{"id":424355,"name":"purring happy cat.mp3","author":"Minscer","duration":49},"train":{"id":219233,"name":"DC Metro - Interior 1","author":"crashoverride6","duration":218},"airplane":{"id":456092,"name":"Airplane cabin ambience / atmosphere Airbus A330-300","author":"FillSoko","duration":155},"brown_noise":{"id":242513,"name":"brownnoise.aiff","author":"Hinoirocks","duration":34},"pink_noise":{"id":470754,"name":"Pink Noise Filtered.wav","author":"Zrte","duration":38},"white_noise":{"id":249313,"name":"White Noise -20dBFS 30 Second.wav","author":"JarredGibb","duration":30},"singing_bowl":{"id":204915,"name":"Singing Bowl a tuned","author":"brodjaman","duration":94}};
+  const SOUND_SOURCES = {"rain_light":{"id":725603,"name":"Rain Falling On The Greenhouse","author":"WhiteNoiseSleeper","url":"https://freesound.org/people/WhiteNoiseSleeper/sounds/725603/","duration":232,"hq":"https://cdn.freesound.org/previews/725/725603_15753134-hq.mp3","hqBytes":5440298},"rain_heavy":{"id":592996,"name":"heavy rain on a small tent hq","author":"Petrosilia","url":"https://freesound.org/people/Petrosilia/sounds/592996/","duration":67,"hq":"https://cdn.freesound.org/previews/592/592996_11710404-hq.mp3","hqBytes":1858944},"rain_window":{"id":648529,"name":"RAIN on glass window.wav","author":"nicoproson","url":"https://freesound.org/people/nicoproson/sounds/648529/","duration":174,"hq":"https://cdn.freesound.org/previews/648/648529_457982-hq.mp3","hqBytes":3997248},"thunder":{"id":158692,"name":"Distant Thunder and Rain from Half Open Window 1.aif","author":"RutgerMuller","url":"https://freesound.org/people/RutgerMuller/sounds/158692/","duration":88,"hq":"https://cdn.freesound.org/previews/158/158692_179538-hq.mp3","hqBytes":1941216},"waves":{"id":803679,"name":"Ocean Waves Crashing on the Coast of Big Lagoon, Redwoods","author":"CVLTIV8R","url":"https://freesound.org/people/CVLTIV8R/sounds/803679/","duration":80,"hq":"https://cdn.freesound.org/previews/803/803679_2520418-hq.mp3","hqBytes":1833135},"stream":{"id":588179,"name":"Mountain River 001.wav","author":"Auxide_Audio","url":"https://freesound.org/people/Auxide_Audio/sounds/588179/","duration":47,"hq":"https://cdn.freesound.org/previews/588/588179_13207434-hq.mp3","hqBytes":1094496},"wind":{"id":217506,"name":"Wind blowing in a field in Texas, USA","author":"felix.blume","url":"https://freesound.org/people/felix.blume/sounds/217506/","duration":212,"hq":"https://cdn.freesound.org/previews/217/217506_1661766-hq.mp3","hqBytes":4756032},"night_crickets":{"id":425425,"name":"AMB_Rural_Summer_Night.wav","author":"AnthonyRamirez","url":"https://freesound.org/people/AnthonyRamirez/sounds/425425/","duration":125,"hq":"https://cdn.freesound.org/previews/425/425425_7193358-hq.mp3","hqBytes":2912400},"fire":{"id":717579,"name":"Fireplace Fire Crackling","author":"RyanKingArt","url":"https://freesound.org/people/RyanKingArt/sounds/717579/","duration":61,"hq":"https://cdn.freesound.org/previews/717/717579_11069322-hq.mp3","hqBytes":1126813},"fan":{"id":457551,"name":"Computer Fan Noise","author":"Fabrizio84","url":"https://freesound.org/people/Fabrizio84/sounds/457551/","duration":121,"hq":"https://cdn.freesound.org/previews/457/457551_2841496-hq.mp3","hqBytes":2731080},"aircon":{"id":637930,"name":"vent air conditioner clean rattle hum.flac","author":"kyles","url":"https://freesound.org/people/kyles/sounds/637930/","duration":43,"hq":"https://cdn.freesound.org/previews/637/637930_612689-hq.mp3","hqBytes":963456},"clock":{"id":840291,"name":"thsha1_wall_clock_tick_20251229","author":"thsha1","url":"https://freesound.org/people/thsha1/sounds/840291/","duration":47,"hq":"https://cdn.freesound.org/previews/840/840291_47392-hq.mp3","hqBytes":1099344},"cat_purr":{"id":424355,"name":"purring happy cat.mp3","author":"Minscer","url":"https://freesound.org/people/Minscer/sounds/424355/","duration":49,"hq":"https://cdn.freesound.org/previews/424/424355_385405-hq.mp3","hqBytes":1166448},"train":{"id":219233,"name":"DC Metro - Interior 1","author":"crashoverride6","url":"https://freesound.org/people/crashoverride6/sounds/219233/","duration":218,"hq":"https://cdn.freesound.org/previews/219/219233_1274078-hq.mp3","hqBytes":4927200},"airplane":{"id":456092,"name":"Airplane cabin ambience / atmosphere Airbus A330-300","author":"FillSoko","url":"https://freesound.org/people/FillSoko/sounds/456092/","duration":155,"hq":"https://cdn.freesound.org/previews/456/456092_3025911-hq.mp3","hqBytes":3525875},"brown_noise":{"id":242513,"name":"brownnoise.aiff","author":"Hinoirocks","url":"https://freesound.org/people/Hinoirocks/sounds/242513/","duration":34,"hq":"https://cdn.freesound.org/previews/242/242513_2262598-hq.mp3","hqBytes":778494},"pink_noise":{"id":470754,"name":"Pink Noise Filtered.wav","author":"Zrte","url":"https://freesound.org/people/Zrte/sounds/470754/","duration":38,"hq":"https://cdn.freesound.org/previews/470/470754_9989554-hq.mp3","hqBytes":942144},"white_noise":{"id":249313,"name":"White Noise -20dBFS 30 Second.wav","author":"JarredGibb","url":"https://freesound.org/people/JarredGibb/sounds/249313/","duration":30,"hq":"https://cdn.freesound.org/previews/249/249313_4056007-hq.mp3","hqBytes":697824},"singing_bowl":{"id":204915,"name":"Singing Bowl a tuned","author":"brodjaman","url":"https://freesound.org/people/brodjaman/sounds/204915/","duration":94,"hq":"https://cdn.freesound.org/previews/204/204915_710671-hq.mp3","hqBytes":2082884}};
 // ── 存储：settings 一行、nights 每晚一行、mixes 每个组合一行、library 用户自己加的声音每个一行 ──
 const DEFAULT_SETTINGS = Object.freeze({
   theme: "auto", autoBy: "system", characterId: "", ttsOn: true, sttOn: true, emotion: "calm",
@@ -1117,16 +1143,22 @@ const MIX_PRESETS = [
   { name: "猫和雨", layers: [{ key: "cat_purr", volume: .6 }, { key: "rain_light", volume: .5 }] },
   { name: "纯棕噪", layers: [{ key: "brown_noise", volume: .8 }] },
 ];
+// 内置声音不随包发，第一次用时从 Freesound 拉高音质预览存进媒体库；库里 builtin:true 的行就是下好的
+function builtinRow(key) { return state.library.find(r => r.builtin && r.key === key) || null; }
+function withRow(sound) { const row = builtinRow(sound.key); return { ...sound, name: row && row.name ? row.name : sound.name, ready: !!row, mediaRef: row ? row.mediaRef : null, bytes: row ? row.bytes : (SOUND_SOURCES[sound.key] || {}).hqBytes }; }
 function findSound(key) {
-  return BUILTIN_SOUNDS.find(s => s.key === key) || state.library.find(s => s.key === key) || null;
+  const b = BUILTIN_SOUNDS.find(s => s.key === key);
+  if (b) return withRow(b);
+  const r = state.library.find(s => !s.builtin && s.key === key);
+  return r ? { key: r.key, name: r.name, icon: r.icon || "headphones", cat: "mine", drift: false, user: true, ready: true, mediaRef: r.mediaRef } : null;
 }
 function allSounds() {
-  return BUILTIN_SOUNDS.concat(state.library.map(s => ({ key: s.key, name: s.name, icon: s.icon || "headphones", cat: "mine", drift: false, user: true, mediaRef: s.mediaRef })));
+  return BUILTIN_SOUNDS.map(withRow).concat(state.library.filter(s => !s.builtin).map(s => ({ key: s.key, name: s.name, icon: s.icon || "headphones", cat: "mine", drift: false, user: true, ready: true, mediaRef: s.mediaRef })));
 }
 // ── 音频引擎：解码 → 混音（domain/mixer）→ WAV → media.put → 宿主 ambience 通道循环播放 ──
 // 宿主环境音只有一条通道且播放中改不了音量，所以每次改层/改音量都重新合成一段再切。
 const engine = (() => {
-  const decoded = new Map();          // key → Float32Array(mono @ MIX_SAMPLE_RATE)
+  const decoded = new Map();          // key → [L, R] Float32Array @ MIX_SAMPLE_RATE
   let decodeCtx = null;
   let currentRef = null;              // 正在播的循环体 media ref
   let playing = false;
@@ -1141,20 +1173,31 @@ const engine = (() => {
     }
     return decodeCtx;
   }
+  // dataURL → ArrayBuffer 自己解 base64，不走 fetch(data:)（iOS 的 WebView 里大 data: URL fetch 会失败）
+  function bytesOfDataUrl(dataUrl) {
+    const comma = dataUrl.indexOf(",");
+    if (comma < 0) throw new Error("媒体数据不是 dataURL");
+    const head = dataUrl.slice(0, comma);
+    const body = dataUrl.slice(comma + 1);
+    if (!/;base64/i.test(head)) return new TextEncoder().encode(decodeURIComponent(body)).buffer;
+    const bin = atob(body);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+    return out.buffer;
+  }
   async function fetchBytes(source) {
     if (source.startsWith("media-store://")) {
       const media = await api.media.get({ ref: source });
-      return (await fetch(media.dataUrl)).arrayBuffer();
+      if (!media || !media.dataUrl) throw new Error("媒体库里找不到这段声音，删掉重新下载试试");
+      return bytesOfDataUrl(media.dataUrl);
     }
+    if (source.startsWith("data:")) return bytesOfDataUrl(source);
     return (await fetch(source)).arrayBuffer();
-  }
-  function sourceFor(sound) {
-    if (sound.user) return sound.mediaRef;
-    return api.app.getAssetUrl(`assets/sounds/${sound.key}.mp3`);
   }
   async function decode(sound) {
     if (decoded.has(sound.key)) return decoded.get(sound.key);
-    const src = await sourceFor(sound);
+    let src = sound.mediaRef;
+    if (!src && !sound.user) { const row = await store.ensureBuiltin(sound); src = row.mediaRef; }
     if (!src) throw new Error(`找不到声音文件：${sound.name}`);
     const bytes = await fetchBytes(src);
     const buffer = await new Promise((resolve, reject) => {
@@ -1162,26 +1205,26 @@ const engine = (() => {
       if (p && p.then) p.then(resolve, reject);
     });
     const channels = [];
-    for (let c = 0; c < buffer.numberOfChannels; c += 1) channels.push(buffer.getChannelData(c));
-    const mono = PmMixer.resample(PmMixer.toMono(channels), buffer.sampleRate, PmMixer.MIX_SAMPLE_RATE);
-    decoded.set(sound.key, mono);
-    return mono;
+    for (let c = 0; c < Math.min(2, buffer.numberOfChannels); c += 1) channels.push(PmMixer.resample(buffer.getChannelData(c), buffer.sampleRate, PmMixer.MIX_SAMPLE_RATE));
+    const stereo = PmMixer.asStereo(channels);
+    decoded.set(sound.key, stereo);
+    return stereo;
   }
   function signature(mix) {
     return JSON.stringify({ l: (mix.layers || []).map(l => [l.key, Math.round(l.volume * 100), !!l.drift]), m: Math.round((mix.master ?? .7) * 100) });
   }
-  async function render(mix, { loopSeconds = 90 } = {}) {
+  async function render(mix, { loopSeconds = PmMixer.LOOP_SECONDS } = {}) {
     const layers = [];
     for (const layer of mix.layers || []) {
       const sound = findSound(layer.key); if (!sound) continue;
-      const samples = await decode(sound.user ? { ...sound, user: true, mediaRef: sound.mediaRef } : sound);
+      const samples = await decode(sound);
       layers.push({ samples, volume: layer.volume, drift: layer.drift ?? sound.drift, seed: hashKey(layer.key) });
     }
-    const { samples } = PmMixer.mixLayers(layers, { loopSeconds, master: mix.master ?? .7 });
-    return samples;
+    const { channels } = PmMixer.mixLayers(layers, { loopSeconds, master: mix.master ?? .7 });
+    return channels;
   }
-  async function putWav(samples) {
-    const dataUrl = PmWav.wavDataUrl(samples, PmMixer.MIX_SAMPLE_RATE);
+  async function putWav(channels) {
+    const dataUrl = PmWav.wavDataUrl(channels, PmMixer.MIX_SAMPLE_RATE);
     const stored = await api.media.put({ dataUrl });
     return stored.ref;
   }
@@ -1224,20 +1267,68 @@ const engine = (() => {
   }
   // 单个声音试听 10 秒
   async function preview(sound) {
-    const samples = await decode(sound);
-    const clip = samples.subarray(0, Math.min(samples.length, PmMixer.MIX_SAMPLE_RATE * 10));
-    const out = new Float32Array(clip.length);
-    const rms = PmMixer.rmsOf(clip) || 1; const g = Math.min(4, .12 / rms);
-    for (let i = 0; i < clip.length; i += 1) out[i] = Math.tanh(clip[i] * g * 2);
+    const stereo = await decode(sound);
+    const n = Math.min(stereo[0].length, PmMixer.MIX_SAMPLE_RATE * 10);
+    const rms = (PmMixer.rmsOf(stereo[0].subarray(0, n)) + PmMixer.rmsOf(stereo[1].subarray(0, n))) / 2 || 1; const g = Math.min(4, .12 / rms);
+    const out = stereo.map(ch => { const o = new Float32Array(n); for (let i = 0; i < n; i += 1) o[i] = Math.tanh(ch[i] * g * 2); return o; });
     await api.voice.play({ channel: "ambience", dataUrl: PmWav.wavDataUrl(out, PmMixer.MIX_SAMPLE_RATE), loop: false, volume: 1 });
   }
   function hashKey(s) { let h = 2166136261; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
   return { decode, play, stop, fadeOut, preview, isPlaying: () => playing, forget: key => decoded.delete(key) };
 })();
-// ── 声音商店：Freesound API（CC0），搜索走浏览器直连，下载走宿主代理拿二进制 ──
+// ── 声音下载：内置声景按需从 Freesound 拉 128k 高音质预览；商店搜索走 API；都存进宿主媒体库 ──
+// 预览地址带 Access-Control-Allow-Origin: *，iframe 里直接 fetch，不经宿主代理，没有体积上限。
 const store = (() => {
-  const MAX_SECONDS = 170; // 64k 预览 ≈ 8KB/s，宿主代理二进制上限约 1.5MB
+  const MAX_SECONDS = 240;
   function key() { return (state.settings.freesoundKey || "").trim(); }
+  const fmtMB = bytes => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
+
+  // 直连拉音频 → dataUrl，带进度
+  async function fetchAudio(url, onProgress) {
+    const res = await fetch(url, { mode: "cors", credentials: "omit" });
+    if (!res.ok) throw new Error(`下载失败（${res.status}）`);
+    const total = Number(res.headers.get("content-length")) || 0;
+    const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+    let blob;
+    if (!reader) blob = await res.blob();
+    else {
+      const chunks = []; let got = 0;
+      for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; if (onProgress) onProgress(total ? got / total : 0, got); }
+      blob = new Blob(chunks, { type: res.headers.get("content-type") || "audio/mpeg" });
+    }
+    const dataUrl = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(new Error("读取失败")); r.readAsDataURL(blob); });
+    return { dataUrl, bytes: blob.size };
+  }
+
+  const inflight = new Map();
+  // 内置声音：没下过就下，下过直接返回库里的行
+  function ensureBuiltin(sound, onProgress) {
+    const have = state.library.find(r => r.builtin && r.key === sound.key);
+    if (have) return Promise.resolve(have);
+    if (inflight.has(sound.key)) return inflight.get(sound.key);
+    const job = (async () => {
+      const src = SOUND_SOURCES[sound.key];
+      if (!src || !src.hq) throw new Error(`${sound.name} 没有下载地址`);
+      const { dataUrl, bytes } = await fetchAudio(src.hq, onProgress);
+      const stored = await api.media.put({ dataUrl });
+      const row = await api.db.create("library", { key: sound.key, builtin: true, name: sound.name, source: "freesound", quality: "hq", author: src.author, url: src.url, bytes, mediaRef: stored.ref });
+      state.library.push(row);
+      emit("library");
+      return row;
+    })().finally(() => inflight.delete(sound.key));
+    inflight.set(sound.key, job);
+    return job;
+  }
+  async function ensureAll(keys, onEach) {
+    const todo = keys.map(findSound).filter(s => s && !s.user && !s.ready);
+    for (let i = 0; i < todo.length; i += 1) { await ensureBuiltin(todo[i], p => onEach && onEach(i, todo.length, p, todo[i])); }
+    return todo.length;
+  }
+  function builtinStats() {
+    const rows = state.library.filter(r => r.builtin);
+    return { ready: rows.length, total: BUILTIN_SOUNDS.length, bytes: rows.reduce((s, r) => s + (r.bytes || 0), 0), allBytes: BUILTIN_SOUNDS.reduce((s, b) => s + ((SOUND_SOURCES[b.key] || {}).hqBytes || 0), 0) };
+  }
+
   async function search(query, page = 1) {
     if (!key()) throw new Error("先在「配置」里填 Freesound API Key");
     const params = new URLSearchParams({
@@ -1250,18 +1341,17 @@ const store = (() => {
     const json = res.json || JSON.parse(res.text || "{}");
     return { results: json.results || [], next: !!json.next, count: json.count || 0 };
   }
-  async function download(item) {
-    const url = item.previews && item.previews["preview-lq-mp3"];
+  async function download(item, onProgress) {
+    const url = item.previews && (item.previews["preview-hq-mp3"] || item.previews["preview-lq-mp3"]);
     if (!url) throw new Error("这条没有预览音频");
-    const res = await api.network.fetch({ url, proxy: true, timeoutMs: 90000 });
-    if (!res.ok || !res.binary || !res.data) throw new Error("下载失败，可能超过体积上限");
-    const dataUrl = `data:${res.contentType || "audio/mpeg"};base64,${res.data}`;
+    const { dataUrl, bytes } = await fetchAudio(url, onProgress);
     const stored = await api.media.put({ dataUrl });
     const row = await api.db.create("library", {
-      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound",
-      author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), mediaRef: stored.ref,
+      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound", quality: "hq",
+      author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), bytes, mediaRef: stored.ref,
     });
     state.library.push(row);
+    emit("library");
     return row;
   }
   async function importFile() {
@@ -1271,6 +1361,7 @@ const store = (() => {
     const name = (picked.file.name || "我的录音").replace(/\.[a-z0-9]+$/i, "").slice(0, 24);
     const row = await api.db.create("library", { key: `my_${Date.now().toString(36)}`, name, icon: "mic", source: "import", mediaRef: stored.ref });
     state.library.push(row);
+    emit("library");
     return row;
   }
   async function remove(row) {
@@ -1278,8 +1369,12 @@ const store = (() => {
     await api.db.delete("library", row.id);
     state.library = state.library.filter(r => r.id !== row.id);
     engine.forget(row.key);
+    emit("library");
   }
-  return { search, download, importFile, remove, MAX_SECONDS };
+  async function removeBuiltins() {
+    for (const row of state.library.filter(r => r.builtin)) await remove(row);
+  }
+  return { search, download, importFile, remove, removeBuiltins, ensureBuiltin, ensureAll, builtinStats, fetchAudio, fmtMB, MAX_SECONDS };
 })();
 // ── 入睡会话：开声景 → 角色分段说话（越说越少）→ 定时渐弱 → 落夜记 ──
 const session = (() => {
@@ -1590,12 +1685,19 @@ const sounds = (() => {
   let cat = "rain";
   const mix = () => state.settings.currentMix;
   function layerOf(key) { return mix().layers.find(l => l.key === key); }
-  function toggle(key) {
+  async function toggle(key, tile) {
     const m = mix();
     if (layerOf(key)) m.layers = m.layers.filter(l => l.key !== key);
     else {
       if (m.layers.length >= PmMixer.MAX_LAYERS) { toast(`最多叠 ${PmMixer.MAX_LAYERS} 层`); return; }
       const sound = findSound(key);
+      if (sound && !sound.user && !sound.ready) {
+        if (tile) tile.classList.add("busy");
+        const label = tile && tile.querySelector("span");
+        try { await store.ensureBuiltin(sound, p => { if (label) label.textContent = `${Math.round(p * 100)}%`; }); }
+        catch (e) { fail(e); renderTiles(); return; }
+        if (tile) tile.classList.remove("busy");
+      }
       m.layers.push({ key, volume: .6, drift: !!(sound && sound.drift) });
     }
     m.name = "";
@@ -1635,9 +1737,10 @@ const sounds = (() => {
     const list = allSounds().filter(s => s.cat === cat);
     if (!list.length) box.appendChild(el("p", "empty", cat === "mine" ? "还没有自己的声音。点「＋ 商店」搜，或者导入一段录音。" : ""));
     for (const s of list) {
-      const t = el("button", "tile" + (layerOf(s.key) ? " on" : "") + (s.user ? " mine" : ""));
-      t.type = "button"; t.innerHTML = `${iconSvg(s.user ? s.icon : s.key)}<span>${esc(s.name)}</span>`;
-      t.onclick = () => { t.classList.add("pop"); toggle(s.key); };
+      const t = el("button", "tile" + (layerOf(s.key) ? " on" : "") + (s.user ? " mine" : "") + (!s.user && !s.ready ? " dl" : ""));
+      t.type = "button"; t.innerHTML = `${iconSvg(s.user ? s.icon : s.key)}<span>${esc(s.name)}</span>${!s.user && !s.ready ? `<i class="badge" title="第一次用会下载，约 ${esc(store.fmtMB(s.bytes || 0))}"></i>` : ""}`;
+      t.onclick = () => { t.classList.add("pop"); toggle(s.key, t); };
+      t.addEventListener("contextmenu", e => e.preventDefault());
       let pressTimer = 0;
       t.addEventListener("pointerdown", () => { pressTimer = setTimeout(() => { pressTimer = 0; longPress(s); }, 550); });
       const clear = () => { if (pressTimer) clearTimeout(pressTimer); };
@@ -1647,11 +1750,17 @@ const sounds = (() => {
     document.querySelectorAll("#sound-cats button").forEach(b => b.classList.toggle("on", b.dataset.cat === cat));
   }
   function longPress(s) {
-    const src = s.user ? state.library.find(r => r.key === s.key) : null;
-    const credit = src ? (src.source === "freesound" ? `来自 Freesound · ${src.author} · CC0` : "自己导入的录音") : (SOUND_SOURCES[s.key] ? `来自 Freesound · ${SOUND_SOURCES[s.key].author} · CC0` : "");
+    const src = state.library.find(r => r.key === s.key) || null;
+    const meta = SOUND_SOURCES[s.key];
+    const credit = s.user ? (src && src.source === "freesound" ? `来自 Freesound · ${src.author} · CC0` : "自己导入的录音") : (meta ? `来自 Freesound · ${meta.author} · CC0 · 128 kbps 立体声` : "");
+    const size = src ? `已下载 · ${store.fmtMB(src.bytes || 0)}` : (s.bytes ? `还没下载 · 约 ${store.fmtMB(s.bytes)}` : "");
     openSheet(s.name, box => {
-      box.innerHTML = `<p class="hint">${esc(credit)}</p><div class="grp"><div class="frow"><div class="fl">试听 10 秒</div><button class="mini" type="button" id="sp-prev">播放</button></div>${src ? `<div class="frow"><div class="fl">从我的声音里删除</div><button class="mini warn" type="button" id="sp-del">删除</button></div>` : ""}</div>`;
-      box.querySelector("#sp-prev").onclick = async () => { try { toast("试听中…", 1500); await engine.preview(s); } catch (e) { fail(e); } };
+      box.innerHTML = `<p class="hint">${esc(credit)}${size ? `<br>${esc(size)}` : ""}</p><div class="grp">
+        ${src ? `<div class="frow"><div class="fl">名字</div><input id="sp-name" class="field" maxlength="24" value="${esc(s.name)}"><button class="mini" type="button" id="sp-rename">改</button></div>` : `<div class="frow"><div class="fl">名字</div><div class="fu">下载后长按可以改名</div></div>`}
+        <div class="frow"><div class="fl">试听 10 秒</div><button class="mini" type="button" id="sp-prev">播放</button></div>${src ? `<div class="frow"><div class="fl">${s.user ? "从我的声音里删除" : "删掉下载的文件"}</div><button class="mini warn" type="button" id="sp-del">删除</button></div>` : ""}</div>`;
+      const rn = box.querySelector("#sp-rename");
+      if (rn) rn.onclick = async () => { const name = box.querySelector("#sp-name").value.trim().slice(0, 24); if (!name || name === s.name) { closeSheet(); return; } try { await api.db.update("library", src.id, { name }); src.name = name; closeSheet(); render(); toast("改好了"); } catch (e) { fail(e); } };
+      box.querySelector("#sp-prev").onclick = async () => { try { toast(s.ready ? "试听中…" : "先下载再试听…", 1500); await engine.preview(s); } catch (e) { fail(e); } };
       const del = box.querySelector("#sp-del");
       if (del) del.onclick = async () => { try { await store.remove(src); mix().layers = mix().layers.filter(l => l.key !== s.key); closeSheet(); commit(); toast("删了"); } catch (e) { fail(e); } };
     });
@@ -1666,7 +1775,11 @@ const sounds = (() => {
     const all = state.mixes.map(x => ({ ...x, user: true })).concat(MIX_PRESETS);
     for (const p of all) {
       const b = el("button", m.name === p.name ? "on" : "", p.name); b.type = "button";
-      b.onclick = () => { m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit(); };
+      b.onclick = async () => {
+        const keys = p.layers.map(l => l.key).filter(k => findSound(k));
+        try { await store.ensureAll(keys, (i, n, prog, snd) => toast(`下载 ${snd.name} ${Math.round(prog * 100)}% · ${i + 1}/${n}`, 1200)); } catch (e) { fail(e); return; }
+        m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit();
+      };
       if (p.user) { let t = 0; b.addEventListener("pointerdown", () => { t = setTimeout(async () => { t = 0; if (confirm(`删除组合「${p.name}」？`)) { await api.db.delete("mixes", p.id); state.mixes = state.mixes.filter(x => x.id !== p.id); renderPresets(); } }, 600); }); const c = () => t && clearTimeout(t); b.addEventListener("pointerup", c); b.addEventListener("pointerleave", c); }
       box.appendChild(b);
     }
@@ -1744,7 +1857,8 @@ const sounds = (() => {
     $("btn-import").onclick = async () => { try { const row = await store.importFile(); if (row) { toast("导入了"); cat = "mine"; renderTiles(); } } catch (e) { fail(e); } };
     on("engine", ({ busy }) => { if (!session.active()) $("btn-mix-preview").textContent = busy ? "合成中…" : (engine.isPlaying() ? "停" : "试听"); $("layers").classList.toggle("playing", engine.isPlaying()); $("layers").classList.toggle("busy", !!busy); });
     on("view", v => { if (v !== "sounds" && !session.active() && engine.isPlaying()) engine.stop(); if (v === "sounds") render(); });
-    $("sounds-credit").textContent = "内置声音来自 Freesound · CC0 · 长按一块试听或看来源";
+    on("library", () => { if (state.view === "sounds") renderTiles(); });
+    $("sounds-credit").textContent = "声音来自 Freesound · CC0 · 128k 立体声 · 带角标的第一次点会下载 · 长按试听或看来源";
   }
   function render() { renderCats(); renderTiles(); renderLayers(); renderPresets(); $("layers").classList.toggle("playing", engine.isPlaying()); }
   return { render, bind };
@@ -1982,13 +2096,14 @@ const settings = (() => {
           <div class="frow"><div class="fl">目标入睡</div><input id="goal-bed" type="time" class="field time"></div>
           <div class="frow"><div class="fl">目标时长</div><span><input id="goal-hours" type="number" class="field num" min="4" max="12" step="0.5"> <span class="fu" style="display:inline">小时</span></span></div></div>
         <div class="grp"><div class="grp-t">声景</div>
+          <div class="frow"><div><div class="fl">内置声音</div><div class="fu" id="bi-stat"></div></div><button class="mini" type="button" id="bi-all">全部下载</button><button class="mini warn" type="button" id="bi-clear">清掉</button></div>
           <div class="frow"><div class="fl">结束前渐弱</div><select id="fade-min" class="select"><option value="1">1 分钟</option><option value="2">2 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option></select></div>
           <div class="frow col"><div><div class="fl">Freesound API Key</div><div class="fu">声音商店要用。到 freesound.org/apiv2/apply 申请，只存在这台设备</div></div><input id="fs-key" type="password" class="field" placeholder="粘贴 key" autocomplete="off"></div></div>
         <div class="grp"><div class="grp-t">和聊天的关系</div>
           <div class="frow"><div><div class="fl">睡了 / 醒了写进聊天记录</div><div class="fu">TA 下次聊天知道你昨晚几点睡</div></div><label class="sw"><input id="sync-chat" type="checkbox"><i></i></label></div>
           <div class="frow"><div><div class="fl">早安一句</div><div class="fu">点「我醒了」时让 TA 说一句</div></div><label class="sw"><input id="morning-on" type="checkbox"><i></i></label></div></div>
         <div class="grp"><div class="frow"><div class="fl">声音来源与致谢</div><button class="mini" type="button" id="btn-credits">看</button></div><div class="frow"><div class="fl">清空陪眠的全部数据</div><button class="mini warn" type="button" id="btn-reset">清空</button></div></div>
-        <p class="foot">陪眠 · 第一版</p>`;
+        <p class="foot">陪眠 · 0.2.0</p>`;
       const q = sel => box.querySelector(sel);
       const paint = () => {
         box.querySelectorAll("#theme-picker button").forEach(b => b.classList.toggle("on", b.dataset.theme === s.theme));
@@ -2008,14 +2123,18 @@ const settings = (() => {
       q("#sync-chat").checked = !!s.syncChat; q("#sync-chat").onchange = e => saveSettings({ syncChat: e.target.checked });
       q("#morning-on").checked = !!s.morningOn; q("#morning-on").onchange = e => saveSettings({ morningOn: e.target.checked });
       q("#btn-credits").onclick = credits;
+      const biStat = () => { const st = store.builtinStats(); q("#bi-stat").textContent = `128 kbps 立体声，第一次用时自动下载。已下 ${st.ready}/${st.total}，占 ${store.fmtMB(st.bytes)}；全部约 ${store.fmtMB(st.allBytes)}`; q("#bi-clear").disabled = !st.ready; q("#bi-all").disabled = st.ready >= st.total; };
+      biStat();
+      q("#bi-all").onclick = async ev => { const btn = ev.currentTarget; btn.disabled = true; try { await store.ensureAll(BUILTIN_SOUNDS.map(b => b.key), (i, n, p, snd) => { btn.textContent = `${i + 1}/${n} ${Math.round(p * 100)}%`; }); toast("都下好了"); } catch (e) { fail(e); } finally { btn.textContent = "全部下载"; biStat(); } };
+      q("#bi-clear").onclick = async () => { if (!confirm("删掉已下载的内置声音？下次用会重新下载。")) return; try { await store.removeBuiltins(); toast("清掉了"); } catch (e) { fail(e); } biStat(); };
       q("#btn-reset").onclick = async () => { if (!confirm("清空陪眠的夜记、组合和下载的声音？不可恢复。")) return; try { await session.stop(); await resetAll(); theme.apply(); toast("清空了"); switchView("home"); } catch (e) { fail(e); } };
     }
   }
   function credits() {
     openSheet("声音来源", box => {
       const rows = Object.entries(SOUND_SOURCES).map(([key, s]) => `<p class="credit"><b>${esc(findSound(key)?.name || key)}</b> — ${esc(s.name)} by ${esc(s.author)} · CC0 · freesound.org/s/${s.id}</p>`).join("");
-      const mine = state.library.filter(r => r.source === "freesound").map(r => `<p class="credit"><b>${esc(r.name)}</b> — ${esc(r.author)} · CC0 · freesound.org/s/${String(r.key).replace("fs_", "")}</p>`).join("");
-      box.innerHTML = `<p class="hint">全部为 Creative Commons 0，可自由使用；仍列出作者以示感谢。</p>${rows}${mine ? `<div class="grp-t" style="margin-top:14px">你下载的</div>${mine}` : ""}`;
+      const mine = state.library.filter(r => r.source === "freesound" && !r.builtin).map(r => `<p class="credit"><b>${esc(r.name)}</b> — ${esc(r.author)} · CC0 · freesound.org/s/${String(r.key).replace("fs_", "")}</p>`).join("");
+      box.innerHTML = `<p class="hint">全部为 Creative Commons 0，可自由使用；仍列出作者以示感谢。</p>${rows}${mine ? `<div class="grp-t" style="margin-top:14px">商店里下的</div>${mine}` : ""}`;
     });
   }
   function bind() { on("view", v => { if (v === "settings") render(); }); }
@@ -2040,6 +2159,7 @@ async function boot() {
     document.addEventListener("visibilitychange", () => { if (!document.hidden && state.view === "home") home.render(); });
   } catch (e) { fail(e); }
 }
+if (api && api.__mock) window.__pm = { engine, store, state, PmMixer, PmWav, findSound };
 boot();
 })();
 </script></body></html>

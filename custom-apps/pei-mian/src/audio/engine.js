@@ -1,7 +1,7 @@
 // ── 音频引擎：解码 → 混音（domain/mixer）→ WAV → media.put → 宿主 ambience 通道循环播放 ──
 // 宿主环境音只有一条通道且播放中改不了音量，所以每次改层/改音量都重新合成一段再切。
 const engine = (() => {
-  const decoded = new Map();          // key → Float32Array(mono @ MIX_SAMPLE_RATE)
+  const decoded = new Map();          // key → [L, R] Float32Array @ MIX_SAMPLE_RATE
   let decodeCtx = null;
   let currentRef = null;              // 正在播的循环体 media ref
   let playing = false;
@@ -16,20 +16,31 @@ const engine = (() => {
     }
     return decodeCtx;
   }
+  // dataURL → ArrayBuffer 自己解 base64，不走 fetch(data:)（iOS 的 WebView 里大 data: URL fetch 会失败）
+  function bytesOfDataUrl(dataUrl) {
+    const comma = dataUrl.indexOf(",");
+    if (comma < 0) throw new Error("媒体数据不是 dataURL");
+    const head = dataUrl.slice(0, comma);
+    const body = dataUrl.slice(comma + 1);
+    if (!/;base64/i.test(head)) return new TextEncoder().encode(decodeURIComponent(body)).buffer;
+    const bin = atob(body);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+    return out.buffer;
+  }
   async function fetchBytes(source) {
     if (source.startsWith("media-store://")) {
       const media = await api.media.get({ ref: source });
-      return (await fetch(media.dataUrl)).arrayBuffer();
+      if (!media || !media.dataUrl) throw new Error("媒体库里找不到这段声音，删掉重新下载试试");
+      return bytesOfDataUrl(media.dataUrl);
     }
+    if (source.startsWith("data:")) return bytesOfDataUrl(source);
     return (await fetch(source)).arrayBuffer();
-  }
-  function sourceFor(sound) {
-    if (sound.user) return sound.mediaRef;
-    return api.app.getAssetUrl(`assets/sounds/${sound.key}.mp3`);
   }
   async function decode(sound) {
     if (decoded.has(sound.key)) return decoded.get(sound.key);
-    const src = await sourceFor(sound);
+    let src = sound.mediaRef;
+    if (!src && !sound.user) { const row = await store.ensureBuiltin(sound); src = row.mediaRef; }
     if (!src) throw new Error(`找不到声音文件：${sound.name}`);
     const bytes = await fetchBytes(src);
     const buffer = await new Promise((resolve, reject) => {
@@ -37,26 +48,26 @@ const engine = (() => {
       if (p && p.then) p.then(resolve, reject);
     });
     const channels = [];
-    for (let c = 0; c < buffer.numberOfChannels; c += 1) channels.push(buffer.getChannelData(c));
-    const mono = PmMixer.resample(PmMixer.toMono(channels), buffer.sampleRate, PmMixer.MIX_SAMPLE_RATE);
-    decoded.set(sound.key, mono);
-    return mono;
+    for (let c = 0; c < Math.min(2, buffer.numberOfChannels); c += 1) channels.push(PmMixer.resample(buffer.getChannelData(c), buffer.sampleRate, PmMixer.MIX_SAMPLE_RATE));
+    const stereo = PmMixer.asStereo(channels);
+    decoded.set(sound.key, stereo);
+    return stereo;
   }
   function signature(mix) {
     return JSON.stringify({ l: (mix.layers || []).map(l => [l.key, Math.round(l.volume * 100), !!l.drift]), m: Math.round((mix.master ?? .7) * 100) });
   }
-  async function render(mix, { loopSeconds = 90 } = {}) {
+  async function render(mix, { loopSeconds = PmMixer.LOOP_SECONDS } = {}) {
     const layers = [];
     for (const layer of mix.layers || []) {
       const sound = findSound(layer.key); if (!sound) continue;
-      const samples = await decode(sound.user ? { ...sound, user: true, mediaRef: sound.mediaRef } : sound);
+      const samples = await decode(sound);
       layers.push({ samples, volume: layer.volume, drift: layer.drift ?? sound.drift, seed: hashKey(layer.key) });
     }
-    const { samples } = PmMixer.mixLayers(layers, { loopSeconds, master: mix.master ?? .7 });
-    return samples;
+    const { channels } = PmMixer.mixLayers(layers, { loopSeconds, master: mix.master ?? .7 });
+    return channels;
   }
-  async function putWav(samples) {
-    const dataUrl = PmWav.wavDataUrl(samples, PmMixer.MIX_SAMPLE_RATE);
+  async function putWav(channels) {
+    const dataUrl = PmWav.wavDataUrl(channels, PmMixer.MIX_SAMPLE_RATE);
     const stored = await api.media.put({ dataUrl });
     return stored.ref;
   }
@@ -99,11 +110,10 @@ const engine = (() => {
   }
   // 单个声音试听 10 秒
   async function preview(sound) {
-    const samples = await decode(sound);
-    const clip = samples.subarray(0, Math.min(samples.length, PmMixer.MIX_SAMPLE_RATE * 10));
-    const out = new Float32Array(clip.length);
-    const rms = PmMixer.rmsOf(clip) || 1; const g = Math.min(4, .12 / rms);
-    for (let i = 0; i < clip.length; i += 1) out[i] = Math.tanh(clip[i] * g * 2);
+    const stereo = await decode(sound);
+    const n = Math.min(stereo[0].length, PmMixer.MIX_SAMPLE_RATE * 10);
+    const rms = (PmMixer.rmsOf(stereo[0].subarray(0, n)) + PmMixer.rmsOf(stereo[1].subarray(0, n))) / 2 || 1; const g = Math.min(4, .12 / rms);
+    const out = stereo.map(ch => { const o = new Float32Array(n); for (let i = 0; i < n; i += 1) o[i] = Math.tanh(ch[i] * g * 2); return o; });
     await api.voice.play({ channel: "ambience", dataUrl: PmWav.wavDataUrl(out, PmMixer.MIX_SAMPLE_RATE), loop: false, volume: 1 });
   }
   function hashKey(s) { let h = 2166136261; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }

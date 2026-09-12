@@ -58,9 +58,15 @@ const MIX_PRESETS = [
   { name: "猫和雨", layers: [{ key: "cat_purr", volume: .6 }, { key: "rain_light", volume: .5 }] },
   { name: "纯棕噪", layers: [{ key: "brown_noise", volume: .8 }] },
 ];
+// 内置声音不随包发，第一次用时从 Freesound 拉高音质预览存进媒体库；库里 builtin:true 的行就是下好的
+function builtinRow(key) { return state.library.find(r => r.builtin && r.key === key) || null; }
+function withRow(sound) { const row = builtinRow(sound.key); return { ...sound, name: row && row.name ? row.name : sound.name, ready: !!row, mediaRef: row ? row.mediaRef : null, bytes: row ? row.bytes : (SOUND_SOURCES[sound.key] || {}).hqBytes }; }
 function findSound(key) {
-  return BUILTIN_SOUNDS.find(s => s.key === key) || state.library.find(s => s.key === key) || null;
+  const b = BUILTIN_SOUNDS.find(s => s.key === key);
+  if (b) return withRow(b);
+  const r = state.library.find(s => !s.builtin && s.key === key);
+  return r ? { key: r.key, name: r.name, icon: r.icon || "headphones", cat: "mine", drift: false, user: true, ready: true, mediaRef: r.mediaRef } : null;
 }
 function allSounds() {
-  return BUILTIN_SOUNDS.concat(state.library.map(s => ({ key: s.key, name: s.name, icon: s.icon || "headphones", cat: "mine", drift: false, user: true, mediaRef: s.mediaRef })));
+  return BUILTIN_SOUNDS.map(withRow).concat(state.library.filter(s => !s.builtin).map(s => ({ key: s.key, name: s.name, icon: s.icon || "headphones", cat: "mine", drift: false, user: true, ready: true, mediaRef: s.mediaRef })));
 }

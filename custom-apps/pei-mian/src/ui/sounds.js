@@ -3,12 +3,19 @@ const sounds = (() => {
   let cat = "rain";
   const mix = () => state.settings.currentMix;
   function layerOf(key) { return mix().layers.find(l => l.key === key); }
-  function toggle(key) {
+  async function toggle(key, tile) {
     const m = mix();
     if (layerOf(key)) m.layers = m.layers.filter(l => l.key !== key);
     else {
       if (m.layers.length >= PmMixer.MAX_LAYERS) { toast(`最多叠 ${PmMixer.MAX_LAYERS} 层`); return; }
       const sound = findSound(key);
+      if (sound && !sound.user && !sound.ready) {
+        if (tile) tile.classList.add("busy");
+        const label = tile && tile.querySelector("span");
+        try { await store.ensureBuiltin(sound, p => { if (label) label.textContent = `${Math.round(p * 100)}%`; }); }
+        catch (e) { fail(e); renderTiles(); return; }
+        if (tile) tile.classList.remove("busy");
+      }
       m.layers.push({ key, volume: .6, drift: !!(sound && sound.drift) });
     }
     m.name = "";
@@ -48,9 +55,10 @@ const sounds = (() => {
     const list = allSounds().filter(s => s.cat === cat);
     if (!list.length) box.appendChild(el("p", "empty", cat === "mine" ? "还没有自己的声音。点「＋ 商店」搜，或者导入一段录音。" : ""));
     for (const s of list) {
-      const t = el("button", "tile" + (layerOf(s.key) ? " on" : "") + (s.user ? " mine" : ""));
-      t.type = "button"; t.innerHTML = `${iconSvg(s.user ? s.icon : s.key)}<span>${esc(s.name)}</span>`;
-      t.onclick = () => { t.classList.add("pop"); toggle(s.key); };
+      const t = el("button", "tile" + (layerOf(s.key) ? " on" : "") + (s.user ? " mine" : "") + (!s.user && !s.ready ? " dl" : ""));
+      t.type = "button"; t.innerHTML = `${iconSvg(s.user ? s.icon : s.key)}<span>${esc(s.name)}</span>${!s.user && !s.ready ? `<i class="badge" title="第一次用会下载，约 ${esc(store.fmtMB(s.bytes || 0))}"></i>` : ""}`;
+      t.onclick = () => { t.classList.add("pop"); toggle(s.key, t); };
+      t.addEventListener("contextmenu", e => e.preventDefault());
       let pressTimer = 0;
       t.addEventListener("pointerdown", () => { pressTimer = setTimeout(() => { pressTimer = 0; longPress(s); }, 550); });
       const clear = () => { if (pressTimer) clearTimeout(pressTimer); };
@@ -60,11 +68,17 @@ const sounds = (() => {
     document.querySelectorAll("#sound-cats button").forEach(b => b.classList.toggle("on", b.dataset.cat === cat));
   }
   function longPress(s) {
-    const src = s.user ? state.library.find(r => r.key === s.key) : null;
-    const credit = src ? (src.source === "freesound" ? `来自 Freesound · ${src.author} · CC0` : "自己导入的录音") : (SOUND_SOURCES[s.key] ? `来自 Freesound · ${SOUND_SOURCES[s.key].author} · CC0` : "");
+    const src = state.library.find(r => r.key === s.key) || null;
+    const meta = SOUND_SOURCES[s.key];
+    const credit = s.user ? (src && src.source === "freesound" ? `来自 Freesound · ${src.author} · CC0` : "自己导入的录音") : (meta ? `来自 Freesound · ${meta.author} · CC0 · 128 kbps 立体声` : "");
+    const size = src ? `已下载 · ${store.fmtMB(src.bytes || 0)}` : (s.bytes ? `还没下载 · 约 ${store.fmtMB(s.bytes)}` : "");
     openSheet(s.name, box => {
-      box.innerHTML = `<p class="hint">${esc(credit)}</p><div class="grp"><div class="frow"><div class="fl">试听 10 秒</div><button class="mini" type="button" id="sp-prev">播放</button></div>${src ? `<div class="frow"><div class="fl">从我的声音里删除</div><button class="mini warn" type="button" id="sp-del">删除</button></div>` : ""}</div>`;
-      box.querySelector("#sp-prev").onclick = async () => { try { toast("试听中…", 1500); await engine.preview(s); } catch (e) { fail(e); } };
+      box.innerHTML = `<p class="hint">${esc(credit)}${size ? `<br>${esc(size)}` : ""}</p><div class="grp">
+        ${src ? `<div class="frow"><div class="fl">名字</div><input id="sp-name" class="field" maxlength="24" value="${esc(s.name)}"><button class="mini" type="button" id="sp-rename">改</button></div>` : `<div class="frow"><div class="fl">名字</div><div class="fu">下载后长按可以改名</div></div>`}
+        <div class="frow"><div class="fl">试听 10 秒</div><button class="mini" type="button" id="sp-prev">播放</button></div>${src ? `<div class="frow"><div class="fl">${s.user ? "从我的声音里删除" : "删掉下载的文件"}</div><button class="mini warn" type="button" id="sp-del">删除</button></div>` : ""}</div>`;
+      const rn = box.querySelector("#sp-rename");
+      if (rn) rn.onclick = async () => { const name = box.querySelector("#sp-name").value.trim().slice(0, 24); if (!name || name === s.name) { closeSheet(); return; } try { await api.db.update("library", src.id, { name }); src.name = name; closeSheet(); render(); toast("改好了"); } catch (e) { fail(e); } };
+      box.querySelector("#sp-prev").onclick = async () => { try { toast(s.ready ? "试听中…" : "先下载再试听…", 1500); await engine.preview(s); } catch (e) { fail(e); } };
       const del = box.querySelector("#sp-del");
       if (del) del.onclick = async () => { try { await store.remove(src); mix().layers = mix().layers.filter(l => l.key !== s.key); closeSheet(); commit(); toast("删了"); } catch (e) { fail(e); } };
     });
@@ -79,7 +93,11 @@ const sounds = (() => {
     const all = state.mixes.map(x => ({ ...x, user: true })).concat(MIX_PRESETS);
     for (const p of all) {
       const b = el("button", m.name === p.name ? "on" : "", p.name); b.type = "button";
-      b.onclick = () => { m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit(); };
+      b.onclick = async () => {
+        const keys = p.layers.map(l => l.key).filter(k => findSound(k));
+        try { await store.ensureAll(keys, (i, n, prog, snd) => toast(`下载 ${snd.name} ${Math.round(prog * 100)}% · ${i + 1}/${n}`, 1200)); } catch (e) { fail(e); return; }
+        m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit();
+      };
       if (p.user) { let t = 0; b.addEventListener("pointerdown", () => { t = setTimeout(async () => { t = 0; if (confirm(`删除组合「${p.name}」？`)) { await api.db.delete("mixes", p.id); state.mixes = state.mixes.filter(x => x.id !== p.id); renderPresets(); } }, 600); }); const c = () => t && clearTimeout(t); b.addEventListener("pointerup", c); b.addEventListener("pointerleave", c); }
       box.appendChild(b);
     }
@@ -157,7 +175,8 @@ const sounds = (() => {
     $("btn-import").onclick = async () => { try { const row = await store.importFile(); if (row) { toast("导入了"); cat = "mine"; renderTiles(); } } catch (e) { fail(e); } };
     on("engine", ({ busy }) => { if (!session.active()) $("btn-mix-preview").textContent = busy ? "合成中…" : (engine.isPlaying() ? "停" : "试听"); $("layers").classList.toggle("playing", engine.isPlaying()); $("layers").classList.toggle("busy", !!busy); });
     on("view", v => { if (v !== "sounds" && !session.active() && engine.isPlaying()) engine.stop(); if (v === "sounds") render(); });
-    $("sounds-credit").textContent = "内置声音来自 Freesound · CC0 · 长按一块试听或看来源";
+    on("library", () => { if (state.view === "sounds") renderTiles(); });
+    $("sounds-credit").textContent = "声音来自 Freesound · CC0 · 128k 立体声 · 带角标的第一次点会下载 · 长按试听或看来源";
   }
   function render() { renderCats(); renderTiles(); renderLayers(); renderPresets(); $("layers").classList.toggle("playing", engine.isPlaying()); }
   return { render, bind };

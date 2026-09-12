@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 陪眠 APP：src/domain/*.mjs 是 ESM（Node 测试直接 import），其余 src/**/*.js 共享一个闭包。
-// assets/sources.json 会被注入成 SOUND_SOURCES 常量，供「声音来源」页使用。
+// assets/sources.json 会被注入成 SOUND_SOURCES 常量：内置声音的来源、致谢和高音质预览下载地址（不随包发 mp3，首次用时下载）。
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +39,7 @@ function compileDomainModules() {
 
 function soundSources() {
   const list = JSON.parse(readFileSync(resolve(app, "assets/sources.json"), "utf8"));
-  const map = Object.fromEntries(list.map(s => [s.key, { id: s.id, name: s.name, author: s.author, duration: s.duration }]));
+  const map = Object.fromEntries(list.map(s => [s.key, { id: s.id, name: s.name, author: s.author, url: s.url, duration: s.duration, hq: s.hq, hqBytes: s.hqBytes }]));
   return `  const SOUND_SOURCES = ${JSON.stringify(map)};\n`;
 }
 
