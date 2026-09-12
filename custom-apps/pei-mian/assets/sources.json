@@ -14,7 +14,9 @@
    "sr": 44100.0,
    "bd": 16,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/725/725603_15753134-lq.mp3",
+  "lqBytes": 1944408
  },
  {
   "key": "rain_heavy",
@@ -31,7 +33,9 @@
    "sr": 96000.0,
    "bd": 24,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/592/592996_11710404-lq.mp3",
+  "lqBytes": 725736
  },
  {
   "key": "rain_window",
@@ -48,7 +52,9 @@
    "sr": 96000.0,
    "bd": 32,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/648/648529_457982-lq.mp3",
+  "lqBytes": 1457928
  },
  {
   "key": "thunder",
@@ -65,7 +71,9 @@
    "sr": 48000.0,
    "bd": 24,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/158/158692_179538-lq.mp3",
+  "lqBytes": 738288
  },
  {
   "key": "waves",
@@ -82,7 +90,9 @@
    "sr": 44100.0,
    "bd": 32,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/803/803679_2520418-lq.mp3",
+  "lqBytes": 654360
  },
  {
   "key": "stream",
@@ -99,7 +109,9 @@
    "sr": 48000.0,
    "bd": 16,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/588/588179_13207434-lq.mp3",
+  "lqBytes": 389736
  },
  {
   "key": "wind",
@@ -116,7 +128,9 @@
    "sr": 96000.0,
    "bd": 24,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/217/217506_1661766-lq.mp3",
+  "lqBytes": 1800624
  },
  {
   "key": "night_crickets",
@@ -133,7 +147,9 @@
    "sr": 48000.0,
    "bd": 24,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/425/425425_7193358-lq.mp3",
+  "lqBytes": 1041792
  },
  {
   "key": "fire",
@@ -150,7 +166,9 @@
    "sr": 44100.0,
    "bd": 0,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/717/717579_11069322-lq.mp3",
+  "lqBytes": 420024
  },
  {
   "key": "fan",
@@ -167,7 +185,9 @@
    "sr": 44100.0,
    "bd": 0,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/457/457551_2841496-lq.mp3",
+  "lqBytes": 1031904
  },
  {
   "key": "aircon",
@@ -184,7 +204,9 @@
    "sr": 48000.0,
    "bd": 16,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/637/637930_612689-lq.mp3",
+  "lqBytes": 371112
  },
  {
   "key": "clock",
@@ -201,7 +223,9 @@
    "sr": 48000.0,
    "bd": 24,
    "ch": 1
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/840/840291_47392-lq.mp3",
+  "lqBytes": 389904
  },
  {
   "key": "cat_purr",
@@ -218,7 +242,9 @@
    "sr": 48000.0,
    "bd": 0,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/424/424355_385405-lq.mp3",
+  "lqBytes": 504840
  },
  {
   "key": "train",
@@ -235,7 +261,9 @@
    "sr": 48000.0,
    "bd": 24,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/219/219233_1274078-lq.mp3",
+  "lqBytes": 1860240
  },
  {
   "key": "airplane",
@@ -252,7 +280,9 @@
    "sr": 44100.0,
    "bd": 16,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/456/456092_3025911-lq.mp3",
+  "lqBytes": 1281672
  },
  {
   "key": "brown_noise",
@@ -269,7 +299,9 @@
    "sr": 44100.0,
    "bd": 16,
    "ch": 1
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/242/242513_2262598-lq.mp3",
+  "lqBytes": 273040
  },
  {
   "key": "pink_noise",
@@ -286,7 +318,9 @@
    "sr": 48000.0,
    "bd": 24,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/470/470754_9989554-lq.mp3",
+  "lqBytes": 355416
  },
  {
   "key": "white_noise",
@@ -303,7 +337,9 @@
    "sr": 48000.0,
    "bd": 24,
    "ch": 1
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/249/249313_4056007-lq.mp3",
+  "lqBytes": 248448
  },
  {
   "key": "singing_bowl",
@@ -320,6 +356,8 @@
    "sr": 44100.0,
    "bd": 16,
    "ch": 2
-  }
+  },
+  "lq": "https://cdn.freesound.org/previews/204/204915_710671-lq.mp3",
+  "lqBytes": 829416
  }
 ]

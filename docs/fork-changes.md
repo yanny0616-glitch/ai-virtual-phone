@@ -158,4 +158,4 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 ### 陪眠（`custom-apps/pei-mian/`）
 
-睡前陪伴 APP：角色分段哄睡（越说越轻，TTS 用宿主语音配置）、多层白噪音在 APP 内混音后交宿主播放、夜记 + 周汇总 + 月历、三套主题。19 段 Freesound CC0 录音不随包发，首次点到时从 Freesound 直连下载 128k 立体声预览存进媒体库（包只有 50KB，可过市场 5MB 门槛），APP 内商店可再搜。混音 44.1k 立体声。构建 `npm run pei-mian:build`，校验 `npm run check:pei-mian-app`。为此宿主打包脚本改成递归打目录、`guessMime` 补了音频类型。
+睡前陪伴 APP：角色分段哄睡（越说越轻，TTS 用宿主语音配置）、多层白噪音在 APP 内混音后交宿主播放、夜记 + 周汇总 + 月历、三套主题。19 段 Freesound CC0 录音不随包发，首次点到时从 Freesound 直连下载 128k 立体声预览存进媒体库（包只有 50KB，可过市场 5MB 门槛），APP 内商店可再搜。混音 44.1k 立体声，下载音质可选（省流 64k / 高 128k）。浅色主题是纸面 + 白卡片的独立视觉，首页天体按系统时间切太阳/月亮；组合可钉住收纳，声音和组合长按看小字详情表。构建 `npm run pei-mian:build`，校验 `npm run check:pei-mian-app`。为此宿主打包脚本改成递归打目录、`guessMime` 补了音频类型。

@@ -2,7 +2,7 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>陪眠</title><style>{{STYLES}}</style></head>
 <body><div id="app" data-theme="night">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
-    <linearGradient id="mg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--moon-a)"/><stop offset="1" stop-color="var(--moon-b)"/></linearGradient>
+    <linearGradient id="mg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--moon-a)"/><stop offset="1" stop-color="var(--moon-b)"/></linearGradient><radialGradient id="sg" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="var(--sun-a)"/><stop offset="1" stop-color="var(--sun-b)"/></radialGradient>
   </defs></svg>
 
   <div id="view-home" class="view on" data-view="home">
@@ -14,7 +14,7 @@
         <path class="ring-arc" id="ring-arc" d=""/>
         <g id="ring-stops"></g>
       </svg>
-      <div class="moon-wrap"><div class="moon-glow"></div><svg class="moon" viewBox="0 0 200 200" aria-hidden="true"><path d="M118 34a70 70 0 1 0 50 120 56 56 0 0 1-50-120z" fill="url(#mg)"/></svg></div>
+      <div class="moon-wrap"><div class="moon-glow"></div><svg class="moon" viewBox="0 0 200 200" aria-hidden="true"><path d="M118 34a70 70 0 1 0 50 120 56 56 0 0 1-50-120z" fill="url(#mg)"/></svg><svg class="sun" viewBox="0 0 200 200" aria-hidden="true"><g class="rays" stroke="var(--sun-b)" stroke-width="3" stroke-linecap="round" opacity=".7"><line x1="100" y1="14" x2="100" y2="30" transform="rotate(0 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(30 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(60 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(90 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(120 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(150 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(180 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(210 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(240 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(270 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(300 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(330 100 100)"/></g><circle cx="100" cy="100" r="52" fill="url(#sg)"/></svg></div>
       <div class="dial-cap"><b id="dial-val">45 分</b><span>后停</span></div>
     </div>
     <p class="who-line" id="hero-who"></p>
@@ -76,11 +76,11 @@
   </div>
 
   <nav class="tabbar" id="tabbar">
-    <button class="tb on" type="button" data-view="home"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg><span>今夜</span><small>TONIGHT</small></button>
-    <button class="tb" type="button" data-view="sounds"><svg viewBox="0 0 24 24"><path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2"/></svg><span>声景</span><small>SOUND</small></button>
-    <button class="tb" type="button" data-view="script"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg><span>话术</span><small>VOICE</small></button>
-    <button class="tb" type="button" data-view="journal"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>夜记</span><small>JOURNAL</small></button>
-    <button class="tb" type="button" data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>配置</span><small>SETUP</small></button>
+    <button class="tb on" type="button" data-view="home"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg><span>今夜</span></button>
+    <button class="tb" type="button" data-view="sounds"><svg viewBox="0 0 24 24"><path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2"/></svg><span>声景</span></button>
+    <button class="tb" type="button" data-view="script"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg><span>话术</span></button>
+    <button class="tb" type="button" data-view="journal"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>夜记</span></button>
+    <button class="tb" type="button" data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>配置</span></button>
   </nav>
 
   <div class="sheet-mask" id="sheet-mask"></div>
@@ -101,6 +101,6 @@
       <button class="round" id="btn-dim" type="button" aria-label="更暗"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg></button>
     </div>
   </div>
-</div>
 <div id="toast"></div>
+</div>
 <script>{{SCRIPTS}}</script></body></html>

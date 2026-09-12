@@ -39,7 +39,7 @@ function compileDomainModules() {
 
 function soundSources() {
   const list = JSON.parse(readFileSync(resolve(app, "assets/sources.json"), "utf8"));
-  const map = Object.fromEntries(list.map(s => [s.key, { id: s.id, name: s.name, author: s.author, url: s.url, duration: s.duration, hq: s.hq, hqBytes: s.hqBytes }]));
+  const map = Object.fromEntries(list.map(s => [s.key, { id: s.id, name: s.name, author: s.author, url: s.url, duration: s.duration, hq: s.hq, hqBytes: s.hqBytes, lq: s.lq, lqBytes: s.lqBytes, orig: s.orig }]));
   return `  const SOUND_SOURCES = ${JSON.stringify(map)};\n`;
 }
 

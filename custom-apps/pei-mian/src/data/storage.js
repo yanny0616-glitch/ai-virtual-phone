@@ -1,7 +1,7 @@
 // ── 存储：settings 一行、nights 每晚一行、mixes 每个组合一行、library 用户自己加的声音每个一行 ──
 const DEFAULT_SETTINGS = Object.freeze({
   theme: "auto", autoBy: "system", characterId: "", ttsOn: true, sttOn: true, emotion: "calm",
-  timerMin: 45, fadeMin: 5, syncChat: true, morningOn: true, freesoundKey: "",
+  timerMin: 45, fadeMin: 5, syncChat: true, morningOn: true, freesoundKey: "", soundQuality: "hq", pinnedPresets: null,
   goal: { bedtime: "23:30", hours: 7.5 },
   rhythmPreset: "gentle", rhythm: null, directions: ["today", "scene"], forbid: "",
   insomniaDirections: ["breath", "trivia"], insomniaForbid: "",

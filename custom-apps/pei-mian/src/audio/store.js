@@ -3,6 +3,8 @@
 const store = (() => {
   const MAX_SECONDS = 240;
   function key() { return (state.settings.freesoundKey || "").trim(); }
+  const quality = () => state.settings.soundQuality === "lq" ? "lq" : "hq";
+  const QUALITY_LABEL = { hq: "128 kbps 立体声", lq: "64 kbps" };
   const fmtMB = bytes => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
 
   // 直连拉音频 → dataUrl，带进度
@@ -30,10 +32,11 @@ const store = (() => {
     if (inflight.has(sound.key)) return inflight.get(sound.key);
     const job = (async () => {
       const src = SOUND_SOURCES[sound.key];
-      if (!src || !src.hq) throw new Error(`${sound.name} 没有下载地址`);
-      const { dataUrl, bytes } = await fetchAudio(src.hq, onProgress);
+      const q = quality(); const url = src && (src[q] || src.hq);
+      if (!url) throw new Error(`${sound.name} 没有下载地址`);
+      const { dataUrl, bytes } = await fetchAudio(url, onProgress);
       const stored = await api.media.put({ dataUrl });
-      const row = await api.db.create("library", { key: sound.key, builtin: true, name: sound.name, source: "freesound", quality: "hq", author: src.author, url: src.url, bytes, mediaRef: stored.ref });
+      const row = await api.db.create("library", { key: sound.key, builtin: true, name: sound.name, source: "freesound", quality: q, author: src.author, url: src.url, bytes, mediaRef: stored.ref });
       state.library.push(row);
       emit("library");
       return row;
@@ -48,7 +51,8 @@ const store = (() => {
   }
   function builtinStats() {
     const rows = state.library.filter(r => r.builtin);
-    return { ready: rows.length, total: BUILTIN_SOUNDS.length, bytes: rows.reduce((s, r) => s + (r.bytes || 0), 0), allBytes: BUILTIN_SOUNDS.reduce((s, b) => s + ((SOUND_SOURCES[b.key] || {}).hqBytes || 0), 0) };
+    const q = quality();
+    return { ready: rows.length, hq: rows.filter(r => r.quality !== "lq").length, lq: rows.filter(r => r.quality === "lq").length, total: BUILTIN_SOUNDS.length, bytes: rows.reduce((s, r) => s + (r.bytes || 0), 0), allBytes: BUILTIN_SOUNDS.reduce((s, b) => s + ((SOUND_SOURCES[b.key] || {})[q + "Bytes"] || 0), 0), quality: q };
   }
 
   async function search(query, page = 1) {
@@ -64,12 +68,13 @@ const store = (() => {
     return { results: json.results || [], next: !!json.next, count: json.count || 0 };
   }
   async function download(item, onProgress) {
-    const url = item.previews && (item.previews["preview-hq-mp3"] || item.previews["preview-lq-mp3"]);
+    const q = quality();
+    const url = item.previews && (item.previews[`preview-${q}-mp3`] || item.previews["preview-hq-mp3"] || item.previews["preview-lq-mp3"]);
     if (!url) throw new Error("这条没有预览音频");
     const { dataUrl, bytes } = await fetchAudio(url, onProgress);
     const stored = await api.media.put({ dataUrl });
     const row = await api.db.create("library", {
-      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound", quality: "hq",
+      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound", quality: q,
       author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), bytes, mediaRef: stored.ref,
     });
     state.library.push(row);
@@ -96,5 +101,5 @@ const store = (() => {
   async function removeBuiltins() {
     for (const row of state.library.filter(r => r.builtin)) await remove(row);
   }
-  return { search, download, importFile, remove, removeBuiltins, ensureBuiltin, ensureAll, builtinStats, fetchAudio, fmtMB, MAX_SECONDS };
+  return { search, download, importFile, remove, removeBuiltins, ensureBuiltin, ensureAll, builtinStats, fetchAudio, fmtMB, quality, QUALITY_LABEL, MAX_SECONDS };
 })();

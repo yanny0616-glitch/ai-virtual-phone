@@ -10,8 +10,9 @@ const theme = (() => {
     if (by === "time") { const h = new Date().getHours(); return h >= 7 && h < 19 ? "day" : "night"; }
     return mq && !mq.matches ? "day" : "night";
   }
-  function apply() { const name = resolve(); $("app").dataset.theme = name; emit("theme", name); }
+  function sky() { const h = new Date().getHours(); return h >= 7 && h < 19 ? "sun" : "moon"; }
+  function apply() { const name = resolve(); const app = $("app"); app.dataset.theme = name; app.dataset.sky = sky(); emit("theme", name); }
   if (mq && mq.addEventListener) mq.addEventListener("change", apply);
-  setInterval(() => { if (state.settings && state.settings.theme === "auto" && state.settings.autoBy === "time") apply(); }, 60000);
+  setInterval(() => { if (state.settings) apply(); }, 60000);
   return { apply, resolve };
 })();

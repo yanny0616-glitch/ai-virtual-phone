@@ -2,17 +2,19 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>陪眠</title><style>/* 陪眠自己的视觉：整页夜空、细线分隔、宋体标题与数字、一种强调色（月光琥珀）、底部 5 个 tab */
 #app { --bg0: #070812; --bg1: #12163a; --tx: #ece7dc; --tx2: #9c98ab; --tx3: #5f5c70; --line: rgba(236, 231, 220, .12); --surface: rgba(236, 231, 220, .045);
   --acc: #e8c07a; --acc-rgb: 232, 192, 122; --warn: #e07a6a; --good: #7fc8a5;
-  --moon-a: #fff3d0; --moon-b: #e9b96a; --glow: rgba(232, 192, 122, .28);
+  --moon-a: #fff3d0; --moon-b: #e9b96a; --glow: rgba(232, 192, 122, .28); --sun-a: #fff1b8; --sun-b: #f2b348;
   --sheet-bg: #141838; --toast: rgba(236, 231, 220, .94); --toast-tx: #12163a; --bar-bg: rgba(7, 8, 18, .86); --scheme: dark; }
-#app[data-theme="day"] { --bg0: #f4efe5; --bg1: #fcf9f2; --tx: #2a2730; --tx2: #6f6a78; --tx3: #aca7b0; --line: rgba(42, 39, 48, .12); --surface: rgba(42, 39, 48, .045);
-  --acc: #b07d2e; --acc-rgb: 176, 125, 46; --moon-a: #ffe6a8; --moon-b: #dfa03c; --glow: rgba(223, 160, 60, .22);
-  --sheet-bg: #fcf9f2; --toast: rgba(42, 39, 48, .92); --toast-tx: #fff; --bar-bg: rgba(244, 239, 229, .88); --scheme: light; }
+#app[data-theme="day"] { --bg0: #ede4d3; --bg1: #fbf3e3; --tx: #2b2419; --tx2: #6e6153; --tx3: #a6998a; --line: rgba(60, 42, 20, .11); --surface: rgba(255, 255, 255, .55);
+  --acc: #b8742a; --acc-rgb: 184, 116, 42; --moon-a: #fff3d0; --moon-b: #e6b86a; --glow: rgba(230, 184, 106, .28);
+  --panel: rgba(255, 252, 246, .78); --panel-line: rgba(255, 255, 255, .9); --panel-shadow: 0 1px 2px rgba(80, 55, 20, .05), 0 14px 34px rgba(80, 55, 20, .08); --ink-shadow: rgba(80, 55, 20, .18);
+  --sheet-bg: #fbf6ec; --toast: #2b2419; --toast-tx: #fbf3e3; --bar-bg: rgba(251, 246, 236, .84); --scheme: light; }
 #app[data-theme="candle"] { --bg0: #150e0a; --bg1: #2c1b12; --tx: #f3e6d6; --tx2: #ab937f; --tx3: #6d5747; --line: rgba(243, 230, 214, .12); --surface: rgba(243, 230, 214, .045);
-  --acc: #f0a860; --acc-rgb: 240, 168, 96; --moon-a: #ffe0b0; --moon-b: #f09a4c; --glow: rgba(240, 154, 76, .3);
+  --acc: #f0a860; --acc-rgb: 240, 168, 96; --moon-a: #fff3d0; --moon-b: #e9b96a; --glow: rgba(232, 192, 122, .3);
   --sheet-bg: #24160f; --toast: rgba(243, 230, 214, .94); --toast-tx: #2c1b12; --bar-bg: rgba(21, 14, 10, .86); --scheme: dark; }
-#app[data-theme="mist"] { --bg0: #e5e9ed; --bg1: #f3f5f7; --tx: #2b3440; --tx2: #6f7b8a; --tx3: #a6afba; --line: rgba(43, 52, 64, .12); --surface: rgba(43, 52, 64, .045);
-  --acc: #4f7d95; --acc-rgb: 79, 125, 149; --moon-a: #f4f7f9; --moon-b: #a9b7c4; --glow: rgba(169, 183, 196, .3);
-  --sheet-bg: #f3f5f7; --toast: rgba(43, 52, 64, .92); --toast-tx: #fff; --bar-bg: rgba(229, 233, 237, .88); --scheme: light; }
+#app[data-theme="mist"] { --bg0: #e4e8e6; --bg1: #f5f7f5; --tx: #24302c; --tx2: #64716c; --tx3: #9fa9a5; --line: rgba(36, 48, 44, .11); --surface: rgba(255, 255, 255, .55);
+  --acc: #3f7d70; --acc-rgb: 63, 125, 112; --moon-a: #fff3d0; --moon-b: #e6b86a; --glow: rgba(230, 184, 106, .26);
+  --panel: rgba(255, 255, 255, .72); --panel-line: rgba(255, 255, 255, .95); --panel-shadow: 0 1px 2px rgba(30, 50, 45, .05), 0 14px 34px rgba(30, 50, 45, .08); --ink-shadow: rgba(30, 50, 45, .18);
+  --sheet-bg: #f7f9f8; --toast: #24302c; --toast-tx: #f5f7f5; --bar-bg: rgba(247, 249, 248, .84); --scheme: light; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; }
@@ -34,12 +36,12 @@ button { cursor: pointer; }
 .eyebrow { font-size: 12px; letter-spacing: 3px; color: var(--tx3); }
 .txt-btn { background: none; border: 0; color: var(--acc); font-size: 13px; padding: 0; }
 .txt-btn:disabled { color: var(--tx3); }
-.note { font-size: 13px; color: var(--tx2); line-height: 1.6; margin: 8px 0 12px; }
+.note { font-size: 12.5px; color: var(--tx2); line-height: 1.6; margin: 8px 0 12px; }
 .foot { text-align: center; color: var(--tx3); font-size: 12px; margin-top: 18px; letter-spacing: 1px; }
 .empty { font-size: 13px; color: var(--tx3); text-align: center; padding: 22px 0; line-height: 1.7; }
 
 /* 段落标题（细线） */
-.sec-h, .sec-head, .grp-t { display: flex; align-items: baseline; gap: 10px; margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 12px; letter-spacing: 3px; color: var(--tx2); font-weight: 600; }
+.sec-h, .sec-head, .grp-t { display: flex; align-items: baseline; gap: 10px; margin: 28px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 11px; letter-spacing: 3px; color: var(--tx2); font-weight: 600; }
 .sec-h > span:first-child, .sec-head .t { color: var(--tx2); }
 .sec-sub, .grp-sub { font-size: 12px; letter-spacing: 0; color: var(--tx3); font-weight: 400; }
 .sec-acts, .sec-head .act { margin-left: auto; display: flex; gap: 16px; letter-spacing: 0; font-weight: 400; }
@@ -59,7 +61,14 @@ button { cursor: pointer; }
 .ring-lbl.on { fill: var(--acc); }
 .moon-wrap { position: absolute; left: 50%; top: 50%; width: 118px; height: 118px; transform: translate(-50%, -54%); }
 .moon-glow { position: absolute; inset: -34px; border-radius: 50%; background: radial-gradient(circle, var(--glow), transparent 62%); animation: breathe 5s ease-in-out infinite; }
-.moon { position: relative; width: 100%; height: 100%; filter: drop-shadow(0 0 14px var(--glow)); }
+.moon, .sun { position: relative; width: 100%; height: 100%; filter: drop-shadow(0 0 14px var(--glow)); }
+/* 天上挂什么看系统时间：7～19 点太阳，其余月亮；入睡画面永远是月亮 */
+.moon-wrap .sun { display: none; }
+#app[data-sky="sun"] .moon-wrap:not(.ov-moon) .moon { display: none; }
+#app[data-sky="sun"] .moon-wrap:not(.ov-moon) .sun { display: block; animation: sunrise 1.2s cubic-bezier(.22, 1, .36, 1) both; }
+#app[data-sky="sun"] .moon-wrap:not(.ov-moon) .moon-glow { --glow: rgba(242, 179, 72, .32); }
+.sun .rays { transform-box: fill-box; transform-origin: center; animation: halo 90s linear infinite; }
+@keyframes sunrise { from { opacity: 0; transform: translateY(10px) scale(.9) } to { opacity: 1; transform: none } }
 @keyframes breathe { 0%, 100% { opacity: .55 } 50% { opacity: 1 } }
 .dial-cap { position: absolute; left: 0; right: 0; bottom: 34px; text-align: center; color: var(--tx3); font-size: 12px; letter-spacing: 1px; }
 .dial-cap b { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 500; font-size: 18px; color: var(--tx); margin-right: 4px; }
@@ -121,20 +130,20 @@ button { cursor: pointer; }
 .tile.mine { border-style: dashed; }
 
 /* 表单行 */
-.frow { display: flex; align-items: center; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--line); }
-.frow .fl { font-size: 14px; color: var(--tx); }
-.frow .fu { font-size: 12px; color: var(--tx3); margin-top: 3px; line-height: 1.5; }
+.frow { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.frow .fl { font-size: 13px; color: var(--tx); }
+.frow .fu { font-size: 11.5px; color: var(--tx3); margin-top: 3px; line-height: 1.5; }
 .frow input[type="range"] { flex: 1; }
-.frow > b { font-family: "Noto Serif SC", "Songti SC", serif; font-weight: 500; font-size: 14px; min-width: 48px; text-align: right; }
+.frow > b { font-family: "Noto Serif SC", "Songti SC", serif; font-weight: 500; font-size: 13px; min-width: 44px; text-align: right; }
 input[type="range"] { -webkit-appearance: none; appearance: none; height: 2px; background: var(--line); border-radius: 2px; outline: none; }
 input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--acc); border: 3px solid var(--bg0); box-shadow: 0 0 0 1px rgba(var(--acc-rgb), .6), 0 0 10px rgba(var(--acc-rgb), .4); }
 input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--acc); border: 3px solid var(--bg0); }
 .curve { display: flex; align-items: flex-end; gap: 3px; height: 44px; margin: 6px 0 4px; }
 .curve i { background: rgba(var(--acc-rgb), .5); border-radius: 2px 2px 0 0; min-width: 6px; }
 .tgl-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.tgl { padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--tx2); font-size: 13px; transition: all .2s; }
+.tgl { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--tx2); font-size: 12px; transition: all .2s; }
 .tgl.on { color: var(--acc); border-color: rgba(var(--acc-rgb), .6); background: rgba(var(--acc-rgb), .08); }
-.txt-in { width: 100%; margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 14px; line-height: 1.6; resize: none; outline: none; }
+.txt-in { width: 100%; margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 13px; line-height: 1.6; resize: none; outline: none; }
 .txt-in::placeholder, .field::placeholder { color: var(--tx3); }
 .sw { position: relative; width: 44px; height: 26px; flex: none; margin-left: auto; }
 .sw input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -142,12 +151,12 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 .sw i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--tx2); transition: all .2s; }
 .sw input:checked + i { background: rgba(var(--acc-rgb), .35); }
 .sw input:checked + i::after { transform: translateX(18px); background: var(--acc); }
-.select, .field { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 14px; outline: none; }
+.select, .field { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font-size: 13px; outline: none; }
 .field.time { width: 108px; } .field.num { width: 72px; }
-.mini { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 12px; color: var(--tx2); }
+.mini { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; font-size: 11.5px; color: var(--tx2); }
 .mini.warn { color: var(--warn); border-color: rgba(224, 122, 106, .4); }
 .mini:disabled { opacity: .5; }
-.hint { font-size: 13px; color: var(--tx2); line-height: 1.6; margin-bottom: 12px; }
+.hint { font-size: 12px; color: var(--tx2); line-height: 1.6; margin-bottom: 12px; }
 .chip { display: inline-block; font-size: 11px; color: var(--tx2); padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; }
 
 /* 夜记 */
@@ -202,17 +211,17 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 
 /* 配置 */
 .grp { margin-bottom: 4px; }
-.grp-hint { font-size: 12px; color: var(--tx3); margin-top: 10px; line-height: 1.6; }
+.grp-hint { font-size: 11.5px; color: var(--tx3); margin-top: 10px; line-height: 1.6; }
 .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
 .themes button { background: none; border: 1px solid var(--line); border-radius: 14px; padding: 14px 6px 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .themes button.on { border-color: rgba(var(--acc-rgb), .7); background: rgba(var(--acc-rgb), .07); }
-.themes span { font-size: 13px; color: var(--tx); } .themes small { font-size: 11px; color: var(--tx3); }
+.themes span { font-size: 12px; color: var(--tx); } .themes small { font-size: 10.5px; color: var(--tx3); }
 .swatch { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); }
-.swatch.auto { background: linear-gradient(135deg, #12163a 50%, #f4efe5 50%); }
+.swatch.auto { background: linear-gradient(135deg, #12163a 50%, #ede4d3 50%); }
 .swatch.candle { background: radial-gradient(circle at 40% 40%, #f0a860, #2c1b12 75%); }
-.swatch.mist { background: radial-gradient(circle at 40% 40%, #f3f5f7, #4f7d95 80%); }
+.swatch.mist { background: radial-gradient(circle at 40% 40%, #f7f9f8, #3f7d70 80%); }
 .seg { display: flex; flex-wrap: wrap; gap: 8px; }
-.seg button { padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--tx2); font-size: 13px; }
+.seg button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--tx2); font-size: 12px; }
 .seg button.on { color: var(--acc); border-color: rgba(var(--acc-rgb), .6); background: rgba(var(--acc-rgb), .08); }
 .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; }
 .char-cell { text-align: center; padding: 10px 4px; border-radius: 14px; border: 1px solid transparent; background: none; }
@@ -221,15 +230,15 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 .char-cell.sel .ava { border-color: var(--acc); box-shadow: 0 0 14px rgba(var(--acc-rgb), .35); }
 .char-cell .ava img { width: 100%; height: 100%; object-fit: cover; }
 .char-cell .nm { display: block; font-size: 11px; color: var(--tx2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.credit { font-size: 12px; color: var(--tx2); line-height: 1.6; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.credit { font-size: 11.5px; color: var(--tx2); line-height: 1.6; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .credit b { color: var(--tx); font-weight: 500; }
 .search { display: flex; gap: 8px; }
 .search .field { flex: 1; }
 .list { margin-top: 12px; }
 .list-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .list-item > div:first-child { flex: 1; min-width: 0; }
-.list-item p { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.list-item small { font-size: 12px; color: var(--tx3); }
+.list-item p { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list-item small { font-size: 11px; color: var(--tx3); }
 .list-item .acts { margin: 0; gap: 8px; }
 .list-item .acts .mini { border: 1px solid var(--line); padding: 5px 10px; color: var(--tx2); }
 
@@ -246,7 +255,7 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 #app.sheet-open .sheet-mask { opacity: 1; pointer-events: auto; }
 #app.sheet-open .sheet { transform: translate(-50%, 0); visibility: visible; transition: transform .3s cubic-bezier(.22, 1, .36, 1); }
 .sheet-hd { display: flex; align-items: center; margin-bottom: 14px; }
-.sheet-hd h3 { font-size: 20px; letter-spacing: 1px; }
+.sheet-hd h3 { font-size: 17px; letter-spacing: 1px; }
 .sheet-x { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: none; color: var(--tx2); font-size: 13px; }
 .sheet .big-btn { margin: 20px 0 0; }
 .sheet .grp-t { margin-top: 18px; }
@@ -265,11 +274,10 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 .round.stop { width: 70px; height: 70px; color: var(--acc); border-color: rgba(var(--acc-rgb), .5); box-shadow: 0 0 24px rgba(var(--acc-rgb), .18); }
 .round.rec { color: var(--warn); border-color: var(--warn); box-shadow: 0 0 20px rgba(224, 122, 106, .4); }
 
-#toast { position: fixed; left: 50%; bottom: calc(var(--ai-phone-app-safe-bottom, 0px) + 84px); transform: translate(-50%, 12px); background: var(--toast); color: var(--toast-tx); padding: 9px 16px; border-radius: 999px; font-size: 13px; opacity: 0; pointer-events: none; transition: all .25s; z-index: 80; max-width: 86vw; }
+#toast { position: fixed; left: 50%; bottom: calc(var(--ai-phone-app-safe-bottom, 0px) + 84px); transform: translate(-50%, 12px); background: var(--toast); color: var(--toast-tx); padding: 9px 16px; border-radius: 999px; font-size: 12.5px; line-height: 1.5; opacity: 0; pointer-events: none; transition: all .25s; z-index: 80; max-width: 86vw; border: 1px solid rgba(var(--acc-rgb), .35); box-shadow: 0 8px 28px rgba(0, 0, 0, .28), 0 0 0 1px rgba(0, 0, 0, .06); text-align: center; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 /* 编辑感：英文小标、tab 下的英文 */
 .en { font-family: "Bodoni Moda", "Didot", "Georgia", "Times New Roman", serif; font-style: italic; letter-spacing: 3px; font-size: 11px; }
-.tb small { font-family: "Georgia", "Times New Roman", serif; font-size: 7px; letter-spacing: 2px; opacity: .55; margin-top: -2px; }
 .top h1 { display: flex; align-items: baseline; gap: 12px; }
 .top h1::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .sec-h > span:first-child::before, .grp-t::before, .sec-head .t::before { content: "— "; color: var(--tx3); }
@@ -425,7 +433,8 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 .overlay .ov-moon { position: relative; left: auto; top: auto; transform: none; }
 /* 表单行：右侧控件一律靠右对齐 */
-.frow > .select, .frow > .field, .frow > .mini, .frow > span:last-child, .frow > .txt-btn { margin-left: auto; }
+.frow > .select, .frow > .field, .frow > .mini, .frow > span:last-child, .frow > .txt-btn, .frow > .seg { margin-left: auto; }
+.frow > .seg { flex: none; flex-wrap: nowrap; gap: 6px; } .frow > .seg button { white-space: nowrap; padding: 5px 10px; }
 .frow > .field + .mini { margin-left: 0; }
 .frow > span:last-child { display: inline-flex; align-items: center; gap: 6px; }
 .frow.col { flex-direction: column; align-items: stretch; gap: 8px; }
@@ -442,10 +451,68 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 .tile, .fader, .presets button, .cats button, .modes button, .tb, .tgl, .rate button, .ring-hit, .big-btn, .row, .day, .tl-bar, .char-cell, .themes button { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .tile span, .fader .nm { pointer-events: none; }
 .mini { white-space: nowrap; }
+
+/* 组合：钉住的 + 「全部」 */
+.presets .more { color: var(--acc); }
+.pl { margin-top: 4px; }
+.pl-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.pl-item.on .pl-name { color: var(--acc); }
+.pl-main { flex: 1; min-width: 0; cursor: pointer; }
+.pl-name { font-size: 13px; color: var(--tx); display: flex; align-items: center; gap: 8px; }
+.pl-name small { font-size: 10px; color: var(--tx3); letter-spacing: 1px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
+.pl-sub { font-size: 11px; color: var(--tx3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pin { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: none; color: var(--tx3); font-size: 13px; line-height: 1; }
+.pin.on { color: var(--acc); border-color: rgba(var(--acc-rgb), .55); background: rgba(var(--acc-rgb), .08); }
+/* 详情表：小字 */
+.kv-table { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12px; line-height: 1.5; padding: 4px 0 6px; }
+.kv-table b { font-weight: 400; color: var(--tx3); letter-spacing: 2px; white-space: nowrap; }
+.kv-table span { color: var(--tx2); word-break: break-all; }
+
+/* ── 浅色主题：纸面 + 白卡片，不是换个底色 ── */
+#app:is([data-theme="day"], [data-theme="mist"]) { background: radial-gradient(80% 36% at 50% -4%, var(--bg1), transparent 70%), radial-gradient(60% 40% at 100% 100%, rgba(var(--acc-rgb), .09), transparent 70%), var(--bg0); background-attachment: fixed; }
+#app:is([data-theme="day"], [data-theme="mist"]) :is(.rows, .last, .faders, .stats, .tl, .grp, .open-night, .day-card, .list) { background: var(--panel); border: 1px solid var(--panel-line); border-radius: 18px; box-shadow: var(--panel-shadow); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+#app:is([data-theme="day"], [data-theme="mist"]) .rows { padding: 2px 16px; border-top: 1px solid var(--panel-line); }
+#app:is([data-theme="day"], [data-theme="mist"]) .row:last-child { border-bottom: 0; }
+#app:is([data-theme="day"], [data-theme="mist"]) .last { border-left: 1px solid var(--panel-line); padding: 14px 16px; margin-top: 10px; }
+#app:is([data-theme="day"], [data-theme="mist"]) .faders { padding: 14px 12px 10px; }
+#app:is([data-theme="day"], [data-theme="mist"]) .stats { border-top: 1px solid var(--panel-line); border-bottom: 1px solid var(--panel-line); overflow: hidden; }
+#app:is([data-theme="day"], [data-theme="mist"]) .tl { padding: 10px 14px; }
+#app:is([data-theme="day"], [data-theme="mist"]) .grp { padding: 2px 16px 12px; margin-bottom: 14px; }
+#app:is([data-theme="day"], [data-theme="mist"]) .grp .grp-t { margin-top: 14px; border-bottom-color: transparent; padding-bottom: 2px; }
+#app:is([data-theme="day"], [data-theme="mist"]) .grp .frow:last-child { border-bottom: 0; }
+#app:is([data-theme="day"], [data-theme="mist"]) .list { padding: 2px 14px; }
+#app:is([data-theme="day"], [data-theme="mist"]) .day-card { padding: 0 14px; margin-bottom: 10px; }
+#app:is([data-theme="day"], [data-theme="mist"]) .open-night { border: 1px solid var(--panel-line); padding: 12px 16px; }
+#app:is([data-theme="day"], [data-theme="mist"]) .bubble { background: var(--panel); box-shadow: var(--panel-shadow); border-left-color: var(--acc); }
+#app:is([data-theme="day"], [data-theme="mist"]) :is(.tile, .themes button, .char-cell, .fader .ico, .rate button, .round, .select, .field, .txt-in) { background: rgba(255, 255, 255, .78); border-color: rgba(255, 255, 255, .95); box-shadow: 0 1px 2px var(--ink-shadow), 0 6px 18px rgba(0, 0, 0, .04); }
+#app:is([data-theme="day"], [data-theme="mist"]) .tile { color: var(--tx2); }
+#app:is([data-theme="day"], [data-theme="mist"]) .tile.on, #app:is([data-theme="day"], [data-theme="mist"]) .themes button.on, #app:is([data-theme="day"], [data-theme="mist"]) .char-cell.sel { background: rgba(var(--acc-rgb), .14); border-color: rgba(var(--acc-rgb), .5); box-shadow: 0 8px 20px rgba(var(--acc-rgb), .18); }
+#app:is([data-theme="day"], [data-theme="mist"]) .tile.mine { border-style: dashed; border-color: var(--line); }
+#app:is([data-theme="day"], [data-theme="mist"]) :is(.tgl, .seg button, .mini, .pin, .fader .drift, .sheet-x, .chip) { background: rgba(255, 255, 255, .6); }
+#app:is([data-theme="day"], [data-theme="mist"]) :is(.tgl.on, .seg button.on, .pin.on) { background: rgba(var(--acc-rgb), .14); }
+#app:is([data-theme="day"], [data-theme="mist"]) .big-btn { background: var(--acc); color: #fff; border-color: transparent; box-shadow: 0 10px 30px rgba(var(--acc-rgb), .35); text-shadow: 0 1px 0 rgba(0, 0, 0, .12); animation: none; }
+#app:is([data-theme="day"], [data-theme="mist"]) .tabbar { box-shadow: 0 -8px 30px rgba(0, 0, 0, .06); border-top-color: var(--panel-line); }
+#app:is([data-theme="day"], [data-theme="mist"]) .sheet { box-shadow: 0 -12px 40px rgba(0, 0, 0, .12); border-color: var(--panel-line); }
+#app:is([data-theme="day"], [data-theme="mist"]) .sheet-mask { background: rgba(40, 30, 20, .28); }
+#app:is([data-theme="day"], [data-theme="mist"]) .sw i { background: rgba(0, 0, 0, .12); }
+#app:is([data-theme="day"], [data-theme="mist"]) .sw i::after { background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+#app:is([data-theme="day"], [data-theme="mist"]) .sw input:checked + i { background: var(--acc); }
+#app:is([data-theme="day"], [data-theme="mist"]) .sw input:checked + i::after { background: #fff; }
+#app:is([data-theme="day"], [data-theme="mist"]) input[type="range"] { background: rgba(0, 0, 0, .14); }
+#app:is([data-theme="day"], [data-theme="mist"]) input[type="range"]::-webkit-slider-thumb { border-color: #fff; box-shadow: 0 1px 4px var(--ink-shadow); }
+#app:is([data-theme="day"], [data-theme="mist"]) .tl-track { background: rgba(0, 0, 0, .06); }
+#app:is([data-theme="day"], [data-theme="mist"]) .ring-bg { stroke: rgba(0, 0, 0, .1); }
+#app:is([data-theme="day"], [data-theme="mist"]) .ring-stop { fill: #fff; }
+#app:is([data-theme="day"], [data-theme="mist"]) .moon { filter: drop-shadow(0 6px 14px var(--glow)); }
+#app:is([data-theme="day"], [data-theme="mist"]) .top h1::after { background: linear-gradient(90deg, var(--line), transparent); }
+#app:is([data-theme="day"], [data-theme="mist"]) :is(.sec-h, .grp-t, .sec-head) { color: var(--acc); }
+#app:is([data-theme="day"], [data-theme="mist"]) :is(.sec-h > span:first-child::before, .grp-t::before, .sec-head .t::before) { color: rgba(var(--acc-rgb), .5); }
+#app:is([data-theme="day"], [data-theme="mist"]) .overlay { background: radial-gradient(70% 45% at 50% 30%, var(--bg1), var(--bg0) 80%); }
+#app[data-theme="day"] .who-line .live { background: #4f9a6c; }
 </style></head>
 <body><div id="app" data-theme="night">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
-    <linearGradient id="mg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--moon-a)"/><stop offset="1" stop-color="var(--moon-b)"/></linearGradient>
+    <linearGradient id="mg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--moon-a)"/><stop offset="1" stop-color="var(--moon-b)"/></linearGradient><radialGradient id="sg" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="var(--sun-a)"/><stop offset="1" stop-color="var(--sun-b)"/></radialGradient>
   </defs></svg>
 
   <div id="view-home" class="view on" data-view="home">
@@ -457,7 +524,7 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
         <path class="ring-arc" id="ring-arc" d=""/>
         <g id="ring-stops"></g>
       </svg>
-      <div class="moon-wrap"><div class="moon-glow"></div><svg class="moon" viewBox="0 0 200 200" aria-hidden="true"><path d="M118 34a70 70 0 1 0 50 120 56 56 0 0 1-50-120z" fill="url(#mg)"/></svg></div>
+      <div class="moon-wrap"><div class="moon-glow"></div><svg class="moon" viewBox="0 0 200 200" aria-hidden="true"><path d="M118 34a70 70 0 1 0 50 120 56 56 0 0 1-50-120z" fill="url(#mg)"/></svg><svg class="sun" viewBox="0 0 200 200" aria-hidden="true"><g class="rays" stroke="var(--sun-b)" stroke-width="3" stroke-linecap="round" opacity=".7"><line x1="100" y1="14" x2="100" y2="30" transform="rotate(0 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(30 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(60 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(90 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(120 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(150 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(180 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(210 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(240 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(270 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(300 100 100)"/><line x1="100" y1="14" x2="100" y2="30" transform="rotate(330 100 100)"/></g><circle cx="100" cy="100" r="52" fill="url(#sg)"/></svg></div>
       <div class="dial-cap"><b id="dial-val">45 分</b><span>后停</span></div>
     </div>
     <p class="who-line" id="hero-who"></p>
@@ -519,11 +586,11 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
   </div>
 
   <nav class="tabbar" id="tabbar">
-    <button class="tb on" type="button" data-view="home"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg><span>今夜</span><small>TONIGHT</small></button>
-    <button class="tb" type="button" data-view="sounds"><svg viewBox="0 0 24 24"><path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2"/></svg><span>声景</span><small>SOUND</small></button>
-    <button class="tb" type="button" data-view="script"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg><span>话术</span><small>VOICE</small></button>
-    <button class="tb" type="button" data-view="journal"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>夜记</span><small>JOURNAL</small></button>
-    <button class="tb" type="button" data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>配置</span><small>SETUP</small></button>
+    <button class="tb on" type="button" data-view="home"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg><span>今夜</span></button>
+    <button class="tb" type="button" data-view="sounds"><svg viewBox="0 0 24 24"><path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2"/></svg><span>声景</span></button>
+    <button class="tb" type="button" data-view="script"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg><span>话术</span></button>
+    <button class="tb" type="button" data-view="journal"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>夜记</span></button>
+    <button class="tb" type="button" data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>配置</span></button>
   </nav>
 
   <div class="sheet-mask" id="sheet-mask"></div>
@@ -544,8 +611,8 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
       <button class="round" id="btn-dim" type="button" aria-label="更暗"><svg viewBox="0 0 24 24"><path d="M14 3a8 8 0 1 0 7 11 6.5 6.5 0 0 1-7-11z"/></svg></button>
     </div>
   </div>
-</div>
 <div id="toast"></div>
+</div>
 <script>(function () {
 "use strict";
 const api = window.AiPhone;
@@ -1021,11 +1088,11 @@ function wavDataUrl(channels, sampleRate) {
 
 return Object.freeze(exports);
 })();
-  const SOUND_SOURCES = {"rain_light":{"id":725603,"name":"Rain Falling On The Greenhouse","author":"WhiteNoiseSleeper","url":"https://freesound.org/people/WhiteNoiseSleeper/sounds/725603/","duration":232,"hq":"https://cdn.freesound.org/previews/725/725603_15753134-hq.mp3","hqBytes":5440298},"rain_heavy":{"id":592996,"name":"heavy rain on a small tent hq","author":"Petrosilia","url":"https://freesound.org/people/Petrosilia/sounds/592996/","duration":67,"hq":"https://cdn.freesound.org/previews/592/592996_11710404-hq.mp3","hqBytes":1858944},"rain_window":{"id":648529,"name":"RAIN on glass window.wav","author":"nicoproson","url":"https://freesound.org/people/nicoproson/sounds/648529/","duration":174,"hq":"https://cdn.freesound.org/previews/648/648529_457982-hq.mp3","hqBytes":3997248},"thunder":{"id":158692,"name":"Distant Thunder and Rain from Half Open Window 1.aif","author":"RutgerMuller","url":"https://freesound.org/people/RutgerMuller/sounds/158692/","duration":88,"hq":"https://cdn.freesound.org/previews/158/158692_179538-hq.mp3","hqBytes":1941216},"waves":{"id":803679,"name":"Ocean Waves Crashing on the Coast of Big Lagoon, Redwoods","author":"CVLTIV8R","url":"https://freesound.org/people/CVLTIV8R/sounds/803679/","duration":80,"hq":"https://cdn.freesound.org/previews/803/803679_2520418-hq.mp3","hqBytes":1833135},"stream":{"id":588179,"name":"Mountain River 001.wav","author":"Auxide_Audio","url":"https://freesound.org/people/Auxide_Audio/sounds/588179/","duration":47,"hq":"https://cdn.freesound.org/previews/588/588179_13207434-hq.mp3","hqBytes":1094496},"wind":{"id":217506,"name":"Wind blowing in a field in Texas, USA","author":"felix.blume","url":"https://freesound.org/people/felix.blume/sounds/217506/","duration":212,"hq":"https://cdn.freesound.org/previews/217/217506_1661766-hq.mp3","hqBytes":4756032},"night_crickets":{"id":425425,"name":"AMB_Rural_Summer_Night.wav","author":"AnthonyRamirez","url":"https://freesound.org/people/AnthonyRamirez/sounds/425425/","duration":125,"hq":"https://cdn.freesound.org/previews/425/425425_7193358-hq.mp3","hqBytes":2912400},"fire":{"id":717579,"name":"Fireplace Fire Crackling","author":"RyanKingArt","url":"https://freesound.org/people/RyanKingArt/sounds/717579/","duration":61,"hq":"https://cdn.freesound.org/previews/717/717579_11069322-hq.mp3","hqBytes":1126813},"fan":{"id":457551,"name":"Computer Fan Noise","author":"Fabrizio84","url":"https://freesound.org/people/Fabrizio84/sounds/457551/","duration":121,"hq":"https://cdn.freesound.org/previews/457/457551_2841496-hq.mp3","hqBytes":2731080},"aircon":{"id":637930,"name":"vent air conditioner clean rattle hum.flac","author":"kyles","url":"https://freesound.org/people/kyles/sounds/637930/","duration":43,"hq":"https://cdn.freesound.org/previews/637/637930_612689-hq.mp3","hqBytes":963456},"clock":{"id":840291,"name":"thsha1_wall_clock_tick_20251229","author":"thsha1","url":"https://freesound.org/people/thsha1/sounds/840291/","duration":47,"hq":"https://cdn.freesound.org/previews/840/840291_47392-hq.mp3","hqBytes":1099344},"cat_purr":{"id":424355,"name":"purring happy cat.mp3","author":"Minscer","url":"https://freesound.org/people/Minscer/sounds/424355/","duration":49,"hq":"https://cdn.freesound.org/previews/424/424355_385405-hq.mp3","hqBytes":1166448},"train":{"id":219233,"name":"DC Metro - Interior 1","author":"crashoverride6","url":"https://freesound.org/people/crashoverride6/sounds/219233/","duration":218,"hq":"https://cdn.freesound.org/previews/219/219233_1274078-hq.mp3","hqBytes":4927200},"airplane":{"id":456092,"name":"Airplane cabin ambience / atmosphere Airbus A330-300","author":"FillSoko","url":"https://freesound.org/people/FillSoko/sounds/456092/","duration":155,"hq":"https://cdn.freesound.org/previews/456/456092_3025911-hq.mp3","hqBytes":3525875},"brown_noise":{"id":242513,"name":"brownnoise.aiff","author":"Hinoirocks","url":"https://freesound.org/people/Hinoirocks/sounds/242513/","duration":34,"hq":"https://cdn.freesound.org/previews/242/242513_2262598-hq.mp3","hqBytes":778494},"pink_noise":{"id":470754,"name":"Pink Noise Filtered.wav","author":"Zrte","url":"https://freesound.org/people/Zrte/sounds/470754/","duration":38,"hq":"https://cdn.freesound.org/previews/470/470754_9989554-hq.mp3","hqBytes":942144},"white_noise":{"id":249313,"name":"White Noise -20dBFS 30 Second.wav","author":"JarredGibb","url":"https://freesound.org/people/JarredGibb/sounds/249313/","duration":30,"hq":"https://cdn.freesound.org/previews/249/249313_4056007-hq.mp3","hqBytes":697824},"singing_bowl":{"id":204915,"name":"Singing Bowl a tuned","author":"brodjaman","url":"https://freesound.org/people/brodjaman/sounds/204915/","duration":94,"hq":"https://cdn.freesound.org/previews/204/204915_710671-hq.mp3","hqBytes":2082884}};
+  const SOUND_SOURCES = {"rain_light":{"id":725603,"name":"Rain Falling On The Greenhouse","author":"WhiteNoiseSleeper","url":"https://freesound.org/people/WhiteNoiseSleeper/sounds/725603/","duration":232,"hq":"https://cdn.freesound.org/previews/725/725603_15753134-hq.mp3","hqBytes":5440298,"lq":"https://cdn.freesound.org/previews/725/725603_15753134-lq.mp3","lqBytes":1944408,"orig":{"sr":44100,"bd":16,"ch":2}},"rain_heavy":{"id":592996,"name":"heavy rain on a small tent hq","author":"Petrosilia","url":"https://freesound.org/people/Petrosilia/sounds/592996/","duration":67,"hq":"https://cdn.freesound.org/previews/592/592996_11710404-hq.mp3","hqBytes":1858944,"lq":"https://cdn.freesound.org/previews/592/592996_11710404-lq.mp3","lqBytes":725736,"orig":{"sr":96000,"bd":24,"ch":2}},"rain_window":{"id":648529,"name":"RAIN on glass window.wav","author":"nicoproson","url":"https://freesound.org/people/nicoproson/sounds/648529/","duration":174,"hq":"https://cdn.freesound.org/previews/648/648529_457982-hq.mp3","hqBytes":3997248,"lq":"https://cdn.freesound.org/previews/648/648529_457982-lq.mp3","lqBytes":1457928,"orig":{"sr":96000,"bd":32,"ch":2}},"thunder":{"id":158692,"name":"Distant Thunder and Rain from Half Open Window 1.aif","author":"RutgerMuller","url":"https://freesound.org/people/RutgerMuller/sounds/158692/","duration":88,"hq":"https://cdn.freesound.org/previews/158/158692_179538-hq.mp3","hqBytes":1941216,"lq":"https://cdn.freesound.org/previews/158/158692_179538-lq.mp3","lqBytes":738288,"orig":{"sr":48000,"bd":24,"ch":2}},"waves":{"id":803679,"name":"Ocean Waves Crashing on the Coast of Big Lagoon, Redwoods","author":"CVLTIV8R","url":"https://freesound.org/people/CVLTIV8R/sounds/803679/","duration":80,"hq":"https://cdn.freesound.org/previews/803/803679_2520418-hq.mp3","hqBytes":1833135,"lq":"https://cdn.freesound.org/previews/803/803679_2520418-lq.mp3","lqBytes":654360,"orig":{"sr":44100,"bd":32,"ch":2}},"stream":{"id":588179,"name":"Mountain River 001.wav","author":"Auxide_Audio","url":"https://freesound.org/people/Auxide_Audio/sounds/588179/","duration":47,"hq":"https://cdn.freesound.org/previews/588/588179_13207434-hq.mp3","hqBytes":1094496,"lq":"https://cdn.freesound.org/previews/588/588179_13207434-lq.mp3","lqBytes":389736,"orig":{"sr":48000,"bd":16,"ch":2}},"wind":{"id":217506,"name":"Wind blowing in a field in Texas, USA","author":"felix.blume","url":"https://freesound.org/people/felix.blume/sounds/217506/","duration":212,"hq":"https://cdn.freesound.org/previews/217/217506_1661766-hq.mp3","hqBytes":4756032,"lq":"https://cdn.freesound.org/previews/217/217506_1661766-lq.mp3","lqBytes":1800624,"orig":{"sr":96000,"bd":24,"ch":2}},"night_crickets":{"id":425425,"name":"AMB_Rural_Summer_Night.wav","author":"AnthonyRamirez","url":"https://freesound.org/people/AnthonyRamirez/sounds/425425/","duration":125,"hq":"https://cdn.freesound.org/previews/425/425425_7193358-hq.mp3","hqBytes":2912400,"lq":"https://cdn.freesound.org/previews/425/425425_7193358-lq.mp3","lqBytes":1041792,"orig":{"sr":48000,"bd":24,"ch":2}},"fire":{"id":717579,"name":"Fireplace Fire Crackling","author":"RyanKingArt","url":"https://freesound.org/people/RyanKingArt/sounds/717579/","duration":61,"hq":"https://cdn.freesound.org/previews/717/717579_11069322-hq.mp3","hqBytes":1126813,"lq":"https://cdn.freesound.org/previews/717/717579_11069322-lq.mp3","lqBytes":420024,"orig":{"sr":44100,"bd":0,"ch":2}},"fan":{"id":457551,"name":"Computer Fan Noise","author":"Fabrizio84","url":"https://freesound.org/people/Fabrizio84/sounds/457551/","duration":121,"hq":"https://cdn.freesound.org/previews/457/457551_2841496-hq.mp3","hqBytes":2731080,"lq":"https://cdn.freesound.org/previews/457/457551_2841496-lq.mp3","lqBytes":1031904,"orig":{"sr":44100,"bd":0,"ch":2}},"aircon":{"id":637930,"name":"vent air conditioner clean rattle hum.flac","author":"kyles","url":"https://freesound.org/people/kyles/sounds/637930/","duration":43,"hq":"https://cdn.freesound.org/previews/637/637930_612689-hq.mp3","hqBytes":963456,"lq":"https://cdn.freesound.org/previews/637/637930_612689-lq.mp3","lqBytes":371112,"orig":{"sr":48000,"bd":16,"ch":2}},"clock":{"id":840291,"name":"thsha1_wall_clock_tick_20251229","author":"thsha1","url":"https://freesound.org/people/thsha1/sounds/840291/","duration":47,"hq":"https://cdn.freesound.org/previews/840/840291_47392-hq.mp3","hqBytes":1099344,"lq":"https://cdn.freesound.org/previews/840/840291_47392-lq.mp3","lqBytes":389904,"orig":{"sr":48000,"bd":24,"ch":1}},"cat_purr":{"id":424355,"name":"purring happy cat.mp3","author":"Minscer","url":"https://freesound.org/people/Minscer/sounds/424355/","duration":49,"hq":"https://cdn.freesound.org/previews/424/424355_385405-hq.mp3","hqBytes":1166448,"lq":"https://cdn.freesound.org/previews/424/424355_385405-lq.mp3","lqBytes":504840,"orig":{"sr":48000,"bd":0,"ch":2}},"train":{"id":219233,"name":"DC Metro - Interior 1","author":"crashoverride6","url":"https://freesound.org/people/crashoverride6/sounds/219233/","duration":218,"hq":"https://cdn.freesound.org/previews/219/219233_1274078-hq.mp3","hqBytes":4927200,"lq":"https://cdn.freesound.org/previews/219/219233_1274078-lq.mp3","lqBytes":1860240,"orig":{"sr":48000,"bd":24,"ch":2}},"airplane":{"id":456092,"name":"Airplane cabin ambience / atmosphere Airbus A330-300","author":"FillSoko","url":"https://freesound.org/people/FillSoko/sounds/456092/","duration":155,"hq":"https://cdn.freesound.org/previews/456/456092_3025911-hq.mp3","hqBytes":3525875,"lq":"https://cdn.freesound.org/previews/456/456092_3025911-lq.mp3","lqBytes":1281672,"orig":{"sr":44100,"bd":16,"ch":2}},"brown_noise":{"id":242513,"name":"brownnoise.aiff","author":"Hinoirocks","url":"https://freesound.org/people/Hinoirocks/sounds/242513/","duration":34,"hq":"https://cdn.freesound.org/previews/242/242513_2262598-hq.mp3","hqBytes":778494,"lq":"https://cdn.freesound.org/previews/242/242513_2262598-lq.mp3","lqBytes":273040,"orig":{"sr":44100,"bd":16,"ch":1}},"pink_noise":{"id":470754,"name":"Pink Noise Filtered.wav","author":"Zrte","url":"https://freesound.org/people/Zrte/sounds/470754/","duration":38,"hq":"https://cdn.freesound.org/previews/470/470754_9989554-hq.mp3","hqBytes":942144,"lq":"https://cdn.freesound.org/previews/470/470754_9989554-lq.mp3","lqBytes":355416,"orig":{"sr":48000,"bd":24,"ch":2}},"white_noise":{"id":249313,"name":"White Noise -20dBFS 30 Second.wav","author":"JarredGibb","url":"https://freesound.org/people/JarredGibb/sounds/249313/","duration":30,"hq":"https://cdn.freesound.org/previews/249/249313_4056007-hq.mp3","hqBytes":697824,"lq":"https://cdn.freesound.org/previews/249/249313_4056007-lq.mp3","lqBytes":248448,"orig":{"sr":48000,"bd":24,"ch":1}},"singing_bowl":{"id":204915,"name":"Singing Bowl a tuned","author":"brodjaman","url":"https://freesound.org/people/brodjaman/sounds/204915/","duration":94,"hq":"https://cdn.freesound.org/previews/204/204915_710671-hq.mp3","hqBytes":2082884,"lq":"https://cdn.freesound.org/previews/204/204915_710671-lq.mp3","lqBytes":829416,"orig":{"sr":44100,"bd":16,"ch":2}}};
 // ── 存储：settings 一行、nights 每晚一行、mixes 每个组合一行、library 用户自己加的声音每个一行 ──
 const DEFAULT_SETTINGS = Object.freeze({
   theme: "auto", autoBy: "system", characterId: "", ttsOn: true, sttOn: true, emotion: "calm",
-  timerMin: 45, fadeMin: 5, syncChat: true, morningOn: true, freesoundKey: "",
+  timerMin: 45, fadeMin: 5, syncChat: true, morningOn: true, freesoundKey: "", soundQuality: "hq", pinnedPresets: null,
   goal: { bedtime: "23:30", hours: 7.5 },
   rhythmPreset: "gentle", rhythm: null, directions: ["today", "scene"], forbid: "",
   insomniaDirections: ["breath", "trivia"], insomniaForbid: "",
@@ -1282,6 +1349,8 @@ const engine = (() => {
 const store = (() => {
   const MAX_SECONDS = 240;
   function key() { return (state.settings.freesoundKey || "").trim(); }
+  const quality = () => state.settings.soundQuality === "lq" ? "lq" : "hq";
+  const QUALITY_LABEL = { hq: "128 kbps 立体声", lq: "64 kbps" };
   const fmtMB = bytes => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
 
   // 直连拉音频 → dataUrl，带进度
@@ -1309,10 +1378,11 @@ const store = (() => {
     if (inflight.has(sound.key)) return inflight.get(sound.key);
     const job = (async () => {
       const src = SOUND_SOURCES[sound.key];
-      if (!src || !src.hq) throw new Error(`${sound.name} 没有下载地址`);
-      const { dataUrl, bytes } = await fetchAudio(src.hq, onProgress);
+      const q = quality(); const url = src && (src[q] || src.hq);
+      if (!url) throw new Error(`${sound.name} 没有下载地址`);
+      const { dataUrl, bytes } = await fetchAudio(url, onProgress);
       const stored = await api.media.put({ dataUrl });
-      const row = await api.db.create("library", { key: sound.key, builtin: true, name: sound.name, source: "freesound", quality: "hq", author: src.author, url: src.url, bytes, mediaRef: stored.ref });
+      const row = await api.db.create("library", { key: sound.key, builtin: true, name: sound.name, source: "freesound", quality: q, author: src.author, url: src.url, bytes, mediaRef: stored.ref });
       state.library.push(row);
       emit("library");
       return row;
@@ -1327,7 +1397,8 @@ const store = (() => {
   }
   function builtinStats() {
     const rows = state.library.filter(r => r.builtin);
-    return { ready: rows.length, total: BUILTIN_SOUNDS.length, bytes: rows.reduce((s, r) => s + (r.bytes || 0), 0), allBytes: BUILTIN_SOUNDS.reduce((s, b) => s + ((SOUND_SOURCES[b.key] || {}).hqBytes || 0), 0) };
+    const q = quality();
+    return { ready: rows.length, hq: rows.filter(r => r.quality !== "lq").length, lq: rows.filter(r => r.quality === "lq").length, total: BUILTIN_SOUNDS.length, bytes: rows.reduce((s, r) => s + (r.bytes || 0), 0), allBytes: BUILTIN_SOUNDS.reduce((s, b) => s + ((SOUND_SOURCES[b.key] || {})[q + "Bytes"] || 0), 0), quality: q };
   }
 
   async function search(query, page = 1) {
@@ -1343,12 +1414,13 @@ const store = (() => {
     return { results: json.results || [], next: !!json.next, count: json.count || 0 };
   }
   async function download(item, onProgress) {
-    const url = item.previews && (item.previews["preview-hq-mp3"] || item.previews["preview-lq-mp3"]);
+    const q = quality();
+    const url = item.previews && (item.previews[`preview-${q}-mp3`] || item.previews["preview-hq-mp3"] || item.previews["preview-lq-mp3"]);
     if (!url) throw new Error("这条没有预览音频");
     const { dataUrl, bytes } = await fetchAudio(url, onProgress);
     const stored = await api.media.put({ dataUrl });
     const row = await api.db.create("library", {
-      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound", quality: "hq",
+      key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound", quality: q,
       author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), bytes, mediaRef: stored.ref,
     });
     state.library.push(row);
@@ -1375,7 +1447,7 @@ const store = (() => {
   async function removeBuiltins() {
     for (const row of state.library.filter(r => r.builtin)) await remove(row);
   }
-  return { search, download, importFile, remove, removeBuiltins, ensureBuiltin, ensureAll, builtinStats, fetchAudio, fmtMB, MAX_SECONDS };
+  return { search, download, importFile, remove, removeBuiltins, ensureBuiltin, ensureAll, builtinStats, fetchAudio, fmtMB, quality, QUALITY_LABEL, MAX_SECONDS };
 })();
 // ── 入睡会话：开声景 → 角色分段说话（越说越少）→ 定时渐弱 → 落夜记 ──
 const session = (() => {
@@ -1566,9 +1638,10 @@ const theme = (() => {
     if (by === "time") { const h = new Date().getHours(); return h >= 7 && h < 19 ? "day" : "night"; }
     return mq && !mq.matches ? "day" : "night";
   }
-  function apply() { const name = resolve(); $("app").dataset.theme = name; emit("theme", name); }
+  function sky() { const h = new Date().getHours(); return h >= 7 && h < 19 ? "sun" : "moon"; }
+  function apply() { const name = resolve(); const app = $("app"); app.dataset.theme = name; app.dataset.sky = sky(); emit("theme", name); }
   if (mq && mq.addEventListener) mq.addEventListener("change", apply);
-  setInterval(() => { if (state.settings && state.settings.theme === "auto" && state.settings.autoBy === "time") apply(); }, 60000);
+  setInterval(() => { if (state.settings) apply(); }, 60000);
   return { apply, resolve };
 })();
 // ── 今夜 ──
@@ -1741,11 +1814,7 @@ const sounds = (() => {
       const t = el("button", "tile" + (layerOf(s.key) ? " on" : "") + (s.user ? " mine" : "") + (!s.user && !s.ready ? " dl" : ""));
       t.type = "button"; t.innerHTML = `${iconSvg(s.user ? s.icon : s.key)}<span>${esc(s.name)}</span>${!s.user && !s.ready ? `<i class="badge" title="第一次用会下载，约 ${esc(store.fmtMB(s.bytes || 0))}"></i>` : ""}`;
       t.onclick = () => { t.classList.add("pop"); toggle(s.key, t); };
-      t.addEventListener("contextmenu", e => e.preventDefault());
-      let pressTimer = 0;
-      t.addEventListener("pointerdown", () => { pressTimer = setTimeout(() => { pressTimer = 0; longPress(s); }, 550); });
-      const clear = () => { if (pressTimer) clearTimeout(pressTimer); };
-      t.addEventListener("pointerup", clear); t.addEventListener("pointerleave", clear); t.addEventListener("pointercancel", clear);
+      hold(t, () => longPress(s));
       box.appendChild(t);
     }
     document.querySelectorAll("#sound-cats button").forEach(b => b.classList.toggle("on", b.dataset.cat === cat));
@@ -1753,10 +1822,22 @@ const sounds = (() => {
   function longPress(s) {
     const src = state.library.find(r => r.key === s.key) || null;
     const meta = SOUND_SOURCES[s.key];
-    const credit = s.user ? (src && src.source === "freesound" ? `来自 Freesound · ${src.author} · CC0` : "自己导入的录音") : (meta ? `来自 Freesound · ${meta.author} · CC0 · 128 kbps 立体声` : "");
-    const size = src ? `已下载 · ${store.fmtMB(src.bytes || 0)}` : (s.bytes ? `还没下载 · 约 ${store.fmtMB(s.bytes)}` : "");
+    const rows = [];
+    if (meta) {
+      rows.push(["来源", `Freesound #${meta.id} · ${meta.author} · CC0`]);
+      if (meta.orig) rows.push(["原文件", `${meta.orig.sr ? Math.round(meta.orig.sr / 100) / 10 + " kHz" : "?"} · ${meta.orig.bd ? meta.orig.bd + " bit" : "压缩格式"} · ${meta.orig.ch === 1 ? "单声道" : "立体声"} · ${meta.duration} 秒`]);
+      rows.push(["本机", src ? `${store.QUALITY_LABEL[src.quality] || src.quality || "mp3"} · ${store.fmtMB(src.bytes || 0)} · 已下载` : `还没下载 · 高 ${store.fmtMB(meta.hqBytes || 0)} / 省流 ${store.fmtMB(meta.lqBytes || 0)}`]);
+      rows.push(["原名", meta.name]);
+      rows.push(["链接", meta.url]);
+    } else if (src && src.source === "freesound") {
+      rows.push(["来源", `Freesound · ${src.author || ""} · CC0`]);
+      rows.push(["本机", `${store.QUALITY_LABEL[src.quality] || "mp3"} · ${store.fmtMB(src.bytes || 0)}${src.duration ? ` · ${src.duration} 秒` : ""}`]);
+      if (src.url) rows.push(["链接", src.url]);
+    } else if (src) {
+      rows.push(["来源", "自己导入的录音"]);
+    }
     openSheet(s.name, box => {
-      box.innerHTML = `<p class="hint">${esc(credit)}${size ? `<br>${esc(size)}` : ""}</p><div class="grp">
+      box.innerHTML = `<div class="kv-table">${rows.map(([k, v]) => `<b>${esc(k)}</b><span>${esc(v)}</span>`).join("")}</div><div class="grp">
         ${src ? `<div class="frow"><div class="fl">名字</div><input id="sp-name" class="field" maxlength="24" value="${esc(s.name)}"><button class="mini" type="button" id="sp-rename">改</button></div>` : `<div class="frow"><div class="fl">名字</div><div class="fu">下载后长按可以改名</div></div>`}
         <div class="frow"><div class="fl">试听 10 秒</div><button class="mini" type="button" id="sp-prev">播放</button></div>${src ? `<div class="frow"><div class="fl">${s.user ? "从我的声音里删除" : "删掉下载的文件"}</div><button class="mini warn" type="button" id="sp-del">删除</button></div>` : ""}</div>`;
       const rn = box.querySelector("#sp-rename");
@@ -1770,20 +1851,63 @@ const sounds = (() => {
     const box = $("sound-cats"); box.innerHTML = "";
     for (const c of SOUND_CATEGORIES) { const b = el("button", c.id === cat ? "on" : "", c.name); b.type = "button"; b.dataset.cat = c.id; b.onclick = () => { cat = c.id; renderTiles(); }; box.appendChild(b); }
   }
+  // 组合：常用的钉在声景页，其它收进「全部」弹层
+  function allPresets() { return state.mixes.map(x => ({ ...x, user: true })).concat(MIX_PRESETS); }
+  function pinnedNames() { const v = state.settings.pinnedPresets; return Array.isArray(v) ? v : MIX_PRESETS.slice(0, 4).map(p => p.name); }
+  function togglePin(name) { const cur = pinnedNames(); saveSettings({ pinnedPresets: cur.includes(name) ? cur.filter(n => n !== name) : cur.concat(name) }); renderPresets(); }
+  function presetSummary(p) { return p.layers.map(l => `${findSound(l.key)?.name || l.key} ${Math.round(l.volume * 100)}`).join(" · "); }
+  function hold(node, fn, ms = 550) {
+    let t = 0;
+    node.addEventListener("pointerdown", () => { t = setTimeout(() => { t = 0; fn(); }, ms); });
+    for (const ev of ["pointerup", "pointerleave", "pointercancel"]) node.addEventListener(ev, () => { if (t) clearTimeout(t); });
+    node.addEventListener("contextmenu", e => e.preventDefault());
+  }
+  async function applyPreset(p) {
+    const m = mix();
+    const keys = p.layers.map(l => l.key).filter(k => findSound(k));
+    try { await store.ensureAll(keys, (i, n, prog, snd) => toast(`下载 ${snd.name} ${Math.round(prog * 100)}% · ${i + 1}/${n}`, 1200)); } catch (e) { fail(e); return; }
+    m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit();
+  }
   function renderPresets() {
     const box = $("mix-presets"); box.innerHTML = "";
-    const m = mix();
-    const all = state.mixes.map(x => ({ ...x, user: true })).concat(MIX_PRESETS);
-    for (const p of all) {
+    const m = mix(); const pins = pinnedNames(); const all = allPresets();
+    for (const p of all.filter(p => pins.includes(p.name))) {
       const b = el("button", m.name === p.name ? "on" : "", p.name); b.type = "button";
-      b.onclick = async () => {
-        const keys = p.layers.map(l => l.key).filter(k => findSound(k));
-        try { await store.ensureAll(keys, (i, n, prog, snd) => toast(`下载 ${snd.name} ${Math.round(prog * 100)}% · ${i + 1}/${n}`, 1200)); } catch (e) { fail(e); return; }
-        m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit();
-      };
-      if (p.user) { let t = 0; b.addEventListener("pointerdown", () => { t = setTimeout(async () => { t = 0; if (confirm(`删除组合「${p.name}」？`)) { await api.db.delete("mixes", p.id); state.mixes = state.mixes.filter(x => x.id !== p.id); renderPresets(); } }, 600); }); const c = () => t && clearTimeout(t); b.addEventListener("pointerup", c); b.addEventListener("pointerleave", c); }
+      b.onclick = () => applyPreset(p);
+      hold(b, () => presetSheet(p));
       box.appendChild(b);
     }
+    const more = el("button", "more", `全部 ${all.length} ›`); more.type = "button"; more.onclick = openPresetList; box.appendChild(more);
+  }
+  function openPresetList() {
+    openSheet("组合", box => {
+      box.innerHTML = `<p class="hint">点名字套用；★ 钉到声景页；长按看详情、改名、删除。</p><div class="pl" id="pl"></div>`;
+      const list = box.querySelector("#pl"); const pins = pinnedNames(); const m = mix();
+      for (const p of allPresets()) {
+        const row = el("div", "pl-item" + (m.name === p.name ? " on" : ""));
+        row.innerHTML = `<div class="pl-main"><div class="pl-name">${esc(p.name)}${p.user ? "" : '<small>内置</small>'}</div><div class="pl-sub">${esc(presetSummary(p))}</div></div><button class="pin${pins.includes(p.name) ? " on" : ""}" type="button" aria-label="钉住">★</button>`;
+        row.querySelector(".pl-main").onclick = () => { closeSheet(); applyPreset(p); };
+        row.querySelector(".pin").onclick = ev => { togglePin(p.name); ev.currentTarget.classList.toggle("on"); };
+        hold(row.querySelector(".pl-main"), () => presetSheet(p));
+        list.appendChild(row);
+      }
+    });
+  }
+  function presetSheet(p) {
+    openSheet(p.name, box => {
+      const pins = pinnedNames();
+      box.innerHTML = `<div class="kv-table">${p.layers.map(l => `<b>${esc(findSound(l.key)?.name || l.key)}</b><span>音量 ${Math.round(l.volume * 100)}${(l.drift ?? !!findSound(l.key)?.drift) ? " · 起伏" : ""}${findSound(l.key) && !findSound(l.key).user && !findSound(l.key).ready ? " · 未下载" : ""}</span>`).join("")}<b>总音量</b><span>${Math.round((p.master ?? .7) * 100)}</span><b>来源</b><span>${p.user ? `自己存的${p.createdAt ? " · " + esc(String(p.createdAt).slice(0, 10)) : ""}` : "内置组合"}</span></div>
+        <div class="grp">${p.user ? `<div class="frow"><div class="fl">名字</div><input id="ps-name" class="field" maxlength="16" value="${esc(p.name)}"><button class="mini" type="button" id="ps-rename">改</button></div>` : ""}
+        <div class="frow"><div class="fl">钉在声景页</div><button class="mini" type="button" id="ps-pin">${pins.includes(p.name) ? "取下" : "钉住"}</button></div>
+        <div class="frow"><div class="fl">套用这套</div><button class="mini" type="button" id="ps-apply">套用</button></div>
+        ${p.user ? `<div class="frow"><div class="fl">删除</div><button class="mini warn" type="button" id="ps-del">删除</button></div>` : ""}</div>`;
+      box.querySelector("#ps-pin").onclick = () => { togglePin(p.name); closeSheet(); };
+      box.querySelector("#ps-apply").onclick = () => { closeSheet(); applyPreset(p); };
+      const rn = box.querySelector("#ps-rename");
+      if (rn) rn.onclick = async () => { const name = box.querySelector("#ps-name").value.trim().slice(0, 16); if (!name || name === p.name) { closeSheet(); return; } try { await api.db.update("mixes", p.id, { name }); const row = state.mixes.find(x => x.id === p.id); if (row) row.name = name; if (pinnedNames().includes(p.name)) saveSettings({ pinnedPresets: pinnedNames().map(n => n === p.name ? name : n) }); if (mix().name === p.name) mix().name = name; closeSheet(); renderPresets(); renderLayers(); toast("改好了"); } catch (e) { fail(e); } };
+      const del = box.querySelector("#ps-del");
+      if (del) del.onclick = async () => { if (!confirm(`删除组合「${p.name}」？`)) return; try { await api.db.delete("mixes", p.id); state.mixes = state.mixes.filter(x => x.id !== p.id); if (pinnedNames().includes(p.name)) saveSettings({ pinnedPresets: pinnedNames().filter(n => n !== p.name) }); closeSheet(); renderPresets(); } catch (e) { fail(e); } };
+    });
   }
   function saveMix() {
     const m = mix();
@@ -2097,6 +2221,7 @@ const settings = (() => {
           <div class="frow"><div class="fl">目标入睡</div><input id="goal-bed" type="time" class="field time"></div>
           <div class="frow"><div class="fl">目标时长</div><span><input id="goal-hours" type="number" class="field num" min="4" max="12" step="0.5"> <span class="fu" style="display:inline">小时</span></span></div></div>
         <div class="grp"><div class="grp-t">声景</div>
+          <div class="frow"><div><div class="fl">音质</div><div class="fu">之后下载的声音按这档；已下的不动，清掉再下才换</div></div><div class="seg" id="sq-seg"><button type="button" data-q="lq">省流 64k</button><button type="button" data-q="hq">高 128k</button></div></div>
           <div class="frow"><div><div class="fl">内置声音</div><div class="fu" id="bi-stat"></div></div><button class="mini" type="button" id="bi-all">全部下载</button><button class="mini warn" type="button" id="bi-clear">清掉</button></div>
           <div class="frow"><div class="fl">结束前渐弱</div><select id="fade-min" class="select"><option value="1">1 分钟</option><option value="2">2 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option></select></div>
           <div class="frow col"><div><div class="fl">Freesound API Key</div><div class="fu">声音商店要用。到 freesound.org/apiv2/apply 申请，只存在这台设备</div></div><input id="fs-key" type="password" class="field" placeholder="粘贴 key" autocomplete="off"></div></div>
@@ -2104,7 +2229,7 @@ const settings = (() => {
           <div class="frow"><div><div class="fl">睡了 / 醒了写进聊天记录</div><div class="fu">TA 下次聊天知道你昨晚几点睡</div></div><label class="sw"><input id="sync-chat" type="checkbox"><i></i></label></div>
           <div class="frow"><div><div class="fl">早安一句</div><div class="fu">点「我醒了」时让 TA 说一句</div></div><label class="sw"><input id="morning-on" type="checkbox"><i></i></label></div></div>
         <div class="grp"><div class="frow"><div class="fl">声音来源与致谢</div><button class="mini" type="button" id="btn-credits">看</button></div><div class="frow"><div class="fl">清空陪眠的全部数据</div><button class="mini warn" type="button" id="btn-reset">清空</button></div></div>
-        <p class="foot">陪眠 · 0.2.0</p>`;
+        <p class="foot">陪眠 · 0.3.0</p>`;
       const q = sel => box.querySelector(sel);
       const paint = () => {
         box.querySelectorAll("#theme-picker button").forEach(b => b.classList.toggle("on", b.dataset.theme === s.theme));
@@ -2124,8 +2249,9 @@ const settings = (() => {
       q("#sync-chat").checked = !!s.syncChat; q("#sync-chat").onchange = e => saveSettings({ syncChat: e.target.checked });
       q("#morning-on").checked = !!s.morningOn; q("#morning-on").onchange = e => saveSettings({ morningOn: e.target.checked });
       q("#btn-credits").onclick = credits;
-      const biStat = () => { const st = store.builtinStats(); q("#bi-stat").textContent = `128 kbps 立体声，第一次用时自动下载。已下 ${st.ready}/${st.total}，占 ${store.fmtMB(st.bytes)}；全部约 ${store.fmtMB(st.allBytes)}`; q("#bi-clear").disabled = !st.ready; q("#bi-all").disabled = st.ready >= st.total; };
+      const biStat = () => { const st = store.builtinStats(); const mix = st.hq && st.lq ? `（高 ${st.hq} · 省流 ${st.lq}）` : ""; q("#bi-stat").textContent = `第一次用时自动下载。已下 ${st.ready}/${st.total}${mix}，占 ${store.fmtMB(st.bytes)}；按当前档全部约 ${store.fmtMB(st.allBytes)}`; q("#bi-clear").disabled = !st.ready; q("#bi-all").disabled = st.ready >= st.total; box.querySelectorAll("#sq-seg button").forEach(b => b.classList.toggle("on", b.dataset.q === st.quality)); };
       biStat();
+      box.querySelectorAll("#sq-seg button").forEach(b => { b.onclick = () => { saveSettings({ soundQuality: b.dataset.q }); biStat(); }; });
       q("#bi-all").onclick = async ev => { const btn = ev.currentTarget; btn.disabled = true; try { await store.ensureAll(BUILTIN_SOUNDS.map(b => b.key), (i, n, p, snd) => { btn.textContent = `${i + 1}/${n} ${Math.round(p * 100)}%`; }); toast("都下好了"); } catch (e) { fail(e); } finally { btn.textContent = "全部下载"; biStat(); } };
       q("#bi-clear").onclick = async () => { if (!confirm("删掉已下载的内置声音？下次用会重新下载。")) return; try { await store.removeBuiltins(); toast("清掉了"); } catch (e) { fail(e); } biStat(); };
       q("#btn-reset").onclick = async () => { if (!confirm("清空陪眠的夜记、组合和下载的声音？不可恢复。")) return; try { await session.stop(); await resetAll(); theme.apply(); toast("清空了"); switchView("home"); } catch (e) { fail(e); } };

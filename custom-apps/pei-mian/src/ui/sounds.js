@@ -58,11 +58,7 @@ const sounds = (() => {
       const t = el("button", "tile" + (layerOf(s.key) ? " on" : "") + (s.user ? " mine" : "") + (!s.user && !s.ready ? " dl" : ""));
       t.type = "button"; t.innerHTML = `${iconSvg(s.user ? s.icon : s.key)}<span>${esc(s.name)}</span>${!s.user && !s.ready ? `<i class="badge" title="第一次用会下载，约 ${esc(store.fmtMB(s.bytes || 0))}"></i>` : ""}`;
       t.onclick = () => { t.classList.add("pop"); toggle(s.key, t); };
-      t.addEventListener("contextmenu", e => e.preventDefault());
-      let pressTimer = 0;
-      t.addEventListener("pointerdown", () => { pressTimer = setTimeout(() => { pressTimer = 0; longPress(s); }, 550); });
-      const clear = () => { if (pressTimer) clearTimeout(pressTimer); };
-      t.addEventListener("pointerup", clear); t.addEventListener("pointerleave", clear); t.addEventListener("pointercancel", clear);
+      hold(t, () => longPress(s));
       box.appendChild(t);
     }
     document.querySelectorAll("#sound-cats button").forEach(b => b.classList.toggle("on", b.dataset.cat === cat));
@@ -70,10 +66,22 @@ const sounds = (() => {
   function longPress(s) {
     const src = state.library.find(r => r.key === s.key) || null;
     const meta = SOUND_SOURCES[s.key];
-    const credit = s.user ? (src && src.source === "freesound" ? `来自 Freesound · ${src.author} · CC0` : "自己导入的录音") : (meta ? `来自 Freesound · ${meta.author} · CC0 · 128 kbps 立体声` : "");
-    const size = src ? `已下载 · ${store.fmtMB(src.bytes || 0)}` : (s.bytes ? `还没下载 · 约 ${store.fmtMB(s.bytes)}` : "");
+    const rows = [];
+    if (meta) {
+      rows.push(["来源", `Freesound #${meta.id} · ${meta.author} · CC0`]);
+      if (meta.orig) rows.push(["原文件", `${meta.orig.sr ? Math.round(meta.orig.sr / 100) / 10 + " kHz" : "?"} · ${meta.orig.bd ? meta.orig.bd + " bit" : "压缩格式"} · ${meta.orig.ch === 1 ? "单声道" : "立体声"} · ${meta.duration} 秒`]);
+      rows.push(["本机", src ? `${store.QUALITY_LABEL[src.quality] || src.quality || "mp3"} · ${store.fmtMB(src.bytes || 0)} · 已下载` : `还没下载 · 高 ${store.fmtMB(meta.hqBytes || 0)} / 省流 ${store.fmtMB(meta.lqBytes || 0)}`]);
+      rows.push(["原名", meta.name]);
+      rows.push(["链接", meta.url]);
+    } else if (src && src.source === "freesound") {
+      rows.push(["来源", `Freesound · ${src.author || ""} · CC0`]);
+      rows.push(["本机", `${store.QUALITY_LABEL[src.quality] || "mp3"} · ${store.fmtMB(src.bytes || 0)}${src.duration ? ` · ${src.duration} 秒` : ""}`]);
+      if (src.url) rows.push(["链接", src.url]);
+    } else if (src) {
+      rows.push(["来源", "自己导入的录音"]);
+    }
     openSheet(s.name, box => {
-      box.innerHTML = `<p class="hint">${esc(credit)}${size ? `<br>${esc(size)}` : ""}</p><div class="grp">
+      box.innerHTML = `<div class="kv-table">${rows.map(([k, v]) => `<b>${esc(k)}</b><span>${esc(v)}</span>`).join("")}</div><div class="grp">
         ${src ? `<div class="frow"><div class="fl">名字</div><input id="sp-name" class="field" maxlength="24" value="${esc(s.name)}"><button class="mini" type="button" id="sp-rename">改</button></div>` : `<div class="frow"><div class="fl">名字</div><div class="fu">下载后长按可以改名</div></div>`}
         <div class="frow"><div class="fl">试听 10 秒</div><button class="mini" type="button" id="sp-prev">播放</button></div>${src ? `<div class="frow"><div class="fl">${s.user ? "从我的声音里删除" : "删掉下载的文件"}</div><button class="mini warn" type="button" id="sp-del">删除</button></div>` : ""}</div>`;
       const rn = box.querySelector("#sp-rename");
@@ -87,20 +95,63 @@ const sounds = (() => {
     const box = $("sound-cats"); box.innerHTML = "";
     for (const c of SOUND_CATEGORIES) { const b = el("button", c.id === cat ? "on" : "", c.name); b.type = "button"; b.dataset.cat = c.id; b.onclick = () => { cat = c.id; renderTiles(); }; box.appendChild(b); }
   }
+  // 组合：常用的钉在声景页，其它收进「全部」弹层
+  function allPresets() { return state.mixes.map(x => ({ ...x, user: true })).concat(MIX_PRESETS); }
+  function pinnedNames() { const v = state.settings.pinnedPresets; return Array.isArray(v) ? v : MIX_PRESETS.slice(0, 4).map(p => p.name); }
+  function togglePin(name) { const cur = pinnedNames(); saveSettings({ pinnedPresets: cur.includes(name) ? cur.filter(n => n !== name) : cur.concat(name) }); renderPresets(); }
+  function presetSummary(p) { return p.layers.map(l => `${findSound(l.key)?.name || l.key} ${Math.round(l.volume * 100)}`).join(" · "); }
+  function hold(node, fn, ms = 550) {
+    let t = 0;
+    node.addEventListener("pointerdown", () => { t = setTimeout(() => { t = 0; fn(); }, ms); });
+    for (const ev of ["pointerup", "pointerleave", "pointercancel"]) node.addEventListener(ev, () => { if (t) clearTimeout(t); });
+    node.addEventListener("contextmenu", e => e.preventDefault());
+  }
+  async function applyPreset(p) {
+    const m = mix();
+    const keys = p.layers.map(l => l.key).filter(k => findSound(k));
+    try { await store.ensureAll(keys, (i, n, prog, snd) => toast(`下载 ${snd.name} ${Math.round(prog * 100)}% · ${i + 1}/${n}`, 1200)); } catch (e) { fail(e); return; }
+    m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit();
+  }
   function renderPresets() {
     const box = $("mix-presets"); box.innerHTML = "";
-    const m = mix();
-    const all = state.mixes.map(x => ({ ...x, user: true })).concat(MIX_PRESETS);
-    for (const p of all) {
+    const m = mix(); const pins = pinnedNames(); const all = allPresets();
+    for (const p of all.filter(p => pins.includes(p.name))) {
       const b = el("button", m.name === p.name ? "on" : "", p.name); b.type = "button";
-      b.onclick = async () => {
-        const keys = p.layers.map(l => l.key).filter(k => findSound(k));
-        try { await store.ensureAll(keys, (i, n, prog, snd) => toast(`下载 ${snd.name} ${Math.round(prog * 100)}% · ${i + 1}/${n}`, 1200)); } catch (e) { fail(e); return; }
-        m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit();
-      };
-      if (p.user) { let t = 0; b.addEventListener("pointerdown", () => { t = setTimeout(async () => { t = 0; if (confirm(`删除组合「${p.name}」？`)) { await api.db.delete("mixes", p.id); state.mixes = state.mixes.filter(x => x.id !== p.id); renderPresets(); } }, 600); }); const c = () => t && clearTimeout(t); b.addEventListener("pointerup", c); b.addEventListener("pointerleave", c); }
+      b.onclick = () => applyPreset(p);
+      hold(b, () => presetSheet(p));
       box.appendChild(b);
     }
+    const more = el("button", "more", `全部 ${all.length} ›`); more.type = "button"; more.onclick = openPresetList; box.appendChild(more);
+  }
+  function openPresetList() {
+    openSheet("组合", box => {
+      box.innerHTML = `<p class="hint">点名字套用；★ 钉到声景页；长按看详情、改名、删除。</p><div class="pl" id="pl"></div>`;
+      const list = box.querySelector("#pl"); const pins = pinnedNames(); const m = mix();
+      for (const p of allPresets()) {
+        const row = el("div", "pl-item" + (m.name === p.name ? " on" : ""));
+        row.innerHTML = `<div class="pl-main"><div class="pl-name">${esc(p.name)}${p.user ? "" : '<small>内置</small>'}</div><div class="pl-sub">${esc(presetSummary(p))}</div></div><button class="pin${pins.includes(p.name) ? " on" : ""}" type="button" aria-label="钉住">★</button>`;
+        row.querySelector(".pl-main").onclick = () => { closeSheet(); applyPreset(p); };
+        row.querySelector(".pin").onclick = ev => { togglePin(p.name); ev.currentTarget.classList.toggle("on"); };
+        hold(row.querySelector(".pl-main"), () => presetSheet(p));
+        list.appendChild(row);
+      }
+    });
+  }
+  function presetSheet(p) {
+    openSheet(p.name, box => {
+      const pins = pinnedNames();
+      box.innerHTML = `<div class="kv-table">${p.layers.map(l => `<b>${esc(findSound(l.key)?.name || l.key)}</b><span>音量 ${Math.round(l.volume * 100)}${(l.drift ?? !!findSound(l.key)?.drift) ? " · 起伏" : ""}${findSound(l.key) && !findSound(l.key).user && !findSound(l.key).ready ? " · 未下载" : ""}</span>`).join("")}<b>总音量</b><span>${Math.round((p.master ?? .7) * 100)}</span><b>来源</b><span>${p.user ? `自己存的${p.createdAt ? " · " + esc(String(p.createdAt).slice(0, 10)) : ""}` : "内置组合"}</span></div>
+        <div class="grp">${p.user ? `<div class="frow"><div class="fl">名字</div><input id="ps-name" class="field" maxlength="16" value="${esc(p.name)}"><button class="mini" type="button" id="ps-rename">改</button></div>` : ""}
+        <div class="frow"><div class="fl">钉在声景页</div><button class="mini" type="button" id="ps-pin">${pins.includes(p.name) ? "取下" : "钉住"}</button></div>
+        <div class="frow"><div class="fl">套用这套</div><button class="mini" type="button" id="ps-apply">套用</button></div>
+        ${p.user ? `<div class="frow"><div class="fl">删除</div><button class="mini warn" type="button" id="ps-del">删除</button></div>` : ""}</div>`;
+      box.querySelector("#ps-pin").onclick = () => { togglePin(p.name); closeSheet(); };
+      box.querySelector("#ps-apply").onclick = () => { closeSheet(); applyPreset(p); };
+      const rn = box.querySelector("#ps-rename");
+      if (rn) rn.onclick = async () => { const name = box.querySelector("#ps-name").value.trim().slice(0, 16); if (!name || name === p.name) { closeSheet(); return; } try { await api.db.update("mixes", p.id, { name }); const row = state.mixes.find(x => x.id === p.id); if (row) row.name = name; if (pinnedNames().includes(p.name)) saveSettings({ pinnedPresets: pinnedNames().map(n => n === p.name ? name : n) }); if (mix().name === p.name) mix().name = name; closeSheet(); renderPresets(); renderLayers(); toast("改好了"); } catch (e) { fail(e); } };
+      const del = box.querySelector("#ps-del");
+      if (del) del.onclick = async () => { if (!confirm(`删除组合「${p.name}」？`)) return; try { await api.db.delete("mixes", p.id); state.mixes = state.mixes.filter(x => x.id !== p.id); if (pinnedNames().includes(p.name)) saveSettings({ pinnedPresets: pinnedNames().filter(n => n !== p.name) }); closeSheet(); renderPresets(); } catch (e) { fail(e); } };
+    });
   }
   function saveMix() {
     const m = mix();
