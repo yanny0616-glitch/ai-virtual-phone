@@ -413,6 +413,26 @@ function createChatSilenceStreamFilter(emit: (text: string) => void | Promise<vo
 }
 // END CHAT SILENCE PROTOCOL
 
+// 挂念旧预约没有解析配置：兼容标准标签；新预约尊重冻结时的线上配置。
+function guanianVisibleResponse(text: string, config: unknown): { text: string; reasoningText?: string } {
+  const settings = config as { enabled?: boolean; tag?: string } | undefined;
+  if (settings?.enabled === false) return { text: text.trim() };
+  const tags = settings?.enabled === true
+    ? [typeof settings.tag === "string" && settings.tag.trim() ? settings.tag.trim() : "thinking"]
+    : ["thinking", "think", "thought"];
+  const thoughts: string[] = [];
+  for (const tag of tags) {
+    const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    text = text.replace(new RegExp(`<${escaped}>([\\s\\S]*?)</${escaped}>`, "gi"), (_block, thought: string) => {
+      if (thought.trim()) thoughts.push(thought.trim());
+      return "";
+    });
+    // 不完整标签不能把剩余分析作为台词交付，也不能冒充成功作罢。
+    if (new RegExp(`</?${escaped}>`, "i").test(text)) throw new Error("guanian incomplete thinking block");
+  }
+  return { text: text.trim(), reasoningText: thoughts.join("\n\n") || undefined };
+}
+
 type JobPayload = {
   generatedResponse?: { rawText: string; createdAt: string; processingStarted?: boolean;
     delivery?: { rawText: string; deliverAsCall: boolean; marker: { text: string; insertAt: number; name: string } | null; [key: string]: unknown } };
@@ -1342,6 +1362,15 @@ Deno.serve(async (req: Request) => {
       await usageAdd(rest, job.user_id, budget?.tz ?? 0, usageSource, payload.request.providerKind, data);
     }
     let rawText = payload.generatedResponse.rawText;
+    let guanianReasoning: string | undefined;
+    if (guanianPlan.item) {
+      try {
+        const parsed = guanianVisibleResponse(rawText, payload.merge?.onlineThinking);
+        rawText = parsed.text; guanianReasoning = parsed.reasoningText;
+      }
+      catch { await finish("failed", "guanian incomplete thinking block"); return; }
+      if (!rawText) { await finish("failed", "guanian empty visible response"); return; }
+    }
     if (payload.allowSilence === true && isChatSilenceResponse(rawText, payload.silenceThinkingTag)) {
       if (stripChatSilenceMarker(rawText, payload.silenceThinkingTag)) {
         if (generationLease) {
@@ -1852,6 +1881,7 @@ Deno.serve(async (req: Request) => {
         meta: {
           ...(payload.merge ?? {}),
           pushGenerated: true,
+          ...(guanianReasoning ? { reasoningText: guanianReasoning } : {}),
           ...(cloudHistory ? { guanianContext: { messageIds: cloudHistory.messages.slice(-80).map(m => m.id), checkedAt: new Date().toISOString(), eventId: guanianPlan.item?.from || null, revision: guanianPlan.item?.promiseRevision || null } } : {}),
           ...(executedShortcutMarker ? { shortcutMarker: executedShortcutMarker } : {}),
         },

@@ -53,3 +53,34 @@ const read = p => fs.readFileSync(new URL('../' + p, import.meta.url), 'utf8');
  assert.match(panel,/<div class="num">1<\/div><div class="cap">作 罢/);
  console.log('PASS timeline and counts follow the same terminal receipt as details');
 }
+
+// 使用与报告相同的结构，避免把用户的私人聊天提交进测试。
+for (const tc of [
+ {name:'reported structure', answer:'<thinking>**STEP 1: BASELINE LOAD**\n分析\n[挂念作罢：事情已解决或发生变化]</thinking>\n[挂念作罢：事情已解决或发生变化]', skip:true},
+ {name:'normal dialogue', answer:'<thinking>分析</thinking>吃饭了吗？', visible:'吃饭了吗？'},
+ {name:'marker only inside thinking', answer:'<thinking>[挂念作罢：事情已解决或发生变化]</thinking>有件新事情想告诉你。', visible:'有件新事情想告诉你。'},
+ {name:'custom tag', config:{enabled:true,tag:'分析.v1'}, answer:'<分析.v1>分析</分析.v1>[挂念作罢：事情已解决或发生变化]', skip:true},
+ {name:'explicit disabled', config:{enabled:false,tag:'thinking'}, answer:'<thinking>保留原文</thinking>正文', visible:'<thinking>保留原文</thinking>正文'},
+ {name:'unclosed block', answer:'<thinking>分析\n[挂念作罢：事情已解决或发生变化]', failed:true},
+ {name:'only thinking', answer:'<thinking>分析</thinking>', failed:true},
+]) {
+ const {h,c,init,run}=fixture(); await init(); h.plan.context.day.schedule=[];
+ if(tc.config) {
+  const payload=JSON.parse(await c.api.decryptPayload(h.job.payload,'test-key'));
+  payload.merge.onlineThinking=tc.config;
+  h.job.payload=await c.api.encryptPayload(JSON.stringify(payload),'test-key');
+ }
+ h.answer=tc.answer; await run();
+ if(tc.skip) {
+  assert.equal(h.job.status,'done'); assert.match(h.job.result_note,/guanian skip:/);
+  assert.equal(h.outbox.length,0); assert.ok(h.plan.decisions.some(d=>d.kind==='factcheck' && d.blocked));
+ } else if(tc.failed) {
+  assert.equal(h.job.status,'failed'); assert.equal(h.outbox.length,0);
+ } else {
+  assert.equal(h.outbox.length,1); assert.equal(h.outbox[0].raw_text,tc.visible);
+  if(tc.name==='normal dialogue') assert.equal(h.outbox[0].meta.reasoningText,'分析');
+ }
+ const calls=h.calls.length; await run(); assert.equal(h.calls.length,calls);
+ assert.equal(h.outbox.length,tc.visible ? 1 : 0);
+ console.log('PASS thinking delivery: '+tc.name);
+}

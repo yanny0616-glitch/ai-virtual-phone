@@ -1,6 +1,7 @@
 // 离线推送·回端合并：App 打开/回前台时拉取服务端生成的原始输出，
-// 用客户端同一条解析管线（回复插件 → 输出正则 → parseAndSaveResponse）落进聊天记录。
+// 用客户端同一条解析管线（回复插件 → 思维链提取 → 输出正则 → parseAndSaveResponse）落进聊天记录。
 
+import { parseCloudThinking, resolveCloudThinkingConfig, type CloudThinkingConfig } from "./cloud-reply-thinking";
 import { parseAndSaveResponse, scheduleFollowUp } from "./follow-up-service";
 import { applyOutputRegex } from "./llm-prompt-assembler";
 import type { RegexConfig } from "./settings-types";
@@ -24,6 +25,8 @@ type OutboxEntry = {
     raw_text: string;
     meta: {
         sessionId?: string;
+        onlineThinking?: CloudThinkingConfig;
+        reasoningText?: string;
         followUpIndex?: number;
         prevCount?: number;
         regexes?: RegexConfig[];
@@ -118,7 +121,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
 
                     if ((meta as { kind?: string }).kind === "bridge") {
                         const bridgeMeta = meta as Record<string, unknown> & {
-                            reply?: { sessionId?: string; regexes?: RegexConfig[]; characterName?: string; userName?: string; appId?: string; appTags?: string[] } | null;
+                            reply?: { onlineThinking?: CloudThinkingConfig; reasoningText?: string; sessionId?: string; regexes?: RegexConfig[]; characterName?: string; userName?: string; appId?: string; appTags?: string[] } | null;
                             screenChat?: boolean;
                             screenChatCharacterId?: string;
                             screenChatSequence?: number;
@@ -137,6 +140,8 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                             const alreadyImported = await hasPersistedResponseBatch(replySessionId, responseBatchId);
                             if (!alreadyImported) {
                                 let text = await transformOutboxResponse(entry.raw_text, replySessionId, replyMeta?.appId, entry.id);
+                                const thinking = parseCloudThinking(text, resolveCloudThinkingConfig(replySessionId, replyMeta?.appId, replyMeta?.onlineThinking));
+                                text = thinking.text;
                                 const regexes = Array.isArray(replyMeta?.regexes) ? replyMeta.regexes : [];
                                 if (regexes.length > 0) {
                                     const macroEngine = new MacroEngine(replyMeta?.characterName ?? "", replyMeta?.userName ?? "用户");
@@ -154,6 +159,8 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                                         silent: options?.silent !== false,
                                         responseBatchId,
                                         createdAt: bridgeMeta.screenChatAssistantAt,
+                                        rawResponseText: entry.raw_text,
+                                        reasoningText: thinking.reasoningText ?? replyMeta?.reasoningText,
                                     },
                                 );
                                 if (hasVisible && newCount < 10) scheduleFollowUp(replySessionId, newCount, stateValues);
@@ -221,6 +228,8 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         continue;
                     }
                     let text = await transformOutboxResponse(entry.raw_text, sessionId, meta.appId, entry.id);
+                    const thinking = parseCloudThinking(text, resolveCloudThinkingConfig(sessionId, meta?.appId, meta?.onlineThinking));
+                    text = thinking.text;
                     const regexes = Array.isArray(meta.regexes) ? meta.regexes : [];
                     if (regexes.length > 0) {
                         const macroEngine = new MacroEngine(meta.characterName ?? "", meta.userName ?? "用户");
@@ -251,6 +260,8 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                             durable: true,
                             silent: options?.silent !== false,
                             suppressReply: meta.silentUpdate === true,
+                            rawResponseText: entry.raw_text,
+                            reasoningText: thinking.reasoningText ?? meta.reasoningText,
                             responseBatchId,
                             // 补收时间不是角色发送时间；无效旧数据交给解析器使用本地时间兜底。
                             createdAt: Number.isFinite(Date.parse(entry.created_at)) ? entry.created_at : undefined,

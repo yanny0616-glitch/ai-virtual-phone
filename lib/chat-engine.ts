@@ -2681,6 +2681,7 @@ async function generateChatCompletionCore(
                 regexes,
                 allowSilence,
                 silenceThinkingTag: preset?.online_thinking_tag,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                 request: buildProviderRequest(config, preset, toLlmRequestMessages(bailoutMessages)),
                 replyAfter: replyAfterMessage
                     ? { localMessageId: replyAfterMessage.id, createdAt: replyAfterMessage.createdAt }

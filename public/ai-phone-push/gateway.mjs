@@ -3,7 +3,7 @@
 // verify_jwt 必须关闭；请求改用用户自己的 service_role key 做逐次校验。
 
 // BEGIN PERSONAL PUSH VERSION
-const PERSONAL_PUSH_FUNCTIONS_VERSION = 3;
+const PERSONAL_PUSH_FUNCTIONS_VERSION = 5;
 // END PERSONAL PUSH VERSION
 
 type SubscriptionRow = { endpoint: string; p256dh: string; auth: string };

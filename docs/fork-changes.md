@@ -28,6 +28,10 @@
 
 ## 3. 提示词与请求管线
 
+- **云端回复思维链折叠**：普通回传和现实桥回传在输出正则、拆气泡前按线上标签提取思考，保存 `reasoningText` 供原有折叠入口显示。新回复兜底/追问/主动预约冻结开关和标签，旧回传回退到会话当前绑定预设；显式关闭保持原行为。挂念云端已剥离的思考通过回传 metadata 保留。
+
+- **挂念云端思考解析**：预约冻结线上思考开关和标签；发送前剥离思考块，再判断作罢。旧预约兼容标准 thinking / think / thought 标签。作罢记为任务完成但未发送，不写 outbox；标签不完整或仅有思考时失败结束，不交付分析。
+
 - **提示缓存**（`lib/llm-provider-adapter.ts`）：Anthropic 打 `cache_control` 在 tools → system → 最后一个 message；OpenAI 用 `prompt_cache_key`；Gemini 原生带。开关在 API 配置逐条和工坊两处。已知问题：某些严格中转不认 `cache_control` 报 500，撞上就关那条配置的缓存。
 - **`system` 只挂一个缓存断点**：任何逐轮变动的文本必须排在 `shortTermMemory` 之后，否则整段人设/世界书每轮重新计费。`{{customAppContext}}` 条目默认在 `prompt_order` 最末就是这个原因。
 - **用量统计**：`LlmUsage` 拉平三家字段，缓存命中与写入分开记；按 `characterId` 分桶，后台功能退化为 `name:<功能名>`；自定义 APP 调用来源记 `custom_app:<appId>`。加新 `*-engine.ts` 时 `callLLM` 别漏传 `characterId`。四条请求路径失败时都补一条 failed 日志。日志保留条数可调（50–500），总预算封在 8MB。

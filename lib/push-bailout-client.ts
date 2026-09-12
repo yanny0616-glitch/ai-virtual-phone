@@ -133,6 +133,7 @@ export async function armReplyBailout(params: {
     signal?: AbortSignal;
     allowSilence?: boolean;
     silenceThinkingTag?: string;
+    onlineThinking?: { enabled: boolean; tag: string };
 }): Promise<ReplyBailoutHandle | null> {
     if (!bailoutEnabled()) return null;
     if (!(await hasAccountPushSubscription())) return null;
@@ -166,6 +167,7 @@ export async function armReplyBailout(params: {
                 notify: { title: params.characterName, url: "/", ...(notifyCharacterId ? { characterId: notifyCharacterId } : {}) },
                 merge: {
                     sessionId: params.sessionId,
+                    onlineThinking: params.onlineThinking,
                     prevCount: 0,
                     regexes: params.regexes,
                     characterName: params.characterName,
@@ -319,6 +321,7 @@ export async function armFollowUpBailout(
                     ...(shortcutContinuation ? { shortcutContinuation } : {}),
                     merge: {
                         sessionId,
+                        onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                         followUpIndex: count,
                         prevCount,
                         regexes,
@@ -472,6 +475,7 @@ export async function armIdleReconnectBailout(rule: IdleReconnectRule): Promise<
             shortcutContinuation,
             merge: {
                 sessionId: session.id,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                 prevCount: 0,
                 regexes,
                 characterName: character.name,
@@ -536,6 +540,7 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
             shortcutContinuation,
             merge: {
                 sessionId: session.id,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                 prevCount: 0,
                 regexes,
                 characterName: character.name,
@@ -598,6 +603,7 @@ export async function armTemplateBailout(input: {
             notifyCharacterId: character.id,
             merge: {
                 sessionId: input.session.id,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                 regexes,
                 characterName: character.name,
                 userName: userIdentity?.name ?? "用户",
@@ -665,6 +671,7 @@ export async function armPeriodCareBailouts(): Promise<void> {
                     shortcutContinuation,
                     merge: {
                         sessionId: session.id,
+                        onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                         prevCount: 0,
                         regexes,
                         characterName,

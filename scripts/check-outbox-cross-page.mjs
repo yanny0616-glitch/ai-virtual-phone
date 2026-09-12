@@ -10,11 +10,14 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 async function moduleCode(file,expose){const src=stripTypeScriptTypes(await fs.readFile(path.join(root,file),'utf8')).replace(/^import\s[\s\S]*?;\s*$/gm,'').replace(/\bexport\s+(?=(?:async\s+)?function|const |class )/g,'');return `(()=>{${src}\nreturn {${expose}};})()`;}
 const db=await moduleCode('lib/chat-db.ts','chatDb,dbReadChatSession,dbHasResponseBatch,dbPutMessage,dbPutMessages,dbPutSessions,dbPutMessageBatch,dbReplaceSessions');
 const storage=await moduleCode('lib/chat-storage.ts','refreshChatSessionFromDisk,hasPersistedResponseBatch,createChatMessageBatch,loadChatMessages,loadChatSessions,persistChatMessages,seed(s){_sessionsCache=[s];_messagesCache=[];_hydrated=true;}');
+const thinking=await moduleCode('lib/cloud-reply-thinking.ts','parseCloudThinking,resolveCloudThinkingConfig');
 const consumer=await moduleCode('lib/push-outbox-client.ts','consumeServerOutbox');
 const child=`<!doctype html><script>window.onerror=(m,u,l)=>{parent.h.error=String(m)+":"+l};</script><script src="/dexie.js"></script><script>
 Object.assign(window,${db});
 const registerKvMigration=()=>{},kvGet=()=>null,resolveUserIdentity=()=>({name:'User'}),loadCharacters=()=>[],emitChatPluginEvent=()=>{},runChatPluginTransformSync=(_p,v)=>v;
 const store=${storage};Object.assign(window,store);
+const loadBindingConfig=()=>({}),resolveBinding=()=>({}),loadPresets=()=>[];
+Object.assign(window,${thinking});
 const session={id:'s',contactId:'c',isGroup:true,participantIds:[],unreadCount:0,updatedAt:'2026-09-07T08:00:00Z'};store.seed(session);
 const isPersonalPushCloudActive=()=>true,getChatPluginRuntime=()=>({ensureStarted:async()=>{}}),stripHallucinatedTimestamps=s=>s;
 const runChatPluginTransform=async(_p,v)=>{parent.h.transforms++;return v;};

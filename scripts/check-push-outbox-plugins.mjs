@@ -14,7 +14,7 @@ function load(file, globals, expose) {
     return context.api;
 }
 
-function harness({ enabled = true, ready = Promise.resolve(), initial = {} } = {}) {
+function harness({ enabled = true, ready = Promise.resolve(), initial = {}, thinkingEnabled = false } = {}) {
     const storage = new Map(), variables = new Map(), hooks = new Map(), saved = [];
     variables.set("c1affection", { score: 10, ...initial });
     const session = { id: "s1", contactId: "c1" };
@@ -38,7 +38,13 @@ function harness({ enabled = true, ready = Promise.resolve(), initial = {} } = {
         ...stateParser, ...voiceExpression, stripActionShells: text => text, stripTextToolDirectives: text => text,
         loadCustomAppChatDirectives: () => [],
     }, "parseAIResponse");
+    const thinking = load("lib/cloud-reply-thinking.ts", {
+        loadChatSessions: () => [session], loadBindingConfig: () => ({}),
+        resolveBinding: () => ({presetId:"p"}),
+        loadPresets: () => [{id:"p",online_thinking_enabled:thinkingEnabled,online_thinking_tag:"thinking"}],
+    }, "parseCloudThinking,resolveCloudThinkingConfig");
     const client = load("lib/push-outbox-client.ts", {
+        ...thinking,
         window: {}, isPersonalPushCloudActive: () => true, hasAccountPushSubscription: async () => true,
         loadScreenChatSettings: () => ({ enabled: false }),
         getChatPluginRuntime: () => ({ ensureStarted: async () => {
@@ -71,7 +77,8 @@ function harness({ enabled = true, ready = Promise.resolve(), initial = {} } = {
             for (const part of parsed.parts) {
                 const message = { id: "m" + saved.length, role: "assistant", sessionId,
                     content: part.content, innerMonologue: parsed.innerMonologue,
-                    statusPanel: parsed.statusPanel, responseBatchId: options.responseBatchId };
+                    statusPanel: parsed.statusPanel, responseBatchId: options.responseBatchId,
+                    reasoningText: saved.some(m => m.responseBatchId === options.responseBatchId) ? undefined : options.reasoningText, rawResponseText: options.rawResponseText };
                 hooks.get("message.beforePersist")?.({ message });
                 saved.push(message);
             }
@@ -152,3 +159,26 @@ for (const { line, initial, delta, status, score } of [
     if (initial?.score === 100) assert.equal(h.variables.get("c1affection").todayDelta, 0);
 }
 console.log("PASS affection settlement: zero, missing, alternate formats, daily/reply caps and score bounds (9 cases)");
+
+for (const bridge of [false, true]) {
+ for (const tc of [
+  {name:'legacy current preset', enabled:true, body:'<thinking>分析一\n\n分析二</thinking>\n\n第一句。\n\n第二句。', thought:'分析一\n\n分析二'},
+  {name:'frozen custom tag', enabled:false, config:{enabled:true,tag:'分析.v1'},body:'<分析.v1>自定义分析</分析.v1>第一句。\n\n第二句。',thought:'自定义分析'},
+  {name:'explicit disabled',enabled:true,config:{enabled:false,tag:'thinking'},body:'<thinking>原文</thinking>第一句。', thought:undefined},
+  {name:'cloud already extracted',enabled:true,body:'第一句。\n\n第二句。',cloudThought:'云端分析',thought:'云端分析'},
+ ]) {
+  const h=harness({enabled:false,thinkingEnabled:tc.enabled});
+  const meta={onlineThinking:tc.config,reasoningText:tc.cloudThought};
+  const item=entry(tc.name,bridge?{kind:'bridge',reply:{sessionId:'s1',...meta}}:meta);item.raw_text=tc.body;
+  h.state.entries=[item];h.state.ackStatus=503;
+  await h.client.consumeServerOutbox({force:true});
+  assert.ok(h.saved.length>0);
+  assert.equal(h.saved[0].reasoningText,tc.thought);
+  if(tc.thought) assert.ok(h.saved.every(m=>!m.content.includes(tc.thought)&&!m.content.includes('<thinking>')));
+  assert.ok(h.saved.slice(1).every(m=>m.reasoningText===undefined));
+  assert.equal(h.saved[0].rawResponseText,tc.body);
+  const count=h.saved.length;h.state.ackStatus=200;
+  await h.client.consumeServerOutbox({force:true});assert.equal(h.saved.length,count);
+  console.log(`PASS cloud thinking ${bridge?'bridge':'chat'}: ${tc.name}, retry keeps one batch`);
+ }
+}
