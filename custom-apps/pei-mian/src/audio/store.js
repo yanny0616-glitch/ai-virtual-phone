@@ -24,9 +24,22 @@ const store = (() => {
     return { dataUrl, bytes: blob.size };
   }
 
+  async function persistSound(dataUrl, data, epoch) {
+    return writeData(async () => {
+      const stored = await api.media.put({ dataUrl });
+      try {
+        if (!dataCurrent(epoch)) throw new Error("下载已取消：数据已清空");
+        const row = await api.db.create("library", { ...data, mediaRef: stored.ref });
+        state.library.push(row); emit("library"); return row;
+      } catch (error) { await api.media.delete({ ref: stored.ref }); throw error; }
+    }, epoch);
+  }
   const inflight = new Map();
+  on("reset", () => inflight.clear());
   // 内置声音：没下过就下，下过直接返回库里的行
   function ensureBuiltin(sound, onProgress) {
+    if (resetting) return Promise.reject(new Error("正在清空数据"));
+    const epoch = dataEpoch;
     const have = state.library.find(r => r.builtin && r.key === sound.key);
     if (have) return Promise.resolve(have);
     if (inflight.has(sound.key)) return inflight.get(sound.key);
@@ -35,18 +48,15 @@ const store = (() => {
       const q = quality(); const url = src && (src[q] || src.hq);
       if (!url) throw new Error(`${sound.name} 没有下载地址`);
       const { dataUrl, bytes } = await fetchAudio(url, onProgress);
-      const stored = await api.media.put({ dataUrl });
-      const row = await api.db.create("library", { key: sound.key, builtin: true, name: sound.name, source: "freesound", quality: q, author: src.author, url: src.url, bytes, mediaRef: stored.ref });
-      state.library.push(row);
-      emit("library");
-      return row;
-    })().finally(() => inflight.delete(sound.key));
+      return persistSound(dataUrl, { key: sound.key, builtin: true, name: sound.name, source: "freesound", quality: q, author: src.author, url: src.url, bytes }, epoch);
+    })().finally(() => { if (inflight.get(sound.key) === job) inflight.delete(sound.key); });
     inflight.set(sound.key, job);
     return job;
   }
   async function ensureAll(keys, onEach) {
+    const epoch = dataEpoch;
     const todo = keys.map(findSound).filter(s => s && !s.user && !s.ready);
-    for (let i = 0; i < todo.length; i += 1) { await ensureBuiltin(todo[i], p => onEach && onEach(i, todo.length, p, todo[i])); }
+    for (let i = 0; i < todo.length; i += 1) { if (!dataCurrent(epoch)) throw new Error("下载已取消：数据已清空"); await ensureBuiltin(todo[i], p => onEach && onEach(i, todo.length, p, todo[i])); }
     return todo.length;
   }
   function builtinStats() {
@@ -68,28 +78,22 @@ const store = (() => {
     return { results: json.results || [], next: !!json.next, count: json.count || 0 };
   }
   async function download(item, onProgress) {
+    const epoch = dataEpoch;
     const q = quality();
     const url = item.previews && (item.previews[`preview-${q}-mp3`] || item.previews["preview-hq-mp3"] || item.previews["preview-lq-mp3"]);
     if (!url) throw new Error("这条没有预览音频");
     const { dataUrl, bytes } = await fetchAudio(url, onProgress);
-    const stored = await api.media.put({ dataUrl });
-    const row = await api.db.create("library", {
+    return persistSound(dataUrl, {
       key: `fs_${item.id}`, name: item.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 24), icon: "headphones", source: "freesound", quality: q,
-      author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), bytes, mediaRef: stored.ref,
-    });
-    state.library.push(row);
-    emit("library");
-    return row;
+      author: item.username, license: item.license, url: item.url, duration: Math.round(item.duration), bytes,
+    }, epoch);
   }
   async function importFile() {
+    const epoch = dataEpoch;
     const picked = await api.media.pick({ accept: "audio/*" });
     if (!picked || !picked.file || !picked.file.dataUrl) return null;
-    const stored = await api.media.put({ dataUrl: picked.file.dataUrl });
     const name = (picked.file.name || "我的录音").replace(/\.[a-z0-9]+$/i, "").slice(0, 24);
-    const row = await api.db.create("library", { key: `my_${Date.now().toString(36)}`, name, icon: "mic", source: "import", mediaRef: stored.ref });
-    state.library.push(row);
-    emit("library");
-    return row;
+    return persistSound(picked.file.dataUrl, { key: `my_${Date.now().toString(36)}`, name, icon: "mic", source: "import" }, epoch);
   }
   async function remove(row) {
     if (row.mediaRef) { try { await api.media.delete({ ref: row.mediaRef }); } catch { /* ignore */ } }

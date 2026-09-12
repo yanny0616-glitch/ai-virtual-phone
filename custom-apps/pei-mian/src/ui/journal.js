@@ -90,10 +90,12 @@ const journal = (() => {
       ${cur.topMix ? `<div class="day-meta"><span class="chip">最常听：${esc(cur.topMix.name)} · ${cur.topMix.count} 晚</span><span class="chip">记了 ${cur.nightsLogged} 晚</span></div>` : ""}
       <div id="wk-text">${saved ? `<div class="bubble">${esc(saved)}</div>` : `<p class="archive-note">${cur.nightsLogged ? "这周的数据 TA 还没看" : "这周还没有记录"}</p>`}</div>`;
     review.querySelector("#wk-go").onclick = async ev => {
+      const epoch = dataEpoch;
       const btn = ev.currentTarget; btn.disabled = true; btn.textContent = "想着…";
       try {
         const lines = cur.days.filter(d => d.night).map(d => `${d.date}：${fmtClock(new Date(d.night.sleepAt))} 睡，${d.night.wakeAt ? fmtClock(new Date(d.night.wakeAt)) + " 醒" : "没记醒"}，${PmStats.formatDuration(d.night.durationMin)}，自评 ${d.night.rating || "无"}，起夜 ${d.night.wakeups || 0}`);
         const result = await api.ai.generate({ characterId: state.character.id, appTags: ["peimian", "weekly"], instruction: `本周记录：\n${lines.join("\n")}\n作息目标：${goal().bedtime} 前睡，睡够 ${goal().hours} 小时。说几句你的观察。` });
+        if (!dataCurrent(epoch)) return;
         const text = String(result?.text || "").trim();
         saveSettings({ weeklyLines: { ...(state.settings.weeklyLines || {}), [key]: text } });
         review.querySelector("#wk-text").innerHTML = `<div class="bubble">${esc(text)}</div>`;

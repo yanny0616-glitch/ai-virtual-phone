@@ -3,29 +3,38 @@ const sounds = (() => {
   let cat = "rain";
   const mix = () => state.settings.currentMix;
   function layerOf(key) { return mix().layers.find(l => l.key === key); }
+  let mixVersion = 0;
+  const pendingLayers = new Set();
   async function toggle(key, tile) {
-    const m = mix();
+    if (resetting) return;
+    const m = mix(), version = mixVersion, epoch = dataEpoch;
+    if (pendingLayers.has(key)) return;
     if (layerOf(key)) m.layers = m.layers.filter(l => l.key !== key);
     else {
       if (m.layers.length >= PmMixer.MAX_LAYERS) { toast(`最多叠 ${PmMixer.MAX_LAYERS} 层`); return; }
+      pendingLayers.add(key);
       const sound = findSound(key);
-      if (sound && !sound.user && !sound.ready) {
-        if (tile) tile.classList.add("busy");
-        const label = tile && tile.querySelector("span");
-        try { await store.ensureBuiltin(sound, p => { if (label) label.textContent = `${Math.round(p * 100)}%`; }); }
-        catch (e) { fail(e); renderTiles(); return; }
-        if (tile) tile.classList.remove("busy");
-      }
-      m.layers.push({ key, volume: .6, drift: !!(sound && sound.drift) });
+      try {
+        if (sound && !sound.user && !sound.ready) {
+          if (tile) tile.classList.add("busy");
+          const label = tile && tile.querySelector("span");
+          await store.ensureBuiltin(sound, p => { if (label) label.textContent = `${Math.round(p * 100)}%`; });
+        }
+        if (!dataCurrent(epoch) || mix() !== m || version !== mixVersion || m.layers.some(l => l.key === key)) return;
+        if (m.layers.length >= PmMixer.MAX_LAYERS) { toast(`最多叠 ${PmMixer.MAX_LAYERS} 层`); return; }
+        m.layers.push({ key, volume: .6, drift: !!sound?.drift });
+      } catch (e) { if (dataCurrent(epoch)) { fail(e); renderTiles(); } return; }
+      finally { pendingLayers.delete(key); if (tile) tile.classList.remove("busy"); }
     }
     m.name = "";
     commit();
   }
   let commitTimer = 0;
   function commit() {
+    if (resetting) return;
     saveSettings({ currentMix: mix() });
     renderLayers(); renderTiles(); renderPresets();
-    if (session.active() || engine.isPlaying()) { clearTimeout(commitTimer); commitTimer = setTimeout(() => engine.play(mix()).catch(fail), 400); }
+    if (session.active() || engine.isPlaying()) { clearTimeout(commitTimer); commitTimer = setTimeout(() => { if (!resetting && (session.active() || engine.isPlaying())) engine.play(mix()).catch(fail); }, 400); }
   }
   function renderLayers() {
     const box = $("layers"); box.innerHTML = "";
@@ -107,10 +116,12 @@ const sounds = (() => {
     node.addEventListener("contextmenu", e => e.preventDefault());
   }
   async function applyPreset(p) {
-    const m = mix();
+    if (resetting) return;
+    const m = mix(), version = ++mixVersion, epoch = dataEpoch;
     const keys = p.layers.map(l => l.key).filter(k => findSound(k));
     try { await store.ensureAll(keys, (i, n, prog, snd) => toast(`下载 ${snd.name} ${Math.round(prog * 100)}% · ${i + 1}/${n}`, 1200)); } catch (e) { fail(e); return; }
-    m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter(l => findSound(l.key)); m.name = p.name; if (p.master != null) m.master = p.master; commit();
+    if (!dataCurrent(epoch) || version !== mixVersion || mix() !== m) return;
+    m.layers = p.layers.map(l => ({ key: l.key, volume: l.volume, drift: l.drift ?? !!findSound(l.key)?.drift })).filter((l,i,all) => findSound(l.key) && all.findIndex(x => x.key === l.key) === i).slice(0, PmMixer.MAX_LAYERS); m.name = p.name; if (p.master != null) m.master = p.master; commit();
   }
   function renderPresets() {
     const box = $("mix-presets"); box.innerHTML = "";
@@ -215,6 +226,7 @@ const sounds = (() => {
     return fake;
   }
   function bind() {
+    on("reset", () => { mixVersion += 1; pendingLayers.clear(); clearTimeout(commitTimer); previewCache.clear(); });
     $("btn-mix-save").onclick = saveMix;
     $("btn-mix-preview").onclick = async () => {
       if (engine.isPlaying()) { await engine.stop(); $("btn-mix-preview").textContent = "试听"; return; }

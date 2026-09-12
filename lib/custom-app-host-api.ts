@@ -1064,11 +1064,26 @@ export async function synthesizeCustomAppSpeech(app: InstalledCustomApp, record:
   };
 }
 
+const customAppRecognitions = new Map<string, { appId: string; stop: (cancel: boolean) => void }>();
+
+/** STT 的停止与录音停止独立；requestId 防止旧松手事件结束下一轮识别。 */
+export function stopCustomAppSpeechRecognition(app: InstalledCustomApp, record: Record<string, unknown>): Record<string, unknown> {
+  const requestId = cleanText(record.requestId, 160);
+  const key = `${app.id}:${requestId}`;
+  const active = customAppRecognitions.get(key);
+  if (!active) return { ok: false, reason: "no-active-recognition" };
+  active.stop(record.cancel === true);
+  return { ok: true };
+}
+
 export function recognizeCustomAppSpeech(app: InstalledCustomApp, record: Record<string, unknown>): Promise<Record<string, unknown>> {
   const config = resolveCustomAppVoiceConfig(app, record);
   if (config && config.enableSTT === false) throw new Error("当前语音配置未启用 STT。");
   const lang = cleanText(record.lang ?? record.language, 20) || "zh-CN";
   const timeoutMs = Math.max(1000, Math.min(60_000, Number(record.timeoutMs ?? 15_000) || 15_000));
+  const requestId = cleanText(record.requestId, 160);
+  const key = `${app.id}:${requestId}`;
+  if (customAppRecognitions.has(key)) throw new Error("该语音识别请求仍在进行。");
   return new Promise((resolve, reject) => {
     let settled = false;
     let interimText = "";
@@ -1077,6 +1092,7 @@ export function recognizeCustomAppSpeech(app: InstalledCustomApp, record: Record
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
+      customAppRecognitions.delete(key);
       try { session?.abort(); } catch { /* ignore */ }
       if (error) reject(error);
       else resolve(result);
@@ -1095,7 +1111,11 @@ export function recognizeCustomAppSpeech(app: InstalledCustomApp, record: Record
       finish({}, new Error("浏览器不支持语音识别。"));
       return;
     }
-    session.start();
+    customAppRecognitions.set(key, { appId: app.id, stop: cancel => {
+      if (cancel) finish({ ok: false, text: "", reason: "cancelled" });
+      else session?.stop();
+    } });
+    try { session.start(); } catch (error) { finish({}, error instanceof Error ? error : new Error(String(error))); }
   });
 }
 

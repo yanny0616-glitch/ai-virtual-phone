@@ -68,6 +68,7 @@ import {
   recognizeCustomAppSpeech,
   recordCustomAppSpeech,
   stopCustomAppRecording,
+  stopCustomAppSpeechRecognition,
   requestCustomAppReply,
   runCustomAppAiChat,
   runCustomAppAiClassify,
@@ -395,6 +396,7 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       tts: function(payload){ return request('voice.tts', payload || {}); },
       stt: function(payload){ return request('voice.stt', payload || {}); },
       record: function(payload){ return request('voice.record', payload || {}); },
+      stopSTT: function(payload){ return request('voice.stopSTT', payload || {}); },
       stopRecord: function(payload){ return request('voice.stopRecord', payload || {}); },
       clone: function(payload){ return request('voice.clone', payload || {}); },
       play: function(payload){ return request('voice.play', payload || {}); },
@@ -627,7 +629,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 // 就把 PWA 导航到空白页);而 Web Audio 又会被 iOS 静音拨键掐掉输出。所以
 // 播放必须由宿主页面持有的 <audio> 元素来做:卡片绑到站点本身,点击无害,
 // 静音拨键也不影响媒体元素。
-type FrameAudioChannel = { el: HTMLAudioElement; settle: (() => void) | null; objectUrl: string | null };
+type FrameAudioChannel = { el: HTMLAudioElement; settle: (() => void) | null; objectUrl: string | null; revision: number };
 
 const FRAME_AUDIO_UNLOCK_WAV = "data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YRAAAACAgICAgICAgICAgICAgICA";
 
@@ -942,7 +944,7 @@ export function CustomAppRunner({
     if (!entry) {
       const el = new Audio();
       el.setAttribute("playsinline", "");
-      entry = { el, settle: null, objectUrl: null };
+      entry = { el, settle: null, objectUrl: null, revision: 0 };
       frameAudioChannelsRef.current.set(name, entry);
     }
     return entry;
@@ -964,6 +966,7 @@ export function CustomAppRunner({
       window.removeEventListener("pointerdown", unlockAll);
       window.removeEventListener("touchend", unlockAll);
       for (const entry of channels.values()) {
+        entry.revision += 1;
         const settle = entry.settle;
         entry.settle = null;
         cleanupFrameAudioChannel(entry);
@@ -1142,7 +1145,7 @@ export function CustomAppRunner({
           ai: ["generate", "chat", "embed", "classify"],
           user: ["getProfile", "getPersona", "getPreferences"],
           network: ["fetch"],
-          voice: ["readProfiles", "tts", "stt", "record", "stopRecord", "clone", "play", "stopPlayback", "pausePlayback", "resumePlayback"],
+          voice: ["readProfiles", "tts", "stt", "stopSTT", "record", "stopRecord", "clone", "play", "stopPlayback", "pausePlayback", "resumePlayback"],
           calendar: ["read", "list", "write", "create", "update", "delete", "replaceWeek"],
           world: ["read", "list", "get", "write", "create", "update", "delete", "activate"],
           media: ["pick", "save", "put", "get", "revoke", "delete"],
@@ -1440,23 +1443,30 @@ export function CustomAppRunner({
     if (action === "voice.play") {
       requirePermission("voice.tts");
       const channel = normalizeFrameAudioChannelName(record.channel);
+      // 在第一个 await 前登记所有权；stop、新 play 和卸载均使旧请求失效。
+      const entry = getFrameAudioChannel(channel);
+      const revision = ++entry.revision;
+      const current = () => entry.revision === revision;
+      const cancelled = () => ({ ok: false, cancelled: true });
+      const prevSettle = entry.settle;
+      entry.settle = null;
+      cleanupFrameAudioChannel(entry);
+      prevSettle?.();
       const rawSrc = String(record.dataUrl ?? record.src ?? record.ref ?? "");
       let src = rawSrc;
       let mediaObjectUrl: string | null = null;
       if (isMediaStoreRef(rawSrc)) {
         // 媒体库引用:宿主直接读 Blob 转 objectURL,音频数据不过桥
-        const media = await loadMediaBlob(rawSrc);
+        let media;
+        try { media = await loadMediaBlob(rawSrc); }
+        catch (error) { if (!current()) return cancelled(); throw error; }
+        if (!current()) return cancelled();
         if (!media) throw new Error("voice.play 找不到对应媒体,可能已被删除。");
         mediaObjectUrl = URL.createObjectURL(media.blob);
         src = mediaObjectUrl;
       } else if (!src.startsWith("data:audio/") && !src.startsWith("blob:")) {
         throw new Error("voice.play 需要音频 dataUrl 或 media-store:// 引用。");
       }
-      const entry = getFrameAudioChannel(channel);
-      const prevSettle = entry.settle;
-      entry.settle = null;
-      cleanupFrameAudioChannel(entry);
-      prevSettle?.();
       const el = entry.el;
       entry.objectUrl = mediaObjectUrl;
       el.loop = record.loop === true;
@@ -1465,10 +1475,11 @@ export function CustomAppRunner({
       el.src = src;
       if (el.loop) {
         try { await el.play(); } catch (err) {
+          if (!current()) return cancelled();
           cleanupFrameAudioChannel(entry);
           throw new Error(`宿主音频播放被拦截:${err instanceof Error ? err.message : String(err)}`);
         }
-        return { ok: true, loop: true };
+        return current() ? { ok: true, loop: true } : cancelled();
       }
       return await new Promise((resolve, reject) => {
         let settled = false;
@@ -1476,13 +1487,14 @@ export function CustomAppRunner({
           if (settled) return;
           settled = true;
           if (entry.settle === settle) entry.settle = null;
-          cleanupFrameAudioChannel(entry);
-          resolve({ ok: true });
+          if (current()) cleanupFrameAudioChannel(entry);
+          resolve(current() ? { ok: true } : cancelled());
         };
         const fail = (message: string) => {
           if (settled) return;
           settled = true;
           if (entry.settle === settle) entry.settle = null;
+          if (!current()) { resolve(cancelled()); return; }
           cleanupFrameAudioChannel(entry);
           reject(new Error(message));
         };
@@ -1557,6 +1569,7 @@ export function CustomAppRunner({
       requirePermission("voice.tts");
       const entry = frameAudioChannelsRef.current.get(normalizeFrameAudioChannelName(record.channel));
       if (entry) {
+        entry.revision += 1;
         const settle = entry.settle;
         entry.settle = null;
         cleanupFrameAudioChannel(entry);
@@ -1584,6 +1597,10 @@ export function CustomAppRunner({
     if (action === "voice.tts") {
       requirePermission("voice.tts");
       return synthesizeCustomAppSpeech(app, record);
+    }
+    if (action === "voice.stopSTT") {
+      requirePermission("voice.stt");
+      return stopCustomAppSpeechRecognition(app, record);
     }
     if (action === "voice.stt") {
       requirePermission("voice.stt");

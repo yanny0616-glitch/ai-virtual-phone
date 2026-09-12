@@ -123,3 +123,46 @@ export function monthGrid(year, month /* 1-12 */, weekStartsOn = 1) {
 }
 
 export const _internal = { DAY_MS, average };
+
+// 同晚分段：闭合区间取并集，避免旧重复记录重叠计时；缺少分段的旧记录仍可读取。
+export function nightIntervals(night) {
+  const values = Array.isArray(night.sleepIntervals) ? night.sleepIntervals
+    : night.wakeAt ? [{ start: night.sleepAt, end: night.wakeAt }] : [];
+  return values.filter(x => Number.isFinite(Date.parse(x.start)) && Date.parse(x.end) > Date.parse(x.start))
+    .map(x => ({ start: x.start, end: x.end }));
+}
+export function unionNightIntervals(values) {
+  const sorted = values.map(x => [Date.parse(x.start), Date.parse(x.end)]).filter(([a,b]) => Number.isFinite(a) && b > a).sort((a,b) => a[0]-b[0]);
+  const out = [];
+  for (const [a,b] of sorted) {
+    const last = out[out.length-1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b); else out.push([a,b]);
+  }
+  return out.map(([a,b]) => ({ start: new Date(a).toISOString(), end: new Date(b).toISOString() }));
+}
+export function intervalMinutes(intervals) {
+  return Math.round(unionNightIntervals(intervals).reduce((n,x) => n + Date.parse(x.end)-Date.parse(x.start), 0)/60000);
+}
+export function uniqueNights(rows) {
+  const groups = new Map();
+  for (const row of rows.filter(n => n && n.date)) { const list=groups.get(row.date)||[];list.push(row);groups.set(row.date,list); }
+  return [...groups.values()].map(all => {
+    const shadowed = new Set(all.flatMap(n => n.mergedNightIds || []));
+    const live = all.filter(n => !shadowed.has(n.id));
+    const list = (live.length ? live : all).slice().sort((a,b) => String(a.sleepAt).localeCompare(String(b.sleepAt)) || String(a.updatedAt||'').localeCompare(String(b.updatedAt||'')));
+    if (list.length === 1) return { ...list[0] };
+    const latest = list[list.length-1];
+    const intervals = unionNightIntervals(list.flatMap(nightIntervals));
+    const open = list.filter(n => !n.wakeAt).at(-1);
+    const openStart = open?.segmentSleepAt || open?.sleepAt;
+    const covered = openStart && intervals.some(x => Date.parse(x.end) >= Date.parse(openStart));
+    const isOpen = open && !covered;
+    return { ...latest, sleepAt: list[0].sleepAt, sleepIntervals: intervals,
+      wakeAt: isOpen ? '' : intervals.at(-1)?.end || latest.wakeAt || '',
+      segmentSleepAt: isOpen ? openStart : '', durationMin: intervalMinutes(intervals),
+      wakeups: Math.max(list.length-1,...list.map(n=>n.wakeups||0)),
+      note: [...new Set(list.map(n=>n.note).filter(Boolean))].join('\n'),
+      mergedNightIds: [...new Set(all.flatMap(n=>[n.id,...(n.mergedNightIds||[])])).values()].filter(id=>id && id!==latest.id),
+    };
+  }).sort((a,b)=>b.date.localeCompare(a.date));
+}

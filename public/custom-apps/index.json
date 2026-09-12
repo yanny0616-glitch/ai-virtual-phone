@@ -16,7 +16,7 @@
   {
     "id": "float.peimian",
     "name": "陪眠",
-    "version": "0.3.0",
+    "version": "0.3.3",
     "description": "睡前陪伴：角色用自己的声音哄你入睡，越说越轻；多层白噪音叠加成你的声景，可从 Freesound 搜更多；每晚一条夜记，周视图看作息。",
     "file": "pei-mian.zip"
   },
