@@ -1,3 +1,4 @@
+import { compactToolHistory } from "./tool-history-compact";
 // lib/llm-prompt-assembler.ts
 
 import { Character } from "./character-types";
@@ -624,7 +625,7 @@ function isWBAtDepthPosition(entry: WorldBookEntry): boolean {
  * 预设里没有的东西一律不注入——不存在人设/世界书/记忆的硬编码兜底。
  */
 export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
-    input = { ...input, history: input.history.filter(message => !message.silentUpdate) };
+    input = { ...input, history: compactToolHistory(input.history.filter(message => !message.silentUpdate)) };
     const { character, history, preset, worldBooks, regexes, userIdentity, userName = "User",
         longTermMemories, coreMemories, scheduleSummary } = input;
     const appId = input.appId ?? "chat";
@@ -1776,6 +1777,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
  * and the AI is asked to respond as all characters simultaneously.
  */
 export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessage[] {
+    input = { ...input, history: compactToolHistory(input.history) };
     const {
         members, history, preset, regexes, userIdentity,
         userName = "User", groupName, memberNames,

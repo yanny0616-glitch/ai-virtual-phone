@@ -1,3 +1,4 @@
+import { normalizeMcpArguments } from "./mcp-arguments";
 import type {
     CompositeToolConfig,
     CompositeToolPackageConfig,
@@ -4168,7 +4169,8 @@ export async function callConfiguredMcpTool(server: McpServerConfig, toolName: s
     throwIfAborted(signal);
     const init = await mcpInitialize(server, signal);
     if (!init.success) throw new Error(init.error || "MCP 初始化失败");
-    const request = () => mcpRequest(server.url, "tools/call", { name: toolName, arguments: args }, getMcpSessionHeaders(server), false, isSseUrl(server.url), signal, server.directFetch);
+    const normalizedArgs = normalizeMcpArguments(args, server.discoveredTools?.find(tool => tool.name === toolName)?.inputSchema);
+    const request = () => mcpRequest(server.url, "tools/call", { name: toolName, arguments: normalizedArgs }, getMcpSessionHeaders(server), false, isSseUrl(server.url), signal, server.directFetch);
     let res = await request();
     if (res.error?.code === 401 || res.error?.code === 404) {
         server.sessionId = undefined;

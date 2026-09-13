@@ -50,7 +50,7 @@ console.log('PASS URL allowlists, inert JSON extraction, both mobile data paths,
 
 const js = source => stripTypeScriptTypes(source).replace(/^import\s[\s\S]*?;\s*$/gm, '').replace(/^export /gm, '');
 const context = vm.createContext({ console,
-    formatXhsNoteSnapshot: xhs.formatXhsNoteSnapshot,
+    compactToolHistory: value => value, formatXhsNoteSnapshot: xhs.formatXhsNoteSnapshot,
     resolvePromptTimeAware: value => value,
     buildCharacterTimeContext: () => ({}), buildGroupTimeContext: () => ({}),
     getPromptTimestampOptionsForTimeContext: () => ({}), stripStateAndInnerForPrompt: value => value,

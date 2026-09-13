@@ -119,7 +119,7 @@ try {
     await assert.rejects(client.extractXhsMcpPresentation(invalid),/无效/);
     assert.equal(JSON.stringify((await (await request('tools/list')).json()).result.tools),JSON.stringify(tools.result.tools));
     const js=source=>stripTypeScriptTypes(source).replace(/^import\s[\s\S]*?;\s*$/gm,'').replace(/^export /gm,'');
-    const context=vm.createContext({console,formatXhsNoteSnapshot:xhs.formatXhsNoteSnapshot,resolvePromptTimeAware:v=>v,buildCharacterTimeContext:()=>({}),buildGroupTimeContext:()=>({}),getPromptTimestampOptionsForTimeContext:()=>({}),stripStateAndInnerForPrompt:v=>v,matchesActiveTags:()=>true});
+    const context=vm.createContext({console,compactToolHistory:value=>value,formatXhsNoteSnapshot:xhs.formatXhsNoteSnapshot,resolvePromptTimeAware:v=>v,buildCharacterTimeContext:()=>({}),buildGroupTimeContext:()=>({}),getPromptTimestampOptionsForTimeContext:()=>({}),stripStateAndInnerForPrompt:v=>v,matchesActiveTags:()=>true});
     vm.runInContext(js(fs.readFileSync(path.join(root,'lib/llm-prompt-assembler.ts'),'utf8'))+';globalThis.assemble={assemblePromptPayload,assembleGroupPromptPayload,formatRichMediaForHistory}',context);
     for(const group of [false,true])for(const chronological of [false,true]){
         const snapshot=structuredClone(shared.cards[0]);snapshot.note.images=snapshot.note.images.map(image=>image.ref?{...image,ref:'data:image/png;base64,'+b64}:image);

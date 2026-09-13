@@ -7,7 +7,7 @@ const read = name => fs.readFileSync(new URL('../lib/'+name, import.meta.url), '
 const js = source => stripTypeScriptTypes(source).replace(/^import\s[\s\S]*?;\s*$/gm, '').replace(/^export /gm, '');
 const calls = [];
 const context = vm.createContext({ Date, Error, Boolean,
-    throwIfAborted: () => {}, mcpInitialize: async () => ({success:true}),
+    throwIfAborted: () => {}, normalizeMcpArguments: value => value, mcpInitialize: async () => ({success:true}),
     getMcpSessionHeaders: server => ({Authorization:server.accessToken}), isSseUrl:()=>false,
     mcpRequest: async (...args) => { calls.push(args);return {result:{content:[]}}; },
 });

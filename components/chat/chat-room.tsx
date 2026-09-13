@@ -1,5 +1,7 @@
 "use client";
 
+import { groupToolNotices } from "@/lib/tool-notice-groups";
+import { ToolNoticeGroup } from "./tool-notice-group";
 import { extractXhsNoteUrls } from "@/lib/xhs-note";
 import { hasPendingXhsNotes, hydrateXhsNote, XHS_NOTE_UPDATED } from "@/lib/xhs-note-client";
 
@@ -5385,6 +5387,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return projected;
     }, [dedupedMessages, normalizeDisplayParts, renderDisplayText]);
 
+    const groupedToolNotices = useMemo(() => groupToolNotices(projectedMessages), [projectedMessages]);
+
     // Build a map: startMsgId → { startIdx, endIdx, duration }
     // and a set of all message indices that belong to a voice call group
     const voiceCallGroups = useMemo(() => {
@@ -5874,6 +5878,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     </button>
                 )}
                 {!offlineMode && projectedMessages.map((msg, idx) => {
+                    if (!isMultiSelectMode) {
+                        const notices = groupedToolNotices.groups.get(idx);
+                        if (notices) return <ToolNoticeGroup key={`tools-${msg.id}`} messages={notices} onContextMenu={(id,x,y)=>openMessageContextMenu(id,{x,y})} />;
+                        if (groupedToolNotices.members.has(idx)) return null;
+                    }
+
                     // ── Voice call group: collapsed widget ──
                     const vcGroup = voiceCallGroups.groups.find(g => g.startIdx === idx);
                     if (vcGroup) {
