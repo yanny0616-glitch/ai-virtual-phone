@@ -120,6 +120,7 @@ export type MediaAttachment = {
     type: "audio" | "image" | "video" | "file";
     url: string;
     title?: string;
+    contextText?: string;
 };
 
 // Internal structured payload survives presentation limits; symbols are omitted by JSON serialization.
@@ -139,6 +140,8 @@ export type ToolResult = {
     pendingApproval?: boolean;
     pendingRequest?: MemoryWriteRequest;
     mediaAttachments?: MediaAttachment[];
+    visionAttachments?: MediaAttachment[];
+    xhsCards?: import("./xhs-note").XhsNoteSnapshot[];
 };
 
 import { extractBase64Blocks, storeMediaBase64, storeMediaBlob, detectMediaType, MEDIA_STORE_PROTOCOL } from "./media-cache-storage";
@@ -4208,6 +4211,11 @@ async function executeMcpTool(server: McpServerConfig, toolName: string, args: R
 
 async function extractMcpToolResult(toolName: string, result: unknown, signal?: AbortSignal): Promise<ToolResult> {
     throwIfAborted(signal);
+    const envelope = result as { isError?: boolean; content?: { type?: string; text?: string }[] } | undefined;
+    if (envelope?.isError) return { name: toolName, success: false, error: truncate(envelope.content?.map(item => item.text || "").join("\n") || "MCP工具执行失败") };
+    const { extractXhsMcpPresentation } = await import("./xhs-mcp-result");
+    const xhs = await extractXhsMcpPresentation(result, signal);
+    if (xhs) return { name: toolName, success: true, data: xhs.data, visionAttachments: xhs.images, xhsCards: xhs.cards };
     const r = result as { content?: { type?: string; text?: string; data?: string; mimeType?: string }[] } | undefined;
     const textParts: string[] = [];
     const mcpAttachments: MediaAttachment[] = [];

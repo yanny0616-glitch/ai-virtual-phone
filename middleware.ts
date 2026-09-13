@@ -8,6 +8,7 @@ import { isSelfHostedModeEnabled } from "./lib/self-hosting";
 const PUBLIC_ROUTE_PREFIXES = [
   "/verify",
   "/api/auth/",
+  "/api/xhs-mcp/", // Independent Bearer authentication in the MCP route; no browser login cookie needed.
   "/api/verify/",
   // iPhone Shortcuts does not share the PWA's login cookies. These handlers
   // validate either the bridge token or a short-lived per-command ticket.

@@ -192,3 +192,18 @@ MCP 配置。以手机 UA 读取公开页面，安全解析 `__INITIAL_STATE__`�
 专项验证：`node scripts/check-xhs-note.mjs --live`、`node scripts/check-xhs-note-client.mjs`、
 `node scripts/check-xhs-note-browser.mjs`；真实笔记验证了 5 张配图、16 条可见评论／回复。
 全仓 TypeScript 检查通过；未调用付费模型验证视觉描述质量，图片理解仍取决于角色所用模型。
+
+### 小红书 MCP 搜索、阅读与角色分享（2026-09-13）
+
+新增 Bearer 鉴权的 `/api/xhs-mcp`，提供固定三个工具：`search_xiaohongshu_notes` 搜索候选、
+`read_xiaohongshu_note` 读取正文/评论/配图、`share_xiaohongshu_note` 在当前聊天分享卡片。
+搜索复用 VPS 本机的 `xpzouying/xiaohongshu-mcp` 浏览器服务，需用户扫码登录；部署说明在仓库外
+`../xhs-mcp/README.md`。原始浏览器服务只监听回环端口，对角色不暴露平台发布/评论/点赞接口。
+
+MCP 采用可移植的标准工具协议，Float 专用结构化扩展决定界面呈现：阅读配图仅加入模型上下文，
+分享时才生成一张 assistant `xhs_link` 卡，群聊保留执行角色身份。图片序号、部分失败和完整搜索
+候选链接均保留；工具的 `isError` 作为失败处理。角色分享过的配图在后续请求中转换为带来源说明的
+user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供方。原生/文字工具循环均支持。
+
+工具列表固定，扫码状态与搜索结果不会改变定义。鉴权密钥仅保存在运行时配置及用户的工具箱配置，
+不提交仓库。专项检查：`node scripts/check-xhs-mcp.mjs`（协议、错误、只读/分享分离、单群聊图片历史）。

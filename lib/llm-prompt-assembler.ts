@@ -222,6 +222,10 @@ function formatAnnotatedVisionBody(msg: ChatMessage, body: string): string {
 }
 
 function formatAssistantImageHistoryText(msg: ChatMessage, body: string, showTs: boolean, ts: string): string {
+    if (msg.mediaType === "xhs_link") {
+        const text = `系统记录：这是${msg.senderName || "你"}此前分享给用户的小红书笔记及其配图。\n${body}`;
+        return showTs ? `${ts}\n${text}` : text;
+    }
     if (isImageGenerationMediaMessage(msg)) {
         const originalOutput = body.trim() || formatImageGenerationDirective(msg);
         const text = `系统记录：这是你上一轮发送给用户的图片。\n原始输出：${originalOutput}`;
@@ -560,7 +564,7 @@ function pushChronologicalShortTermBlocks(params: {
 
         if (!body.trim() && !imageUrl) return;
 
-        const isAssistantImage = imageUrl && msg.role === "assistant" && msg.mediaType === "media_file";
+        const isAssistantImage = msg.role === "assistant" && ((imageUrl && msg.mediaType === "media_file") || (visionEnabled && msg.mediaType === "xhs_link" && getXhsPromptImages(msg)?.length));
         const text = isAssistantImage
             ? formatAssistantImageHistoryText(msg, body, Boolean(showTs), ts)
             : (showTs ? `${ts}\n${body}` : body);
@@ -1026,7 +1030,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
             }
 
             if (!body.trim() && !imageUrl) return;
-            const isAssistantImage = imageUrl && msg.role === "assistant" && msg.mediaType === "media_file";
+            const isAssistantImage = msg.role === "assistant" && ((imageUrl && msg.mediaType === "media_file") || (visionEnabled && msg.mediaType === "xhs_link" && getXhsPromptImages(msg)?.length));
             const text = isAssistantImage
                 ? formatAssistantImageHistoryText(msg, body, Boolean(showTs), ts)
                 : (showTs ? `${ts}\n${body}` : body);
@@ -1740,7 +1744,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
             imageUrl = visionImageUrl;
         }
 
-        const isAssistantImage = imageUrl && msg.role === "assistant" && msg.mediaType === "media_file";
+        const isAssistantImage = msg.role === "assistant" && ((imageUrl && msg.mediaType === "media_file") || (visionEnabled && msg.mediaType === "xhs_link" && getXhsPromptImages(msg)?.length));
         const text = isAssistantImage
             ? formatAssistantImageHistoryText(msg, body, Boolean(showTs), ts)
             : (showTs ? `${ts}\n${body}` : body);
@@ -2224,7 +2228,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 imageUrl = visionImageUrl;
             }
 
-            const isAssistantImage = imageUrl && msg.role === "assistant" && msg.mediaType === "media_file";
+            const isAssistantImage = msg.role === "assistant" && ((imageUrl && msg.mediaType === "media_file") || (groupVisionEnabled && msg.mediaType === "xhs_link" && getXhsPromptImages(msg)?.length));
             const text = isAssistantImage
                 ? formatAssistantImageHistoryText(msg, body, Boolean(showTs), ts)
                 : (showTs ? `${ts}\n${body}` : body);

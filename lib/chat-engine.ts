@@ -2542,7 +2542,7 @@ async function generateNativeChatCompletion(
         }
 
         for (const r of realResults) {
-            for (const att of r.mediaAttachments || []) {
+            for (const att of [...(r.mediaAttachments || []), ...(r.visionAttachments || [])]) {
                 throwIfAborted(options?.signal);
                 if (config.enableImageRecognition && att.type === "image" && att.url) {
                     const ref = att.url;
@@ -2553,8 +2553,8 @@ async function generateNativeChatCompletion(
                                 requestMessages.push({
                                     role: "user",
                                     content: [
-                                        { type: "text", text: "系统记录：这是你刚才生成的图片。" },
-                                        { type: "image_url", image_url: { url: dataUrl, detail: "low" } },
+                                        { type: "text", text: att.contextText || "系统记录：这是你刚才生成的图片。" },
+                                        { type: "image_url", image_url: { url: dataUrl, detail: att.contextText ? "high" : "low" } },
                                     ],
                                 });
                             }
@@ -2959,7 +2959,7 @@ async function generateChatCompletionCore(
                 ];
                 if (config.enableImageRecognition) {
                     for (const r of results) {
-                        for (const att of r.mediaAttachments || []) {
+                        for (const att of [...(r.mediaAttachments || []), ...(r.visionAttachments || [])]) {
                             throwIfAborted(options?.signal);
                             if (att.type !== "image" || !att.url) continue;
                             try {
@@ -2969,8 +2969,8 @@ async function generateChatCompletionCore(
                                     insertions.push({
                                         role: "user",
                                         content: [
-                                            { type: "text", text: "系统记录：这是你刚才生成的图片。" },
-                                            { type: "image_url", image_url: { url: dataUrl, detail: "low" } },
+                                            { type: "text", text: att.contextText || "系统记录：这是你刚才生成的图片。" },
+                                            { type: "image_url", image_url: { url: dataUrl, detail: att.contextText ? "high" : "low" } },
                                         ],
                                     });
                                 }

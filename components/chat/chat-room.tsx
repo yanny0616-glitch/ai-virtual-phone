@@ -3166,6 +3166,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             });
         }
         for (const result of results) {
+            for (const snapshot of result.xhsCards || []) {
+                throwIfGenerationStopped(guard);
+                const msg = pushChatMessage({
+                    sessionId: session.id, role: "assistant", content: "[小红书分享]", mediaType: "xhs_link",
+                    mediaData: { xhsNote: snapshot }, toolExecutionId,
+                    ...(session.isGroup ? { senderCharacterId: result.actorCharacterId, senderName: result.actorName } : {}),
+                });
+                setMessages(prev => [...prev, msg]);
+            }
             for (const att of result.mediaAttachments || []) {
                 throwIfGenerationStopped(guard);
                 const msg = pushChatMessage({

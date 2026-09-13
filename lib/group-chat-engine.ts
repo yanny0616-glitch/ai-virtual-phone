@@ -531,7 +531,7 @@ function getNativeGroupActorName(call: LlmToolCall): string {
 }
 
 async function appendNativeMediaContext(
-    requestMessages: LlmRequestMessage[],
+    requestMessages: LlmRequestMessage[] | LLMMessage[],
     results: Awaited<ReturnType<typeof executeToolCalls>>,
     enableVision: boolean | undefined,
     signal?: AbortSignal,
@@ -539,7 +539,7 @@ async function appendNativeMediaContext(
     throwIfAborted(signal);
     if (!enableVision) return;
     for (const result of results) {
-        for (const att of result.mediaAttachments || []) {
+        for (const att of [...(result.mediaAttachments || []), ...(result.visionAttachments || [])]) {
             throwIfAborted(signal);
             if (att.type !== "image" || !att.url) continue;
             const dataUrl = await resolveCompressedImageDataUrl(att.url);
@@ -549,8 +549,8 @@ async function appendNativeMediaContext(
             requestMessages.push({
                 role: "user",
                 content: [
-                    { type: "text", text: "系统记录：这是你刚才生成的图片。" },
-                    { type: "image_url", image_url: { url: dataUrl, detail: "low" } },
+                    { type: "text", text: att.contextText || "系统记录：这是你刚才生成的图片。" },
+                    { type: "image_url", image_url: { url: dataUrl, detail: att.contextText ? "high" : "low" } },
                 ],
             });
         }
@@ -1009,10 +1009,12 @@ export async function generateGroupChatCompletion(
                 throwIfAborted(options?.signal);
                 callbacks?.onToolResult?.(toolResultContent, { toolExecutionId });
                 const idx = findInsertIdx();
-                llmMessages.splice(idx, 0,
+                const toolInsertions: LLMMessage[] = [
                     { role: "assistant", content: assistantForToolContext, _debugMeta: { _fromHistory: true } },
                     { role: "user", content: toolResultContent, _debugMeta: { _fromHistory: true } },
-                );
+                ];
+                await appendNativeMediaContext(toolInsertions, results, config.enableImageRecognition, options?.signal);
+                llmMessages.splice(idx, 0, ...toolInsertions);
             }
 
             if (resultsForContinuation.length === 0) {
