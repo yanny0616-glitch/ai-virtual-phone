@@ -5880,7 +5880,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 {!offlineMode && projectedMessages.map((msg, idx) => {
                     if (!isMultiSelectMode) {
                         const notices = groupedToolNotices.groups.get(idx);
-                        if (notices) return <ToolNoticeGroup key={`tools-${msg.id}`} messages={notices} onContextMenu={(id,x,y)=>openMessageContextMenu(id,{x,y})} />;
+                        if (notices) return <ToolNoticeGroup key={`tools-${msg.id}`} messages={notices} onContextMenu={(id,x,y)=>openMessageContextMenu(id,{x,y})} renderActions={id => { const entry = notices.find(item => item.id === id); return entry && activeMessageId === id ? renderBubbleContextMenu(entry, { allowMultiSelect: true }) : null; }} />;
                         if (groupedToolNotices.members.has(idx)) return null;
                     }
 
