@@ -63,8 +63,8 @@ try {
       if(savedMode===undefined)delete process.env.NEXT_PUBLIC_SELF_HOSTED_MODE;else process.env.NEXT_PUBLIC_SELF_HOSTED_MODE=savedMode;
     }
     const init=await (await request('initialize',{protocolVersion:'2025-03-26'})).json();assert.equal(init.result.protocolVersion,'2025-03-26');
-    const tools=await (await request('tools/list')).json();assert.equal(tools.result.tools.length,3);
-    assert.ok(tools.result.tools.every(t=>!t.name.includes('publish')&&!t.name.includes('comment')));
+    const tools=await (await request('tools/list')).json();assert.equal(tools.result.tools.length,4);
+    assert.ok(tools.result.tools.every(t=>!t.name.includes('publish')));
     const failed=await (await request('tools/call',{name:'search_xiaohongshu_notes',arguments:{keyword:'猫'}})).json();
     assert.ok(failed.result.isError);assert.match(failed.result.content[0].text,/登录/);
     loggedIn=true;
@@ -75,21 +75,26 @@ try {
     assert.deepEqual(read.structuredContent.floatXhsNote.imageIndexes,[0,2]);
     const readPresentation=await client.extractXhsMcpPresentation(read);
     assert.equal(stored,0);assert.equal(readPresentation.cards.length,0);assert.equal(readPresentation.images.length,2);
-    assert.match(readPresentation.images[1].contextText,/第 3 张/);assert.match(readPresentation.data,/公开评论/);
+    assert.match(readPresentation.images[1].contextText,/第 3 张/);assert.match(readPresentation.data,/本次未读取评论/);
     const share=await server.callXhsMcpTool('share_xiaohongshu_note',{url:note.url});
     const shared=await client.extractXhsMcpPresentation(share);
     assert.equal(stored,2);assert.equal(shared.cards.length,1);assert.equal(shared.cards[0].status,'partial');
     assert.equal(shared.cards[0].note.images[1].error,'不可见');assert.match(shared.data,/卡片已发送/);
-    const commentRead=structuredClone(read);
-    commentRead.structuredContent.floatXhsNote.note.images[2].commentIndex=0;
-    commentRead.structuredContent.floatXhsNote.note.imageCount=2;
-    commentRead.structuredContent.floatXhsNote.note.commentImageCount=1;
+    note.images[2].commentIndex=0;
+    const bodyOnly=await server.callXhsMcpTool('read_xiaohongshu_note',{url:note.url});
+    assert.equal(bodyOnly.structuredContent.floatXhsNote.note.comments.length,0);
+    assert.equal(bodyOnly.structuredContent.floatXhsNote.note.images.length,2);
+    assert.equal(bodyOnly.structuredContent.floatXhsNote.note.commentsRead,false);
+    const commentRead=await server.callXhsMcpTool('read_xiaohongshu_comments',{url:note.url,limit:1});
+    assert.equal(commentRead.structuredContent.floatXhsNote.note.comments.length,1);
+    assert.equal(commentRead.structuredContent.floatXhsNote.note.images.length,1);
     const automatic=await client.extractXhsMcpPresentation(commentRead,undefined,true);
-    assert.equal(automatic.cards.length,0);assert.equal(automatic.snapshot.note.images[2].commentIndex,0);
-    assert.match(automatic.images[1].contextText,/属于评论 1/);assert.match(automatic.data,/附件第 3 张/);
-    assert.ok(automatic.snapshot.note.images[2].ref.startsWith('media-store://'));
-    const badIndex=structuredClone(commentRead);badIndex.structuredContent.floatXhsNote.note.images[2].commentIndex=5;
-    await assert.rejects(client.extractXhsMcpPresentation(badIndex),/无效/);
+    assert.equal(automatic.cards.length,0);assert.equal(automatic.snapshot.note.images[0].commentIndex,0);
+    assert.match(automatic.images[0].contextText,/属于评论 1/);
+    const emptyPage=await server.callXhsMcpTool('read_xiaohongshu_comments',{url:note.url,offset:1,limit:1});
+    assert.equal(emptyPage.structuredContent.floatXhsNote.note.images.length,0);
+    await assert.rejects(server.callXhsMcpTool('read_xiaohongshu_comments',{url:note.url,limit:99}));
+    delete note.images[2].commentIndex;
     const invalid=structuredClone(share);invalid.structuredContent.floatXhsNote.note.title={html:'bad'};
     await assert.rejects(client.extractXhsMcpPresentation(invalid),/无效/);
     assert.equal(JSON.stringify((await (await request('tools/list')).json()).result.tools),JSON.stringify(tools.result.tools));
@@ -103,7 +108,7 @@ try {
         const input={character:{id:'c',name:'角色'},members:[],memberNames:[],groupName:'群',history:[msg],preset:null,worldBooks:[],regexes:[],timeAware:false,enableVision:true,...(chronological?{unifiedRecentItems:[{kind:'history',historyIndex:0}]}:{})};
         const messages=(group?context.assemble.assembleGroupPromptPayload:context.assemble.assemblePromptPayload)(input);
         const imageMessages=messages.filter(m=>Array.isArray(m.content)&&m.content.some(p=>p.type==='image_url'));
-        assert.equal(imageMessages.length,1);assert.equal(imageMessages[0].role,'user');assert.match(JSON.stringify(imageMessages),/真实笔记/);assert.match(JSON.stringify(imageMessages),/公开评论/);
+        assert.equal(imageMessages.length,1);assert.equal(imageMessages[0].role,'user');assert.match(JSON.stringify(imageMessages),/真实笔记/);assert.match(JSON.stringify(imageMessages),/本次未读取评论/);
     }
     const groupSource=fs.readFileSync(path.join(root,'lib/group-chat-engine.ts'),'utf8');
     const fn=groupSource.slice(groupSource.indexOf('async function appendNativeMediaContext('),groupSource.indexOf('async function runNativeGroupToolLoop('));

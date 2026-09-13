@@ -4,10 +4,12 @@ import assert from 'node:assert/strict';
 import { stripTypeScriptTypes } from 'node:module';
 
 const presentationSource = stripTypeScriptTypes(fs.readFileSync(new URL('../lib/xhs-mcp-result.ts', import.meta.url), 'utf8')).replace(/^import\s[\s\S]*?;\s*$/gm, '').replace(/^export /gm, '');
-const source = stripTypeScriptTypes(fs.readFileSync(new URL('../lib/xhs-note-client.ts', import.meta.url), 'utf8')).replace(/^import\s[\s\S]*?;\s*$/gm, '').replace(/^export /gm, '');
+const source = stripTypeScriptTypes(fs.readFileSync(new URL('../lib/xhs-note-client.ts', import.meta.url), 'utf8')).replace(/^import\s[\s\S]*?;\s*$/gm, '').replace(/^export /gm, '').replace('await import("./tool-executor")', '({ callConfiguredMcpTool: globalThis.callConfiguredMcpTool })');
 const rows = new Map(), deleted = [], requests = [], events = [];
 let sequence = 0, fetchImpl;
 const context = vm.createContext({ console, AbortSignal, Promise, structuredClone, isXhsNoteUrl: () => true, formatXhsNoteSnapshot: () => "note",
+    loadMcpServers: () => [{id:'xhs', enabled:true}], isXhsMcpServer: () => true,
+    callConfiguredMcpTool: async (server,name,args) => { requests.push({server,name,args}); return (await (await fetchImpl()).json()).result; },
     loadChatMessages: id => [...rows.values()].filter(row => row.sessionId === id),
     updateChatMessage: (id, patch) => { if (!rows.has(id)) return null; const row = { ...rows.get(id), ...patch }; rows.set(id, row); return row; },
     storeMediaBase64: async () => ({ ref: 'media-store://' + ++sequence }),
@@ -28,7 +30,7 @@ let resolveFirst;
 fetchImpl = async () => new Promise(resolve => { resolveFirst = resolve; });
 const row = make('a');
 const first = hydrateXhsNote(row);
-assert.equal(first, hydrateXhsNote(row)); assert.equal(requests.length, 1);
+assert.equal(first, hydrateXhsNote(row)); await Promise.resolve(); assert.equal(requests.length, 1);
 assert.ok(hasPendingXhsNotes([...rows.values()]));
 assert.equal(hasPendingXhsNotes([{ ...row, isRetracted: true }]), false);
 resolveFirst(response(mcpResult(note)));
@@ -37,15 +39,15 @@ const result = rows.get('a').mediaData.xhsNote;
 assert.equal(result.status, 'partial'); assert.equal(result.note.images.filter(i => i.ref).length, 4);
 assert.equal(result.note.images[1].error, '403'); assert.equal(result.note.images[2].url, note.images[2].url);
 assert.ok(!hasPendingXhsNotes([...rows.values()])); assert.equal(requests.length, 1);
-assert.equal(requests[0].url,"/api/xhs-mcp"); assert.equal(requests[0].body.params.name,"read_xiaohongshu_note");
+assert.equal(requests[0].server.id,"xhs"); assert.equal(requests[0].name,"read_xiaohongshu_note");
 assert.ok(events.every(e => e.detail.sessionId === 's'));
 
-fetchImpl = async () => ({ ok: false, status: 503, json: async () => ({ ok: false, error: '暂时不可用' }) });
+fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ result:{isError:true,content:[{text:'暂时不可用'}]} }) });
 await hydrateXhsNote(make('failed', 'other'));
 assert.equal(rows.get('failed').mediaData.xhsNote.status, 'failed');
 assert.equal(rows.get('failed').mediaData.xhsNote.sourceUrl, 'https://xhslink.cn/o/test');
 fetchImpl = async () => new Promise(resolve => { resolveFirst = resolve; });
-const removed = make('removed'); const running = hydrateXhsNote(removed); rows.delete('removed');
+const removed = make('removed'); const running = hydrateXhsNote(removed); rows.delete('removed'); await Promise.resolve();
 resolveFirst(response(mcpResult(note))); await running;
 assert.ok(!rows.has('removed'));
 

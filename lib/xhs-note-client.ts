@@ -1,3 +1,5 @@
+import { loadMcpServers } from "./tool-storage";
+import { isXhsMcpServer } from "./xhs-mcp-config";
 import { loadChatMessages, updateChatMessage, type ChatMessage } from "./chat-storage";
 import { deleteMediaRef } from "./media-cache-storage";
 import { extractXhsMcpPresentation } from "./xhs-mcp-result";
@@ -11,15 +13,13 @@ export function hasPendingXhsNotes(messages: ChatMessage[]): boolean {
 }
 
 async function readViaMcp(url: string): Promise<unknown> {
-    const response = await fetch("/api/xhs-mcp", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
-        body: JSON.stringify({ jsonrpc: "2.0", id: "automatic-note-read", method: "tools/call", params: { name: "read_xiaohongshu_note", arguments: { url } } }),
-        signal: AbortSignal.timeout(115000),
-    });
-    if (response.status === 401) throw new Error("登录已过期，请重新登录后重试");
-    const data = await response.json();
-    if (!response.ok || data.error || data.result?.isError) throw new Error(data.error?.message || data.result?.content?.find((item: { type: string }) => item.type === "text")?.text || "MCP 读取失败，请稍后重试");
-    return data.result;
+    const server = loadMcpServers().find(isXhsMcpServer);
+    if (!server || !server.enabled) throw new Error("请在设置 → 聊天工具箱开启小红书 MCP 后重试");
+    const { callConfiguredMcpTool } = await import("./tool-executor");
+    const result = await callConfiguredMcpTool(server, "read_xiaohongshu_note", { url }, AbortSignal.timeout(115000));
+    const envelope = result as { isError?: boolean; content?: Array<{ text?: string }> };
+    if (envelope?.isError) throw new Error(envelope.content?.map(item => item.text || "").join("\n") || "MCP 读取失败");
+    return result;
 }
 
 export function hydrateXhsNote(message: ChatMessage): Promise<void> {

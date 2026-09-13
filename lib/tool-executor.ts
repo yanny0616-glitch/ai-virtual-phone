@@ -4162,47 +4162,29 @@ export async function completePendingMcpOAuthCallback(): Promise<{ completed: bo
 
 // ── MCP Tool Execution (with handshake) ───────
 
+/** Shared transport for character calls and automatic card reads. */
+export async function callConfiguredMcpTool(server: McpServerConfig, toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    if (!server.enabled) throw new Error("小红书 MCP 已关闭，请在聊天工具箱开启");
+    throwIfAborted(signal);
+    const init = await mcpInitialize(server, signal);
+    if (!init.success) throw new Error(init.error || "MCP 初始化失败");
+    const request = () => mcpRequest(server.url, "tools/call", { name: toolName, arguments: args }, getMcpSessionHeaders(server), false, isSseUrl(server.url), signal, server.directFetch);
+    let res = await request();
+    if (res.error?.code === 401 || res.error?.code === 404) {
+        server.sessionId = undefined;
+        _mcpSessions.delete(server.id);
+        _mcpSseEndpoints.delete(server.id);
+        const reinit = await mcpInitialize(server, signal);
+        if (!reinit.success) throw new Error(reinit.error || "MCP 重新初始化失败");
+        res = await request();
+    }
+    if (res.error) throw new Error(res.error.message);
+    return res.result;
+}
+
 async function executeMcpTool(server: McpServerConfig, toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     try {
-        throwIfAborted(signal);
-        // Ensure initialized
-        const init = await mcpInitialize(server, signal);
-        if (!init.success) {
-            return { name: toolName, success: false, error: init.error || "MCP 初始化失败" };
-        }
-
-        const useSse = isSseUrl(server.url);
-        const requestUrl = server.url;
-        const res = await mcpRequest(requestUrl, "tools/call", {
-            name: toolName,
-            arguments: args,
-        }, getMcpSessionHeaders(server), false, useSse, signal, server.directFetch);
-
-        // Session expired — retry once
-        if (res.error?.code === 401 || res.error?.code === 404) {
-            server.sessionId = undefined;
-            _mcpSessions.delete(server.id);
-            _mcpSseEndpoints.delete(server.id);
-            const reinit = await mcpInitialize(server, signal);
-            if (!reinit.success) {
-                return { name: toolName, success: false, error: reinit.error || "MCP 重新初始化失败" };
-            }
-            const retry = await mcpRequest(server.url, "tools/call", {
-                name: toolName,
-                arguments: args,
-            }, getMcpSessionHeaders(server), false, useSse, signal, server.directFetch);
-
-            if (retry.error) {
-                return { name: toolName, success: false, error: retry.error.message };
-            }
-            return await extractMcpToolResult(toolName, retry.result, signal);
-        }
-
-        if (res.error) {
-            return { name: toolName, success: false, error: res.error.message };
-        }
-
-        return await extractMcpToolResult(toolName, res.result, signal);
+        return await extractMcpToolResult(toolName, await callConfiguredMcpTool(server, toolName, args, signal), signal);
     } catch (err) {
         if (isAbortError(err)) throw err;
         return { name: toolName, success: false, error: String(err) };

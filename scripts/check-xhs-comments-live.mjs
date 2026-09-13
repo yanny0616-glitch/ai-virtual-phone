@@ -21,7 +21,7 @@ function load(file) {
 const reader = load('lib/server/xhs-reader.ts');
 const server = load('lib/server/xhs-mcp.ts');
 const url='https://xhslink.cn/o/AUUi1Y0LLfs';
-const result=await server.callXhsMcpTool('read_xiaohongshu_note',{url});
+const result=await server.callXhsMcpTool('read_xiaohongshu_comments',{url,limit:10});
 const meta=result.structuredContent.floatXhsNote;
 const note=meta.note;
 const comments=note.images.filter(i=>i.commentIndex!==undefined);
