@@ -4,8 +4,9 @@ export type XhsNote = {
     title: string;
     author: string;
     desc: string;
-    images: Array<{ url: string; ref?: string; error?: string }>;
+    images: Array<{ url: string; ref?: string; error?: string; commentIndex?: number }>;
     imageCount: number;
+    commentImageCount?: number;
     likedCount: string;
     commentCount: string;
     collectedCount: string;
@@ -44,8 +45,9 @@ export function formatXhsNoteSnapshot(snapshot: XhsNoteSnapshot): string {
         `链接：${note.url}`, `标题：${note.title}`, `作者：${note.author}`,
         `正文：\n${note.desc}`, `点赞：${note.likedCount}；收藏：${note.collectedCount}；评论总数：${note.commentCount}`,
         `页面可获取的评论（${note.comments.length} 条，不代表全部评论）：`,
-        ...note.comments.map(c => `${c.user}${c.ipLocation ? `（${c.ipLocation}）` : ""}：${c.content}`),
-        `笔记配图 ${note.imageCount} 张，已加载 ${readable} 张。实际可见图片以本条消息附带的图片块为准；没有图片块时不能描述图片细节。`,
+        ...note.comments.map((c, index) => `评论 ${index + 1} · ${c.user}${c.ipLocation ? `（${c.ipLocation}）` : ""}：${c.content}${note.images.flatMap((image, i) => image.commentIndex === index ? [`；图片见附件第 ${i + 1} 张`] : []).join("")}`),
+        `笔记配图 ${note.imageCount} 张，页面可获取的评论图片 ${note.commentImageCount ?? 0} 张，合计已加载 ${readable} 张。图片块统一按附件顺序编号，评论图片归属以上文为准。实际可见图片以本条消息附带的图片块为准；没有图片块时不能描述图片细节。`,
+        "评论只来自当前页面公开数据；未获取到评论图片不代表原评论区没有图片。",
         ...note.images.flatMap((image, index) => image.error ? [`第 ${index + 1} 张配图未加载：${image.error}`] : []),
         ...note.warnings,
         snapshot.error || "",

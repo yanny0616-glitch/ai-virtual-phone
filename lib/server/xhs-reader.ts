@@ -61,20 +61,31 @@ export function parseXhsNote(html: string, url: string): XhsNote {
     const commentData = object(data.commentData);
     const rawComments = list(commentData.comments ?? commentData.list ?? detail.comments);
     const comments: XhsNote["comments"] = [];
+    const commentImages: XhsNote["images"] = [];
+    let commentImageCount = 0;
     for (const raw of rawComments) {
         for (const item of [raw, ...list(object(raw).subComments)]) {
             const c = object(item), u = object(c.user ?? c.userInfo);
-            if (!text(c.content)) continue;
+            const pictures = list(c.pictures);
+            if (!text(c.content) && !pictures.length) continue;
+            const commentIndex = comments.length;
             comments.push({ user: text(u.nickname ?? u.nickName, 200) || "用户", content: text(c.content, 10000), ipLocation: text(c.ipLocation, 100) });
+            commentImageCount += pictures.length;
+            for (const picture of pictures) {
+                const p = object(picture);
+                const imageUrl = normalizeXhsImageUrl(p.originUrl) ?? normalizeXhsImageUrl(p.url);
+                if (imageUrl && images.length + commentImages.length < 60) commentImages.push({ url: imageUrl, commentIndex });
+            }
         }
     }
     const warnings: string[] = [];
+    if (commentImages.length < commentImageCount) warnings.push("部分评论图片没有可用地址或超出单次 60 张附件上限，未全部读取。");
     if (text(note.type) === "video") warnings.push("这是视频笔记：目前读取正文和封面，不包含视频画面、音轨或完整转写。");
     if (images.length < imageList.length) warnings.push("部分配图没有可用的公开图片地址。");
     if (images.length > 30) throw new Error("笔记超过 30 张配图，本次未读取；请拆分分享，避免遗漏图片");
     return {
         url, title: text(note.title, 1000) || "小红书笔记", author: text(user.nickname ?? user.nickName, 200) || "未知作者",
-        desc: text(note.desc), images: images.map(url => ({ url })), imageCount: imageList.length,
+        desc: text(note.desc), images: [...images.map(url => ({ url })), ...commentImages], imageCount: imageList.length, commentImageCount,
         likedCount: text(interact.likedCount, 50) || "—", commentCount: text(interact.commentCount ?? commentData.commentCount, 50) || "—",
         collectedCount: text(interact.collectedCount, 50) || "—", comments, noteType: text(note.type), warnings,
     };

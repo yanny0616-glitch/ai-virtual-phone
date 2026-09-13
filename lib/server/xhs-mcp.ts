@@ -77,7 +77,7 @@ export async function callXhsMcpTool(name: string, args: Record<string, unknown>
         } catch (error) { note.images[i].error = error instanceof Error ? error.message : "配图未加载"; }
     }
     const action = name === "share_xiaohongshu_note" ? "share" : "read";
-    const status = note.images.some(image => image.error) ? "partial" as const : "ready" as const;
+    const status = (note.images.some(image => image.error) || note.images.length < note.imageCount + (note.commentImageCount ?? 0)) ? "partial" as const : "ready" as const;
     const promptNote = { ...note, images: note.images.map((image, index) => ({ ...image, ref: imageIndexes.includes(index) ? "attached" : undefined })) };
     content.unshift({ type: "text", text: formatXhsNoteSnapshot({ sourceUrl: args.url, status, note: promptNote }) });
     return { content, structuredContent: { floatXhsNote: { version: 1, action, sourceUrl: args.url, note, imageIndexes } } };

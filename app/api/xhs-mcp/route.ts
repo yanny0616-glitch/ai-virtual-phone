@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callXhsMcpTool, hasXhsMcpAccess, XHS_MCP_TOOLS } from "@/lib/server/xhs-mcp";
+import { ACCOUNT_GATE_COOKIE, ACCOUNT_SESSION_COOKIE } from "@/lib/account-cookie-constants";
+import { verifyAccountGateCookieValue } from "@/lib/account-gate-cookie";
+import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -7,7 +10,13 @@ const headers = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*
 
 export async function OPTIONS() { return new NextResponse(null, { status: 204, headers }); }
 export async function POST(req: NextRequest) {
-    if (!hasXhsMcpAccess(req.headers.get("authorization"))) return NextResponse.json({ error: "MCP连接密钥不正确" }, { status: 401, headers });
+    // Automatic link reads use this exact MCP endpoint with the existing Float login.
+    // Cookie access is same-origin only; external MCP clients retain Bearer auth.
+    const origin = req.headers.get("origin");
+    const sameOrigin = req.headers.get("sec-fetch-site") === "same-origin" && origin === req.nextUrl.origin;
+    const browserAccess = sameOrigin && (isSelfHostedModeEnabled() || await verifyAccountGateCookieValue(
+        req.cookies.get(ACCOUNT_GATE_COOKIE)?.value ?? "", req.cookies.get(ACCOUNT_SESSION_COOKIE)?.value ?? ""));
+    if (!hasXhsMcpAccess(req.headers.get("authorization")) && !browserAccess) return NextResponse.json({ error: "请登录 Float 或提供有效 MCP 连接密钥" }, { status: 401, headers });
     let id: unknown = null;
     try {
         const raw = await req.text();

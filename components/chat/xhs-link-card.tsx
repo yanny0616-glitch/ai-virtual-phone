@@ -43,7 +43,7 @@ export function XhsLinkCard({ message }: { message: ChatMessage }) {
             </a>
             {loading && <div role="status" aria-live="polite" className="border-t border-rose-100 px-3 py-2 text-[10px] text-rose-500 motion-safe:animate-pulse">{snapshot.stage || "正在读取笔记…"}</div>}
             {failed && <div className="border-t border-rose-100 px-3 py-2"><p role="status" className="text-[10px] leading-4 text-rose-600">{snapshot.error}</p><button type="button" onClick={() => retryXhsNote(message)} className="mt-1 inline-flex min-h-9 items-center gap-1 text-[11px] text-rose-600"><RotateCcw size={12} />重新读取</button></div>}
-            {note && !loading && <div className="border-t border-rose-100 px-3 py-1.5 text-[9px] opacity-50">已读取页面可见的 {note.comments.length} 条评论 · {note.images.filter(i => i.ref).length}/{note.imageCount} 张配图{note.noteType === "video" ? " · 视频仅含封面" : ""}</div>}
+            {note && !loading && <div className="border-t border-rose-100 px-3 py-1.5 text-[9px] opacity-50">已读取页面可见的 {note.comments.length} 条评论 · 正文图 {note.images.filter(i => i.ref && i.commentIndex === undefined).length}/{note.imageCount} · 评论图 {note.images.filter(i => i.ref && i.commentIndex !== undefined).length}/{note.commentImageCount ?? 0}{note.noteType === "video" ? " · 视频仅含封面" : ""}</div>}
         </div>
     );
 }

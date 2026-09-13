@@ -1,5 +1,6 @@
 import { loadChatMessages, updateChatMessage, type ChatMessage } from "./chat-storage";
-import { deleteMediaRef, storeMediaBase64 } from "./media-cache-storage";
+import { deleteMediaRef } from "./media-cache-storage";
+import { extractXhsMcpPresentation } from "./xhs-mcp-result";
 import type { XhsNote, XhsNoteSnapshot } from "./xhs-note";
 
 export const XHS_NOTE_UPDATED = "float-xhs-note-updated";
@@ -9,15 +10,16 @@ export function hasPendingXhsNotes(messages: ChatMessage[]): boolean {
     return messages.some(message => !message.isRetracted && message.mediaData?.xhsNote?.status === "loading");
 }
 
-async function post(path: string, body: unknown): Promise<Record<string, unknown>> {
-    const response = await fetch(path, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-        signal: AbortSignal.timeout(35000),
+async function readViaMcp(url: string): Promise<unknown> {
+    const response = await fetch("/api/xhs-mcp", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+        body: JSON.stringify({ jsonrpc: "2.0", id: "automatic-note-read", method: "tools/call", params: { name: "read_xiaohongshu_note", arguments: { url } } }),
+        signal: AbortSignal.timeout(115000),
     });
     if (response.status === 401) throw new Error("登录已过期，请重新登录后重试");
     const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "读取失败，请稍后重试");
-    return data;
+    if (!response.ok || data.error || data.result?.isError) throw new Error(data.error?.message || data.result?.content?.find((item: { type: string }) => item.type === "text")?.text || "MCP 读取失败，请稍后重试");
+    return data.result;
 }
 
 export function hydrateXhsNote(message: ChatMessage): Promise<void> {
@@ -36,37 +38,18 @@ export function hydrateXhsNote(message: ChatMessage): Promise<void> {
         };
         let note: XhsNote | undefined;
         try {
-            // Refresh signed CDN URLs after reload/retry; do not reuse expired URLs.
-            const data = await post("/api/xhs-card", { url: snapshot.sourceUrl });
-            note = data.note as XhsNote;
-            if (!patch({ ...snapshot, note, status: "loading", stage: `正在加载配图 0/${note.images.length}` })) return;
-            await Promise.all((snapshot.note?.images || []).map(image => deleteMediaRef(image.ref)));
-            let finished = 0;
-            for (let offset = 0; offset < note.images.length; offset += 3) {
-                if (!current()) return;
-                const batch = note.images.slice(offset, offset + 3);
-                try {
-                    const result = await post("/api/xhs-images", { urls: batch.map(image => image.url) });
-                    const images = result.images as Array<{ url: string; base64?: string; mime?: string; error?: string }>;
-                    for (let i = 0; i < batch.length; i++) {
-                        const image = images[i];
-                        if (image?.base64 && image.mime) {
-                            const stored = await storeMediaBase64(image.base64, image.mime);
-                            if (!current()) { await deleteMediaRef(stored.ref); return; }
-                            note.images[offset + i] = { url: batch[i].url, ref: stored.ref };
-                        } else note.images[offset + i] = { url: batch[i].url, error: image?.error || "未返回图片" };
-                        finished++;
-                        if (!patch({ ...snapshot, note: { ...note, images: [...note.images] }, status: "loading", stage: `正在加载配图 ${finished}/${note.images.length}` })) return;
-                    }
-                } catch (error) {
-                    for (let i = 0; i < batch.length; i++) {
-                        note.images[offset + i] = { url: batch[i].url, error: error instanceof Error ? error.message : "下载失败" };
-                    }
-                    finished += batch.length;
-                }
+            // Same MCP read tool as characters. Persist only this existing user card.
+            const result = await readViaMcp(snapshot.sourceUrl);
+            if (!current()) return;
+            const presentation = await extractXhsMcpPresentation(result, undefined, true);
+            const loaded = presentation?.snapshot;
+            if (!loaded?.note) throw new Error("MCP 未返回可读取的笔记");
+            note = loaded.note;
+            if (!patch({ ...loaded, sourceUrl: snapshot.sourceUrl })) {
+                await Promise.all(note.images.map(image => deleteMediaRef(image.ref)));
+                return;
             }
-            const missing = note.images.some(image => image.error) || note.images.length < note.imageCount;
-            patch({ sourceUrl: snapshot.sourceUrl, status: missing ? "partial" : "ready", note, error: missing ? "部分配图未加载，角色只能看到成功加载的图片" : undefined });
+            await Promise.all((snapshot.note?.images || []).map(image => deleteMediaRef(image.ref)));
         } catch (error) {
             patch({ sourceUrl: snapshot.sourceUrl, status: note ? "partial" : "failed", note, error: error instanceof Error ? error.message : "笔记读取失败" });
         }

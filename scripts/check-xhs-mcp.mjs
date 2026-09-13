@@ -29,7 +29,7 @@ function load(file) {
     const code=ts.transpileModule(src,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
     const resolve=name=>{
         if(name==='./xhs-reader')return {readXhsNote:async()=>structuredClone(note),readXhsImage:async url=>{if(url.endsWith('/1'))throw Error('不可见');return {base64:b64,mime:'image/png'};}};
-        if(name==='./media-cache-storage')return {storeMediaBase64:async()=>({ref:'media-store://'+ ++stored})};
+        if(name==='./media-cache-storage')return {storeMediaBase64:async()=>({ref:'media-store://'+ ++stored}),deleteMediaRef:async()=>{}};
         if(name.startsWith('@/'))return load(name.slice(2)+'.ts');
         if(name.startsWith('.'))return load(path.resolve(path.dirname(absolute),name+'.ts'));
         return require(name);
@@ -41,6 +41,22 @@ try {
     const server=load('lib/server/xhs-mcp.ts'), route=load('app/api/xhs-mcp/route.ts'), client=load('lib/xhs-mcp-result.ts'), xhs=load('lib/xhs-note.ts');
     const request=async(method,params={},auth=true)=>route.POST(new Request('https://float.yanny.top/api/xhs-mcp',{method:'POST',headers:{Authorization:auth?'Bearer test_mcp_access':'Bearer wrong','Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})}));
     assert.equal((await request('tools/list',{},false)).status,401);
+    const {NextRequest}=require('next/server');
+    const gate=load('lib/account-gate-cookie.ts'), cookieNames=load('lib/account-cookie-constants.ts');
+    const savedSecret=process.env.ACCOUNT_GATE_SECRET, savedMode=process.env.NEXT_PUBLIC_SELF_HOSTED_MODE;
+    process.env.ACCOUNT_GATE_SECRET='test-only-gate-secret';process.env.NEXT_PUBLIC_SELF_HOSTED_MODE='false';
+    try {
+      const session='test-session', value=await gate.createAccountGateCookieValue(session,300);
+      const browserRequest=(origin,cookie)=>new NextRequest('https://float.yanny.top/api/xhs-mcp',{method:'POST',headers:{origin,'sec-fetch-site':'same-origin','content-type':'application/json',cookie},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'read_xiaohongshu_note',arguments:{url:note.url}}})});
+      const cookie=`${cookieNames.ACCOUNT_SESSION_COOKIE}=${session}; ${cookieNames.ACCOUNT_GATE_COOKIE}=${value}`;
+      assert.equal((await route.POST(browserRequest('https://evil.test',cookie))).status,401);
+      assert.equal((await route.POST(browserRequest('https://float.yanny.top',''))).status,401);
+      const browserResponse=await (await route.POST(browserRequest('https://float.yanny.top',cookie))).json();
+      assert.equal(browserResponse.result.structuredContent.floatXhsNote.action,'read');
+    } finally {
+      if(savedSecret===undefined)delete process.env.ACCOUNT_GATE_SECRET;else process.env.ACCOUNT_GATE_SECRET=savedSecret;
+      if(savedMode===undefined)delete process.env.NEXT_PUBLIC_SELF_HOSTED_MODE;else process.env.NEXT_PUBLIC_SELF_HOSTED_MODE=savedMode;
+    }
     const init=await (await request('initialize',{protocolVersion:'2025-03-26'})).json();assert.equal(init.result.protocolVersion,'2025-03-26');
     const tools=await (await request('tools/list')).json();assert.equal(tools.result.tools.length,3);
     assert.ok(tools.result.tools.every(t=>!t.name.includes('publish')&&!t.name.includes('comment')));
@@ -59,6 +75,16 @@ try {
     const shared=await client.extractXhsMcpPresentation(share);
     assert.equal(stored,2);assert.equal(shared.cards.length,1);assert.equal(shared.cards[0].status,'partial');
     assert.equal(shared.cards[0].note.images[1].error,'不可见');assert.match(shared.data,/卡片已发送/);
+    const commentRead=structuredClone(read);
+    commentRead.structuredContent.floatXhsNote.note.images[2].commentIndex=0;
+    commentRead.structuredContent.floatXhsNote.note.imageCount=2;
+    commentRead.structuredContent.floatXhsNote.note.commentImageCount=1;
+    const automatic=await client.extractXhsMcpPresentation(commentRead,undefined,true);
+    assert.equal(automatic.cards.length,0);assert.equal(automatic.snapshot.note.images[2].commentIndex,0);
+    assert.match(automatic.images[1].contextText,/属于评论 1/);assert.match(automatic.data,/附件第 3 张/);
+    assert.ok(automatic.snapshot.note.images[2].ref.startsWith('media-store://'));
+    const badIndex=structuredClone(commentRead);badIndex.structuredContent.floatXhsNote.note.images[2].commentIndex=5;
+    await assert.rejects(client.extractXhsMcpPresentation(badIndex),/无效/);
     const invalid=structuredClone(share);invalid.structuredContent.floatXhsNote.note.title={html:'bad'};
     await assert.rejects(client.extractXhsMcpPresentation(invalid),/无效/);
     assert.equal(JSON.stringify((await (await request('tools/list')).json()).result.tools),JSON.stringify(tools.result.tools));
