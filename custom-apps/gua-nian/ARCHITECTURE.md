@@ -353,3 +353,15 @@ ui/diagnostics.js 的 diagnosticJobGroups 先判角色，再分消息任务、�
 本地整天生成与云端生成原料使用 `fixedCalendarItems` 排除 ID 以 `guanian_` 开头的挂念写回条目，避免旧产物成为必须原样保留的约束或在模型漏写时被补回。其他来源的日历安排继续保留；聊天与惦记仍参与模型判断，因此重新生成不保证所有内容不同。日历同步继续读取完整旧列表，以清理并替换挂念自己的旧条目。
 
 随宿主发布后，已安装用户打开挂念点击「立即更新」升级至 0.9.35，再重新生成即可生效；无需手动导入 ZIP，不自动改写已有日程。云端在下次上传生成原料后使用新筛选结果，无需更改云函数。专项检查：`node scripts/check-gua-nian-calendar-regeneration.mjs`；未做手机端完整实测。
+
+## 0.9.36：日程生成提示词
+
+`data/defaults.js` 的 DEFAULT_DAY_PROMPT 是恢复默认的正本，SET_DEF.dayPrompt 负责旧设置补齐；schema 新增 textarea 类型，复用设置回填/读表/保存流程。恢复按钮只编辑输入框，留空读表回退默认。提示词不含动态日期、聊天资料和结构协议。
+
+`buildDayInstruction` 读取 dayPrompt，既用于本地 generateDay，也用于 uploadGenKitCloud 的 genKit.instruction。保存变化清零各角色 _kitAt，让下次既有上传入口刷新；不自动生成日程，也不声称今天计划同步已更新明日原料。无需改 worker 或 schema。默认内容限定角色独立日程与用户自主行动；输出仍依赖模型遵守。
+
+专项：check-gua-nian-day-prompt.mjs 覆盖草稿、保存回填、恢复及空白回退；calendar-regeneration 专项同时验证真实本地请求和云端原料都包含自定义提示词。
+
+## 0.9.37：提示词编辑抽屉
+
+settings 的日程字段在配置页渲染隐藏草稿和编辑按钮，独立 day-prompt-sheet 复用 sheet/txt-in/mini/big-btn 样式。专用遮罩不关闭父设置层；关闭丢弃弹窗草稿，完成复制回隐藏字段，恢复默认仅编辑弹窗。打开期间父设置 inert，Esc关闭、Tab限制在弹窗内，关闭恢复入口焦点。云端逻辑不变。

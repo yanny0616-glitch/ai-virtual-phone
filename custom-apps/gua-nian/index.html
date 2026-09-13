@@ -540,6 +540,18 @@
   details.fold[open] > summary .cv { transform: rotate(90deg); }
   details.fold[open] > summary { margin-bottom: 4px; }
   .rule-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--line); }
+
+  /* 提示词编辑沿用设置抽屉，独立遮罩保留设置页草稿。 */
+  .day-prompt-mask { z-index: 44; }
+  .day-prompt-sheet { z-index: 45; display: flex; flex-direction: column; overflow: hidden; }
+  .day-prompt-open #day-prompt-mask { opacity: 1; pointer-events: auto; }
+  .day-prompt-open #day-prompt-sheet { transform: none; }
+  .day-prompt-caption { color: var(--tx2); font-size: 12px; line-height: 1.7; margin: -4px 0 12px; }
+  #day-prompt-input { min-height: 150px; height: 38vh; height: 38dvh; flex: 1 1 auto; resize: none; line-height: 1.85; padding: 14px; }
+  .day-prompt-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
+  .day-prompt-tools span { color: var(--tx3); font-size: 11px; line-height: 1.6; }
+  .day-prompt-tools .mini, .day-prompt-edit { min-height: 36px; padding: 7px 12px; font-family: inherit; cursor: pointer; }
+  .day-prompt-sheet .sheet-hd, .day-prompt-sheet .big-btn { flex: none; }
 </style>
 </head>
 <body>
@@ -585,6 +597,15 @@
     </div>
     <div id="dsheet-body"></div>
   </div>
+  <div class="sheet-mask day-prompt-mask" id="day-prompt-mask"></div>
+  <div class="sheet day-prompt-sheet" id="day-prompt-sheet" role="dialog" aria-modal="true" aria-labelledby="day-prompt-title" inert>
+    <div class="sheet-hd"><h3 id="day-prompt-title">日 程 提 示 词</h3><button type="button" class="sheet-x" id="day-prompt-close" aria-label="取消编辑">✕</button></div>
+    <p class="day-prompt-caption">写下你希望 TA 怎样安排自己的一天。</p>
+    <textarea class="txt-in" id="day-prompt-input" aria-label="日程生成提示词" spellcheck="false"></textarea>
+    <div class="day-prompt-tools"><button type="button" class="mini" id="restore-dayPrompt">恢复默认</button><span>完成后，在设置页保存生效</span></div>
+    <button type="button" class="big-btn" id="day-prompt-done">完 成 编 辑</button>
+  </div>
+
 </div>
 <div id="toast"></div>
 
@@ -1554,8 +1575,18 @@ return Object.freeze(exports);
     return AiPhone.db.create(coll, data);
   }
 
+  const DEFAULT_DAY_PROMPT = [
+    "以当前角色的人设、职业、近期记忆和最近聊天为依据，安排角色自己会过的一天：先定身体底子和情绪底色，再排日程。",
+    "日程的主体是角色，不是用户，也不是替双方编写未来剧情。默认安排角色能独立决定和执行的工作、学习、兴趣、家务、吃饭和休息，保留自己的生活主线。",
+    "涉及用户参与的共同活动，只有最新聊天中双方明确约好、用户明确同意且尚未取消时，才能列为共同日程。仅提过、角色想做、角色单方面要求、过去做过或关系亲密，都不等于用户已答应。",
+    "标题、地点和备注都不能替用户安排未来行动、台词、感受或反应。即使约好一起吃饭，也不能预写用户一定赴约、吃完、嫌淡或如何回应；到点也不代表已经完成。",
+    "可以写角色自己的打算和准备，例如自己吃午饭、准备饭菜、处理文件；没有共同约定时，不写陪用户吃饭、陪用户睡觉等需要用户配合才能成立的既定安排。",
+    "已发生的互动可以作为背景影响角色状态，但不能自动延续成之后一整天的共同剧情。未来备注只写角色自己的准备和计划，不把尚未发生的细节写成事实。",
+  ].join("\n");
+
   // 所有可调参数的默认值；旧版本存的 settings 缺哪个补哪个
   const SET_DEF = {
+    dayPrompt: DEFAULT_DAY_PROMPT,
     quietStart: "23:30", quietEnd: "08:00",
     userSleepOn: false,  // 用户可选睡眠窗：仅暂停回音统计的等待计时，默认不启用
     userSleepStart: "23:30", userSleepEnd: "08:00",
@@ -3025,12 +3056,12 @@ return Object.freeze(exports);
   function buildDayInstruction(cal, nowHM, past, existing, threads) {
     let inst = [
       "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
-      "以当前角色的人设、职业、近期记忆和最近的聊天为依据，想象TA今天真实会过的一天：先定今天的身体底子和情绪底色，再排日程。",
+      String(S.settings.dayPrompt || "").trim() || DEFAULT_DAY_PROMPT,
       "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + nowHM + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
       past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵；跨好几天的事——项目、备考、排练、等结果——按筹备、进行、收尾、余波的顺序往下走，让这几天连成线）：\n" + past.lines.join("\n") : null,
       past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
       threads && threads.length ? "惦记账本（已了结项仅供判重，不再安排；未了结事项：约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + threads.join("\n") : null,
-      "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
+      "最近聊天中角色明确要做的事、未取消的承诺，以及双方已明确说定的共同安排，应落进 schedule；仅提过但没说定的共同活动不要当作约定。",
       "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
       '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-8到8的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-15到15的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
       "body 是今天真实带在身上的状况，多数日子是空数组，最多两条；有近期经历依据才写，不要每天编造胃痛、头闷。轻微不适扣 1 到 3，明显不适扣 4 到 8；情绪低落本身不扣身体精力。",
@@ -5309,6 +5340,9 @@ return Object.freeze(exports);
   const SET_SECTIONS = [
     { id: "base", name: "基本", groups: [
       { title: "挂念的人", sub: "可以多选，每位各有自己的一天", fields: [{ type: "chars" }] },
+      { title: "日程生成提示词", sub: "所有选中角色共用", fields: [
+        { type: "textarea", key: "dayPrompt", label: "日程生成提示词" },
+      ], hint: "可编辑角色日程的内容要求。日期、聊天资料和输出格式由程序自动补齐。保存后用于下一次生成，不自动改写今天已有日程。<br>云端在下次打开挂念或重新编排、上传生成原料后使用新内容。恢复默认只回填编辑框，点保存才生效；留空保存会使用默认提示词。", open: true },
       { title: "模型调用", adv: true, fields: [
         { type: "stepper", key: "apiDailyCap", min: 0, max: 500, step: 5, label: "一天最多", unit: "次" },
         { type: "stepper", key: "tokenDailyCap", min: 0, max: 5000000, step: 50000, label: "一天最多", unit: "token" },
@@ -5427,6 +5461,11 @@ return Object.freeze(exports);
       return '<div class="tgl-row">' +
         (f.items || []).map((it) => '<button class="tgl" id="set-' + it.key + '">' + esc(it.label) + "</button>").join("") + "</div>";
     }
+    if (f.type === "textarea") {
+      return '<input type="hidden" id="set-' + f.key + '">' +
+        '<div class="frow"><div class="fl">角色的一天怎么安排<div class="fu">默认规则可编辑，也可随时恢复</div></div>' +
+        '<button type="button" class="mini day-prompt-edit" id="edit-dayPrompt">编辑提示词 ›</button></div>';
+    }
     if (f.type === "text") {
       return '<input type="' + (f.password ? "password" : "text") + '" class="txt-in" id="set-' + f.key +
         '" placeholder="' + esc(f.placeholder || "") + '" spellcheck="false" autocomplete="off">';
@@ -5501,14 +5540,48 @@ return Object.freeze(exports);
       else if (f.type === "seg") document.querySelectorAll("#set-" + f.key + " button")
         .forEach((b) => b.classList.toggle("on", +b.dataset.v === (+S.settings[f.key] || 0)));
       else if (f.type === "toggles") (f.items || []).forEach((it) => $("#set-" + it.key).classList.toggle("on", !!S.settings[it.key]));
+      else if (f.type === "textarea") $("#set-" + f.key).value = S.settings[f.key] ?? SET_DEF[f.key];
       else if (f.type === "text") $("#set-" + f.key).value = S.settings[f.key] || "";
     }
     bindSheet();
     document.body.classList.add("sheet-open");
   }
-  function closeSheet() { document.body.classList.remove("sheet-open"); }
+  function closeSheet() { closeDayPromptEditor(); document.body.classList.remove("sheet-open"); }
+
+  function closeDayPromptEditor() {
+    document.body.classList.remove("day-prompt-open");
+    $("#day-prompt-sheet").inert = true;
+    $("#sheet").inert = false;
+    const button = $("#edit-dayPrompt");
+    if (button) button.focus();
+  }
+  function openDayPromptEditor() {
+    const editor = $("#day-prompt-input");
+    editor.value = $("#set-dayPrompt").value || DEFAULT_DAY_PROMPT;
+    $("#day-prompt-sheet").inert = false;
+    $("#sheet").inert = true;
+    document.body.classList.add("day-prompt-open");
+    $("#day-prompt-close").onclick = closeDayPromptEditor;
+    $("#day-prompt-mask").onclick = closeDayPromptEditor;
+    $("#restore-dayPrompt").onclick = () => { editor.value = DEFAULT_DAY_PROMPT; editor.focus(); };
+    $("#day-prompt-done").onclick = () => {
+      $("#set-dayPrompt").value = editor.value.trim() || DEFAULT_DAY_PROMPT;
+      closeDayPromptEditor();
+    };
+    $("#day-prompt-sheet").onkeydown = event => {
+      if (event.key === "Escape") { event.preventDefault(); closeDayPromptEditor(); }
+      if (event.key !== "Tab") return;
+      const controls = Array.from($("#day-prompt-sheet").querySelectorAll("button,textarea"));
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    $("#day-prompt-close").focus();
+  }
 
   function bindSheet() {
+    const editDayPrompt = $("#edit-dayPrompt");
+    if (editDayPrompt) editDayPrompt.onclick = openDayPromptEditor;
     const stepper = {};
     for (const f of SET_FIELDS()) if (f.type === "stepper") stepper[f.key] = f;
     $("#sheet-body").querySelectorAll("[data-step]").forEach((b) => {
@@ -5571,6 +5644,7 @@ return Object.freeze(exports);
         const on = document.querySelector("#set-" + f.key + " button.on");
         out[f.key] = on ? +on.dataset.v : SET_DEF[f.key];
       } else if (f.type === "toggles") (f.items || []).forEach((it) => { out[it.key] = $("#set-" + it.key).classList.contains("on"); });
+      else if (f.type === "textarea") out[f.key] = ($("#set-" + f.key).value || "").trim() || SET_DEF[f.key];
       else if (f.type === "text") out[f.key] = ($("#set-" + f.key).value || "").trim();
     }
     if (typeof out.cloudUrl === "string") out.cloudUrl = out.cloudUrl.replace(/\/+$/, "");
@@ -5581,6 +5655,7 @@ return Object.freeze(exports);
   function settingsSaveEffects(before, after) {
     const changed = (keys) => keys.some((key) => before[key] !== after[key]);
     const notes = [];
+    if (changed(["dayPrompt"])) notes.push("日程生成提示词已保存，下一次生成使用新内容；今天已有日程不变。云端在下次打开挂念或重新编排上传生成原料后生效。");
     if (changed(["userSleepOn", "userSleepStart", "userSleepEnd"])) notes.push(after.userSleepOn
       ? "你的睡眠时段已保存；计划同步成功后，尚未结算的回音会跳过这段时间，已结算记录不重算。"
       : "睡眠时段已关闭；计划同步成功后，尚未结算的回音恢复按发送后 3 小时统计。未回复仍保持中性。");
@@ -5617,6 +5692,7 @@ return Object.freeze(exports);
     const cloudGenWas = !!S.settings.cloudGen;
     const generationResults = [];
     await patchSettings(() => Object.assign({ characterIds: ids, characterId: S.cur }, sheet));
+    if (before.dayPrompt !== S.settings.dayPrompt) for (const cx of allCx()) cx._kitAt = 0;
     S._settingsEffects = settingsSaveEffects(before, S.settings);
     renderSettingsEffects();
     closeSheet();

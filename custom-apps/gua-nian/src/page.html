@@ -49,6 +49,15 @@
     </div>
     <div id="dsheet-body"></div>
   </div>
+  <div class="sheet-mask day-prompt-mask" id="day-prompt-mask"></div>
+  <div class="sheet day-prompt-sheet" id="day-prompt-sheet" role="dialog" aria-modal="true" aria-labelledby="day-prompt-title" inert>
+    <div class="sheet-hd"><h3 id="day-prompt-title">日 程 提 示 词</h3><button type="button" class="sheet-x" id="day-prompt-close" aria-label="取消编辑">✕</button></div>
+    <p class="day-prompt-caption">写下你希望 TA 怎样安排自己的一天。</p>
+    <textarea class="txt-in" id="day-prompt-input" aria-label="日程生成提示词" spellcheck="false"></textarea>
+    <div class="day-prompt-tools"><button type="button" class="mini" id="restore-dayPrompt">恢复默认</button><span>完成后，在设置页保存生效</span></div>
+    <button type="button" class="big-btn" id="day-prompt-done">完 成 编 辑</button>
+  </div>
+
 </div>
 <div id="toast"></div>
 

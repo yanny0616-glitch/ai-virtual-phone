@@ -4,6 +4,9 @@
   const SET_SECTIONS = [
     { id: "base", name: "基本", groups: [
       { title: "挂念的人", sub: "可以多选，每位各有自己的一天", fields: [{ type: "chars" }] },
+      { title: "日程生成提示词", sub: "所有选中角色共用", fields: [
+        { type: "textarea", key: "dayPrompt", label: "日程生成提示词" },
+      ], hint: "可编辑角色日程的内容要求。日期、聊天资料和输出格式由程序自动补齐。保存后用于下一次生成，不自动改写今天已有日程。<br>云端在下次打开挂念或重新编排、上传生成原料后使用新内容。恢复默认只回填编辑框，点保存才生效；留空保存会使用默认提示词。", open: true },
       { title: "模型调用", adv: true, fields: [
         { type: "stepper", key: "apiDailyCap", min: 0, max: 500, step: 5, label: "一天最多", unit: "次" },
         { type: "stepper", key: "tokenDailyCap", min: 0, max: 5000000, step: 50000, label: "一天最多", unit: "token" },
@@ -122,6 +125,11 @@
       return '<div class="tgl-row">' +
         (f.items || []).map((it) => '<button class="tgl" id="set-' + it.key + '">' + esc(it.label) + "</button>").join("") + "</div>";
     }
+    if (f.type === "textarea") {
+      return '<input type="hidden" id="set-' + f.key + '">' +
+        '<div class="frow"><div class="fl">角色的一天怎么安排<div class="fu">默认规则可编辑，也可随时恢复</div></div>' +
+        '<button type="button" class="mini day-prompt-edit" id="edit-dayPrompt">编辑提示词 ›</button></div>';
+    }
     if (f.type === "text") {
       return '<input type="' + (f.password ? "password" : "text") + '" class="txt-in" id="set-' + f.key +
         '" placeholder="' + esc(f.placeholder || "") + '" spellcheck="false" autocomplete="off">';
@@ -196,14 +204,48 @@
       else if (f.type === "seg") document.querySelectorAll("#set-" + f.key + " button")
         .forEach((b) => b.classList.toggle("on", +b.dataset.v === (+S.settings[f.key] || 0)));
       else if (f.type === "toggles") (f.items || []).forEach((it) => $("#set-" + it.key).classList.toggle("on", !!S.settings[it.key]));
+      else if (f.type === "textarea") $("#set-" + f.key).value = S.settings[f.key] ?? SET_DEF[f.key];
       else if (f.type === "text") $("#set-" + f.key).value = S.settings[f.key] || "";
     }
     bindSheet();
     document.body.classList.add("sheet-open");
   }
-  function closeSheet() { document.body.classList.remove("sheet-open"); }
+  function closeSheet() { closeDayPromptEditor(); document.body.classList.remove("sheet-open"); }
+
+  function closeDayPromptEditor() {
+    document.body.classList.remove("day-prompt-open");
+    $("#day-prompt-sheet").inert = true;
+    $("#sheet").inert = false;
+    const button = $("#edit-dayPrompt");
+    if (button) button.focus();
+  }
+  function openDayPromptEditor() {
+    const editor = $("#day-prompt-input");
+    editor.value = $("#set-dayPrompt").value || DEFAULT_DAY_PROMPT;
+    $("#day-prompt-sheet").inert = false;
+    $("#sheet").inert = true;
+    document.body.classList.add("day-prompt-open");
+    $("#day-prompt-close").onclick = closeDayPromptEditor;
+    $("#day-prompt-mask").onclick = closeDayPromptEditor;
+    $("#restore-dayPrompt").onclick = () => { editor.value = DEFAULT_DAY_PROMPT; editor.focus(); };
+    $("#day-prompt-done").onclick = () => {
+      $("#set-dayPrompt").value = editor.value.trim() || DEFAULT_DAY_PROMPT;
+      closeDayPromptEditor();
+    };
+    $("#day-prompt-sheet").onkeydown = event => {
+      if (event.key === "Escape") { event.preventDefault(); closeDayPromptEditor(); }
+      if (event.key !== "Tab") return;
+      const controls = Array.from($("#day-prompt-sheet").querySelectorAll("button,textarea"));
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    $("#day-prompt-close").focus();
+  }
 
   function bindSheet() {
+    const editDayPrompt = $("#edit-dayPrompt");
+    if (editDayPrompt) editDayPrompt.onclick = openDayPromptEditor;
     const stepper = {};
     for (const f of SET_FIELDS()) if (f.type === "stepper") stepper[f.key] = f;
     $("#sheet-body").querySelectorAll("[data-step]").forEach((b) => {
@@ -266,6 +308,7 @@
         const on = document.querySelector("#set-" + f.key + " button.on");
         out[f.key] = on ? +on.dataset.v : SET_DEF[f.key];
       } else if (f.type === "toggles") (f.items || []).forEach((it) => { out[it.key] = $("#set-" + it.key).classList.contains("on"); });
+      else if (f.type === "textarea") out[f.key] = ($("#set-" + f.key).value || "").trim() || SET_DEF[f.key];
       else if (f.type === "text") out[f.key] = ($("#set-" + f.key).value || "").trim();
     }
     if (typeof out.cloudUrl === "string") out.cloudUrl = out.cloudUrl.replace(/\/+$/, "");
@@ -276,6 +319,7 @@
   function settingsSaveEffects(before, after) {
     const changed = (keys) => keys.some((key) => before[key] !== after[key]);
     const notes = [];
+    if (changed(["dayPrompt"])) notes.push("日程生成提示词已保存，下一次生成使用新内容；今天已有日程不变。云端在下次打开挂念或重新编排上传生成原料后生效。");
     if (changed(["userSleepOn", "userSleepStart", "userSleepEnd"])) notes.push(after.userSleepOn
       ? "你的睡眠时段已保存；计划同步成功后，尚未结算的回音会跳过这段时间，已结算记录不重算。"
       : "睡眠时段已关闭；计划同步成功后，尚未结算的回音恢复按发送后 3 小时统计。未回复仍保持中性。");
@@ -312,6 +356,7 @@
     const cloudGenWas = !!S.settings.cloudGen;
     const generationResults = [];
     await patchSettings(() => Object.assign({ characterIds: ids, characterId: S.cur }, sheet));
+    if (before.dayPrompt !== S.settings.dayPrompt) for (const cx of allCx()) cx._kitAt = 0;
     S._settingsEffects = settingsSaveEffects(before, S.settings);
     renderSettingsEffects();
     closeSheet();

@@ -534,3 +534,15 @@
   details.fold[open] > summary .cv { transform: rotate(90deg); }
   details.fold[open] > summary { margin-bottom: 4px; }
   .rule-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--line); }
+
+  /* 提示词编辑沿用设置抽屉，独立遮罩保留设置页草稿。 */
+  .day-prompt-mask { z-index: 44; }
+  .day-prompt-sheet { z-index: 45; display: flex; flex-direction: column; overflow: hidden; }
+  .day-prompt-open #day-prompt-mask { opacity: 1; pointer-events: auto; }
+  .day-prompt-open #day-prompt-sheet { transform: none; }
+  .day-prompt-caption { color: var(--tx2); font-size: 12px; line-height: 1.7; margin: -4px 0 12px; }
+  #day-prompt-input { min-height: 150px; height: 38vh; height: 38dvh; flex: 1 1 auto; resize: none; line-height: 1.85; padding: 14px; }
+  .day-prompt-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
+  .day-prompt-tools span { color: var(--tx3); font-size: 11px; line-height: 1.6; }
+  .day-prompt-tools .mini, .day-prompt-edit { min-height: 36px; padding: 7px 12px; font-family: inherit; cursor: pointer; }
+  .day-prompt-sheet .sheet-hd, .day-prompt-sheet .big-btn { flex: none; }
