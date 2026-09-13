@@ -53,6 +53,11 @@ try {
       assert.equal((await route.POST(browserRequest('https://float.yanny.top',''))).status,401);
       const browserResponse=await (await route.POST(browserRequest('https://float.yanny.top',cookie))).json();
       assert.equal(browserResponse.result.structuredContent.floatXhsNote.action,'read');
+      const proxied=browserRequest('https://float.yanny.top',cookie);
+      proxied.headers.set('host','float.yanny.top');
+      const internal=new NextRequest('http://localhost:3001/api/xhs-mcp',{method:'POST',headers:proxied.headers,body:await proxied.text()});
+      assert.equal((await (await route.POST(internal)).json()).result.structuredContent.floatXhsNote.action,'read');
+
     } finally {
       if(savedSecret===undefined)delete process.env.ACCOUNT_GATE_SECRET;else process.env.ACCOUNT_GATE_SECRET=savedSecret;
       if(savedMode===undefined)delete process.env.NEXT_PUBLIC_SELF_HOSTED_MODE;else process.env.NEXT_PUBLIC_SELF_HOSTED_MODE=savedMode;

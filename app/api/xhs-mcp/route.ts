@@ -13,7 +13,10 @@ export async function POST(req: NextRequest) {
     // Automatic link reads use this exact MCP endpoint with the existing Float login.
     // Cookie access is same-origin only; external MCP clients retain Bearer auth.
     const origin = req.headers.get("origin");
-    const sameOrigin = req.headers.get("sec-fetch-site") === "same-origin" && origin === req.nextUrl.origin;
+    // Next's URL can contain the internal reverse-proxy origin. The Host header
+    // retains the public hostname; accept its exact HTTPS origin as well.
+    const sameOrigin = req.headers.get("sec-fetch-site") === "same-origin" && Boolean(origin)
+        && (origin === req.nextUrl.origin || origin === `https://${req.headers.get("host")}`);
     const browserAccess = sameOrigin && (isSelfHostedModeEnabled() || await verifyAccountGateCookieValue(
         req.cookies.get(ACCOUNT_GATE_COOKIE)?.value ?? "", req.cookies.get(ACCOUNT_SESSION_COOKIE)?.value ?? ""));
     if (!hasXhsMcpAccess(req.headers.get("authorization")) && !browserAccess) return NextResponse.json({ error: "请登录 Float 或提供有效 MCP 连接密钥" }, { status: 401, headers });
