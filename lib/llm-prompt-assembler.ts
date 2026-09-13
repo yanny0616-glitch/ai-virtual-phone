@@ -11,6 +11,7 @@ import { readDwellingLayoutCache } from "./dwelling-storage";
 import { formatDwellingContext } from "./dwelling-engine";
 import { matchesActiveTags, isWorldBookEntryInScope } from "./content-tag-utils";
 import { formatXiaohongshuShareForPrompt } from "./chat-share";
+import { formatXhsNoteSnapshot } from "./xhs-note";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
 import { formatPromptTimestamp, getPromptTimestampOptionsForTimeContext, resolvePromptTimeAware, type PromptTimestampOptions } from "./prompt-time";
 import { formatCharacterRelationsForPrompt } from "./character-world-storage";
@@ -147,6 +148,7 @@ type PromptBlock = {
     fromHistory?: boolean;
     historyRole?: ChatMessage["role"];
     imageUrl?: string;      // vision: image URL/data URL attached to this prompt block
+    imageUrls?: Array<{ url: string; index: number }>; // One shared note retains its ordered image set.
     reasoning?: string;
     openRouterReasoningDetails?: unknown[];
     toolCalls?: LLMToolCallPayload[];
@@ -190,6 +192,11 @@ function getPromptVisionImageUrl(msg: ChatMessage): string | undefined {
         return stickerUrl || undefined;
     }
     return undefined;
+}
+
+function getXhsPromptImages(msg: ChatMessage): Array<{ url: string; index: number }> | undefined {
+    if (msg.mediaType !== "xhs_link" || msg.isRetracted) return undefined;
+    return msg.mediaData?.xhsNote?.note?.images.flatMap((image, index) => image.ref?.startsWith("data:image/") ? [{ url: image.ref, index: index + 1 }] : []);
 }
 
 function formatDirectVisionBody(msg: ChatMessage, userName: string, charName: string): string {
@@ -566,6 +573,7 @@ function pushChronologicalShortTermBlocks(params: {
             fromHistory: true,
             historyRole: msg.role,
             imageUrl,
+            imageUrls: visionEnabled ? getXhsPromptImages(msg) : undefined,
         });
 
         if (msg.isRetracted) {
@@ -1031,6 +1039,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 fromHistory: true,
                 historyRole: msg.role,
                 imageUrl,
+                imageUrls: visionEnabled ? getXhsPromptImages(msg) : undefined,
             });
 
             // Retracted: keep the original message above, then append a system notice
@@ -1079,11 +1088,15 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                !finalPayload[finalPayload.length - 1].toolCalls?.length &&
                finalPayload[finalPayload.length - 1].role !== "tool");
 
-        if (b.imageUrl) {
+        if (b.imageUrl || b.imageUrls?.length) {
             // Vision message: build multi-part content with image (never merged)
             const parts: LLMContentPart[] = [];
             if (processedText) parts.push({ type: "text", text: processedText });
-            parts.push({ type: "image_url", image_url: { url: b.imageUrl, detail: "low" } });
+            if (b.imageUrl) parts.push({ type: "image_url", image_url: { url: b.imageUrl, detail: "low" } });
+            for (const image of b.imageUrls || []) {
+                parts.push({ type: "text", text: `小红书配图 ${image.index}：` });
+                parts.push({ type: "image_url", image_url: { url: image.url, detail: "high" } });
+            }
             finalPayload.push({
                 role: b.role,
                 content: parts,
@@ -1223,6 +1236,8 @@ export function formatRichMediaForHistory(msg: ChatMessage, userName: string, ch
                 body: d?.xiaohongshuBody,
                 description: d?.xiaohongshuDescription,
             });
+        case "xhs_link":
+            return msg.isRetracted ? "[小红书分享已撤回]" : d?.xhsNote ? formatXhsNoteSnapshot(d.xhsNote) : msg.content;
         case "accept_red_packet":
             if (isGroup && d?.claimer && d?.owner) return `[${d.claimer}领取了${d.owner}的红包]`;
             return "[领取红包]";
@@ -1738,6 +1753,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
             fromHistory: true,
             historyRole: msg.role,
             imageUrl,
+            imageUrls: visionEnabled ? getXhsPromptImages(msg) : undefined,
         });
     });
 
@@ -2222,6 +2238,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 fromHistory: true,
                 historyRole: msg.role,
                 imageUrl,
+                imageUrls: groupVisionEnabled ? getXhsPromptImages(msg) : undefined,
             });
         });
     }
@@ -2248,11 +2265,15 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
             !finalPayload[finalPayload.length - 1].toolCalls?.length &&
             finalPayload[finalPayload.length - 1].role !== "tool";
 
-        if (b.imageUrl) {
+        if (b.imageUrl || b.imageUrls?.length) {
             // Vision message: build multi-part content with image (never merged)
             const parts: LLMContentPart[] = [];
             if (processedText) parts.push({ type: "text", text: processedText });
-            parts.push({ type: "image_url", image_url: { url: b.imageUrl, detail: "low" } });
+            if (b.imageUrl) parts.push({ type: "image_url", image_url: { url: b.imageUrl, detail: "low" } });
+            for (const image of b.imageUrls || []) {
+                parts.push({ type: "text", text: `小红书配图 ${image.index}：` });
+                parts.push({ type: "image_url", image_url: { url: image.url, detail: "high" } });
+            }
             finalPayload.push({
                 role: b.role,
                 content: parts,

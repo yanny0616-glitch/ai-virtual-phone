@@ -281,6 +281,20 @@ async function resolveVisionImageRefForApi(imageRef: string): Promise<VisionImag
 }
 
 export async function prepareVisionPromptImageMessage(msg: ChatMessage): Promise<void> {
+    if (msg.mediaType === "xhs_link" && msg.mediaData?.xhsNote?.note) {
+        const snapshot = msg.mediaData.xhsNote;
+        const note = snapshot.note!;
+        const images = await Promise.all(note.images.map(async image => {
+            if (!image.ref) return image;
+            const result = await resolveVisionImageRefForApi(image.ref);
+            // Never pass an unresolved media-store reference to the model provider.
+            return "url" in result && result.url.startsWith("data:image/")
+                ? { ...image, ref: result.url }
+                : { ...image, ref: undefined, error: "本地配图不可用，请重新读取笔记" };
+        }));
+        msg.mediaData = { ...msg.mediaData, xhsNote: { ...snapshot, note: { ...note, images } } };
+        return;
+    }
     if (msg.mediaType === "sticker") {
         if (msg.role !== "user") return;
         const stickerUrl = msg.mediaData?.stickerUrl?.trim();
@@ -304,18 +318,23 @@ export async function prepareVisionPromptImageMessage(msg: ChatMessage): Promise
 }
 
 function isVisionPromptImageMessage(msg: ChatMessage): boolean {
-    return msg.mediaType === "image"
+    return msg.mediaType === "xhs_link" || msg.mediaType === "image"
         || (msg.role === "user" && msg.mediaType === "sticker" && Boolean(msg.mediaData?.stickerUrl))
         || (msg.mediaType === "media_file" && msg.mediaData?.fileType === "image");
 }
 
 function hasVisionPromptImageData(msg: ChatMessage): boolean {
+    if (msg.mediaType === "xhs_link") return Boolean(msg.mediaData?.xhsNote?.note?.images.some(image => image.ref));
     return msg.mediaType === "sticker"
         ? Boolean(msg.mediaData?.stickerUrl)
         : Boolean(msg.mediaUrl);
 }
 
 function stripVisionPromptImageData(msg: ChatMessage): ChatMessage {
+    if (msg.mediaType === "xhs_link" && msg.mediaData?.xhsNote?.note) {
+        const snapshot = msg.mediaData.xhsNote;
+        return { ...msg, mediaData: { ...msg.mediaData, xhsNote: { ...snapshot, note: { ...snapshot.note!, images: snapshot.note!.images.map(image => ({ ...image, ref: undefined })) } } } };
+    }
     if (msg.mediaType === "sticker") {
         return {
             ...msg,
@@ -1926,6 +1945,7 @@ export async function buildChatPromptMessages(
         excludeOfflineSessionId: options?.excludeOfflineSessionId,
         promptTimestampOptions,
     });
+    if (truncatedHistory.some(msg => !msg.isRetracted && msg.mediaData?.xhsNote?.status === "loading")) throw new Error("小红书笔记和配图还在加载，请完成后再回复");
     const promptHistory = applyVisionImagePromptLimit(
         truncatedHistory.map(msg => ({ ...msg })),
         session.visionImagePromptLimit,

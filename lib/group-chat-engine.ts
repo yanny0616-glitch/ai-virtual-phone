@@ -399,6 +399,7 @@ async function buildGroupChatPromptMessages(
         includeNativeToolHistory: usesNativeActions,
         promptTimestampOptions: groupPromptTimestampOptions,
     });
+    if (truncatedAnnotatedHistory.some(msg => !msg.isRetracted && msg.mediaData?.xhsNote?.status === "loading")) throw new Error("小红书笔记和配图还在加载，请完成后再回复");
     const promptHistory = applyVisionImagePromptLimit(
         truncatedAnnotatedHistory.map(msg => ({ ...msg })),
         session.visionImagePromptLimit,

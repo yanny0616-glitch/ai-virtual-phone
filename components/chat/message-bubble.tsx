@@ -1,5 +1,7 @@
 "use client";
 
+import { XhsLinkCard } from "./xhs-link-card";
+
 import { resolveVoiceExpressionText, stripVoiceExpression } from "@/lib/voice-expression";
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
@@ -92,6 +94,8 @@ function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
  */
 export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
     switch (msg.mediaType) {
+        case "xhs_link":
+            return <XhsLinkCard message={msg} />;
         case "red_packet":
             return <RedPacketBubble msg={msg} charName={charName} userName={userName} groupSize={groupSize} onShowDetail={onShowDetail} />;
         case "transfer":
@@ -144,6 +148,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         if (prev.msg.id !== next.msg.id) return false;
         if (prev.msg.content !== next.msg.content) return false;
         if (prev.msg.mediaType !== next.msg.mediaType) return false;
+        if (prev.msg.mediaData?.xhsNote !== next.msg.mediaData?.xhsNote) return false;
         if (prev.msg.isRetracted !== next.msg.isRetracted) return false;
         if (prev.msg.isTyping !== next.msg.isTyping) return false;
         if (prev.msg.mediaData?.status !== next.msg.mediaData?.status) return false;

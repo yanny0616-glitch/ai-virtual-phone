@@ -110,6 +110,7 @@ export type ChatMessage = {
         | "payment_request" | "accept_payment_request" | "decline_payment_request"
         | "music" | "music_share" | "music_notify" | "music_not_found"
         | "xiaohongshu_note_share"
+        | "xhs_link"
         | "gift"
         | "contact_card"
         | "app_card"
@@ -125,6 +126,7 @@ export type ChatMessage = {
     origin?: "chat" | "reading_discuss" | "custom_app" | "custom_app_background";
     mediaUrl?: string;
     mediaData?: {
+        xhsNote?: import("./xhs-note").XhsNoteSnapshot;
         amount?: number;          // 红包/转账金额
         count?: number;           // 红包个数
         label?: string;           // 红包留言/转账备注/照片描述/位置名/表情名
@@ -300,6 +302,7 @@ export const CHAT_RESPONSE_BATCH_REPLACED_EVENT = "chat-response-batch-replaced"
 
 // ── Media Preview Map ─────────────────────────
 const MEDIA_PREVIEW_MAP: Record<string, string> = {
+    xhs_link: "[小红书链接]",
     image: "[图片]", audio: "[语音]", video: "[视频]",
     red_packet: "[红包]", transfer: "[转账]", location: "[位置]",
     poke: "[拍了拍你]", sticker: "[表情]", quote: "[引用]", dice: "[掷骰子]",

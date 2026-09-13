@@ -1,5 +1,8 @@
 "use client";
 
+import { extractXhsNoteUrls } from "@/lib/xhs-note";
+import { hasPendingXhsNotes, hydrateXhsNote, XHS_NOTE_UPDATED } from "@/lib/xhs-note-client";
+
 import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, markChatSessionRead, CHAT_MESSAGE_PUSHED_EVENT } from "@/lib/chat-storage";
 import { cleanStreamText, splitStreamPreviewSegments, stripLiteralTexts, stripXmlTagBlocks } from "@/lib/stream-preview";
@@ -222,6 +225,7 @@ function getWeixinCloudDeleteTargetCount(messages: ChatMessage[]): number {
 }
 
 const CHAT_MEDIA_BUBBLE_TYPES = new Set([
+    "xhs_link",
     "sticker",
     "dice",
     "red_packet",
@@ -3623,6 +3627,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     };
 
     const triggerAIResponse = async () => {
+        if (hasPendingXhsNotes(loadChatMessages(session.id))) {
+            showChatToast("小红书笔记和配图还在加载，完成后再回复");
+            return;
+        }
         let silencedUserId: string | undefined;
         if (isGeneratingRef.current) {
             if (activeGenerationRuns.has(session.id)) return;
@@ -3990,6 +3998,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // 被动回复闸门：单聊里按 app（挂念）留下的作息判——睡着押到醒来再回、忙着偷空再回。
     // 已同步个人云的等待由云端执行；其余由桌面壳到点发回复请求。
     const scheduleGatedReply = async (text: string) => {
+        if (hasPendingXhsNotes(loadChatMessages(session.id))) {
+            showChatToast("小红书笔记和配图还在加载，完成后再回复");
+            return;
+        }
         await getChatPluginRuntime().ensureReady();
         const replyGate = readEffectiveReplyGate(session.contactId);
         if (session.isGroup) { void triggerAIResponse(); return; }
@@ -4099,6 +4111,20 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return true;
     };
 
+    useEffect(() => {
+        const sync = (event: Event) => {
+            if ((event as CustomEvent).detail?.sessionId === session.id) setMessages(loadChatMessages(session.id));
+        };
+        window.addEventListener(XHS_NOTE_UPDATED, sync);
+        return () => window.removeEventListener(XHS_NOTE_UPDATED, sync);
+    }, [session.id]);
+
+    useEffect(() => {
+        for (const message of messages) {
+            if (!message.isRetracted && message.mediaData?.xhsNote?.status === "loading") void hydrateXhsNote(message);
+        }
+    }, [messages]);
+
     const handleSendText = (text: string, options?: { autoReply?: boolean }): boolean => {
         if (!ensureGroupSpeakPermission()) return false;
         if (isGenerating) {
@@ -4107,6 +4133,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         }
         const trimmed = text.trim();
         if (!trimmed) return false;
+        if (extractXhsNoteUrls(trimmed).length > 3) {
+            showChatToast("每次最多分享 3 条小红书笔记，请分开发送");
+            return false;
+        }
 
         // Cancel any pending follow-up for this session
         cancelFollowUp(session.id);
@@ -4135,6 +4165,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             });
 
             setMessages(prev => [...prev, newMsg]);
+            const xhsCards = extractXhsNoteUrls(currentText).map(url => pushChatMessage({
+                sessionId: session.id,
+                role: "user",
+                content: "[小红书链接]",
+                mediaType: "xhs_link",
+                mediaData: { xhsNote: { sourceUrl: url, status: "loading", stage: "正在读取笔记…" } },
+            }));
+            if (xhsCards.length) setMessages(prev => [...prev, ...xhsCards]);
             if (diceOnly) {
                 const diceAside = pushChatMessage({
                     sessionId: session.id,
@@ -4146,7 +4184,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             setPendingGenerate(true);
             // 按回复键发送：消息落库后立即触发模型回复（无论插件是否异步改写，
             // 都在消息真正写入后触发，避免回复基于旧上下文）
-            if (options?.autoReply) scheduleGatedReply(currentText);
+            if (xhsCards.length) {
+                void Promise.all(xhsCards.map(hydrateXhsNote)).then(() => {
+                    if (options?.autoReply && loadChatMessages(session.id).some(m => m.id === newMsg.id)) void scheduleGatedReply(currentText);
+                });
+            } else if (options?.autoReply) scheduleGatedReply(currentText);
         };
 
         // 聊天插件织入点 user.beforeSend：无插件时走原同步路径，
