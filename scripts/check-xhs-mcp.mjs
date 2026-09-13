@@ -15,12 +15,16 @@ const realFetch = globalThis.fetch;
 const oldEnv = [process.env.XHS_MCP_ACCESS_TOKEN, process.env.XHS_BROWSER_TOKEN];
 process.env.XHS_MCP_ACCESS_TOKEN='test_mcp_access'; process.env.XHS_BROWSER_TOKEN='test_backend';
 globalThis.fetch = async (url, options) => {
-    assert.ok(url.startsWith('http://127.0.0.1:18060/api/v1/'));
+    assert.ok(url.startsWith('http://127.0.0.1:18061/'));
     assert.equal(options.headers.Authorization,'Bearer test_backend');
-    if(url.endsWith('/login/status'))return Response.json({success:true,data:{is_logged_in:loggedIn}});
-    assert.ok(url.endsWith('/feeds/search'));
-    return Response.json({success:true,data:{feeds:Array.from({length:10},(_,i)=>({id:i.toString(16).padStart(24,'0'),xsecToken:'token_'+i+'_'.repeat(100),noteCard:{displayTitle:'标题'+i,user:{nickname:'作者'},type:'normal'}}))}});
+    if(url.endsWith('/cookie'))return Response.json({ok:true,data:{state:'ready',configured:true,message:'已登录'}});
+    if(url.endsWith('/status'))return Response.json({ok:true,data:{state:loggedIn?'ready':'unconfigured',message:loggedIn?'已登录':'搜索未登录'}});
+    const body=JSON.parse(options.body);
+    if(!loggedIn)return Response.json({error:'公开链接可读，搜索未登录'},{status:400});
+    if(body.command==='search' || body.command==='list-feeds' || body.command==='user-profile') return Response.json({ok:true,data:{feeds:Array.from({length:10},(_,i)=>({id:i.toString(16).padStart(24,'0'),xsecToken:'token_'+i+'_'.repeat(100),title:'标题'+i,user:{nickname:'作者'}}))}});
+    return Response.json({ok:true,data:{success:true,command:body.command}});
 };
+
 function load(file) {
     const absolute=path.resolve(root,file);
     if(cache.has(absolute))return cache.get(absolute).exports;
@@ -57,17 +61,33 @@ try {
       proxied.headers.set('host','float.yanny.top');
       const internal=new NextRequest('http://localhost:3001/api/xhs-mcp',{method:'POST',headers:proxied.headers,body:await proxied.text()});
       assert.equal((await (await route.POST(internal)).json()).result.structuredContent.floatXhsNote.action,'read');
+      const accountRoute=load('app/api/xhs-account/route.ts');
+      const adminReq=(withCookie,origin='https://float.yanny.top')=>new NextRequest('https://float.yanny.top/api/xhs-account',{method:'POST',headers:{origin,'sec-fetch-site':'same-origin','content-type':'application/json',cookie:withCookie?cookie:'',Authorization:'Bearer test_mcp_access'},body:JSON.stringify({action:'save',cookie:'a1=test; web_session=never-echo-this'})});
+      assert.equal((await accountRoute.POST(adminReq(false))).status,401);
+      assert.equal((await accountRoute.POST(adminReq(true,'https://evil.test'))).status,401);
+      const saved=await (await accountRoute.POST(adminReq(true))).json();assert.equal(saved.state,'ready');assert.ok(!JSON.stringify(saved).includes('never-echo-this'));
+
 
     } finally {
       if(savedSecret===undefined)delete process.env.ACCOUNT_GATE_SECRET;else process.env.ACCOUNT_GATE_SECRET=savedSecret;
       if(savedMode===undefined)delete process.env.NEXT_PUBLIC_SELF_HOSTED_MODE;else process.env.NEXT_PUBLIC_SELF_HOSTED_MODE=savedMode;
     }
     const init=await (await request('initialize',{protocolVersion:'2025-03-26'})).json();assert.equal(init.result.protocolVersion,'2025-03-26');
-    const tools=await (await request('tools/list')).json();assert.equal(tools.result.tools.length,4);
-    assert.ok(tools.result.tools.every(t=>!t.name.includes('publish')));
+    const tools=await (await request('tools/list')).json();assert.equal(tools.result.tools.length,12);
+    assert.ok(tools.result.tools.some(t=>t.name==='publish_xiaohongshu_note'));
     const failed=await (await request('tools/call',{name:'search_xiaohongshu_notes',arguments:{keyword:'猫'}})).json();
     assert.ok(failed.result.isError);assert.match(failed.result.content[0].text,/登录/);
     loggedIn=true;
+    for(const [name,args] of [
+      ['get_xiaohongshu_recommendations',{}], ['get_xiaohongshu_profile',{user_id:'0123456789abcdef01234567'}],
+      ['like_xiaohongshu_note',{feed_id:'0123456789abcdef01234567'}], ['favorite_xiaohongshu_note',{feed_id:'0123456789abcdef01234567',unfavorite:true}],
+      ['post_xiaohongshu_comment',{feed_id:'0123456789abcdef01234567',content:'test',xsec_token:'test'}],
+      ['reply_xiaohongshu_comment',{feed_id:'0123456789abcdef01234567',comment_id:'0123456789abcdef01234567',content:'test',xsec_token:'test'}],
+      ['publish_xiaohongshu_note',{title:'test',content:'test',images:['https://example.com/photo.png']}],
+    ]) { const result=await server.callXhsMcpTool(name,args);assert.ok(result.content.length); }
+    await assert.rejects(server.callXhsMcpTool('publish_xiaohongshu_note',{title:'a',content:'b',images:['http://127.0.0.1/a']}));
+    await assert.rejects(server.callXhsMcpTool('post_xiaohongshu_comment',{feed_id:'invalid',content:'test'}));
+
     const search=await server.callXhsMcpTool('search_xiaohongshu_notes',{keyword:'猫',limit:10});
     const searchPresentation=await client.extractXhsMcpPresentation(search);
     assert.equal(JSON.parse(searchPresentation.data).notes.length,10);assert.ok(searchPresentation.data.length>2000);

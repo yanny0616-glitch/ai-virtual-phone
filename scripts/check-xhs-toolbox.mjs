@@ -13,7 +13,7 @@ const context = vm.createContext({ Date, Error, Boolean,
 });
 vm.runInContext(js(read('xhs-mcp-tools.ts'))+js(read('xhs-mcp-config.ts'))+';globalThis.reconcile=reconcileXhsMcpServers;',context);
 const fresh=context.reconcile([], 'https://float.example');
-assert.equal(fresh.length,1);assert.equal(fresh[0].enabled,true);assert.equal(fresh[0].discoveredTools.length,4);
+assert.equal(fresh.length,1);assert.equal(fresh[0].enabled,true);assert.equal(fresh[0].discoveredTools.length,12);
 const disabled={...fresh[0],enabled:false};
 assert.equal(context.reconcile([disabled], 'https://float.example')[0].enabled,false);
 const imported={...fresh[0],id:'imported-existing',accessToken:'test-token',directFetch:false};

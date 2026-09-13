@@ -1,3 +1,4 @@
+import { requestXhsApi } from "./xhs-api";
 import { timingSafeEqual } from "node:crypto";
 import { formatXhsNoteSnapshot, isXhsNoteUrl } from "../xhs-note";
 import { readXhsImage, readXhsNote } from "./xhs-reader";
@@ -13,44 +14,58 @@ export function hasXhsMcpAccess(authorization: string | null): boolean {
     return supplied.length === wanted.length && timingSafeEqual(supplied, wanted);
 }
 
-async function browserRequest(path: "/login/status" | "/feeds/search", body?: unknown): Promise<Record<string, unknown>> {
-    const token = process.env.XHS_BROWSER_TOKEN?.trim();
-    if (!token) throw new Error("小红书搜索服务尚未配置");
-    // Fixed host and allowlisted paths: callers cannot turn this into an internal-network proxy.
-    const response = await fetch(`http://127.0.0.1:18060/api/v1${path}`, {
-        method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(55000),
-    });
-    if (!response.ok) throw new Error(`小红书搜索暂时不可用（HTTP ${response.status}）`);
-    const result = await response.json();
-    if (!result.success) throw new Error("小红书搜索失败，请检查登录或稍后再试");
-    return result.data || {};
+const accountCommands: Record<string,string> = {
+    get_xiaohongshu_recommendations:"list-feeds",get_xiaohongshu_profile:"user-profile",
+    like_xiaohongshu_note:"like-feed",favorite_xiaohongshu_note:"favorite-feed",
+    post_xiaohongshu_comment:"post-comment",reply_xiaohongshu_comment:"reply-comment",publish_xiaohongshu_note:"publish",
+};
+function validateAccountArgs(name: string, args: Record<string,unknown>) {
+    const tool=XHS_MCP_TOOLS.find(tool=>tool.name===name);
+    const definition=tool?.inputSchema as {required?:string[];properties?:Record<string,{type?:string}>};
+    for(const key of definition.required || []) if(args[key]===undefined || args[key]==="")throw new Error(`缺少参数：${key}`);
+    for(const [key,value] of Object.entries(args)) {
+        const type=definition.properties?.[key]?.type;
+        if(!type)throw new Error(`未知参数：${key}`);
+        if(type==="array" ? !Array.isArray(value) || value.some(v=>typeof v!=="string") : type==="integer" ? !Number.isInteger(value) : typeof value!==type)throw new Error(`参数格式不正确：${key}`);
+        if(typeof value==="string" && value.length>5000)throw new Error(`参数过长：${key}`);
+    }
+    for(const key of ["feed_id","user_id","comment_id"]) if(args[key]!==undefined && !/^[a-f0-9]{24}$/i.test(String(args[key])))throw new Error(`${key}需为24位笔记/用户/评论ID`);
+    if(args.limit!==undefined && (Number(args.limit)<1 || Number(args.limit)>10))throw new Error("limit需为1–10");
+    if(args.images) {
+        const images=args.images as string[];
+        if(!images.length || images.length>9 || images.some(raw=>{try {const u=new URL(raw);return u.protocol!=="https:" || Boolean(u.username||u.password);}catch{return true;}}))throw new Error("请提供1–9个有效HTTPS图片URL");
+    }
+    if(args.visibility!==undefined && !["public","private"].includes(String(args.visibility)))throw new Error("visibility需为public或private");
 }
-
+function noteCandidates(data: Record<string,unknown>, limit=5) {
+    return ((Array.isArray(data.feeds)?data.feeds:[]) as Array<Record<string,unknown>>).slice(0,limit).flatMap(item=>{
+        const id=String(item.id||item.note_id||"");if(!/^[a-f0-9]{24}$/i.test(id))return [];
+        const token=String(item.xsecToken||item.xsec_token||"");
+        return [{id,title:String(item.title||item.display_title||""),author:String((item.user as {nickname?:string})?.nickname||""),url:`https://www.xiaohongshu.com/explore/${id}?xsec_token=${encodeURIComponent(token)}&xsec_source=pc_search`,xsec_token:token}];
+    });
+}
 let searching = false;
 export async function callXhsMcpTool(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+    if (name === "check_xiaohongshu_login") return {content:[{type:"text",text:JSON.stringify(await requestXhsApi("status",{refresh:true},signal))}]};
+    if (accountCommands[name]) {
+        validateAccountArgs(name,args);
+        const data=await requestXhsApi("call",{command:accountCommands[name],args},signal);
+        if(name==="get_xiaohongshu_recommendations" || name==="get_xiaohongshu_profile") {
+            const search={version:1,keyword:name==="get_xiaohongshu_profile"?"用户主页":"首页推荐",notes:noteCandidates(data,Number(args.limit)||5),notice:name==="get_xiaohongshu_profile" ? `主页信息：${JSON.stringify(data.basic_info||{}).slice(0,2000)}；主页状态：${String(data.profile_status||"")}；笔记状态：${String(data.notes_status||"")}` : "推荐摘要，请读取正文后再分享。",cursor_score:data.cursor_score};
+            return {content:[{type:"text",text:JSON.stringify(search)}],structuredContent:{floatXhsSearch:search}};
+        }
+        return {content:[{type:"text",text:JSON.stringify(data).slice(0,18000)}]};
+    }
     if (name === "search_xiaohongshu_notes") {
-        const keyword = typeof args.keyword === "string" ? args.keyword.trim() : "";
-        if (!keyword || keyword.length > 80) throw new Error("搜索关键词需为1–80字");
-        if (searching) throw new Error("已有小红书搜索正在执行，请稍后再试");
-        searching = true;
+        const keyword=typeof args.keyword==="string"?args.keyword.trim():"";
+        if(!keyword || keyword.length>80)throw new Error("搜索关键词需为1–80字");
+        if(searching)throw new Error("已有小红书搜索正在执行，请稍后再试");
+        searching=true;
         try {
-            const login = await browserRequest("/login/status");
-            if (!login.is_logged_in) throw new Error("小红书尚未登录或登录已失效，请用户完成服务端扫码登录；不要编造搜索结果");
-            const result = await browserRequest("/feeds/search", { keyword });
-            const limit = Number.isInteger(args.limit) ? Math.max(1, Math.min(10, Number(args.limit))) : 5;
-            const feeds = Array.isArray(result.feeds) ? result.feeds : [];
-            const notes = feeds.filter(feed => typeof feed?.id === "string" && /^[a-f\d]{24}$/i.test(feed.id) && typeof feed.xsecToken === "string")
-                .slice(0, limit).map(feed => {
-                    const card = feed.noteCard || {};
-                    const url = new URL(`https://www.xiaohongshu.com/explore/${feed.id}`);
-                    url.searchParams.set("xsec_token", feed.xsecToken);
-                    url.searchParams.set("xsec_source", "pc_search");
-                    return { title: String(card.displayTitle || "未命名笔记"), author: String(card.user?.nickname || card.user?.nickName || ""), type: String(card.type || ""), likedCount: String(card.interactInfo?.likedCount || ""), url: url.href };
-                });
-            const search = { version: 1, keyword, notes, notice: notes.length ? "这是搜索摘要。调用read_xiaohongshu_note读完后再挑选分享，不要仅凭标题推断正文。" : "没有获取到可用笔记，可能无匹配结果或页面受限；不要编造。" };
-            return { content: [{ type: "text", text: JSON.stringify(search) }], structuredContent: { floatXhsSearch: search } };
-        } finally { searching = false; }
+            const data=await requestXhsApi("call",{command:"search",args:{keyword}},signal);
+            const search={version:1,keyword,notes:noteCandidates(data,Math.max(1,Math.min(10,Number(args.limit)||5))),notice:"这是搜索摘要。读取正文后再挑选分享，评论按需读取。"};
+            return {content:[{type:"text",text:JSON.stringify(search)}],structuredContent:{floatXhsSearch:search}};
+        } finally {searching=false;}
     }
     if (!["read_xiaohongshu_note", "read_xiaohongshu_comments", "share_xiaohongshu_note"].includes(name)) throw new Error("未知工具");
     if (typeof args.url !== "string" || !isXhsNoteUrl(args.url)) throw new Error("需要完整的小红书HTTPS链接");

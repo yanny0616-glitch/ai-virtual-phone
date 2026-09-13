@@ -16,7 +16,7 @@ export function reconcileXhsMcpServers(servers: McpServerConfig[], origin: strin
         ...(local ? { url, directFetch: true, discoveredTools: XHS_MCP_TOOLS } : {}),
     } : {
         id: XHS_MCP_ID, name: "小红书 MCP", url, enabled: true, directFetch: true,
-        description: "统一用于自动读卡片、角色搜索、读正文、按需分批读评论和分享。搜索需要小红书登录，公开链接读取不需要。",
+        description: "公开笔记读取、搜索、推荐、用户主页、按需评论和账号操作；Cookie与登录状态在此配置。",
         discoveredTools: XHS_MCP_TOOLS, createdAt: Date.now(), updatedAt: Date.now(),
     };
     return [...servers.filter(item => !isXhsMcpServer(item)), server];
