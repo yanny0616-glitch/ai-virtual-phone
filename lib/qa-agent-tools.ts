@@ -1,3 +1,4 @@
+import { QA_TOOLBOX_TOOL } from "./qa-toolbox-tools";
 import { buildProviderRequest, parseProviderResponse } from "./llm-provider-adapter";
 import { loadApiConfigs } from "./settings-storage";
 import type { ApiConfig } from "./settings-types";
@@ -1364,6 +1365,7 @@ const BASE_TOOLS: QaTool[] = [apiCheckTool, storageReportTool, errorLogTool, dev
 
 // 暴露给模型的统一工具集
 const UNIFIED_BASE_TOOLS: QaTool[] = [
+    QA_TOOLBOX_TOOL,
     listTool,
     readTool,
     writeTool,
