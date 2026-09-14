@@ -7268,3 +7268,63 @@
   right: 100%;
   margin: 0 6px 0 0;
 }
+
+/* 工具调用折叠：贴着系统消息的气泡语言，收起时是一个胶囊 */
+.chat-tool-fold {
+  margin: 4px auto;
+  width: max-content;
+  max-width: 88%;
+}
+.chat-tool-fold > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 16px;
+  background: rgba(0,0,0,0.05);
+  color: var(--c-icon);
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  line-height: 1.5;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.chat-tool-fold > summary::-webkit-details-marker { display: none; }
+.chat-tool-fold > summary::after {
+  content: "›";
+  font-size: calc(13px*var(--app-text-scale,1));
+  line-height: 1;
+  transition: transform 0.16s ease;
+}
+.chat-tool-fold[open] > summary::after { transform: rotate(90deg); }
+.chat-tool-fold[open] { width: 88%; }
+.chat-tool-fold-count { opacity: 0.7; }
+.chat-tool-fold-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--c-success);
+  flex: none;
+}
+.chat-tool-fold-dot.is-running { background: var(--c-warning); animation: chat-tool-fold-blink 1s ease-in-out infinite; }
+.chat-tool-fold-dot.is-failed { background: var(--c-danger); }
+@keyframes chat-tool-fold-blink { 50% { opacity: 0.3; } }
+.chat-tool-fold-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.04);
+}
+.chat-tool-fold-item {
+  color: var(--c-icon);
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.chat-tool-fold-item + .chat-tool-fold-item { border-top: 1px solid rgba(0,0,0,0.05); padding-top: 4px; }
