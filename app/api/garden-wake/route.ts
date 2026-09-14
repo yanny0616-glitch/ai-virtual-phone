@@ -1,4 +1,5 @@
 import {NextRequest,NextResponse} from "next/server";
+import {timingSafeEqual} from "node:crypto";
 import {readFile} from "node:fs/promises";
 import {isSelfHostedModeEnabled} from "@/lib/self-hosting";
 export const runtime="nodejs";
@@ -6,6 +7,9 @@ export async function POST(req:NextRequest){
  const origin=req.headers.get("origin");
  if(!isSelfHostedModeEnabled()||req.headers.get("sec-fetch-site")!=="same-origin"||!origin||(origin!==req.nextUrl.origin&&origin!==`https://${req.headers.get("host")}`))return NextResponse.json({error:"仅限自部署 Float 同源访问"},{status:403});
  try{
+  const expected=Buffer.from((await readFile("/etc/float-garden-wake/client-token","utf8")).trim());
+  const supplied=Buffer.from(req.headers.get("x-float-garden-key")||"");
+  if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))return NextResponse.json({error:"请填写正确的唤醒连接码"},{status:401});
   const raw=await req.text();if(raw.length>20000)throw Error("请求过大");
   const body=JSON.parse(raw);
   if(!["status","save","start","stop","clear","events","ack"].includes(body.action))throw Error("未知操作");
