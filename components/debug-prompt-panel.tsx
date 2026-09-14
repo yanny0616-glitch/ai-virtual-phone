@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useSyncExternalStore, useMemo, useCallback, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useSyncExternalStore, useMemo, useCallback, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
 import { getDebugChatState, getDebugPromptSnapshot, subscribeDebugChatState, subscribeDebugPromptSnapshot, type DebugPromptSnapshot } from "@/lib/debug-store";
 import { previewPromptRequestSnapshot, ChatEngineError } from "@/lib/chat-engine";
 import { previewGroupPromptRequestSnapshot } from "@/lib/group-chat-engine";
@@ -11,6 +11,7 @@ import {
     expandFloatingDock,
     collapseFloatingDock,
     setFloatingDockAnchor,
+    clampFloatingDockAnchor,
     setActiveFloatingTool,
 } from "@/lib/floating-dock-store";
 import {
@@ -114,6 +115,7 @@ export function DebugPromptPanel() {
     const [floatingDockEnabled, setFloatingDockEnabled] = useState(false);
     const [quickActionEnabled, setQuickActionEnabled] = useState(false);
     const dockState = useSyncExternalStore(subscribeFloatingDockState, getFloatingDockState, getFloatingDockState);
+    const floatingButtonRef = useRef<HTMLButtonElement | null>(null);
     const floatingDragRef = useRef<FloatingDragState | null>(null);
     const suppressFloatingClickRef = useRef(false);
     const [selectedChatSessionId, setSelectedChatSessionId] = useState("");
@@ -655,8 +657,8 @@ export function DebugPromptPanel() {
         }
         event.stopPropagation();
         const button = event.currentTarget;
-        const anchor = isDual ? dockState.anchorPosition : null;
-        const bounds = getFloatingButtonBounds(button, (isDual && anchor) ? anchor : floatingPosition);
+        const anchor = floatingDockEnabled ? dockState.anchorPosition : null;
+        const bounds = getFloatingButtonBounds(button, anchor ?? floatingPosition);
         floatingDragRef.current = {
             pointerId: event.pointerId,
             startClientX: event.clientX,
@@ -862,6 +864,21 @@ export function DebugPromptPanel() {
         setAdventureWorldId(adventureWorldOptions[0].id);
     }, [adventureWorldId, adventureWorldOptions]);
 
+    useLayoutEffect(() => {
+        if (!enabled || !floatingDockEnabled) return;
+        const parent = floatingButtonRef.current?.offsetParent;
+        if (!(parent instanceof HTMLElement)) return;
+        const apply = () => {
+            const safeArea = Number.parseFloat(getComputedStyle(parent).getPropertyValue("--safe-area-top"));
+            clampFloatingDockAnchor(parent.clientWidth, parent.clientHeight, Math.max(72, (Number.isFinite(safeArea) ? safeArea : 48) + 18));
+        };
+        apply();
+        const observer = new ResizeObserver(apply);
+        observer.observe(parent);
+        window.addEventListener("resize", apply);
+        return () => { observer.disconnect(); window.removeEventListener("resize", apply); };
+    }, [enabled, floatingDockEnabled, dockState.anchorPosition]);
+
     if (!enabled) return null;
 
     const isPanelOpen = !collapsed;
@@ -877,7 +894,7 @@ export function DebugPromptPanel() {
     );
     const isExpanded = floatingDockEnabled && !isPanelOpen && dockState.isExpanded;
     const isPaired = isDual && !isPromptPrimary && !isPanelOpen && dockState.isExpanded;
-    const anchor = isDual ? dockState.anchorPosition : null;
+    const anchor = floatingDockEnabled ? dockState.anchorPosition : null;
     const dockSide = dockState.dockSide;
 
     const buttonClass = [
@@ -892,7 +909,7 @@ export function DebugPromptPanel() {
     let buttonStyle: CSSProperties | undefined;
     if (draggingFloatingButton && floatingPosition) {
         buttonStyle = { left: floatingPosition.left, top: floatingPosition.top };
-    } else if (isDual && anchor) {
+    } else if (anchor) {
         buttonStyle = { left: anchor.left, top: anchor.top };
     } else if (floatingPosition) {
         buttonStyle = { left: floatingPosition.left, top: floatingPosition.top };
@@ -905,10 +922,11 @@ export function DebugPromptPanel() {
 
     const floatingButton = showFloatingButton ? (
         <button
+            ref={floatingButtonRef}
             type="button"
             className={buttonClass}
             aria-label={isPanelOpen ? "关闭提示词查看器" : "打开提示词查看器"}
-            data-positioned={(isDual ? !!anchor : !!floatingPosition) ? "" : undefined}
+            data-positioned={buttonStyle?.left !== undefined ? "" : undefined}
             data-dragging={draggingFloatingButton ? "" : undefined}
             data-dock-side={floatingDockEnabled ? dockSide : undefined}
             onPointerDown={handleFloatingPointerDown}

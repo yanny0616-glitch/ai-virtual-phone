@@ -263,3 +263,5 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 - **外观预设**（外观 → 外观预设）：把当前整套外观存成命名预设，最多 30 套，一键切换。内容 = 主题档案（主题色 / 壁纸参数 / 图标皮 / 字体 / 状态栏 / CSS 变量）+ 桌面图标位置 / 组件 / DIY 模板 / dock / 文件夹。存 KV 键 `ai_phone_appearance_presets_v1`（已加入「桌面与主题」备份模块），素材只记 id 引用，复用主题素材库，不复制 dataURL。切换走与主题包导入相同的落地路径（`onDesktopThemeChange` → `saveDIYTemplates` → `onApply`），不刷新页面。恢复默认与壁纸 / 图标皮 / 字体 / dock 皮删除会跳过仍被任一预设引用的素材（`isThemeAssetReferencedByPresets`），只解除当前引用。支持重命名、用当前外观覆盖、删除。
 - **开屏动画**（外观 → 开屏动画）：默认「漂浮」（原 canvas 版）之外新增三套纯 CSS 变体「墨色」「极光」「脉冲」，以及「不要开屏」（水合完成后自动进桌面）。选择存 localStorage `ai_phone_splash_variant`（开屏在 KV 水合前渲染，KV 那时读不到），两个 localStorage 键已登记进「桌面与主题」备份模块。页面里卡片按 390 宽真实尺寸渲染再缩放预览，点卡片全屏预览。
 - **自定义开屏**（同一页下方）：贴一段完整 HTML（可带 style/script）或从 .html 文件导入，存 `ai_phone_splash_custom_v1`，最多 20 套、单套 40 万字符；用沙盒 iframe（`sandbox="allow-scripts"`，不同源）渲染，碰不到宿主存储；没写 `<html>` 自动补无边距外壳。可编辑、删除（删掉正在用的回到「漂浮」）。
+
+- **悬浮球贴边定位**：快捷操作和提示词球均校正记忆坐标，使用容器布局尺寸并监听尺寸变化，避开顶部状态栏；单球也使用停靠锚点，定位标记与实际坐标一致。
