@@ -1,5 +1,7 @@
 "use client";
 
+import { loadQaMcpAccess, saveQaMcpAccess } from "@/lib/qa-mcp-access";
+import { loadMcpServers } from "@/lib/tool-storage";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -559,6 +561,8 @@ function QaSessionDrawer({
 // ── 工坊配置面板 ─────────────────────────────────────
 
 function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?: (msg: string) => void }) {
+  const [mcpServers] = useState(() => loadMcpServers());
+  const [mcpAccess, setMcpAccess] = useState(() => loadQaMcpAccess());
   const [budget, setBudget] = useState(() => String(getQaContextBudgetChars()));
   const [pageChars, setPageChars] = useState(() => String(getQaPageChars()));
   const [maxRounds, setMaxRounds] = useState(() => String(getQaMaxRounds()));
@@ -598,6 +602,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     // 留空 = 显式不传 max_tokens（0 哨兵），与"没设置用默认值"区分开
     setQaMaxOutputTokens(trimmedTokens ? parsedTokens : 0);
     setQaPromptCache(promptCache);
+    saveQaMcpAccess(mcpAccess);
     onNotice?.("已保存工坊配置。");
     onClose();
   };
@@ -608,6 +613,8 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     setQaMaxRounds(null);
     setQaMaxOutputTokens(null);
     setQaPromptCache(null);
+    saveQaMcpAccess({});
+    setMcpAccess({});
     setPromptCache(true);
     setBudget(String(QA_DEFAULT_CONTEXT_BUDGET_CHARS));
     setPageChars(String(QA_DEFAULT_PAGE_CHARS));
@@ -620,6 +627,19 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     <div className="qa-devnotice-backdrop" onClick={onClose}>
       <div className="qa-devnotice" role="dialog" aria-label="工坊配置" onClick={(e) => e.stopPropagation()}>
         <div className="qa-devnotice-title">工坊配置</div>
+        <div className="qa-settings-hint">允许工坊调用的 MCP（沿用聊天工具箱配置）</div>
+        <div style={{ maxHeight: "24vh", overflowY: "auto" }}>
+          {mcpServers.length ? mcpServers.map(server => (
+            <label key={server.id} className="qa-settings-toggle">
+              <span>{server.name}{!server.enabled ? "（工具箱已关闭）" : ""}</span>
+              <input type="checkbox" checked={mcpAccess[server.id] === server.url} onChange={e => setMcpAccess(previous => {
+                const next = { ...previous }; if (e.target.checked) next[server.id] = server.url; else delete next[server.id]; return next;
+              })} />
+            </label>
+          )) : <div className="qa-settings-hint">先让工坊配置聊天工具箱，再到这里选择允许调用的 MCP。</div>}
+        </div>
+        <div className="qa-settings-hint">默认不选。工具箱关闭、取消勾选或服务器地址变化后，工坊不能继续调用；更换地址需重新选择。</div>
+
         <label className="qa-settings-field">
           <span>上下文预算（字符）</span>
           <input

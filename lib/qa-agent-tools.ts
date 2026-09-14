@@ -1,3 +1,5 @@
+import { QA_MCP_TOOL } from "./qa-mcp-tools";
+import { getQaMcpServers } from "./qa-mcp-access";
 import { QA_TOOLBOX_TOOL } from "./qa-toolbox-tools";
 import { buildProviderRequest, parseProviderResponse } from "./llm-provider-adapter";
 import { loadApiConfigs } from "./settings-storage";
@@ -1388,6 +1390,7 @@ const UNIFIED_GITHUB_WRITE_TOOLS: QaTool[] = [branchOpsTool, githubPullCreateToo
 export function getQaTools(): QaTool[] {
     const config = loadQaGithubConfig();
     const tools = [...UNIFIED_BASE_TOOLS];
+    if (getQaMcpServers().length) tools.push(QA_MCP_TOOL);
     if (config) tools.push(...UNIFIED_GITHUB_READ_TOOLS);
     if (config?.token) tools.push(...UNIFIED_GITHUB_WRITE_TOOLS);
     if (isWorkshopComputerEnabled()) tools.push(...QA_COMPUTER_TOOLS);
@@ -1397,6 +1400,7 @@ export function getQaTools(): QaTool[] {
 // 全量注册表（store 里用于工具名映射与执行查找）：统一工具 + 全部旧工具隐藏别名，
 // Set 去重（部分工具两边都在）
 export const QA_TOOLS: QaTool[] = [...new Set([
+    QA_MCP_TOOL,
     ...UNIFIED_BASE_TOOLS,
     ...UNIFIED_GITHUB_READ_TOOLS,
     ...UNIFIED_GITHUB_WRITE_TOOLS,
