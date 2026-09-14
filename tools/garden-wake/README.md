@@ -9,7 +9,7 @@ Deployment on this VPS:
 - Generate a random private backend credential at `/etc/float-garden-wake/backend-token`, directory 0700, file 0600. Never log it. Create a separate private client-token for the owner; enter it once in the UI (stored only in this browser localStorage). The API never bootstraps or returns this credential.
 - State directory `/var/lib/float-garden-wake` is 0700; atomic JSON state files are 0600 and include the user's machine token.
 - Copy the supplied unit to `/etc/systemd/system/float-garden-wake.service`, daemon-reload and enable/start. It listens only on 127.0.0.1:18062, uses `Restart=no`, and NEVER starts a Garden connection on process startup. Only the explicit UI Start action opens one stream.
-- Next.js `/api/garden-wake` requires self-hosted mode, same-origin browser POST and the constant-time-checked `x-float-garden-key` matching a separate 0600 `/etc/float-garden-wake/client-token`, and forwards to the credential-protected loopback service. This is a single-owner VPS integration, not a multi-tenant service.
+- Next.js `/api/garden-wake` requires the site login when account mode is enabled, same-origin browser POST and the constant-time-checked `x-float-garden-key` matching a separate 0600 `/etc/float-garden-wake/client-token`, and forwards to the credential-protected loopback service. This is a single-owner VPS integration, not a multi-tenant service.
 
 UI: chat toolbox → Garden MCP → Garden event wake. User chooses a character and auto/receive mode. Save stops the previous connection; Start begins one new connection. Stop, status refresh, and clear are explicit actions. Clear removes configuration and pending events. No timers, health checks or process restarts reopen Garden SSE.
 

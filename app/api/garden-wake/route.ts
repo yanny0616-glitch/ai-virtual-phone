@@ -1,11 +1,14 @@
 import {NextRequest,NextResponse} from "next/server";
 import {timingSafeEqual} from "node:crypto";
 import {readFile} from "node:fs/promises";
+import {ACCOUNT_GATE_COOKIE,ACCOUNT_SESSION_COOKIE} from "@/lib/account-cookie-constants";
+import {verifyAccountGateCookieValue} from "@/lib/account-gate-cookie";
 import {isSelfHostedModeEnabled} from "@/lib/self-hosting";
 export const runtime="nodejs";
 export async function POST(req:NextRequest){
  const origin=req.headers.get("origin");
- if(!isSelfHostedModeEnabled()||req.headers.get("sec-fetch-site")!=="same-origin"||!origin||(origin!==req.nextUrl.origin&&origin!==`https://${req.headers.get("host")}`))return NextResponse.json({error:"仅限自部署 Float 同源访问"},{status:403});
+ const loggedIn=isSelfHostedModeEnabled()||await verifyAccountGateCookieValue(req.cookies.get(ACCOUNT_GATE_COOKIE)?.value||"",req.cookies.get(ACCOUNT_SESSION_COOKIE)?.value||"");
+ if(!loggedIn||req.headers.get("sec-fetch-site")!=="same-origin"||!origin||(origin!==req.nextUrl.origin&&origin!==`https://${req.headers.get("host")}`))return NextResponse.json({error:"请登录 Float 并从本站配置页访问"},{status:403});
  try{
   const expected=Buffer.from((await readFile("/etc/float-garden-wake/client-token","utf8")).trim());
   const supplied=Buffer.from(req.headers.get("x-float-garden-key")||"");
