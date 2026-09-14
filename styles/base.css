@@ -438,11 +438,11 @@ a {
   position: absolute;
   left: 0;
   top: 0;
-  width: 20px;
-  height: 20px;
-  border: 1px solid rgba(23, 75, 255, 0.6);
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid rgba(23, 75, 255, 0.7);
   border-radius: 50%;
-  transform: translate(-50%, -50%) scale(0.2);
+  transform: translate(-50%, -50%);
   opacity: 0;
   animation: splashPulseRing 3.6s cubic-bezier(0.1, 0.6, 0.3, 1) infinite;
 }
@@ -494,8 +494,8 @@ a {
   animation: splashFadeIn 1s 2.4s ease forwards;
 }
 @keyframes splashPulseRing {
-  0% { opacity: 0.9; transform: translate(-50%, -50%) scale(0.2); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(14); }
+  0% { opacity: 0.9; width: 8px; height: 8px; }
+  100% { opacity: 0; width: 340px; height: 340px; }
 }
 @keyframes splashPulseCore {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
@@ -508,26 +508,27 @@ a {
   50% { opacity: 0; }
 }
 
-/* 外观页里的开屏预览盒 */
+/* 外观页里的开屏预览盒：内部按 390 宽真实尺寸渲染，整体缩放 */
+.splash-preview-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
 .splash-preview-box {
   position: relative;
   width: 100%;
   aspect-ratio: 9 / 16;
   overflow: hidden;
   border-radius: 14px;
-  container-type: inline-size;
   background: #f1f2f6;
 }
-.splash-preview-box .splash-animation-corner {
-  top: 12px;
-  left: 8px;
-  font-size: 6px;
-}
-.splash-preview-box .splash-animation-corner-right {
-  right: 8px;
-}
-.splash-preview-box .splash-pulse-corner {
-  bottom: 14px;
-  left: 8px;
-  font-size: 6px;
+.splash-preview-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
 }

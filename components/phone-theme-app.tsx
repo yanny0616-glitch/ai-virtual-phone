@@ -77,7 +77,7 @@ import {
 } from "@/lib/appearance-presets";
 import { notifyDesktopWidgetsChanged } from "@/lib/mascot-events";
 import { SPLASH_VARIANTS, readSplashVariant, writeSplashVariant, type SplashVariantId } from "@/lib/splash-config";
-import { SplashVariant } from "@/components/splash-variants";
+import { SplashPreview, SplashVariant } from "@/components/splash-variants";
 
 type ThemeSection =
   | "menu"
@@ -956,11 +956,11 @@ function SplashVariantPage({ onNotice }: { onNotice: (text: string) => void }) {
           const active = selected === variant.id;
           return (
             <div key={variant.id} className="rounded-xl bg-[var(--c-card)] border p-2 flex flex-col gap-2" style={{ borderColor: active ? "var(--c-icon-active)" : "var(--c-card-border)" }}>
-              <button type="button" className="splash-preview-box" onClick={() => setPreviewing(variant.id)} aria-label={`预览${variant.label}`}>
+              <button type="button" className="splash-preview-btn" onClick={() => setPreviewing(variant.id)} aria-label={`预览${variant.label}`}>
                 {variant.id === "none" ? (
-                  <div className="absolute inset-0 grid place-items-center ts-11 text-[var(--c-text)]">直接进桌面</div>
+                  <div className="splash-preview-box grid place-items-center ts-11 text-[var(--c-text)]">直接进桌面</div>
                 ) : (
-                  <SplashVariant variant={variant.id} />
+                  <SplashPreview variant={variant.id} />
                 )}
               </button>
               <div className="ts-12 font-semibold flex items-center gap-1">

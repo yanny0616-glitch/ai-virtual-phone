@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
 import { SplashAnimation } from "./splash-animation";
 import type { SplashVariantId } from "@/lib/splash-config";
 
@@ -59,4 +60,31 @@ export function SplashVariant({ variant }: { variant: SplashVariantId }) {
   if (variant === "pulse") return <PulseSplash />;
   // "none" 也渲染默认动画：主壳会在水合完成后自动跳过，之前那一两秒总得有画面
   return <SplashAnimation />;
+}
+
+// 预览：按真实手机尺寸渲染再整体缩小，字号/圆角/位置和真开屏一致（小盒子里直接渲染会走样）
+const PREVIEW_W = 390;
+const PREVIEW_H = Math.round((390 * 16) / 9);
+
+export function SplashPreview({ variant }: { variant: SplashVariantId }) {
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(0);
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const update = () => setScale(box.clientWidth / PREVIEW_W);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={boxRef} className="splash-preview-box">
+      {scale > 0 && (
+        <div className="splash-preview-stage" style={{ width: PREVIEW_W, height: PREVIEW_H, transform: `scale(${scale})` }}>
+          <SplashVariant variant={variant} />
+        </div>
+      )}
+    </div>
+  );
 }
