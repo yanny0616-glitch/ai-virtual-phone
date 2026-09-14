@@ -625,7 +625,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
 
   return (
     <div className="qa-devnotice-backdrop" onClick={onClose}>
-      <div className="qa-devnotice" role="dialog" aria-label="工坊配置" onClick={(e) => e.stopPropagation()}>
+      <div className="qa-devnotice" style={{ maxHeight: "85dvh", overflowY: "auto" }} role="dialog" aria-label="工坊配置" onClick={(e) => e.stopPropagation()}>
         <div className="qa-devnotice-title">工坊配置</div>
         <div className="qa-settings-hint">允许工坊调用的 MCP（沿用聊天工具箱配置）</div>
         <div style={{ maxHeight: "24vh", overflowY: "auto" }}>
