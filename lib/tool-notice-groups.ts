@@ -4,7 +4,7 @@ import type { ChatMessage } from "./chat-storage";
 export function groupToolNotices<T extends Pick<ChatMessage,"id"|"mediaType"|"content">>(messages: T[], isHidden?: (msg: T) => boolean) {
     const groups=new Map<number,T[]>(), members=new Set<number>();
     let start=-1; let notices:T[]=[];
-    const flush=()=>{if(notices.length>1){groups.set(start,notices);}start=-1;notices=[];};
+    const flush=()=>{if(notices.length>0){groups.set(start,notices);}start=-1;notices=[];};
     for(let i=0;i<messages.length;i++) {
         const msg=messages[i];
         if(msg.mediaType==="tool_call" || msg.mediaType==="tool_result" || (isHidden?.(msg) && msg.mediaType!=="tool_notice"))continue;
