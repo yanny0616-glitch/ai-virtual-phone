@@ -716,6 +716,20 @@ const githubCommitTool: QaTool = {
         // 替换在此处解析成完整内容（读当前文件→替换→交给原提交管线），确认面板展示的即最终内容
         const files: QaCommitFile[] = [];
         const resolved = new Map<string, string>(); // 同文件多条编辑按顺序叠加
+        const originals = new Map<string, string | null>(); // 确认卡 diff 用的原文；null = 新文件
+        const readOriginal = async (path: string): Promise<string | null | undefined> => {
+            try {
+                return (await readQaGithubFile(config, path, context?.signal)).text;
+            } catch (error) {
+                return error instanceof Error && error.message.startsWith("文件不存在") ? null : undefined;
+            }
+        };
+        // 全自动模式没有确认卡，不为 diff 多花 API 配额
+        const captureOriginal = async (path: string) => {
+            if (context?.autoCommit || originals.has(path)) return;
+            const original = await readOriginal(path);
+            if (original !== undefined) originals.set(path, original);
+        };
         const consumedStaged: string[] = []; // 引用了暂存区的路径：提案落地后才清空（提交失败可重试）
         for (const raw of rawFiles) {
             if (!raw || typeof raw !== "object") continue;
@@ -728,10 +742,12 @@ const githubCommitTool: QaTool = {
                 if (staged == null) return `文件 ${path}：提交暂存区里没有它。先用「暂存提交文件」写入。当前暂存区：${commitStagingSummary()}`;
                 resolved.set(path, staged);
                 consumedStaged.push(stagedKey);
+                await captureOriginal(path);
                 continue;
             }
             if (typeof entry.content === "string") {
                 resolved.set(path, entry.content);
+                await captureOriginal(path);
                 continue;
             }
             if (typeof entry.find === "string" && typeof entry.replace === "string") {
@@ -743,6 +759,7 @@ const githubCommitTool: QaTool = {
                     } catch (error) {
                         return `片段替换失败：读取 ${path} 出错——${error instanceof Error ? error.message : String(error)}。新文件请用 {path, content} 整写。`;
                     }
+                    if (!originals.has(path)) originals.set(path, base);
                 }
                 const count = base.split(entry.find).length - 1;
                 if (count === 0) return `文件 ${path}：找不到 find 片段。先用「读取仓库文件」核对原文（注意空格与换行须完全一致）。`;
@@ -753,7 +770,7 @@ const githubCommitTool: QaTool = {
             }
             return `文件 ${path}：需给 content（整写）或 find+replace（片段替换）。`;
         }
-        for (const [path, content] of resolved) files.push({ path, content });
+        for (const [path, content] of resolved) files.push({ path, content, original: originals.get(path) });
         const deletes = (Array.isArray(args.deletes) ? args.deletes : [])
             .map((p) => (typeof p === "string" ? p.trim() : ""))
             .filter(Boolean);

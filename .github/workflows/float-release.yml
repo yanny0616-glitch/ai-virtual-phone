@@ -34,7 +34,7 @@ jobs:
         run: npm ci
 
       - name: Check generated copies are in sync
-        run: npm run check:push && npm run check:apps-dist && npm run check:sdk
+        run: npm run check:push && npm run check:apps-dist && npm run check:sdk && npm run check:qa
 
       - name: Build production bundle
         run: npm run build

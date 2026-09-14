@@ -112,6 +112,8 @@ function getContextBudget(): number {
 function entryChars(entry: QaContextEntry): number {
     let total = entry.content.length;
     for (const file of entry.files ?? []) total += file.name.length + file.content.length;
+    // 图片 dataURL 每轮原样重发，不计入就永远触不到压缩阈值
+    for (const image of entry.images ?? []) total += image.length;
     for (const call of entry.toolCalls ?? []) {
         total += call.name.length + JSON.stringify(call.args ?? {}).length;
     }
@@ -533,6 +535,20 @@ export function editAndResendQaMessage(
     }));
     void sendQaMessage(content, images, files);
     return { ok: true };
+}
+
+/** 重新生成最后一条回复：等价于把上一条用户消息原样重发。只允许最后一轮，且该轮没有工具副作用。 */
+export function regenerateQaMessage(sessionId: string, assistantMsgId: string): QaMessageEditResult {
+    const session = sessions.find((candidate) => candidate.id === sessionId);
+    if (!session) return { ok: false, reason: "会话已不存在。" };
+    const index = session.messages.findIndex((message) => message.id === assistantMsgId);
+    if (index < 0) return { ok: false, reason: "消息已不存在。" };
+    if (index !== session.messages.length - 1) return { ok: false, reason: "只能重新生成最后一条回复。" };
+    const userMsg = session.messages[index - 1];
+    if (!userMsg || userMsg.role !== "user") return { ok: false, reason: "这轮回复没有对应的用户消息（续接轮次），无法重来。" };
+    const blocked = getQaEditAndResendBlockReason(sessionId, userMsg.id);
+    if (blocked) return { ok: false, reason: blocked.replace("；你仍可以保存文字修改", "，请新开一轮描述需求") };
+    return editAndResendQaMessage(sessionId, userMsg.id, userMsg.content, userMsg.images, userMsg.files);
 }
 
 function updateSession(sessionId: string, updater: (session: QaSession) => QaSession, options?: { persist?: boolean }) {

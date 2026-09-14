@@ -2062,3 +2062,121 @@
   opacity: 0.45;
   cursor: default;
 }
+
+/* ── 代码块语法高亮（跟随浅色 token，不引入 hljs 主题文件）── */
+.qa-codeblock .hljs-comment,
+.qa-codeblock .hljs-quote { color: var(--qa-text-tertiary); font-style: italic; }
+.qa-codeblock .hljs-keyword,
+.qa-codeblock .hljs-selector-tag,
+.qa-codeblock .hljs-meta,
+.qa-codeblock .hljs-doctag { color: #8a4bd6; }
+.qa-codeblock .hljs-string,
+.qa-codeblock .hljs-regexp,
+.qa-codeblock .hljs-addition { color: #3a7d44; }
+.qa-codeblock .hljs-number,
+.qa-codeblock .hljs-literal,
+.qa-codeblock .hljs-symbol { color: #b25b1e; }
+.qa-codeblock .hljs-title,
+.qa-codeblock .hljs-title.function_,
+.qa-codeblock .hljs-title.class_,
+.qa-codeblock .hljs-section { color: #2f5fc4; }
+.qa-codeblock .hljs-attr,
+.qa-codeblock .hljs-attribute,
+.qa-codeblock .hljs-variable,
+.qa-codeblock .hljs-template-variable,
+.qa-codeblock .hljs-property { color: #9a5c0c; }
+.qa-codeblock .hljs-built_in,
+.qa-codeblock .hljs-type { color: #1f7a8c; }
+.qa-codeblock .hljs-name,
+.qa-codeblock .hljs-tag { color: #2f5fc4; }
+.qa-codeblock .hljs-deletion { color: var(--qa-danger); }
+.qa-codeblock .hljs-emphasis { font-style: italic; }
+.qa-codeblock .hljs-strong { font-weight: 600; }
+
+/* ── 提案卡：文件行可展开看 diff ── */
+.qa-commit-files {
+  max-height: none;
+}
+.qa-commit-file-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.qa-commit-file-chevron {
+  flex: none;
+  color: var(--qa-text-tertiary);
+  transition: transform 0.15s ease;
+}
+.qa-commit-file.is-open .qa-commit-file-chevron {
+  transform: rotate(180deg);
+}
+.qa-commit-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qa-commit-file-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  background: var(--qa-accent-subtle);
+  color: var(--qa-accent);
+}
+.qa-commit-stat {
+  flex: none;
+  display: inline-flex;
+  gap: 5px;
+  font-size: 11px;
+}
+.qa-commit-stat .is-add { color: var(--success); }
+.qa-commit-stat .is-del { color: var(--qa-danger); }
+.qa-commit-diff-note {
+  margin: 4px 0 6px 18px;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--qa-text-tertiary);
+}
+.qa-commit-diff {
+  margin: 4px 0 8px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--qa-bg-surface);
+  box-shadow: inset 0 0 0 1px var(--qa-border-subtle);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.qa-diff-line {
+  padding: 0 8px;
+  color: var(--qa-text-secondary);
+}
+.qa-diff-sign {
+  display: inline-block;
+  width: 12px;
+  color: var(--qa-text-tertiary);
+}
+.qa-diff-line.is-add {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--qa-text-primary);
+}
+.qa-diff-line.is-del {
+  background: color-mix(in srgb, var(--qa-danger) 11%, transparent);
+  color: var(--qa-text-primary);
+}
+.qa-diff-line.is-hunk {
+  padding-top: 2px;
+  color: var(--qa-accent);
+  background: var(--qa-accent-subtle);
+}

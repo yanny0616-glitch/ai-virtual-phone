@@ -46,6 +46,7 @@ import {
 import { loadQaGithubConfig } from "./qa-github";
 import { loadUploadConfig } from "./resource-hub-upload";
 import { CUSTOM_APP_CREATOR_GUIDE_MD } from "./custom-app-creator-guide";
+import { CHAT_PLUGIN_FULL_DOC } from "./chat-plugin-docs";
 import { fetchCustomAppMarketItems, fetchMyCustomAppMarketItems } from "./custom-app-market-client";
 import { buildMarketItemByAppId, classifyInstalledApp, type MarketOwnershipData } from "./custom-app-ownership";
 import type { CustomAppPermission, InstalledCustomApp } from "./custom-app-types";
@@ -172,17 +173,17 @@ const contentGuideTool: QaContentTool = {
     name: "创作指南",
     nativeName: "read_creation_guide",
     description:
-        "读取三类本机内容的官方制作说明（自定义APP / 小游戏 / 黑市剧场）。动手写内容前必读：包含运行时协议、可用 API、字段含义与限制。",
+        "读取官方制作说明（自定义APP / 小游戏 / 黑市剧场 / 聊天插件）。动手写内容前必读：包含运行时协议、可用 API、字段含义与限制。",
     schemaLines: [
         "  参数：",
-        "    · type (必填) — app / game / theater",
+        "    · type (必填) — app / game / theater / plugin",
         "    · page (可选) — 指南较长时分页返回，默认第 1 页",
         '  调用：[执行动作:创作指南({"type":"game"})]',
     ],
     parameters: {
         type: "object",
         properties: {
-            type: { type: "string", enum: ["app", "game", "theater"], description: "内容类型" },
+            type: { type: "string", enum: ["app", "game", "theater", "plugin"], description: "内容类型" },
             page: { type: "number", description: "页码，默认 1" },
         },
         required: ["type"],
@@ -193,8 +194,9 @@ const contentGuideTool: QaContentTool = {
             type === "app" ? CUSTOM_APP_CREATOR_GUIDE_MD
             : type === "game" ? GAME_CREATOR_GUIDE_MD
             : type === "theater" ? THEATER_GUIDE_MD
+            : type === "plugin" ? CHAT_PLUGIN_FULL_DOC
             : null;
-        if (!guide) return "type 需为 app / game / theater 之一。";
+        if (!guide) return "type 需为 app / game / theater / plugin 之一。";
         const pageSize = getQaPageChars();
         const pages = Math.max(1, Math.ceil(guide.length / pageSize));
         const page = Math.min(pages, Math.max(1, typeof args.page === "number" ? Math.floor(args.page) : 1));
@@ -806,7 +808,7 @@ const readContentTool: QaContentTool = {
     parameters: {
         type: "object",
         properties: {
-            type: { type: "string", enum: ["app", "game", "theater"], description: "内容类型" },
+            type: { type: "string", enum: ["app", "game", "theater", "plugin"], description: "内容类型" },
             name: { type: "string", description: "APP 名 / 游戏标题 / 剧场档案名（先用「清单」查有什么）" },
             page: { type: "number", description: "内容较长时分页返回，默认第 1 页" },
         },
@@ -816,7 +818,7 @@ const readContentTool: QaContentTool = {
         "读取一条本机内容的完整源码与字段：自定义 APP（含 HTML）、游戏（草稿箱优先，其次本机测试）、剧场（草稿箱优先，其次本机测试）。修改前先读，改完用对应的保存/安装工具写回。",
     schemaLines: [
         "  参数：",
-        "    · type (必填) — app / game / theater",
+        "    · type (必填) — app / game / theater / plugin",
         "    · name (必填) — APP 名 / 游戏标题 / 剧场档案名",
         "    · page (可选) — 内容较长时分页，默认第 1 页",
         '  调用：[执行动作:读取本机内容({"type":"game","name":"五子棋"})]',
@@ -1190,7 +1192,7 @@ const exportContentTool: QaContentTool = {
     parameters: {
         type: "object",
         properties: {
-            type: { type: "string", enum: ["app", "game", "theater"], description: "内容类型" },
+            type: { type: "string", enum: ["app", "game", "theater", "plugin"], description: "内容类型" },
             name: { type: "string", description: "APP 名 / 游戏草稿标题 / 剧场草稿标题" },
         },
         required: ["type", "name"],
@@ -1199,7 +1201,7 @@ const exportContentTool: QaContentTool = {
         "把一条本机内容导出为文件下载（blob 下载，不刷新页面），用户可发给别人导入：APP 导出市场同款 zip 安装包（对方从应用市场上传导入）；游戏/剧场导出草稿 JSON（对方从草稿箱「从文件导入」）。游戏/剧场只支持草稿——本机测试内容先用对应的存草稿工具转成草稿再导出。",
     schemaLines: [
         "  参数：",
-        "    · type (必填) — app / game / theater",
+        "    · type (必填) — app / game / theater / plugin",
         "    · name (必填) — APP 名 / 游戏草稿标题 / 剧场草稿标题",
         '  调用：[执行动作:导出文件({"type":"app","name":"番茄钟"})]',
     ],

@@ -2,14 +2,19 @@
 
 import { loadQaMcpAccess, saveQaMcpAccess } from "@/lib/qa-mcp-access";
 import { loadMcpServers } from "@/lib/tool-storage";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 // CommonMark 的 flanking 规则会让 **「加粗」** 这类紧贴全角标点的写法解析失败
 // （** 后跟标点时要求前面是空格/标点，中文里前面通常是汉字），中文消息大量中招。
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkBreaks from "remark-breaks";
-import { AppWindow, ArrowUp, BrushCleaning, Check, ChevronLeft, ChevronRight, Copy, Drama, FileCode2, FileText, Gamepad2, Github, Image as ImageIcon, Loader2, Menu, MoreVertical, Paperclip, Pencil, Pin, PinOff, Play, Plus, Square, Trash2, Wrench, X } from "lucide-react";
+import { AppWindow, ArrowUp, BrushCleaning, Check, ChevronLeft, ChevronRight, Copy, Drama, FileCode2, FileText, Gamepad2, Github, Image as ImageIcon, Loader2, Menu, MoreVertical, Paperclip, Pencil, Pin, PinOff, Play, Plus, Square, Trash2, Wrench, X,
+  RefreshCw,
+  ChevronDown,
+} from "lucide-react";
+import { highlightQaCode } from "@/lib/qa-highlight";
+import { computeQaLineDiff, type QaLineDiff } from "@/lib/qa-diff";
 import { getQaApiLogs, clearQaApiLogs, type DebugInfo } from "@/lib/api-log-store";
 import { QaFileCard } from "@/components/qa-file-card";
 import { parseQaFileMarker } from "@/lib/qa-computer-tools";
@@ -41,6 +46,7 @@ import {
   QA_TEXT_ATTACHMENTS_MAX_CHARS,
   setQaContextBudgetChars,
   retryQaMessage,
+  regenerateQaMessage,
   renameQaSession,
   revertQaAppliedCommit,
   sendQaMessage,
@@ -69,6 +75,11 @@ import {
   getQaPromptCache,
   setQaPromptCache,
   setQaMaxOutputTokens,
+  getQaTemperature,
+  setQaTemperature,
+  QA_DEFAULT_TEMPERATURE,
+  QA_TEMPERATURE_MIN,
+  QA_TEMPERATURE_MAX,
   QA_DEFAULT_MAX_OUTPUT_TOKENS,
   QA_MAX_OUTPUT_TOKENS_MIN,
   QA_MAX_OUTPUT_TOKENS_MAX,
@@ -111,6 +122,7 @@ function QaCodeBlock({ className, children }: { className?: string; children?: R
   const [copied, setCopied] = useState(false);
   const language = /language-(\w+)/.exec(className || "")?.[1] ?? "";
   const code = String(children ?? "").replace(/\n$/, "");
+  const html = useMemo(() => highlightQaCode(code, language), [code, language]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard
@@ -131,7 +143,7 @@ function QaCodeBlock({ className, children }: { className?: string; children?: R
         </button>
       </div>
       <pre>
-        <code>{code}</code>
+        {html != null ? <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} /> : <code>{code}</code>}
       </pre>
     </div>
   );
@@ -158,6 +170,55 @@ const QA_MARKDOWN_COMPONENTS = {
 } as any;
 
 // ── 提交提案卡片 ─────────────────────────────────────
+
+/** 单个文件行：点开看逐行 diff。原文缺省（提案时没读到）就只能整文件展示新内容。 */
+function QaCommitFileRow({ path, content, original }: { path: string; content: string; original?: string | null }) {
+  const [open, setOpen] = useState(false);
+  const diff: QaLineDiff | null = useMemo(
+    () => (open ? computeQaLineDiff(original ?? "", content) : null),
+    [open, original, content],
+  );
+  const isNew = original === null;
+  const unknown = original === undefined;
+  const stat = diff && !diff.tooLarge ? (
+    <span className="qa-commit-stat">
+      {diff.added > 0 && <span className="is-add">+{diff.added}</span>}
+      {diff.removed > 0 && <span className="is-del">−{diff.removed}</span>}
+    </span>
+  ) : null;
+  return (
+    <li className={`qa-commit-file${open ? " is-open" : ""}`}>
+      <button type="button" className="qa-commit-file-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <ChevronDown size={12} className="qa-commit-file-chevron" />
+        <span className="qa-commit-file-path">{path}</span>
+        {isNew && <span className="qa-commit-file-tag">新文件</span>}
+        {unknown && <span className="qa-commit-file-tag">原文未读取</span>}
+        {stat}
+      </button>
+      {open && diff && (
+        diff.tooLarge ? (
+          <div className="qa-commit-diff-note">文件太大（超过 4000 行），不逐行比对：整文件替换，新内容 {content.split("\n").length} 行。</div>
+        ) : diff.hunks.length === 0 ? (
+          <div className="qa-commit-diff-note">内容与仓库原文完全一致，没有实际改动。</div>
+        ) : (
+          <pre className="qa-commit-diff">
+            {diff.hunks.map((hunk, index) => (
+              <Fragment key={index}>
+                <div className="qa-diff-line is-hunk">@@ -{hunk.oldStart} +{hunk.newStart} @@</div>
+                {hunk.lines.map((line, lineIndex) => (
+                  <div key={lineIndex} className={`qa-diff-line is-${line.kind}`}>
+                    <span className="qa-diff-sign">{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}</span>
+                    {line.text || " "}
+                  </div>
+                ))}
+              </Fragment>
+            ))}
+          </pre>
+        )
+      )}
+    </li>
+  );
+}
 
 function QaCommitCard({ msg }: { msg: QaMsg }) {
   const pending = msg.pendingCommit;
@@ -188,7 +249,7 @@ function QaCommitCard({ msg }: { msg: QaMsg }) {
       <div className="qa-commit-msg">{proposal.message}</div>
       <ul className="qa-commit-files">
         {files.map((f) => (
-          <li key={f.path}>{f.path}</li>
+          <QaCommitFileRow key={f.path} path={f.path} content={f.content} original={f.original} />
         ))}
         {(proposal.deletes ?? []).map((path) => (
           <li key={`del-${path}`} className="qa-commit-file-delete">− {path}（删除）</li>
@@ -298,6 +359,7 @@ const QaMessageItem = memo(function QaMessageItem({
   onViewImage,
   onCopy,
   onEdit,
+  onRegenerate,
 }: {
   msg: QaMsg;
   isStreaming: boolean;
@@ -305,6 +367,8 @@ const QaMessageItem = memo(function QaMessageItem({
   onViewImage: (url: string) => void;
   onCopy: (content: string) => void;
   onEdit: (msg: QaMsg) => void;
+  /** 只有会话最后一条回复才给：重新生成会删掉这条回复重来 */
+  onRegenerate?: (id: string) => void;
 }) {
   const thinkingOnly = isStreaming && !msg.content && (!msg.tools || msg.tools.length === 0);
   // 消息操作（复制原始内容 / 编辑原始内容——前端渲染会吞掉一些特殊标签，
@@ -323,6 +387,11 @@ const QaMessageItem = memo(function QaMessageItem({
           <button type="button" className="qa-msg-action" aria-label="修改原始内容" title="修改" onClick={() => onEdit(msg)}>
             <Pencil size={14} strokeWidth={2} />
           </button>
+          {msg.role === "assistant" && onRegenerate && (
+            <button type="button" className="qa-msg-action" aria-label="重新生成" title="重新生成" onClick={() => onRegenerate(msg.id)}>
+              <RefreshCw size={14} strokeWidth={2} />
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -570,6 +639,10 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     const v = getQaMaxOutputTokens();
     return v == null ? "" : String(v);
   });
+  const [temperature, setTemperature] = useState(() => {
+    const v = getQaTemperature();
+    return v == null ? "" : String(v);
+  });
   const [promptCache, setPromptCache] = useState(() => getQaPromptCache());
   const usedChars = getQaActiveContextChars();
   const pct = Math.round((usedChars / getQaContextBudgetChars()) * 100);
@@ -596,11 +669,18 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
       onNotice?.(`单次最大输出 token 需留空或为 ${QA_MAX_OUTPUT_TOKENS_MIN.toLocaleString()} - ${QA_MAX_OUTPUT_TOKENS_MAX.toLocaleString()} 之间的数字。`);
       return;
     }
+    const trimmedTemp = temperature.trim();
+    const parsedTemp = trimmedTemp ? Number(trimmedTemp) : null;
+    if (parsedTemp != null && (!Number.isFinite(parsedTemp) || parsedTemp < QA_TEMPERATURE_MIN || parsedTemp > QA_TEMPERATURE_MAX)) {
+      onNotice?.(`温度需留空或为 ${QA_TEMPERATURE_MIN} - ${QA_TEMPERATURE_MAX} 之间的数字。`);
+      return;
+    }
     setQaContextBudgetChars(parsed);
     setQaPageChars(parsedPage);
     setQaMaxRounds(parsedRounds);
     // 留空 = 显式不传 max_tokens（0 哨兵），与"没设置用默认值"区分开
     setQaMaxOutputTokens(trimmedTokens ? parsedTokens : 0);
+    setQaTemperature(parsedTemp ?? "omit");
     setQaPromptCache(promptCache);
     saveQaMcpAccess(mcpAccess);
     onNotice?.("已保存工坊配置。");
@@ -612,6 +692,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     setQaPageChars(null);
     setQaMaxRounds(null);
     setQaMaxOutputTokens(null);
+    setQaTemperature(null);
     setQaPromptCache(null);
     saveQaMcpAccess({});
     setMcpAccess({});
@@ -620,6 +701,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     setPageChars(String(QA_DEFAULT_PAGE_CHARS));
     setMaxRounds(String(QA_DEFAULT_MAX_ROUNDS));
     setMaxOutTokens(String(QA_DEFAULT_MAX_OUTPUT_TOKENS));
+    setTemperature(String(QA_DEFAULT_TEMPERATURE));
     onNotice?.("已恢复默认配置。");
   };
 
@@ -701,6 +783,22 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
         </label>
         <div className="qa-settings-hint">
           输出长度护栏：每次请求带 max_tokens，小坊会按该预算分段写大文件，写超被安全截断后自动续接，不再整轮报废。默认 {QA_DEFAULT_MAX_OUTPUT_TOKENS.toLocaleString()}；留空 = 不传该参数（部分模型/中转不支持 max_tokens 时请留空）。
+        </div>
+        <label className="qa-settings-field">
+          <span>采样温度</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={QA_TEMPERATURE_MIN}
+            max={QA_TEMPERATURE_MAX}
+            step={0.1}
+            placeholder="留空 = 不传"
+            value={temperature}
+            onChange={(e) => setTemperature(e.target.value)}
+          />
+        </label>
+        <div className="qa-settings-hint">
+          工坊不走聊天预设，温度只在这里调。写代码、排障建议 0.5 - 0.8，越低越稳。默认 {QA_DEFAULT_TEMPERATURE}；留空 = 不传该参数（部分推理模型/中转不接受 temperature 时请留空）。
         </div>
         <label className="qa-settings-toggle">
           <span>提示缓存</span>
@@ -957,6 +1055,14 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, []);
 
+  const isCoarsePointer = useCallback(() => {
+    try {
+      return window.matchMedia("(pointer: coarse)").matches;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     if ((!text && pendingImages.length === 0 && pendingFiles.length === 0) || snapshot.isGenerating || snapshot.isCompacting) return;
@@ -1026,6 +1132,16 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
     stickToBottomRef.current = true;
     void retryQaMessage(assistantMsgId);
   }, []);
+
+  const handleRegenerate = useCallback((assistantMsgId: string) => {
+    if (!snapshot.activeSessionId) return;
+    const result = regenerateQaMessage(snapshot.activeSessionId, assistantMsgId);
+    if (!result.ok) {
+      onNotice?.(result.reason);
+      return;
+    }
+    stickToBottomRef.current = true;
+  }, [snapshot.activeSessionId, onNotice]);
 
   const handleCopyMessage = useCallback((content: string) => {
     void navigator.clipboard?.writeText(content).then(
@@ -1174,8 +1290,8 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
           </div>
         ) : (
           <div className="qa-messages">
-            {messages.map((msg) => (
-              <QaMessageItem key={msg.id} msg={msg} isStreaming={msg.id === streamingMsgId} onRetry={handleRetry} onViewImage={setViewerImage} onCopy={handleCopyMessage} onEdit={handleEditMessage} />
+            {messages.map((msg, index) => (
+              <QaMessageItem key={msg.id} msg={msg} isStreaming={msg.id === streamingMsgId} onRetry={handleRetry} onViewImage={setViewerImage} onCopy={handleCopyMessage} onEdit={handleEditMessage} onRegenerate={index === messages.length - 1 && !snapshot.isGenerating ? handleRegenerate : undefined} />
             ))}
           </div>
         )}
@@ -1228,6 +1344,14 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
             onChange={(e) => {
               setInput(e.target.value);
               autoGrow();
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              const modifier = e.metaKey || e.ctrlKey;
+              // 触屏设备 Enter 保留换行（软键盘没有 Shift+Enter），桌面 Enter 直接发送
+              if (!modifier && (e.shiftKey || isCoarsePointer())) return;
+              e.preventDefault();
+              handleSend();
             }}
           />
           <div className="qa-composer-toolbar">

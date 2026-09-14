@@ -27,7 +27,12 @@ async function ghJson<T>(config: QaGithubConfig, path: string, init: RequestInit
     return (await response.json()) as T;
 }
 
-export type QaCommitFile = { path: string; content: string };
+export type QaCommitFile = {
+    path: string;
+    content: string;
+    /** 提案时读到的仓库原文，供确认卡展示 diff：null = 仓库里没有（新文件）；缺省 = 未读取 */
+    original?: string | null;
+};
 
 export type QaCommitResult = {
     sha: string;

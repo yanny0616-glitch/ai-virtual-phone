@@ -13,10 +13,10 @@ import { fetchLlmPayload } from "./llm-http";
 import { pushApiLog } from "./api-log-store";
 import type { LLMContentPart } from "./llm-prompt-assembler";
 import { loadApiConfigs, loadBindingConfig } from "./settings-storage";
-import type { ApiConfig } from "./settings-types";
+import type { ApiConfig, PresetConfig } from "./settings-types";
 import { buildQaSystemPrompt } from "./qa-knowledge";
 import { createSseJsonParser } from "./sse-json";
-import { getQaMaxOutputTokens, getQaMaxRounds, getQaPromptCache } from "./qa-prefs";
+import { getQaMaxOutputTokens, getQaMaxRounds, getQaPromptCache, getQaTemperature } from "./qa-prefs";
 import { parseToolCalls } from "./tool-executor";
 import {
     buildQaNativeNameMap,
@@ -56,6 +56,19 @@ export function resolveQaApiConfig(): ApiConfig | null {
         if (found) return found;
     }
     return apiConfigs[0] ?? null;
+}
+
+/**
+ * 工坊不走聊天预设：只造一个承载采样参数的最小对象给适配层。
+ * enabled_generation_parameters 收窄到温度（可选）+ max_tokens，其余采样项一概不发；
+ * max_tokens 的实际值仍由请求 options.maxTokens（工坊配置）决定。
+ */
+export function resolveQaPreset(): PresetConfig {
+    const temperature = getQaTemperature();
+    return {
+        temperature: temperature ?? 0,
+        enabled_generation_parameters: temperature == null ? ["max_tokens"] : ["temperature", "max_tokens"],
+    } as PresetConfig;
 }
 
 function requireQaApiConfig(): ApiConfig {
@@ -332,6 +345,7 @@ async function requestQaCompletion(
     // 输出护栏：配置了「单次最大输出 token」时每次请求带 max_tokens，
     // 写超被服务端安全截断（agent 循环里会自动续接），而不是拖垮整轮
     const maxTokens = getQaMaxOutputTokens() ?? undefined;
+    const preset = resolveQaPreset();
     // 工坊调用记录：与角色聊天/记忆等底层日志隔离，只进工坊右上角「调用记录」
     const logQaCall = (entry: { model: string; messages: { role: string; content: string | LLMContentPart[]; marker?: string }[]; rawResponse: string; reasoning?: string }) => {
         pushApiLog({
@@ -349,7 +363,7 @@ async function requestQaCompletion(
     };
     try {
       try {
-          const streamRequest = buildProviderRequest(apiConfig, null, messages, { stream: true, maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
+          const streamRequest = buildProviderRequest(apiConfig, preset, messages, { stream: true, maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
           const result = await streamQaProviderRequest(streamRequest, { signal: options?.signal }, options?.callbacks);
           if (!result.content.trim()) throw new Error("LLM 返回了空内容");
           logQaCall({ model: apiConfig.defaultModel, messages: streamRequest.messagesForLog, rawResponse: result.content, reasoning: result.reasoning });
@@ -357,7 +371,7 @@ async function requestQaCompletion(
       } catch (streamError) {
           if (options?.signal?.aborted) throw streamError;
           await options?.callbacks?.onStreamFallback?.(formatQaErrorMessage(streamError));
-          const request = buildProviderRequest(apiConfig, null, messages, { maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
+          const request = buildProviderRequest(apiConfig, preset, messages, { maxTokens, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
           const response = await fetchLlmPayload(request, { signal: options?.signal });
           if (!response.ok) throw new Error(`API ${response.status}: ${await response.text()}`);
           const parsed = parseProviderResponse(request.providerKind, await response.json());
@@ -396,9 +410,8 @@ export async function callQaChat(
     options?: { signal?: AbortSignal; callbacks?: QaStreamCallbacks },
 ): Promise<{ content: string; reasoning: string }> {
     const apiConfig = requireQaApiConfig();
-    const latestUser = [...history].reverse().find((m) => m.role === "user");
     const messages: LlmRequestMessage[] = [
-        { role: "system", content: buildQaSystemPrompt(latestUser?.content ?? "") },
+        { role: "system", content: buildQaSystemPrompt() },
         ...historyToRequestMessages(history),
     ];
     return requestQaCompletion(apiConfig, messages, options);
@@ -621,10 +634,7 @@ export async function callQaAgent(history: QaEngineMessage[], options?: QaAgentO
 
 async function callQaAgentText(apiConfig: ApiConfig, history: QaEngineMessage[], options?: QaAgentOptions): Promise<void> {
     const callbacks = options?.callbacks;
-    const latestUser = options?.context
-        ? [...options.context].reverse().find((m) => m.role === "user")
-        : [...history].reverse().find((m) => m.role === "user");
-    const systemPrompt = `${buildQaSystemPrompt(latestUser?.content ?? "")}\n\n${buildQaToolsPrompt()}\n\n${buildQaOutputBudgetPrompt()}`;
+    const systemPrompt = `${buildQaSystemPrompt()}\n\n${buildQaToolsPrompt()}\n\n${buildQaOutputBudgetPrompt()}`;
     const working: LlmRequestMessage[] = options?.context
         ? contextToTextMessages(options.context)
         : historyToRequestMessages(history);
@@ -696,12 +706,9 @@ async function callQaAgentText(apiConfig: ApiConfig, history: QaEngineMessage[],
 
 async function callQaAgentNative(apiConfig: ApiConfig, history: QaEngineMessage[], options?: QaAgentOptions): Promise<void> {
     const callbacks = options?.callbacks;
-    const latestUser = options?.context
-        ? [...options.context].reverse().find((m) => m.role === "user")
-        : [...history].reverse().find((m) => m.role === "user");
     // 原生协议下工具经请求体声明，系统提示词只保留身份与行为规则
     const systemPrompt = [
-        buildQaSystemPrompt(latestUser?.content ?? ""),
+        buildQaSystemPrompt(),
         "你有原生工具可以调用（见请求中的 tools 定义）。排查问题先分诊再选工具，不要凭空猜测、也不要把工具挨个跑一遍：某个 APP/游戏/剧场自身行为不对是它的代码问题，「读取」源码定位；环境问题（API 连不上/存储满/页面崩溃/设备兼容）才用「环境体检」；产品用法问题查「答疑文档」。收到工具结果后用人话向用户解释结论和建议。",
         buildQaOutputBudgetPrompt(),
     ].join("\n\n");
@@ -709,6 +716,7 @@ async function callQaAgentNative(apiConfig: ApiConfig, history: QaEngineMessage[
         ? contextToNativeMessages(options.context)
         : historyToRequestMessages(history);
     const nameMap = buildQaNativeNameMap();
+    const preset = resolveQaPreset();
 
     const maxRounds = getQaMaxRounds();
     let emittedAny = false;
@@ -730,7 +738,7 @@ async function callQaAgentNative(apiConfig: ApiConfig, history: QaEngineMessage[
         try {
             result = await sendLLMToolStreamRequest(
                 apiConfig,
-                null,
+                preset,
                 messages,
                 tools,
                 [],
@@ -748,7 +756,7 @@ async function callQaAgentNative(apiConfig: ApiConfig, history: QaEngineMessage[
         } catch (streamError) {
             if (options?.signal?.aborted) throw streamError;
             await callbacks?.onStreamFallback?.(formatQaErrorMessage(streamError));
-            const fallbackRequest = buildProviderRequest(apiConfig, null, messages, { tools, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
+            const fallbackRequest = buildProviderRequest(apiConfig, preset, messages, { tools, maxTokens: getQaMaxOutputTokens() ?? undefined, promptCache: getQaPromptCache(), promptCacheKey: "ai-phone-qa" });
             const response = await fetchLlmPayload(fallbackRequest, { signal: options?.signal });
             if (!response.ok) throw new Error(`API ${response.status}: ${await response.text()}`);
             const parsed = parseProviderResponse(fallbackRequest.providerKind, await response.json());
