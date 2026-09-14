@@ -7272,8 +7272,8 @@
 /* 工具调用折叠：贴着系统消息的气泡语言，收起时是一个胶囊 */
 .chat-tool-fold {
   margin: 4px auto;
-  width: max-content;
-  max-width: 88%;
+  width: 88%;
+  text-align: center;
 }
 .chat-tool-fold > summary {
   list-style: none;
@@ -7299,7 +7299,6 @@
   transition: transform 0.16s ease;
 }
 .chat-tool-fold[open] > summary::after { transform: rotate(90deg); }
-.chat-tool-fold[open] { width: 88%; }
 .chat-tool-fold-count { opacity: 0.7; }
 .chat-tool-fold-dot {
   width: 6px; height: 6px; border-radius: 50%;
@@ -7310,6 +7309,7 @@
 .chat-tool-fold-dot.is-failed { background: var(--c-danger); }
 @keyframes chat-tool-fold-blink { 50% { opacity: 0.3; } }
 .chat-tool-fold-body {
+  text-align: left;
   margin-top: 6px;
   display: flex;
   flex-direction: column;
@@ -7327,4 +7327,4 @@
   user-select: none;
   -webkit-user-select: none;
 }
-.chat-tool-fold-item + .chat-tool-fold-item { border-top: 1px solid rgba(0,0,0,0.05); padding-top: 4px; }
+.chat-tool-fold-body > div + div { border-top: 1px solid rgba(0,0,0,0.05); padding-top: 4px; }
