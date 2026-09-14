@@ -7272,8 +7272,10 @@
 /* 工具调用折叠：贴着系统消息的气泡语言，收起时是一个胶囊 */
 .chat-tool-fold {
   margin: 4px auto;
-  width: 88%;
-  text-align: center;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 .chat-tool-fold > summary {
   list-style: none;
@@ -7310,6 +7312,8 @@
 @keyframes chat-tool-fold-blink { 50% { opacity: 0.3; } }
 .chat-tool-fold-body {
   text-align: left;
+  width: fit-content;
+  max-width: 88%;
   margin-top: 6px;
   display: flex;
   flex-direction: column;

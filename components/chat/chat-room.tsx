@@ -5387,7 +5387,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return projected;
     }, [dedupedMessages, normalizeDisplayParts, renderDisplayText]);
 
-    const groupedToolNotices = useMemo(() => groupToolNotices(projectedMessages), [projectedMessages]);
+    const groupedToolNotices = useMemo(() => groupToolNotices(projectedMessages, msg => isHiddenChatFlowMessage(msg)), [projectedMessages]);
 
     // Build a map: startMsgId → { startIdx, endIdx, duration }
     // and a set of all message indices that belong to a voice call group
