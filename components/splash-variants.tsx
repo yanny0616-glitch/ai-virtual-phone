@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { SplashAnimation } from "./splash-animation";
-import type { SplashVariantId } from "@/lib/splash-config";
+import { buildCustomSplashDocument, resolveCustomSplash, type SplashVariantId } from "@/lib/splash-config";
 
 // 几套纯 CSS 开屏（keyframes 在 styles/base.css）。默认的「漂浮」仍是 canvas 版 SplashAnimation。
 // 都是 absolute 铺满父级 .splash-phone-screen；外观页预览时放进等比小盒子里同样成立。
@@ -54,7 +54,23 @@ function PulseSplash() {
   );
 }
 
+// 用户自己的开屏：沙盒 iframe（只放行脚本，不同源），碰不到宿主的存储和页面
+function CustomSplash({ code }: { code: string }) {
+  return (
+    <iframe
+      className="splash-variant splash-custom-frame"
+      title="custom splash"
+      sandbox="allow-scripts"
+      srcDoc={buildCustomSplashDocument(code)}
+    />
+  );
+}
+
 export function SplashVariant({ variant }: { variant: SplashVariantId }) {
+  if (variant.startsWith("custom:")) {
+    const custom = resolveCustomSplash(variant);
+    return custom ? <CustomSplash code={custom.code} /> : <SplashAnimation />;
+  }
   if (variant === "ink") return <InkSplash />;
   if (variant === "aurora") return <AuroraSplash />;
   if (variant === "pulse") return <PulseSplash />;

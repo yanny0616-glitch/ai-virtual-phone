@@ -172,6 +172,11 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "music-custom-bg-v1",
         ],
       },
+      {
+        type: "localStorage",
+        label: "开屏动画选择与自定义开屏",
+        keys: ["ai_phone_splash_variant", "ai_phone_splash_custom_v1"],
+      },
     ],
   },
   {

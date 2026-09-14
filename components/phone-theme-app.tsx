@@ -76,7 +76,18 @@ import {
   type AppearancePreset,
 } from "@/lib/appearance-presets";
 import { notifyDesktopWidgetsChanged } from "@/lib/mascot-events";
-import { SPLASH_VARIANTS, readSplashVariant, writeSplashVariant, type SplashVariantId } from "@/lib/splash-config";
+import {
+  CUSTOM_SPLASH_MAX,
+  SPLASH_VARIANTS,
+  customSplashVariantId,
+  deleteCustomSplash,
+  loadCustomSplashes,
+  readSplashVariant,
+  saveCustomSplash,
+  writeSplashVariant,
+  type CustomSplash,
+  type SplashVariantId,
+} from "@/lib/splash-config";
 import { SplashPreview, SplashVariant } from "@/components/splash-variants";
 
 type ThemeSection =
@@ -937,20 +948,78 @@ function AppearancePresetPage({
   );
 }
 
-// ── 开屏动画：几套里选一套，下次进入生效 ─────────────
+// ── 开屏动画：内置几套 + 自己的代码，选一套下次进入生效 ─────────────
 function SplashVariantPage({ onNotice }: { onNotice: (text: string) => void }) {
   const [selected, setSelected] = useState<SplashVariantId>(() => readSplashVariant());
   const [previewing, setPreviewing] = useState<SplashVariantId | null>(null);
+  const [customs, setCustoms] = useState<CustomSplash[]>(() => loadCustomSplashes());
+  const [editor, setEditor] = useState<{ id?: string; name: string; code: string } | null>(null);
+  const [confirmDeleteCustom, setConfirmDeleteCustom] = useState<CustomSplash | null>(null);
+  const customFileRef = useRef<HTMLInputElement | null>(null);
+
+  const labelOf = (id: SplashVariantId) =>
+    SPLASH_VARIANTS.find((v) => v.id === id)?.label ?? customs.find((c) => customSplashVariantId(c.id) === id)?.name ?? id;
 
   const choose = (id: SplashVariantId) => {
     writeSplashVariant(id);
     setSelected(id);
-    onNotice(id === "none" ? "已关闭开屏，下次打开直接进桌面" : `开屏动画已切换为「${SPLASH_VARIANTS.find((v) => v.id === id)?.label}」，下次打开生效`);
+    onNotice(id === "none" ? "已关闭开屏，下次打开直接进桌面" : `开屏动画已切换为「${labelOf(id)}」，下次打开生效`);
+  };
+
+  const handleSaveCustom = () => {
+    if (!editor) return;
+    try {
+      const saved = saveCustomSplash(editor);
+      setCustoms(loadCustomSplashes());
+      setEditor(null);
+      onNotice(`已保存「${saved.name}」`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "保存失败");
+    }
+  };
+
+  const handleDeleteCustom = (item: CustomSplash) => {
+    setConfirmDeleteCustom(null);
+    deleteCustomSplash(item.id);
+    setCustoms(loadCustomSplashes());
+    setSelected(readSplashVariant());
+    onNotice(`已删除「${item.name}」`);
+  };
+
+  const handleCustomFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const code = typeof reader.result === "string" ? reader.result : "";
+      setEditor((prev) => ({ id: prev?.id, name: prev?.name || file.name.replace(/\.[^.]+$/, ""), code }));
+    };
+    reader.readAsText(file);
+  };
+
+  const formatTime = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  const renderUseButton = (id: SplashVariantId) => {
+    const active = selected === id;
+    return (
+      <button
+        type="button"
+        className={`h-8 rounded-[16px] px-4 text-xs font-bold active:scale-95 ${active ? "bg-[var(--c-page-body-bg)] text-[var(--c-text)]" : "bg-black text-white"}`}
+        onClick={() => choose(id)}
+        disabled={active}
+      >
+        {active ? "使用中" : "使用"}
+      </button>
+    );
   };
 
   return (
     <div className="theme-section-page" data-bottom-reserve>
-      <div className="ts-11 text-[var(--c-text)] leading-relaxed mb-3">点卡片可以预览，点「使用」保存。选择只存在这台设备的浏览器里。</div>
+      <div className="ts-11 text-[var(--c-text)] leading-relaxed mb-3">点卡片可以预览，点「使用」保存。选择只存在这台设备的浏览器里，会随备份带走。</div>
       <div className="grid grid-cols-2 gap-3">
         {SPLASH_VARIANTS.map((variant) => {
           const active = selected === variant.id;
@@ -968,24 +1037,109 @@ function SplashVariantPage({ onNotice }: { onNotice: (text: string) => void }) {
                 {active && <Check size={13} className="text-[var(--c-icon-active)]" />}
               </div>
               <div className="ts-10 text-[var(--c-text)] leading-snug min-h-[2.4em]">{variant.desc}</div>
-              <button
-                type="button"
-                className={`h-8 rounded-[16px] text-xs font-bold active:scale-95 ${active ? "bg-[var(--c-page-body-bg)] text-[var(--c-text)]" : "bg-black text-white"}`}
-                onClick={() => choose(variant.id)}
-                disabled={active}
-              >
-                {active ? "使用中" : "使用"}
-              </button>
+              {renderUseButton(variant.id)}
             </div>
           );
         })}
       </div>
+
+      <div className="flex items-center justify-between mt-5 mb-2">
+        <div className="ts-13 font-semibold">自定义开屏</div>
+        <button
+          type="button"
+          className="inline-flex h-8 items-center gap-1 rounded-[16px] bg-black px-3 text-xs font-bold text-white active:scale-95 disabled:opacity-40"
+          onClick={() => setEditor({ name: "", code: "" })}
+          disabled={customs.length >= CUSTOM_SPLASH_MAX}
+        >
+          <Plus size={14} strokeWidth={2} />
+          新建
+        </button>
+      </div>
+      <div className="ts-11 text-[var(--c-text)] leading-relaxed mb-2">贴一段完整 HTML（可以带 style 和 script），它会在开屏那块 390×844 的画面里独立运行，和换消息主题一样，存几套随时切。</div>
+      {customs.length === 0 ? (
+        <div className="rounded-xl bg-[var(--c-card)] border border-[var(--c-card-border)] p-4 ts-11 text-[var(--c-text)] text-center">还没有自定义开屏</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {customs.map((item) => {
+            const id = customSplashVariantId(item.id);
+            const active = selected === id;
+            return (
+              <div key={item.id} className="rounded-xl bg-[var(--c-card)] border p-2.5 flex gap-3 items-center" style={{ borderColor: active ? "var(--c-icon-active)" : "var(--c-card-border)" }}>
+                <button type="button" className="splash-preview-btn w-12 shrink-0" onClick={() => setPreviewing(id)} aria-label={`预览${item.name}`}>
+                  <SplashPreview variant={id} />
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="ts-13 font-semibold truncate flex items-center gap-1">
+                    {item.name}
+                    {active && <Check size={13} className="text-[var(--c-icon-active)]" />}
+                  </div>
+                  <div className="ts-10 text-[var(--c-text)] opacity-70 mt-0.5">{Math.round(item.code.length / 1000)}K 字符 · 更新于 {formatTime(item.updatedAt)}</div>
+                  <div className="flex gap-1 mt-1.5">
+                    <button type="button" className="w-7 h-7 grid place-items-center rounded-md text-[var(--c-text)] active:bg-[var(--c-page-body-bg)]" title="编辑代码" aria-label="编辑代码" onClick={() => setEditor({ id: item.id, name: item.name, code: item.code })}><Pencil size={13} /></button>
+                    <button type="button" className="w-7 h-7 grid place-items-center rounded-md text-[var(--c-danger,#d0564b)] active:bg-[var(--c-page-body-bg)]" title="删除" aria-label="删除" onClick={() => setConfirmDeleteCustom(item)}><Trash2 size={13} /></button>
+                  </div>
+                </div>
+                {renderUseButton(id)}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {previewing && previewing !== "none" && createPortal(
         <div className="absolute inset-0 z-[60] bg-[#F1F2F6]" onClick={() => setPreviewing(null)}>
           <SplashVariant variant={previewing} />
-          <div className="absolute left-0 right-0 bottom-6 text-center ts-11 text-black/50 z-[5]">点击任意处返回</div>
+          <div className="absolute left-0 right-0 bottom-6 text-center ts-11 text-black/50 z-[5] pointer-events-none">点击任意处返回</div>
+          <button type="button" className="absolute inset-0 z-[4] bg-transparent border-0" aria-label="返回" onClick={() => setPreviewing(null)} />
         </div>,
         document.querySelector(".phone-shell") ?? document.body,
+      )}
+      {editor && createPortal(
+        <ContentDialog
+          title={editor.id ? "编辑自定义开屏" : "新建自定义开屏"}
+          confirmLabel="保存"
+          cancelLabel="取消"
+          confirmDisabled={!editor.code.trim()}
+          onConfirm={handleSaveCustom}
+          onCancel={() => setEditor(null)}
+        >
+          <div className="flex flex-col gap-2">
+            <input
+              type="text"
+              value={editor.name}
+              onChange={(e) => setEditor({ ...editor, name: e.target.value })}
+              placeholder="名字"
+              maxLength={24}
+              className="h-9 rounded-lg border border-[var(--c-card-border)] bg-[var(--c-page-body-bg)] px-3 ts-12 outline-none"
+            />
+            <textarea
+              value={editor.code}
+              onChange={(e) => setEditor({ ...editor, code: e.target.value })}
+              placeholder={"<style>body{background:#111}</style>\n<div id=\"logo\">float</div>\n<script>/* 你的动画 */</script>"}
+              spellCheck={false}
+              className="h-[38vh] rounded-lg border border-[var(--c-card-border)] bg-[var(--c-page-body-bg)] p-2.5 ts-11 font-mono leading-relaxed outline-none resize-none"
+            />
+            <div className="flex items-center justify-between">
+              <button type="button" className="ts-11 text-[var(--c-icon-active)] bg-transparent border-0 p-0" onClick={() => customFileRef.current?.click()}>从 .html 文件导入</button>
+              <span className="ts-10 text-[var(--c-text)] opacity-70">{Math.round(editor.code.length / 1000)}K 字符</span>
+            </div>
+            <input ref={customFileRef} type="file" accept=".html,.htm,text/html" className="hidden" onChange={handleCustomFile} />
+            <div className="ts-10 text-[var(--c-text)] leading-relaxed">代码在沙盒里运行，碰不到手机的数据。没写 &lt;html&gt; 会自动补上无边距的外壳。图片和字体请内嵌为 data URL 或用公网地址。</div>
+          </div>
+        </ContentDialog>,
+        document.querySelector(".phone-shell") ?? document.body,
+      )}
+      {confirmDeleteCustom && (
+        <ConfirmDialog
+          title={`删除「${confirmDeleteCustom.name}」？`}
+          message="正在使用它的话，开屏会回到默认的「漂浮」。"
+          confirmLabel="删除"
+          cancelLabel="取消"
+          variant="danger"
+          icon={Trash2}
+          onConfirm={() => handleDeleteCustom(confirmDeleteCustom)}
+          onCancel={() => setConfirmDeleteCustom(null)}
+        />
       )}
     </div>
   );
