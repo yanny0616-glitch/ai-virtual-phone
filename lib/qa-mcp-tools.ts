@@ -16,15 +16,26 @@ export async function runQaMcp(args:Record<string,unknown>,context?:{signal?:Abo
     // Re-check permission after loading the executor; settings can change mid-turn.
     const current=getQaMcpServers().find(item=>item.id===server.id && item.url===server.url);
     if(!current)throw new Error("该MCP授权已撤回，未执行调用");
+    const redact=(text:string):string=>{
+        for(const secret of [current.url,current.accessToken,current.refreshToken,current.oauthClientSecret,...Object.values(current.headers||{})].filter((s):s is string=>Boolean(s)).sort((a,b)=>b.length-a.length)) {
+            text=text.split(secret).join("[凭据已隐藏]");
+        }
+        return text.replace(/Bearer\s+[^\s"',;]+/gi,"Bearer [凭据已隐藏]");
+    };
     let raw:unknown;
     try {raw=await callConfiguredMcpTool(current,tool.name,(args.arguments||{}) as Record<string,unknown>,context?.signal);}
-    catch {context?.signal?.throwIfAborted();throw new Error("MCP连接或调用失败，请检查该服务器的连接状态；未自动重试业务操作");}
+    catch(error) {
+        context?.signal?.throwIfAborted();
+        const detail=redact(error instanceof Error?error.message:String(error)).slice(0,1000);
+        const hint=/401|Missing bearer token/i.test(detail)?"请在聊天工具箱完成该服务的OAuth授权或配置有效Token；发现工具不代表账号已授权。":"请根据上述错误检查连接或工具参数。";
+        throw new Error(`MCP调用失败：${detail}\n${hint}未自动重试业务操作。`);
+    }
     const result=raw as {isError?:boolean;content?:Array<{type?:string;text?:string;resource?:{text?:string};url?:string;uri?:string}>};
     const texts=(result.content||[]).flatMap(item=>item.type==="text"?[item.text||""]:item.resource?.text?[item.resource.text]:item.type==="resource_link"?[`资源链接：${item.uri||item.url||""}`]:[]);
     let text=texts.join("\n");
     if(!text)text="MCP已返回结果，但没有可显示的文本。";
     // Connection credentials must never be echoed by an error response.
-    for(const secret of [current.accessToken,current.refreshToken,...Object.values(current.headers||{})].filter((s):s is string=>Boolean(s)))text=text.split(secret).join("[凭据已隐藏]");
+    text=redact(text);
     if(result.isError)throw new Error(text.slice(0,1000));
     const images=(result.content||[]).filter(item=>item.type==="image").length;
     if(images)text+=`\n[工具另返回${images}张图片；当前工坊此入口只接收文本，不能据此声称看到了图片内容。]`;

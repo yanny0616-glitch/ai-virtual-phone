@@ -3860,6 +3860,7 @@ async function ensureTokenFresh(server: McpServerConfig, signal?: AbortSignal): 
 
         if (tokenRes.status === 200) {
             const data = JSON.parse(tokenRes.text);
+            if (typeof data.access_token !== "string" || !data.access_token.trim()) return;
             server.accessToken = data.access_token;
             if (data.refresh_token) server.refreshToken = data.refresh_token;
             server.tokenExpiresAt = data.expires_in ? Date.now() + data.expires_in * 1000 : undefined;
@@ -4137,6 +4138,10 @@ export async function completePendingMcpOAuthCallback(): Promise<{ completed: bo
         }
 
         const tokenData = JSON.parse(tokenRes.text);
+        if (typeof tokenData.access_token !== "string" || !tokenData.access_token.trim()) {
+            clearMcpOAuthFlow();
+            return { completed: true, success: false, error: "OAuth服务器未返回有效access_token，授权未完成", serverName: pending.serverName };
+        }
         const servers = loadMcpServers();
         const idx = servers.findIndex(s => s.id === pending.serverId);
         const now = Date.now();
@@ -4201,7 +4206,7 @@ export async function callConfiguredMcpTool(server: McpServerConfig, toolName: s
         if (!reinit.success) throw new Error(reinit.error || "MCP 重新初始化失败");
         res = await request();
     }
-    if (res.error) throw new Error(res.error.message);
+    if (res.error) throw new Error(`MCP tools/call（${res.error.code}）：${res.error.message}`);
     return res.result;
 }
 
@@ -4397,12 +4402,13 @@ export async function startMcpOAuth(server: McpServerConfig): Promise<{ success:
             protocolVersion: MCP_PROTOCOL_VERSION,
             capabilities: {},
             clientInfo: MCP_CLIENT_INFO,
-        });
+        }, undefined, false, isSseUrl(server.url), undefined, server.directFetch);
 
-        if (probe.error?.code !== 401) {
+        // Public initialize/tools/list are not proof of account authorization.
+        // An explicit OAuth action must complete the actual authorization flow.
+        if (probe.error && probe.error.code !== 401) {
             popup.close();
-            const init = await mcpInitialize(server);
-            return init;
+            return { success: false, error: probe.error.message };
         }
 
         // Step 2: Discover OAuth metadata. Notion MCP follows RFC 9470 protected
@@ -4517,6 +4523,10 @@ export async function startMcpOAuth(server: McpServerConfig): Promise<{ success:
         }
 
         const tokenData = JSON.parse(tokenRes.text);
+        if (typeof tokenData.access_token !== "string" || !tokenData.access_token.trim()) {
+            clearMcpOAuthFlow();
+            return { success: false, error: "OAuth服务器未返回有效access_token，授权未完成" };
+        }
         server.accessToken = tokenData.access_token;
         server.refreshToken = tokenData.refresh_token;
         server.tokenExpiresAt = tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : undefined;
