@@ -253,3 +253,7 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 - **提案卡逐行 diff**：「提交修改」在确认模式下顺带读一次仓库原文（片段替换本就读过；整写/暂存引用各多一次读取，404 记为新文件；全自动模式不读，省 API 配额），存进提案的 `original` 字段。确认卡每个文件行可展开，`lib/qa-diff.ts` 做去公共头尾后的 LCS 行 diff，3 行上下文分 hunk，显示 +/− 统计；任一侧超过 4000 行只提示整文件替换。回归：`scripts/check-qa-diff.mjs`。
 - **代码语法高亮**：`lib/qa-highlight.ts` 用 `highlight.js/lib/core` 只注册 11 种常用语言（js/ts/json/html/css/bash/python/sql/yaml/markdown/diff），token 颜色写在 `styles/qa.css` 跟随浅色主题。超过 3 万字符不高亮；未标语言只对 3000 字符内的代码自动识别且要求置信度。流式期间仍是纯文本，生成结束后才高亮。
 - **重新生成**：会话最后一条回复的操作栏多一个刷新按钮，等价于把上一条用户消息原样重发（复用编辑重发的裁剪逻辑与副作用门禁：该轮调过工具就拒绝并提示新开一轮）。续接轮次（重试产生、没有用户气泡）不给重来。
+
+### 工坊按选择调用 REST / 组合 / 自定义 APP 工具（2026-09-14）
+
+与「调用MCP」同一套门禁：工坊配置里第二张勾选表（`lib/qa-tool-access.ts`），默认空，授权绑定 `kind:id → 指纹`（REST 用方法+地址、组合工具用 updatedAt、APP 工具用 APP 版本），指纹变了授权即失效；调用还要求工具在聊天工具箱启用（包内工具还要求包启用）。新增固定工具「调用工具箱工具 / call_workshop_toolbox_tool」：list 列出已授权工具、read 看参数 schema、call 执行，执行前再查一次授权。`tool-executor` 新增 `executeWorkshopToolboxTool` 按 id 定点执行，不走按名字的全表匹配，同名工具不会串条目。REST 工具 headers / fixedParams 的值及其中每个词不论成败一律脱敏；结果超工坊单页上限截断。「配置聊天工具箱」不能改这张授权表。回归：`scripts/check-qa-tool-access.mjs`。

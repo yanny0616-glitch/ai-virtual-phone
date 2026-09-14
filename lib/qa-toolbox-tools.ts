@@ -89,7 +89,7 @@ export async function manageQaToolbox(args:Record<string,unknown>,context?:{sign
     }
     context?.signal?.throwIfAborted();
     save(kind,existing?rows.map(row=>row.id===id?next:row):[...rows,next]);
-    return JSON.stringify({saved:true,location:"设置 → 聊天工具箱",entry:redactToolboxEntry(next),notice:"此配置供角色聊天调用；工坊这里只管理配置，不执行该工具的业务动作。"});
+    return JSON.stringify({saved:true,location:"设置 → 聊天工具箱",entry:redactToolboxEntry(next),notice:"此配置供角色聊天调用；工坊这里只管理配置。工坊自己要调用它，需用户在工坊配置里勾选授权。"});
 }
 
 export const QA_TOOLBOX_TOOL = {

@@ -1,6 +1,7 @@
 "use client";
 
 import { loadQaMcpAccess, saveQaMcpAccess } from "@/lib/qa-mcp-access";
+import { listQaSelectableTools, loadQaToolAccess, saveQaToolAccess } from "@/lib/qa-tool-access";
 import { loadMcpServers } from "@/lib/tool-storage";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
@@ -632,6 +633,8 @@ function QaSessionDrawer({
 function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?: (msg: string) => void }) {
   const [mcpServers] = useState(() => loadMcpServers());
   const [mcpAccess, setMcpAccess] = useState(() => loadQaMcpAccess());
+  const [toolboxTools] = useState(() => listQaSelectableTools());
+  const [toolAccess, setToolAccess] = useState(() => loadQaToolAccess());
   const [budget, setBudget] = useState(() => String(getQaContextBudgetChars()));
   const [pageChars, setPageChars] = useState(() => String(getQaPageChars()));
   const [maxRounds, setMaxRounds] = useState(() => String(getQaMaxRounds()));
@@ -683,6 +686,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     setQaTemperature(parsedTemp ?? "omit");
     setQaPromptCache(promptCache);
     saveQaMcpAccess(mcpAccess);
+    saveQaToolAccess(toolAccess);
     onNotice?.("已保存工坊配置。");
     onClose();
   };
@@ -696,6 +700,8 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     setQaPromptCache(null);
     saveQaMcpAccess({});
     setMcpAccess({});
+    saveQaToolAccess({});
+    setToolAccess({});
     setPromptCache(true);
     setBudget(String(QA_DEFAULT_CONTEXT_BUDGET_CHARS));
     setPageChars(String(QA_DEFAULT_PAGE_CHARS));
@@ -721,6 +727,23 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
           )) : <div className="qa-settings-hint">先让工坊配置聊天工具箱，再到这里选择允许调用的 MCP。</div>}
         </div>
         <div className="qa-settings-hint">默认不选。工具箱关闭、取消勾选或服务器地址变化后，工坊不能继续调用；更换地址需重新选择。</div>
+
+        <div className="qa-settings-hint">允许工坊调用的工具箱工具（REST / 组合 / 自定义 APP 工具）</div>
+        <div style={{ maxHeight: "24vh", overflowY: "auto" }}>
+          {toolboxTools.length ? toolboxTools.map(tool => (
+            <label key={tool.key} className="qa-settings-toggle">
+              <span>
+                {tool.name}
+                <span className="qa-settings-tag">{tool.kind === "rest" ? "REST" : tool.kind === "composite" ? "组合" : tool.appName ?? "APP"}</span>
+                {!tool.enabled ? "（工具箱已关闭）" : ""}
+              </span>
+              <input type="checkbox" checked={toolAccess[tool.key] === tool.fingerprint} onChange={e => setToolAccess(previous => {
+                const next = { ...previous }; if (e.target.checked) next[tool.key] = tool.fingerprint; else delete next[tool.key]; return next;
+              })} />
+            </label>
+          )) : <div className="qa-settings-hint">聊天工具箱里还没有 REST / 组合工具，也没有装带共享工具的自定义 APP。</div>}
+        </div>
+        <div className="qa-settings-hint">默认不选。REST 换了地址、组合工具被修改、APP 升级后授权自动失效，需重新勾选。</div>
 
         <label className="qa-settings-field">
           <span>上下文预算（字符）</span>

@@ -1,6 +1,8 @@
 import { QA_MCP_TOOL } from "./qa-mcp-tools";
 import { getQaMcpServers } from "./qa-mcp-access";
 import { QA_TOOLBOX_TOOL } from "./qa-toolbox-tools";
+import { QA_TOOLBOX_CALL_TOOL } from "./qa-toolbox-call";
+import { getQaAuthorizedTools } from "./qa-tool-access";
 import { buildProviderRequest, parseProviderResponse } from "./llm-provider-adapter";
 import { loadApiConfigs } from "./settings-storage";
 import type { ApiConfig } from "./settings-types";
@@ -1408,6 +1410,7 @@ export function getQaTools(): QaTool[] {
     const config = loadQaGithubConfig();
     const tools = [...UNIFIED_BASE_TOOLS];
     if (getQaMcpServers().length) tools.push(QA_MCP_TOOL);
+    if (getQaAuthorizedTools().length) tools.push(QA_TOOLBOX_CALL_TOOL);
     if (config) tools.push(...UNIFIED_GITHUB_READ_TOOLS);
     if (config?.token) tools.push(...UNIFIED_GITHUB_WRITE_TOOLS);
     if (isWorkshopComputerEnabled()) tools.push(...QA_COMPUTER_TOOLS);
@@ -1418,6 +1421,7 @@ export function getQaTools(): QaTool[] {
 // Set 去重（部分工具两边都在）
 export const QA_TOOLS: QaTool[] = [...new Set([
     QA_MCP_TOOL,
+    QA_TOOLBOX_CALL_TOOL,
     ...UNIFIED_BASE_TOOLS,
     ...UNIFIED_GITHUB_READ_TOOLS,
     ...UNIFIED_GITHUB_WRITE_TOOLS,

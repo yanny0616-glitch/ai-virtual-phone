@@ -451,6 +451,27 @@ export async function executeToolCalls(toolCalls: ToolCall[], context?: ToolExec
     return Promise.all(toolCalls.map(call => executeSingleToolCall(call, context, { depth: 0 })));
 }
 
+/** 工坊按 id 定点调用工具箱工具：不走按名字的全表匹配，同名工具不会串到别的条目上。 */
+export async function executeWorkshopToolboxTool(
+    target: { kind: "rest" | "composite" | "custom_app"; id: string; name: string },
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext,
+): Promise<ToolResult> {
+    throwIfAborted(context?.signal);
+    if (target.kind === "rest") {
+        const tool = loadRestTools().find(t => t.id === target.id && t.enabled);
+        if (!tool) return { name: target.name, success: false, error: "REST 工具不存在或已关闭" };
+        return executeRestTool(tool, args, context?.signal);
+    }
+    if (target.kind === "composite") {
+        const tool = loadCompositeTools().find(t => t.id === target.id && t.enabled);
+        if (!tool) return { name: target.name, success: false, error: "组合工具不存在或已关闭" };
+        return executeCompositeTool(tool, args, context, 0);
+    }
+    const result = await executeCustomAppToolCall({ name: target.name, args }, context, buildToolNameMacroContext(context));
+    return result ?? { name: target.name, success: false, error: "自定义 APP 工具不存在或已关闭" };
+}
+
 type ToolExecutionHint = {
     depth: number;
     toolType?: CompositeToolStep["toolType"];
