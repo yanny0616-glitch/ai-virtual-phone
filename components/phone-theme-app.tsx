@@ -4,13 +4,19 @@ import { createPortal } from "react-dom";
 import {
   AlertCircle,
   AppWindow,
+  Check,
   Code2,
   Download,
+  Layers,
   LayoutGrid,
   PaintBucket,
+  Pencil,
   Plus,
   RotateCcw,
+  Save,
   Smartphone,
+  Sparkles,
+  Trash2,
   Type,
   Upload,
   Wallpaper,
@@ -58,6 +64,20 @@ import {
   installThemePackageFile,
   resetThemePackageState,
 } from "@/lib/theme-package";
+import {
+  APPEARANCE_PRESET_MAX,
+  deleteAppearancePreset,
+  describeAppearancePreset,
+  isThemeAssetReferencedByPresets,
+  loadAppearancePresets,
+  overwriteAppearancePreset,
+  renameAppearancePreset,
+  saveAppearancePreset,
+  type AppearancePreset,
+} from "@/lib/appearance-presets";
+import { notifyDesktopWidgetsChanged } from "@/lib/mascot-events";
+import { SPLASH_VARIANTS, readSplashVariant, writeSplashVariant, type SplashVariantId } from "@/lib/splash-config";
+import { SplashVariant } from "@/components/splash-variants";
 
 type ThemeSection =
   | "menu"
@@ -67,7 +87,9 @@ type ThemeSection =
   | "widgets"
   | "case"
   | "text"
-  | "css";
+  | "css"
+  | "presets"
+  | "splash";
 
 type ThemeMenuItemSection = Exclude<ThemeSection, "menu"> | "transfer" | "reset";
 type WallpaperSliderField = "wallpaperOpacity" | "wallpaperBlur" | "wallpaperScale" | "wallpaperX" | "wallpaperY";
@@ -135,6 +157,14 @@ function IconReset() {
   return <RotateCcw size={22} strokeWidth={1.75} />;
 }
 
+function IconPresets() {
+  return <Layers size={22} strokeWidth={1.75} />;
+}
+
+function IconSplash() {
+  return <Sparkles size={22} strokeWidth={1.75} />;
+}
+
 const MENU_ITEMS: Array<{
   section: ThemeMenuItemSection;
   icon: () => React.JSX.Element;
@@ -152,6 +182,8 @@ const MENU_ITEMS: Array<{
   { section: "case", icon: IconCase, label: "状态栏", color: BINDING_ACCENTS.memory, glass: "status-bar" },
   { section: "text", icon: IconText, label: "文字", color: BINDING_ACCENTS.identity, glow: `color-mix(in srgb, ${BINDING_ACCENTS.identity} 35%, transparent)`, glass: "text" },
   { section: "css", icon: IconCode, label: "CSS 变量", desc: "自定义全局样式变量", color: BINDING_ACCENTS.embedding, glow: `color-mix(in srgb, ${BINDING_ACCENTS.embedding} 35%, transparent)`, glass: "css" },
+  { section: "presets", icon: IconPresets, label: "外观预设", desc: "存多套外观，一键切换", color: BINDING_ACCENTS.preset, glow: `color-mix(in srgb, ${BINDING_ACCENTS.preset} 35%, transparent)`, glass: "presets" },
+  { section: "splash", icon: IconSplash, label: "开屏动画", desc: "换一套开机画面", color: BINDING_ACCENTS.voice, glass: "quick-action" },
   { section: "transfer", icon: IconTransfer, label: "主题导入 / 导出", desc: "备份与迁移", color: BINDING_ACCENTS.api, glow: `color-mix(in srgb, ${BINDING_ACCENTS.api} 35%, transparent)`, glass: "theme-transfer" },
   { section: "reset", icon: IconReset, label: "恢复默认", desc: "重置外观", color: BINDING_ACCENTS.regex, glow: `color-mix(in srgb, ${BINDING_ACCENTS.regex} 30%, transparent)`, glass: "theme-reset" },
 ];
@@ -168,9 +200,11 @@ const SECTION_TITLES: Record<Exclude<ThemeSection, "menu">, string> = {
   case: "\u624B\u673A\u58F3",
   text: "\u6587\u5B57",
   css: "CSS \u53D8\u91CF",
+  presets: "外观预设",
+  splash: "开屏动画",
 };
 
-const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css"]);
+const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "presets", "splash"]);
 
 function isThemeSection(value: string): value is ThemeSection {
   return THEME_SECTIONS.has(value);
@@ -283,6 +317,21 @@ export function PhoneThemeApp({
     <PageShell title={title} onBack={handleBack}>
         {section === "menu" ? (
           <div className="page-menu appearance-main-menu">
+            {/* Section 0: 外观预设 — 单张通栏卡 */}
+            <div>
+              <h3 className="appearance-menu-section-title">Presets</h3>
+              <div className="menu-group mt-2.5">
+                {MENU_ITEMS.filter(item => item.section === "presets").map((item) => (
+                  <button key={item.section} className="menu-item" type="button" onClick={() => setSection("presets")}>
+                    <span className="card-icon card-icon-glass"><GlassIcon name={item.glass} /></span>
+                    <span className="menu-label appearance-menu-item-label">{item.label}</span>
+                    <span className="ts-11 text-[var(--c-text)] ml-auto mr-1">{item.desc}</span>
+                    <span className="menu-right"><IconChevronRight /></span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Section 1: 外观定制 — 2x2 card grid */}
             <div>
               <h3 className="appearance-menu-section-title">Appearance</h3>
@@ -346,12 +395,12 @@ export function PhoneThemeApp({
                     </div>
                   );
                 })()}
-                {MENU_ITEMS.filter(item => ["text"].includes(item.section)).map((item) => (
+                {MENU_ITEMS.filter(item => ["text", "splash"].includes(item.section)).map((item) => (
                   <button
                     key={item.section}
                     className="menu-item"
                     type="button"
-                    onClick={() => setShowTextAdjust(true)}
+                    onClick={() => (item.section === "splash" ? setSection("splash") : setShowTextAdjust(true))}
                   >
                     <span className="card-icon card-icon-glass">
                       <GlassIcon name={item.glass} />
@@ -440,6 +489,18 @@ export function PhoneThemeApp({
           <GlobalCSSPage draft={draft} onDraftChange={onDraftChange} onApply={onApply} onNotice={onNotice} />
         ) : section === "icons" ? (
           <IconSkinPage draft={draft} onDraftChange={onDraftChange} onApply={onApply} onNotice={onNotice} />
+        ) : section === "presets" ? (
+          <AppearancePresetPage
+            draft={draft}
+            pageIcons={pageIcons}
+            widgets={widgets}
+            onDesktopThemeChange={onDesktopThemeChange}
+            onApply={onApply}
+            onDraftChange={onDraftChange}
+            onNotice={onNotice}
+          />
+        ) : section === "splash" ? (
+          <SplashVariantPage onNotice={onNotice} />
         ) : (
           <div className="flex-1 overflow-y-auto items-start justify-center flex">
             <p className="ts-14 text-[var(--c-icon)]">{"\u300C"}{SECTION_TITLES[section]}{"\u300D\u529F\u80FD\u5F00\u53D1\u4E2D\u2026"}</p>
@@ -680,6 +741,256 @@ function buildColor(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+// ── 外观预设：整套外观存多份，一键切换 ─────────────────
+function AppearancePresetPage({
+  draft,
+  pageIcons,
+  widgets,
+  onDesktopThemeChange,
+  onApply,
+  onDraftChange,
+  onNotice,
+}: {
+  draft: ThemeProfile;
+  pageIcons: DesktopIconLayout;
+  widgets: WidgetInstance[];
+  onDesktopThemeChange: PhoneThemeAppProps["onDesktopThemeChange"];
+  onApply: (next: ThemeProfile) => Promise<void> | void;
+  onDraftChange: (next: ThemeProfile) => void;
+  onNotice: (text: string) => void;
+}) {
+  const [presets, setPresets] = useState<AppearancePreset[]>(() => loadAppearancePresets());
+  const [newName, setNewName] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<AppearancePreset | null>(null);
+  const [confirmOverwrite, setConfirmOverwrite] = useState<AppearancePreset | null>(null);
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const ids = presets.map((p) => p.themeProfile.wallpaperAssetId).filter((id): id is string => Boolean(id));
+    if (!ids.length) return;
+    let cancelled = false;
+    void getThemeAssetMap(ids).then((map) => { if (!cancelled) setThumbs(map); });
+    return () => { cancelled = true; };
+  }, [presets]);
+
+  const refresh = () => setPresets(loadAppearancePresets());
+
+  const handleSave = () => {
+    try {
+      const preset = saveAppearancePreset(newName, { themeProfile: draft, iconLayout: pageIcons, widgets });
+      setNewName("");
+      refresh();
+      onNotice(`已保存预设「${preset.name}」`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "保存失败");
+    }
+  };
+
+  const handleApply = async (preset: AppearancePreset) => {
+    setBusyId(preset.id);
+    try {
+      // 与主题包导入同一条落地路径：桌面布局/组件/dock/文件夹 → DIY 模板 → 主题档案
+      onDesktopThemeChange({ widgets: preset.desktop.widgets, iconLayout: preset.desktop.iconLayout, dock: preset.desktop.dock, folders: preset.desktop.folders });
+      saveDIYTemplates(preset.desktop.diyTemplates);
+      notifyDesktopWidgetsChanged();
+      await onApply(preset.themeProfile);
+      onDraftChange(preset.themeProfile);
+      onNotice(`已切换到「${preset.name}」`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "切换失败");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleOverwrite = (preset: AppearancePreset) => {
+    setConfirmOverwrite(null);
+    const next = overwriteAppearancePreset(preset.id, { themeProfile: draft, iconLayout: pageIcons, widgets });
+    refresh();
+    onNotice(next ? `已用当前外观更新「${next.name}」` : "预设已不存在");
+  };
+
+  const handleRename = () => {
+    if (!renaming) return;
+    renameAppearancePreset(renaming.id, renaming.name);
+    setRenaming(null);
+    refresh();
+  };
+
+  const handleDelete = (preset: AppearancePreset) => {
+    setConfirmDelete(null);
+    deleteAppearancePreset(preset.id);
+    refresh();
+    onNotice(`已删除「${preset.name}」，它用过的壁纸和图标仍在素材库里`);
+  };
+
+  const formatTime = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="theme-section-page" data-bottom-reserve>
+      <div className="rounded-xl bg-[var(--c-card)] border border-[var(--c-card-border)] p-3 flex flex-col gap-2">
+        <div className="ts-12 font-medium">把当前外观存为预设</div>
+        <div className="ts-11 text-[var(--c-text)] leading-relaxed">包含主题色、壁纸、图标、字体、状态栏、CSS 变量、桌面组件与图标位置、dock 和文件夹。壁纸等素材只记引用，不会重复占空间。</div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder={`预设 ${presets.length + 1}`}
+            maxLength={24}
+            className="flex-1 min-w-0 h-9 rounded-lg border border-[var(--c-card-border)] bg-[var(--c-page-body-bg)] px-3 ts-12 outline-none"
+          />
+          <button
+            type="button"
+            className="inline-flex h-9 items-center gap-1.5 rounded-[18px] bg-black px-4 text-xs font-bold text-white active:scale-95 disabled:opacity-40"
+            onClick={handleSave}
+            disabled={presets.length >= APPEARANCE_PRESET_MAX}
+          >
+            <Save size={14} strokeWidth={1.8} />
+            保存
+          </button>
+        </div>
+      </div>
+
+      {presets.length === 0 ? (
+        <p className="ts-12 text-[var(--c-text)] text-center mt-8">还没有预设。先把外观调成你喜欢的样子，回来存一份。</p>
+      ) : (
+        <div className="flex flex-col gap-2 mt-3">
+          {presets.map((preset) => {
+            const accent = preset.themeProfile.cssOverrides["--c-icon-active"] || preset.themeProfile.cssOverrides["--c-success"] || "var(--c-icon-active)";
+            const thumb = preset.themeProfile.wallpaperAssetId ? thumbs[preset.themeProfile.wallpaperAssetId] : undefined;
+            const busy = busyId === preset.id;
+            return (
+              <div key={preset.id} className="rounded-xl bg-[var(--c-card)] border border-[var(--c-card-border)] p-2.5 flex gap-3 items-center">
+                <div
+                  className="w-12 h-[72px] rounded-lg overflow-hidden shrink-0 border border-[var(--c-card-border)]"
+                  style={{ background: thumb ? `url(${thumb}) center/cover` : `linear-gradient(160deg, ${accent}, var(--c-page-body-bg))` }}
+                />
+                <div className="flex-1 min-w-0">
+                  {renaming?.id === preset.id ? (
+                    <div className="flex gap-1.5 items-center">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={renaming.name}
+                        maxLength={24}
+                        onChange={(e) => setRenaming({ id: preset.id, name: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleRename(); if (e.key === "Escape") setRenaming(null); }}
+                        className="flex-1 min-w-0 h-8 rounded-lg border border-[var(--c-card-border)] bg-[var(--c-page-body-bg)] px-2 ts-12 outline-none"
+                      />
+                      <button type="button" className="w-8 h-8 grid place-items-center rounded-lg bg-black text-white" onClick={handleRename} aria-label="确定"><Check size={14} /></button>
+                    </div>
+                  ) : (
+                    <div className="ts-13 font-semibold truncate">{preset.name}</div>
+                  )}
+                  <div className="ts-10 text-[var(--c-text)] truncate mt-0.5">{describeAppearancePreset(preset)}</div>
+                  <div className="ts-10 text-[var(--c-text)] opacity-70 mt-0.5">更新于 {formatTime(preset.updatedAt)}</div>
+                  <div className="flex gap-1 mt-1.5">
+                    <button type="button" className="w-7 h-7 grid place-items-center rounded-md text-[var(--c-text)] active:bg-[var(--c-page-body-bg)]" title="重命名" aria-label="重命名" onClick={() => setRenaming({ id: preset.id, name: preset.name })}><Pencil size={13} /></button>
+                    <button type="button" className="w-7 h-7 grid place-items-center rounded-md text-[var(--c-text)] active:bg-[var(--c-page-body-bg)]" title="用当前外观覆盖" aria-label="用当前外观覆盖" onClick={() => setConfirmOverwrite(preset)}><Save size={13} /></button>
+                    <button type="button" className="w-7 h-7 grid place-items-center rounded-md text-[var(--c-danger,#d0564b)] active:bg-[var(--c-page-body-bg)]" title="删除" aria-label="删除" onClick={() => setConfirmDelete(preset)}><Trash2 size={13} /></button>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center rounded-[18px] bg-black px-4 text-xs font-bold text-white active:scale-95 disabled:opacity-40 shrink-0"
+                  onClick={() => handleApply(preset)}
+                  disabled={busyId !== null}
+                >
+                  {busy ? "切换中…" : "应用"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`删除预设「${confirmDelete.name}」？`}
+          message="只删除这份预设记录，当前外观和素材库都不受影响。"
+          confirmLabel="删除"
+          cancelLabel="取消"
+          variant="danger"
+          icon={Trash2}
+          onConfirm={() => handleDelete(confirmDelete)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+      {confirmOverwrite && (
+        <ConfirmDialog
+          title={`用当前外观覆盖「${confirmOverwrite.name}」？`}
+          message="这套预设原来保存的内容会被替换成现在的外观。"
+          icon={Save}
+          confirmLabel="覆盖"
+          cancelLabel="取消"
+          onConfirm={() => handleOverwrite(confirmOverwrite)}
+          onCancel={() => setConfirmOverwrite(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── 开屏动画：几套里选一套，下次进入生效 ─────────────
+function SplashVariantPage({ onNotice }: { onNotice: (text: string) => void }) {
+  const [selected, setSelected] = useState<SplashVariantId>(() => readSplashVariant());
+  const [previewing, setPreviewing] = useState<SplashVariantId | null>(null);
+
+  const choose = (id: SplashVariantId) => {
+    writeSplashVariant(id);
+    setSelected(id);
+    onNotice(id === "none" ? "已关闭开屏，下次打开直接进桌面" : `开屏动画已切换为「${SPLASH_VARIANTS.find((v) => v.id === id)?.label}」，下次打开生效`);
+  };
+
+  return (
+    <div className="theme-section-page" data-bottom-reserve>
+      <div className="ts-11 text-[var(--c-text)] leading-relaxed mb-3">点卡片可以预览，点「使用」保存。选择只存在这台设备的浏览器里。</div>
+      <div className="grid grid-cols-2 gap-3">
+        {SPLASH_VARIANTS.map((variant) => {
+          const active = selected === variant.id;
+          return (
+            <div key={variant.id} className="rounded-xl bg-[var(--c-card)] border p-2 flex flex-col gap-2" style={{ borderColor: active ? "var(--c-icon-active)" : "var(--c-card-border)" }}>
+              <button type="button" className="splash-preview-box" onClick={() => setPreviewing(variant.id)} aria-label={`预览${variant.label}`}>
+                {variant.id === "none" ? (
+                  <div className="absolute inset-0 grid place-items-center ts-11 text-[var(--c-text)]">直接进桌面</div>
+                ) : (
+                  <SplashVariant variant={variant.id} />
+                )}
+              </button>
+              <div className="ts-12 font-semibold flex items-center gap-1">
+                {variant.label}
+                {active && <Check size={13} className="text-[var(--c-icon-active)]" />}
+              </div>
+              <div className="ts-10 text-[var(--c-text)] leading-snug min-h-[2.4em]">{variant.desc}</div>
+              <button
+                type="button"
+                className={`h-8 rounded-[16px] text-xs font-bold active:scale-95 ${active ? "bg-[var(--c-page-body-bg)] text-[var(--c-text)]" : "bg-black text-white"}`}
+                onClick={() => choose(variant.id)}
+                disabled={active}
+              >
+                {active ? "使用中" : "使用"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {previewing && previewing !== "none" && createPortal(
+        <div className="absolute inset-0 z-[60] bg-[#F1F2F6]" onClick={() => setPreviewing(null)}>
+          <SplashVariant variant={previewing} />
+          <div className="absolute left-0 right-0 bottom-6 text-center ts-11 text-black/50 z-[5]">点击任意处返回</div>
+        </div>,
+        document.querySelector(".phone-shell") ?? document.body,
+      )}
+    </div>
+  );
+}
+
 function PalettePresetPage({
   draft,
   onDraftChange,
@@ -829,7 +1140,7 @@ function TextScalePage({
     const next = normalizeThemeProfile({ ...draft, fontAssetId: null, cssOverrides });
     let cleanupFailed = false;
     try {
-      if (assetId) {
+      if (assetId && !isThemeAssetReferencedByPresets(assetId)) {
         try {
           await deleteThemeAsset(assetId);
         } catch (err) {
@@ -1101,7 +1412,8 @@ function IconSkinPage({
     if (!confirmDeleteId) return;
     const { iconId, assetId } = confirmDeleteId;
     setConfirmDeleteId(null);
-    await deleteThemeAsset(assetId);
+    // 外观预设还引用着的素材只解除当前引用，不真删
+    if (!isThemeAssetReferencedByPresets(assetId)) await deleteThemeAsset(assetId);
     const next = updateIconSkin(draft, iconId, null);
     onDraftChange(next);
     await onApply(next);
@@ -1135,7 +1447,7 @@ function IconSkinPage({
 
   const handleDockDeleteConfirm = useCallback(async () => {
     setConfirmDeleteDock(false);
-    if (draft.dockSkinAssetId) {
+    if (draft.dockSkinAssetId && !isThemeAssetReferencedByPresets(draft.dockSkinAssetId)) {
       await deleteThemeAsset(draft.dockSkinAssetId);
     }
     const next = normalizeThemeProfile({ ...draft, dockSkinAssetId: null });

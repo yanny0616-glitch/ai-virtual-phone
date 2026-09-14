@@ -257,3 +257,8 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 ### 工坊按选择调用 REST / 组合 / 自定义 APP 工具（2026-09-14）
 
 与「调用MCP」同一套门禁：工坊配置里第二张勾选表（`lib/qa-tool-access.ts`），默认空，授权绑定 `kind:id → 指纹`（REST 用方法+地址、组合工具用 updatedAt、APP 工具用 APP 版本），指纹变了授权即失效；调用还要求工具在聊天工具箱启用（包内工具还要求包启用）。新增固定工具「调用工具箱工具 / call_workshop_toolbox_tool」：list 列出已授权工具、read 看参数 schema、call 执行，执行前再查一次授权。`tool-executor` 新增 `executeWorkshopToolboxTool` 按 id 定点执行，不走按名字的全表匹配，同名工具不会串条目。REST 工具 headers / fixedParams 的值及其中每个词不论成败一律脱敏；结果超工坊单页上限截断。「配置聊天工具箱」不能改这张授权表。回归：`scripts/check-qa-tool-access.mjs`。
+
+### 外观预设与开屏动画（2026-09-14）
+
+- **外观预设**（外观 → 外观预设）：把当前整套外观存成命名预设，最多 30 套，一键切换。内容 = 主题档案（主题色 / 壁纸参数 / 图标皮 / 字体 / 状态栏 / CSS 变量）+ 桌面图标位置 / 组件 / DIY 模板 / dock / 文件夹。存 KV 键 `ai_phone_appearance_presets_v1`（已加入「桌面与主题」备份模块），素材只记 id 引用，复用主题素材库，不复制 dataURL。切换走与主题包导入相同的落地路径（`onDesktopThemeChange` → `saveDIYTemplates` → `onApply`），不刷新页面。恢复默认与壁纸 / 图标皮 / 字体 / dock 皮删除会跳过仍被任一预设引用的素材（`isThemeAssetReferencedByPresets`），只解除当前引用。支持重命名、用当前外观覆盖、删除。
+- **开屏动画**（外观 → 开屏动画）：默认「漂浮」（原 canvas 版）之外新增三套纯 CSS 变体「墨色」「极光」「脉冲」，以及「不要开屏」（水合完成后自动进桌面）。选择存 localStorage `ai_phone_splash_variant`（开屏在 KV 水合前渲染，KV 那时读不到），只在本设备生效、不进备份。页面里卡片可实时预览，点卡片全屏预览。

@@ -25,6 +25,7 @@ import {
 } from "@/lib/theme-storage";
 import { GRID_COLS, GRID_ROWS, WIDGET_SIZE_CELLS, type DIYTemplateSlot, type DIYWidgetTemplate, type WidgetInstance, type WidgetSize } from "@/lib/widget-types";
 import { createDefaultWidgets, loadDIYTemplates, saveDIYTemplates, saveWidgets } from "@/lib/widget-storage";
+import { isThemeAssetReferencedByPresets } from "@/lib/appearance-presets";
 
 const PACKAGE_SCHEMA = "ai-phone-theme-package";
 const PACKAGE_VERSION = 1;
@@ -501,7 +502,8 @@ export async function installThemePackageFile(file: File): Promise<InstalledThem
 export async function resetThemePackageState(): Promise<InstalledThemePackage> {
   const previousProfile = readThemeProfile();
   const previousTemplates = loadDIYTemplates();
-  const assetIds = collectResetDeleteAssetIds(previousProfile);
+  // 外观预设还引用着的素材不删，否则切回那套预设时壁纸/图标皮是空的
+  const assetIds = collectResetDeleteAssetIds(previousProfile).filter((id) => !isThemeAssetReferencedByPresets(id));
   await Promise.all(assetIds.map((id) => deleteThemeAsset(id)));
 
   const themeProfile = writeThemeProfile({

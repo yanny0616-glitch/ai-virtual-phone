@@ -9,7 +9,8 @@ import { RealityBridgeScheduler } from "@/components/reality-bridge-scheduler";
 import { MediaMaintenanceScheduler } from "@/components/media-maintenance-scheduler";
 import { DesktopShell } from "./desktop-shell";
 import { OfflinePushRevampAnnouncement } from "./offline-push-revamp-announcement";
-import { SplashAnimation } from "./splash-animation";
+import { SplashVariant } from "./splash-variants";
+import { readSplashVariant, type SplashVariantId } from "@/lib/splash-config";
 import { MusicProvider } from "@/lib/music-context";
 import { hydrateKvDb, isKvHydrated } from "@/lib/kv-db";
 import { getThemeAssetMap, readThemeProfile } from "@/lib/theme-storage";
@@ -150,6 +151,11 @@ async function warmBuiltinFonts(shouldStop: () => boolean): Promise<void> {
 }
 
 function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: () => void }) {
+  // 开屏在 KV 水合前就渲染，所以选择存在 localStorage，挂载时同步读一次即可
+  const [variant] = useState<SplashVariantId>(() => readSplashVariant());
+  useEffect(() => {
+    if (variant === "none" && ready) onEnter?.();
+  }, [variant, ready, onEnter]);
   return (
     <main className="app-root splash-root">
       <section
@@ -159,7 +165,7 @@ function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: (
         <div className="phone-case">
           <div className="phone-frame">
             <div className="phone-shell splash-phone-screen">
-              <SplashAnimation />
+              <SplashVariant variant={variant} />
               <button
                 type="button"
                 className={ready ? "splash-enter-button splash-enter-button-show" : "splash-enter-button"}

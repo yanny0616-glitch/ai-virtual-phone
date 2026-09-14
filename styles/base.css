@@ -264,3 +264,270 @@ a {
   .xl\:text-6xl { font-size: calc(60px*var(--app-text-scale,1)); }
 }
 
+
+/* ── 开屏动画：CSS 变体（选择在 外观 → 开屏动画）── */
+.splash-variant {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 墨色 */
+.splash-ink {
+  background: radial-gradient(120% 80% at 50% 110%, #1d1f2b 0%, #0c0d12 60%, #050507 100%);
+  color: #f1f2f6;
+}
+.splash-ink-glow {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: 70%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(23, 75, 255, 0.55) 0%, rgba(23, 75, 255, 0.12) 40%, transparent 70%);
+  filter: blur(18px);
+  animation: splashInkBreathe 4.2s ease-in-out infinite;
+}
+.splash-ink-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 40%;
+  display: flex;
+  justify-content: center;
+  gap: 0.02em;
+  font: italic 400 clamp(52px, 22cqw, 92px)/1 "Instrument Serif", Georgia, serif;
+  letter-spacing: -0.02em;
+}
+.splash-ink-title span {
+  display: inline-block;
+  opacity: 0;
+  filter: blur(10px);
+  transform: translateY(18px);
+  animation: splashInkRise 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.splash-ink-line {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(241, 242, 246, 0.7), transparent);
+  transform: translateX(-50%);
+  animation: splashInkLine 1.6s 1.3s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.splash-ink-tagline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 60%;
+  text-align: center;
+  opacity: 0;
+  color: rgba(241, 242, 246, 0.55);
+  font: 300 11px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.32em;
+  animation: splashFadeIn 1.2s 2.2s ease forwards;
+}
+@keyframes splashInkBreathe {
+  0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.92); }
+  50% { opacity: 0.95; transform: translate(-50%, -50%) scale(1.06); }
+}
+@keyframes splashInkRise {
+  to { opacity: 1; filter: blur(0); transform: translateY(0); }
+}
+@keyframes splashInkLine {
+  to { width: 38%; }
+}
+@keyframes splashFadeIn {
+  to { opacity: 1; }
+}
+
+/* 极光 */
+.splash-aurora {
+  background: #f4f3ee;
+  container-type: inline-size;
+}
+.splash-aurora-blob {
+  position: absolute;
+  width: 78%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  filter: blur(40px);
+  opacity: 0.85;
+  mix-blend-mode: multiply;
+}
+.splash-aurora-blob-a {
+  left: -18%;
+  top: 6%;
+  background: #9fd3ff;
+  animation: splashAuroraDrift 11s ease-in-out infinite;
+}
+.splash-aurora-blob-b {
+  right: -22%;
+  top: 28%;
+  background: #ffc7d9;
+  animation: splashAuroraDrift 13s 1.5s ease-in-out infinite reverse;
+}
+.splash-aurora-blob-c {
+  left: 8%;
+  bottom: -20%;
+  background: #d9f0b8;
+  animation: splashAuroraDrift 15s 3s ease-in-out infinite;
+}
+.splash-aurora-veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(244, 243, 238, 0) 0%, rgba(244, 243, 238, 0.35) 100%);
+}
+.splash-aurora-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 41%;
+  text-align: center;
+  color: #1a1a1a;
+  font: 500 clamp(40px, 17cqw, 72px)/1 "Inter", -apple-system, sans-serif;
+  letter-spacing: -0.05em;
+  opacity: 0;
+  transform: scale(0.96);
+  animation: splashAuroraTitle 1.6s 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.splash-aurora-tagline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 55%;
+  text-align: center;
+  color: rgba(26, 26, 26, 0.55);
+  font: italic 400 15px/1 "Instrument Serif", Georgia, serif;
+  opacity: 0;
+  animation: splashFadeIn 1.4s 1.6s ease forwards;
+}
+@keyframes splashAuroraDrift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(14%, -8%) scale(1.12); }
+  66% { transform: translate(-8%, 12%) scale(0.94); }
+}
+@keyframes splashAuroraTitle {
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* 脉冲 */
+.splash-pulse {
+  background: #f1f2f6;
+  color: #174bff;
+}
+.splash-pulse-dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(23, 75, 255, 0.22) 1px, transparent 1.4px);
+  background-size: 18px 18px;
+  mask-image: radial-gradient(circle at 50% 46%, #000 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle at 50% 46%, #000 0%, transparent 70%);
+}
+.splash-pulse-rings {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 0;
+  height: 0;
+}
+.splash-pulse-rings span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(23, 75, 255, 0.6);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.2);
+  opacity: 0;
+  animation: splashPulseRing 3.6s cubic-bezier(0.1, 0.6, 0.3, 1) infinite;
+}
+.splash-pulse-core {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #174bff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 6px rgba(23, 75, 255, 0.12);
+  animation: splashPulseCore 1.2s ease-in-out infinite;
+}
+.splash-pulse-text {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 62%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font: 400 13px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.18em;
+}
+.splash-pulse-typed {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 0;
+  animation: splashPulseType 1.6s 0.6s steps(11, end) forwards;
+}
+.splash-pulse-caret {
+  width: 7px;
+  height: 14px;
+  margin-left: 3px;
+  background: #174bff;
+  animation: splashPulseCaret 0.9s steps(1, end) infinite;
+}
+.splash-pulse-corner {
+  position: absolute;
+  left: 18px;
+  bottom: 96px;
+  color: rgba(23, 75, 255, 0.5);
+  font: 300 9px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.22em;
+  opacity: 0;
+  animation: splashFadeIn 1s 2.4s ease forwards;
+}
+@keyframes splashPulseRing {
+  0% { opacity: 0.9; transform: translate(-50%, -50%) scale(0.2); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(14); }
+}
+@keyframes splashPulseCore {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.25); }
+}
+@keyframes splashPulseType {
+  to { max-width: 12em; }
+}
+@keyframes splashPulseCaret {
+  50% { opacity: 0; }
+}
+
+/* 外观页里的开屏预览盒 */
+.splash-preview-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: 14px;
+  container-type: inline-size;
+  background: #f1f2f6;
+}
+.splash-preview-box .splash-animation-corner {
+  top: 12px;
+  left: 8px;
+  font-size: 6px;
+}
+.splash-preview-box .splash-animation-corner-right {
+  right: 8px;
+}
+.splash-preview-box .splash-pulse-corner {
+  bottom: 14px;
+  left: 8px;
+  font-size: 6px;
+}

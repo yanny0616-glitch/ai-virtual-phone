@@ -157,6 +157,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "ai_phone_widgets_v1",
           "ai_phone_diy_templates_v1",
           "ai_phone_theme_profile_v1",
+          "ai_phone_appearance_presets_v1",
           "css-schemes-v1",
           "chat-app-custom-css",
           "music-custom-css",
