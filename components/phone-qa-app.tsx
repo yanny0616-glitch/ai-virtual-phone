@@ -1,5 +1,6 @@
 "use client";
 
+import { QA_IMAGE_CONTEXT_WEIGHT } from "@/lib/qa-context-budget";
 import { loadQaMcpAccess, saveQaMcpAccess } from "@/lib/qa-mcp-access";
 import { listQaSelectableTools, loadQaToolAccess, saveQaToolAccess } from "@/lib/qa-tool-access";
 import { loadMcpServers } from "@/lib/tool-storage";
@@ -746,7 +747,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
         <div className="qa-settings-hint">默认不选。REST 换了地址、组合工具被修改、APP 升级后授权自动失效，需重新勾选。</div>
 
         <label className="qa-settings-field">
-          <span>上下文预算（字符）</span>
+          <span>上下文预算（等效字符）</span>
           <input
             type="number"
             inputMode="numeric"
@@ -760,7 +761,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
         <div className="qa-settings-hint">
           上下文满 100% 时自动压缩成摘要并重新累计。中文约 1 字符 ≈ 1 token；默认 {QA_DEFAULT_CONTEXT_BUDGET_CHARS.toLocaleString()}，小上下文（32k）模型建议 30000–50000。
         </div>
-        <div className="qa-settings-hint">当前会话已用 {usedChars.toLocaleString()} 字符（约 {pct}%）。</div>
+        <div className="qa-settings-hint">当前会话估算 {usedChars.toLocaleString()} 等效字符（约 {pct}%）。图片按每张 {QA_IMAGE_CONTEXT_WEIGHT.toLocaleString()} 等效字符预估，不按 Base64 长度计数，也不代表实际计费 tokens。</div>
         <label className="qa-settings-field">
           <span>单页读取字符数</span>
           <input

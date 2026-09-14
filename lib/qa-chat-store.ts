@@ -1,3 +1,4 @@
+import { estimateQaEntryChars, shouldCompactBeforeQaTurn } from "./qa-context-budget";
 import { callQaAgent, compactQaContext, formatQaErrorMessage, type QaContextEntry } from "./qa-agent-engine";
 import { QA_TOOLS, formatQaToolSubtitle, type QaCreatedContent, type QaProposedCommit } from "./qa-agent-tools";
 import { loadQaGithubConfig } from "./qa-github";
@@ -109,16 +110,7 @@ function getContextBudget(): number {
     return DEFAULT_CONTEXT_BUDGET_CHARS;
 }
 
-function entryChars(entry: QaContextEntry): number {
-    let total = entry.content.length;
-    for (const file of entry.files ?? []) total += file.name.length + file.content.length;
-    // 图片 dataURL 每轮原样重发，不计入就永远触不到压缩阈值
-    for (const image of entry.images ?? []) total += image.length;
-    for (const call of entry.toolCalls ?? []) {
-        total += call.name.length + JSON.stringify(call.args ?? {}).length;
-    }
-    return total;
-}
+const entryChars = estimateQaEntryChars;
 
 /** 旧会话没有 context 字段：用可见消息引导出初始上下文 */
 function sessionContext(session: QaSession): QaContextEntry[] {
@@ -590,9 +582,11 @@ export async function sendQaMessage(
         images: images?.length ? images : undefined,
         files: files?.length ? files : undefined,
     };
-    // 当前内容加上新消息将触顶时，先压缩再开新轮。
-    const nextUsage = contextUsageOf(session) + entryChars(nextEntry) / getContextBudget();
-    if (nextUsage >= 1) {
+    // Avoid counting binary transport bytes as text, and don't summarize twice per turn.
+    let attemptedPreCompaction = false;
+    const currentChars = sessionContext(session).reduce((sum,entry)=>sum+entryChars(entry),0);
+    if (shouldCompactBeforeQaTurn(currentChars,entryChars(nextEntry),getContextBudget())) {
+        attemptedPreCompaction = true;
         await compactSessionContext(sessionId);
     }
 
@@ -788,7 +782,7 @@ export async function sendQaMessage(
             await applyQaCommit(assistantMsg.id);
         }
         // 本轮结束后触顶：立即压缩（进度条回到低位）
-        if (contextUsageOf(sessions.find((s) => s.id === sessionId) ?? null) >= 1) {
+        if (!attemptedPreCompaction && contextUsageOf(sessions.find((s) => s.id === sessionId) ?? null) >= 1) {
             await compactSessionContext(sessionId);
         }
     } catch (error) {
