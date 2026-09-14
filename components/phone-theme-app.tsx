@@ -1002,6 +1002,7 @@ function SplashVariantPage({ onNotice }: { onNotice: (text: string) => void }) {
     const d = new Date(ts);
     return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   };
+  const formatChars = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K 字符` : `${n} 字符`);
 
   const renderUseButton = (id: SplashVariantId) => {
     const active = selected === id;
@@ -1065,7 +1066,7 @@ function SplashVariantPage({ onNotice }: { onNotice: (text: string) => void }) {
             const active = selected === id;
             return (
               <div key={item.id} className="rounded-xl bg-[var(--c-card)] border p-2.5 flex gap-3 items-center" style={{ borderColor: active ? "var(--c-icon-active)" : "var(--c-card-border)" }}>
-                <button type="button" className="splash-preview-btn w-12 shrink-0" onClick={() => setPreviewing(id)} aria-label={`预览${item.name}`}>
+                <button type="button" className="splash-preview-btn" style={{ width: 48, flex: "none" }} onClick={() => setPreviewing(id)} aria-label={`预览${item.name}`}>
                   <SplashPreview variant={id} />
                 </button>
                 <div className="flex-1 min-w-0">
@@ -1073,7 +1074,7 @@ function SplashVariantPage({ onNotice }: { onNotice: (text: string) => void }) {
                     {item.name}
                     {active && <Check size={13} className="text-[var(--c-icon-active)]" />}
                   </div>
-                  <div className="ts-10 text-[var(--c-text)] opacity-70 mt-0.5">{Math.round(item.code.length / 1000)}K 字符 · 更新于 {formatTime(item.updatedAt)}</div>
+                  <div className="ts-10 text-[var(--c-text)] opacity-70 mt-0.5">{formatChars(item.code.length)} · 更新于 {formatTime(item.updatedAt)}</div>
                   <div className="flex gap-1 mt-1.5">
                     <button type="button" className="w-7 h-7 grid place-items-center rounded-md text-[var(--c-text)] active:bg-[var(--c-page-body-bg)]" title="编辑代码" aria-label="编辑代码" onClick={() => setEditor({ id: item.id, name: item.name, code: item.code })}><Pencil size={13} /></button>
                     <button type="button" className="w-7 h-7 grid place-items-center rounded-md text-[var(--c-danger,#d0564b)] active:bg-[var(--c-page-body-bg)]" title="删除" aria-label="删除" onClick={() => setConfirmDeleteCustom(item)}><Trash2 size={13} /></button>
@@ -1121,7 +1122,7 @@ function SplashVariantPage({ onNotice }: { onNotice: (text: string) => void }) {
             />
             <div className="flex items-center justify-between">
               <button type="button" className="ts-11 text-[var(--c-icon-active)] bg-transparent border-0 p-0" onClick={() => customFileRef.current?.click()}>从 .html 文件导入</button>
-              <span className="ts-10 text-[var(--c-text)] opacity-70">{Math.round(editor.code.length / 1000)}K 字符</span>
+              <span className="ts-10 text-[var(--c-text)] opacity-70">{formatChars(editor.code.length)}</span>
             </div>
             <input ref={customFileRef} type="file" accept=".html,.htm,text/html" className="hidden" onChange={handleCustomFile} />
             <div className="ts-10 text-[var(--c-text)] leading-relaxed">代码在沙盒里运行，碰不到手机的数据。没写 &lt;html&gt; 会自动补上无边距的外壳。图片和字体请内嵌为 data URL 或用公网地址。</div>
