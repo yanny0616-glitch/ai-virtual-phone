@@ -1,0 +1,52 @@
+import {EventStore,startService} from './service.mjs';
+import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import assert from 'node:assert/strict';
+const dir=await mkdtemp(`${tmpdir()}/tool-events-test-`);
+try{
+ await mkdir(`${dir}/state`);
+ await writeFile(`${dir}/state/state.json`,JSON.stringify({config:{serverId:'garden',characterId:'char-old',mode:'auto',token:'old-private-token'},events:[{id:'old',serverId:'garden',characterId:'char-old',mode:'auto',message:'old wake',reason:'forum'}]}));
+ const store=new EventStore(`${dir}/state`);await store.load();assert.equal(store.data.sources.garden.token,'old-private-token');assert.equal(store.data.events[0].messageId,'garden_wake_old');
+ const loaded=new EventStore(`${dir}/state`);await loaded.load();assert.equal(loaded.data.events.length,1);
+ await writeFile(`${dir}/key`,'backend-secret');let starts=0;
+ const service=await startService({dir:`${dir}/state`,port:0,secretPath:`${dir}/key`,gardenFactory:async()=>{starts++;let resolve;const done=new Promise(r=>{resolve=r;});return {done,stop:resolve};}});
+ const url=`http://127.0.0.1:${service.server.address().port}`;
+ const call=async(body,auth='backend-secret')=>{const r=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${auth}`},body:JSON.stringify(body)});return {status:r.status,data:await r.json()};};
+ try{
+  assert.equal(starts,0);
+  assert.equal((await call({action:'status'},'bad')).status,401);
+  const status=(await call({action:'status',serverId:'garden'})).data;assert.equal(status.config.hasToken,true);assert.ok(!JSON.stringify(status).includes('old-private-token'));
+  for(const id of ['one','two'])assert.equal((await call({action:'save',adapter:'webhook',serverId:id,serverUrl:`https://${id}.example/mcp`,characterId:`char-${id}`,mode:'receive'})).status,200);
+  const one=(await call({action:'credentials',serverId:'one'})).data.ingressToken;
+  const two=(await call({action:'credentials',serverId:'two'})).data.ingressToken;
+  assert.notEqual(one,two);assert.ok(!(await call({action:'status',serverId:'one'})).data.ingressToken);
+  const event={action:'ingest',sourceId:'one',version:1,eventId:'event-1',reason:'notify',message:'hello',characterId:'attacker',mode:'auto'};
+  assert.equal((await call(event,one)).status,409);
+  await call({action:'start',serverId:'one'});await call({action:'start',serverId:'two'});
+  assert.equal((await call({...event,sourceId:'two'},one)).status,401);
+  assert.equal((await call({action:'clear',serverId:'two'},one)).status,401);
+  assert.equal((await call({...event,version:2},one)).status,400);
+  const first=await call(event,one);assert.equal(first.status,200);assert.equal(first.data.duplicate,false);
+  assert.equal((await call(event,one)).data.duplicate,true);
+  const inbox=(await call({action:'events'})).data.events;const received=inbox.find(e=>e.sourceId==='one');assert.equal(received.characterId,'char-one');assert.equal(received.mode,'receive');assert.equal(received.serverUrl,'https://one.example/mcp');
+  assert.equal((await call({action:'ack',ids:[received.id]})).data.acceptedIds.length,1);
+  assert.equal((await call({action:'ack',ids:[received.id]})).data.acceptedIds.length,0);
+  assert.equal((await call(event,one)).data.duplicate,true);
+  assert.equal((await call({...event,sourceId:'two'},two)).data.duplicate,false);
+  await call({action:'clear',serverId:'one'});
+  assert.equal((await call({action:'events'})).data.events.filter(e=>e.sourceId==='two').length,1);
+  assert.equal((await call({...event,eventId:'event-new'},one)).status,401);
+  await call({action:'start',serverId:'garden'});assert.equal(starts,1);await call({action:'stop',serverId:'garden'});assert.equal(starts,1);
+  const pendingTwo=service.store.data.events.find(e=>e.sourceId==='two');
+  await call({action:'stop',serverId:'two'});assert.equal((await call({action:'ack',ids:[pendingTwo.id]})).data.acceptedIds.length,0);assert.equal((await call({...event,sourceId:'two',eventId:'after-stop'},two)).status,409);
+  const previous=service.store.data.events.length;const save=service.store.save;service.store.save=async()=>{throw Error('disk failure');};
+  await assert.rejects(service.store.enqueue('two',{reason:'notify',message:'not committed',eventId:'failure'}));assert.equal(service.store.data.events.length,previous);service.store.save=save;
+ }finally{await service.shutdown();}
+ console.log('PASS legacy migration, separate source keys/targets, explicit start/stop, scoped deletion, durable eventId deduplication, ack winner, failed-write rollback, no Garden auto-connect');
+}finally{await rm(dir,{recursive:true,force:true});}
+const {sendEvent}=await import('./send-event.mjs');
+let sends=0;
+const env={FLOAT_EVENT_URL:'https://float.example/api/tool-events/ingest',FLOAT_EVENT_TOKEN:'private-producer',FLOAT_EVENT_SOURCE_ID:'source'};
+await sendEvent({eventId:'stable',reason:'notify',message:'hello',sourceId:'ignored'},env,async(_url,options)=>{sends++;const body=JSON.parse(options.body);assert.equal(body.sourceId,'source');assert.equal(body.eventId,'stable');return {ok:true,json:async()=>({ok:true})};});
+await assert.rejects(sendEvent({eventId:'stable',reason:'notify',message:'hello'},env,async()=>{sends++;return {ok:false,status:401};}),/401/);assert.equal(sends,2);
+console.log('PASS external adapter helper assigns configured source and never retries rejected delivery');

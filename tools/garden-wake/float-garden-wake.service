@@ -1,11 +1,11 @@
 [Unit]
-Description=Float Garden wake configuration and inbox
+Description=Float tool event gateway and inbox
 After=network-online.target
 Wants=network-online.target
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/node /root/vibe-coding/float/garden-wake-adapter/service.mjs
-WorkingDirectory=/root/vibe-coding/float/garden-wake-adapter
+ExecStart=/usr/local/bin/node /root/vibe-coding/float/tool-events-vps/service.mjs
+WorkingDirectory=/root/vibe-coding/float/tool-events-vps
 Restart=no
 UMask=0077
 NoNewPrivileges=true

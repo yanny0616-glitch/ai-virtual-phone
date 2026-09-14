@@ -277,3 +277,7 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 ### 花园事件唤醒配置（2026-09-14）
 
 聊天工具箱的花园 MCP 内新增角色选择、自动处理/仅接收、Machine Token 和手动连接管理。独立 VPS adapter 使用官方唤醒桥 0.2.1，单连接故障即停，不自动重连；收到事件写入私有队列。Float 前台以稳定消息 ID 写入普通 user 消息并确认收件，只有确认赢家启动现有角色工具管线。手机关闭时仅暂存，回到 Float 再处理，不宣称离线运行 MCP。部署、数据路径与投递边界见 `tools/garden-wake/README.md`。
+
+### 通用工具事件入口（2026-09-14）
+
+花园专用收件管线改为多来源通用事件网关：每个已有 MCP 均可配置独立来源、目标角色、自动处理/仅接收。公共 `/api/tool-events/ingest` 使用来源专属 Bearer 密钥接收 version/sourceId/eventId/reason/message；外部不能指定角色或管理其他来源。支持有界持久事件 ID 去重、原子确认、来源暂停和隔离删除。宿主消费器只核对保存的 MCP ID/URL 与开启状态，不含花园域名判断；花园 SSE 放入独立适配器，其他来源用 Webhook 或外部转换器，不必改宿主核心。旧配置、密钥、本地开关和消息 ID 兼容迁移，旧 API 留别名。仍仅在 Float 可见运行时触发角色，离线只暂存；详见 `tools/tool-events/README.md`。
