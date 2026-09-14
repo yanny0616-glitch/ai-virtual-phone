@@ -7273,9 +7273,7 @@
 .chat-tool-fold {
   margin: 4px auto;
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  text-align: center;
 }
 .chat-tool-fold > summary {
   list-style: none;
@@ -7312,10 +7310,9 @@
 @keyframes chat-tool-fold-blink { 50% { opacity: 0.3; } }
 .chat-tool-fold-body {
   text-align: left;
-  width: fit-content;
   max-width: 88%;
   margin-top: 6px;
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
   gap: 4px;
   padding: 8px 10px;
