@@ -201,6 +201,9 @@ export type ChatMessage = {
         xiaohongshuCoverIcon?: string;
         xiaohongshuTone?: string;
         callDuration?: string;    // 通话时长（如 05:23）
+        callMissedCount?: number; // 你连着打、TA 没接的通数
+        callLastAt?: string;      // 最后一通没接的时间
+        callReason?: string;      // TA 拒接时界面上的说明（如「在开会」）
         voiceDuration?: number;   // 语音条时长（秒）
         synthesizedFromText?: string; // 语音条当前音频对应的合成文本
         ttsText?: string; // 含情绪/声音标记的朗读原文；label/content 保持可读文本
@@ -409,6 +412,14 @@ export function getChatMessagePreview(msg: ChatMessage): string {
 
     // Silent thought/status: empty content + folded panel → "♥"
     if (!msg.content.trim() && (msg.innerMonologue || msg.statusPanel || msg.reasoningText) && msg.role === "assistant") return "♥";
+
+    // 你打过去没接通的记录存在对方名下
+    if (msg.role === "assistant") {
+        const missed = msg.content.match(/^\[我未接听((?:语音|视频)通话)\]/);
+        if (missed) return `对方没接${missed[1]}${(msg.mediaData?.callMissedCount ?? 1) > 1 ? ` ×${msg.mediaData?.callMissedCount}` : ""}`;
+        const rejected = msg.content.match(/^\[我拒绝了((?:语音|视频)通话)\]/);
+        if (rejected) return `对方拒接了${rejected[1]}`;
+    }
 
     // System messages: call messages → clean format, others → user name → "你"
     if (msg.role === "system") {

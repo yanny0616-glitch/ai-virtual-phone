@@ -60,7 +60,7 @@ export function settleDeferredReplyDelivery(sessionId: string, key: string | nul
         const gate = rec.characterId ? readEffectiveReplyGate(rec.characterId) : null;
         const decision = evaluateReplyGate(gate, lastUser.content);
         writeDeferredReply(sessionId, {
-            ...(decision.kind === "delay" ? decision : { until: Date.now(), note: decision.note || "" }),
+            ...(decision.kind === "delay" && decision.reason !== "distracted" ? { ...decision, reason: decision.reason } : { until: Date.now(), note: decision.note || "" }),
             characterId: rec.characterId,
             cloud: { key: `deferred:${crypto.randomUUID()}`, projectUrl: rec.cloud.projectUrl,
                 revision: Date.now(), syncedRevision: 0, attempted: false, state: "syncing" },

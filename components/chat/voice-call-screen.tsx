@@ -22,6 +22,8 @@ import { CallSttWarningDialog, hideCallSttWarningPermanently, isCallSttWarningHi
 import { isAndroidBrowser, isIOSDevice } from "./voice-input-platform";
 import { CallVolumeControl } from "./call-volume-control";
 import { startIncomingCallVibration } from "@/lib/call-vibration";
+import { emitCallEnded, recordUnansweredCall, resolveCallConnect } from "@/lib/call-connect";
+import type { CallBeforeConnectPayload } from "@/lib/chat-plugin-types";
 
 // ── Types ───────────────────────────────────────────
 
@@ -70,6 +72,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const playCallAudio = iosDevice ? playAudioBlob : playAudioBlobViaMediaElement;
     const keyboardOffsetStyle = useCallKeyboardOffsetStyle();
     const [callState, setCallState] = useState<CallState>("CONNECTING");
+    const [endNote, setEndNote] = useState("");
     const hasConnectedRef = useRef(false);
     const [callDuration, setCallDuration] = useState(0);
     const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
@@ -218,31 +221,21 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         // Load existing messages for context
         messagesRef.current = loadChatMessages(session.id);
 
-        // Insert system message (skip if already exists from strict mode remount)
-        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
-        const initRole = initiator === "character" ? "assistant" : "user";
-        if (!lastMsg || !(lastMsg.content.includes("发起了语音通话"))) {
-            const callMsg = initiator === "character"
-                ? `[我向${userNameRef.current}发起了语音通话]`
-                : `[我向${character.name}发起了语音通话]`;
-            const sysMsg = pushChatMessage({
-                sessionId: session.id,
-                role: initRole,
-                content: callMsg,
-            });
-            messagesRef.current = [...messagesRef.current, sysMsg];
-        }
-
-        // User-initiated: auto-connect after 3s fake dial
-        // Character-initiated: wait for user to accept
+        // 角色打来：等你接。你打过去：先问插件（睡着 / 开会 / 忙）接不接、响多久，默认 3 秒接通
         let connectTimer: NodeJS.Timeout | undefined;
-        if (initiator !== "character") {
+        let disposed = false;
+        if (initiator === "character") pushStartMessage();
+        else void resolveCallConnect(session.id, session.contactId, "voice").then(decision => {
+            if (disposed) return;
             connectTimer = setTimeout(() => {
-                setCallState("IDLE");
-            }, 3000);
-        }
+                if (stateRef.current === "ENDED") return;
+                if (decision.outcome === "answer") { pushStartMessage(); setCallState("IDLE"); return; }
+                endUnanswered(decision);
+            }, decision.ringMs);
+        });
 
         return () => {
+            disposed = true;
             if (connectTimer) clearTimeout(connectTimer);
             if (timerRef.current) clearInterval(timerRef.current);
         };
@@ -273,7 +266,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             case "USER_SPEAKING": return "正在聆听...";
             case "PROCESSING": return "对方正在思考...";
             case "AI_SPEAKING": return "对方正在说话...";
-            case "ENDED": return "通话已结束";
+            case "ENDED": return endNote || "通话已结束";
         }
     };
 
@@ -596,6 +589,25 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
     // ── Hangup ──────────────────────────────────────
 
+    // 只在真接通（或角色打来）时记「发起了通话」；没接通的另记一条未接 / 拒接
+    const pushStartMessage = () => {
+        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
+        if (lastMsg && lastMsg.content.includes("发起了语音通话")) return;
+        const callMsg = initiator === "character"
+            ? `[我向${userNameRef.current}发起了语音通话]`
+            : `[我向${character.name}发起了语音通话]`;
+        const sysMsg = pushChatMessage({ sessionId: session.id, role: initiator === "character" ? "assistant" : "user", content: callMsg });
+        messagesRef.current = [...messagesRef.current, sysMsg];
+    };
+
+    const endUnanswered = (decision: CallBeforeConnectPayload) => {
+        setEndNote(decision.outcome === "reject" ? `对方已拒接${decision.reason ? " · " + decision.reason : ""}` : "对方无应答");
+        setCallState("ENDED");
+        recordUnansweredCall(session.id, "voice", decision.outcome === "reject" ? "reject" : "noAnswer", decision.reason);
+        emitCallEnded({ sessionId: session.id, characterId: session.contactId, kind: "voice", outcome: decision.outcome, durationSec: 0 });
+        setTimeout(() => onEnd(), 1800);
+    };
+
     const handleHangup = useCallback(() => {
         setCallState("ENDED");
 
@@ -616,17 +628,22 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             window.speechSynthesis.cancel();
         }
 
+        // 没等接通就挂了：记成取消，不留时长
+        const cancelled = !hasConnectedRef.current && initiator !== "character";
+        if (cancelled) pushStartMessage();
         const endMsg = pushChatMessage({
             sessionId: session.id,
             role: "user",
-            content: `[我挂断了语音通话]`,
-            mediaData: { callDuration: formatTime(callDuration) },
+            content: cancelled ? `[我取消了语音通话]` : `[我挂断了语音通话]`,
+            mediaData: cancelled ? undefined : { callDuration: formatTime(callDuration) },
         });
         messagesRef.current = [...messagesRef.current, endMsg];
+        emitCallEnded({ sessionId: session.id, characterId: session.contactId, kind: "voice", outcome: cancelled ? "cancel" : "answer", durationSec: cancelled ? 0 : callDuration });
 
         // Delay then close
         setTimeout(() => onEnd(), 1500);
-    }, [session.id, callDuration, onEnd]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session.id, session.contactId, callDuration, onEnd, initiator]);
 
     // ── Render ──────────────────────────────────────
 

@@ -42,6 +42,7 @@
     "check:memory-recall": "node scripts/check-memory-recall.mjs",
     "check:menstrual-predict": "node scripts/check-menstrual-predict.mjs",
     "check:meetup-plugin": "node scripts/check-meetup-plugin.mjs",
+    "check:routine-plugin": "node scripts/check-routine-plugin.mjs",
     "check:chat-silence": "node scripts/check-chat-silence.mjs && node scripts/check-busy-reply-plugin.mjs",
     "gua-nian:scheduler-test": "node scripts/check-gua-nian-scheduler.mjs && node scripts/check-gua-nian-scheduler-app.mjs",
     "check:cloud-messages": "node scripts/check-cloud-message-repair.mjs",

@@ -69,6 +69,7 @@ export type ChatPluginModule = {
  *   llm.request       每次请求体发出前（含流式/工具通道）。可改 messages/model/temperature
  *   llm.response      模型原始回复文本落地前（正则式改写在这里做）
  *   moments.beforePost  朋友圈定时发帖到点、真正生成前。cancelled=true 则这次不发，retryAfterMs 后再问；hint 追加到发帖指令后
+ *   call.beforeConnect  你打给单聊角色、接通前：接不接、响多久（默认 3 秒接通）
  * 同步 transform 点（handler 必须同步返回，返回 Promise 会被忽略并记一次警告）：
  *   message.beforePersist  任何消息写入存储前（用户/角色/系统/群聊全路径）
  *   moments.schedule       朋友圈算「下次几点到点」时（首次建档 / 发完一条 / 被插件押后）。改 nextPostAfter 即改时机
@@ -82,7 +83,8 @@ export type ChatPluginTransformPoint =
     | "message.beforeReveal"
     | "moments.beforePost"
     | "moments.schedule"
-    | "chat.replyGate";
+    | "chat.replyGate"
+    | "call.beforeConnect";
 
 export type UserBeforeSendPayload = {
     text: string;
@@ -171,7 +173,30 @@ export type MomentsSchedulePayload = {
     nextPostAfter: number;
 };
 
+/** 你打给单聊角色、接通前。宿主默认 3 秒接通；插件可改成没人接或拒接 */
+export type CallBeforeConnectPayload = {
+    sessionId: string;
+    characterId: string;
+    kind: "voice" | "video";
+    /** answer 接通；noAnswer 响满 ringMs 没人接；reject 响 ringMs 后被挂掉 */
+    outcome: "answer" | "noAnswer" | "reject";
+    /** 响多久，毫秒（500～60000） */
+    ringMs: number;
+    /** 拒接时界面上和聊天记录里的一句说明，如「在开会」 */
+    reason?: string;
+};
+
+export type CallEndedPayload = {
+    sessionId: string;
+    characterId: string;
+    kind: "voice" | "video";
+    /** cancel：你没等接通就挂了 */
+    outcome: "answer" | "noAnswer" | "reject" | "cancel";
+    durationSec: number;
+};
+
 export type ChatPluginTransformPayloadMap = {
+    "call.beforeConnect": CallBeforeConnectPayload;
     "chat.replyGate": { characterId: string; nowMs: number; source: ReplyGate | null; gate: ReplyGate | null };
     "user.beforeSend": UserBeforeSendPayload;
     "prompt.system": PromptSystemPayload;
@@ -193,6 +218,7 @@ export type ChatPluginTransformPayloadMap = {
  *   llm.streamChunk    流式分片（高频，勿做重活）
  *   plugins.changed    插件列表/启停状态变化
  *   variables.changed  共享变量池有写入（插件或自定义 APP 都算）
+ *   call.ended         单聊通话结束（接通后挂断 / 没人接 / 被拒接 / 你没等接通就挂了）
  */
 export type ChatPluginEventPoint =
     | "app.ready"
@@ -202,7 +228,8 @@ export type ChatPluginEventPoint =
     | "message.deleted"
     | "llm.streamChunk"
     | "plugins.changed"
-    | "variables.changed";
+    | "variables.changed"
+    | "call.ended";
 
 export type ChatPluginEventPayloadMap = {
     "app.ready": Record<string, never>;
@@ -213,6 +240,7 @@ export type ChatPluginEventPayloadMap = {
     "llm.streamChunk": { chunk: string; sessionId?: string; purpose: string };
     "plugins.changed": Record<string, never>;
     "variables.changed": { name: string; scope: ChatPluginVarScope; targetId?: string };
+    "call.ended": CallEndedPayload;
 };
 
 // ── UI 坑位 ────────────────────────────────────────────────

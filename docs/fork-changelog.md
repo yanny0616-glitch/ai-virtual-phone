@@ -1186,3 +1186,11 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 验证：`node scripts/check-preset-entry-sync.mjs` 覆盖真实挂念声明的新旧差异、选择性写入、开关/顺序/额外数据保留、冲突及重复条目；`node scripts/check-preset-sync-browser.mjs` 在 320/390px Chromium 运行真实 React 弹窗，每个宽度 17 项交互检查。相关类型检查通过；预设管理页与通用弹窗已有的 7 个 lint 错误、3 个警告未扩大处理。本地未执行 Next 全量构建，发布由 GitHub Actions 构建；手机预设需用户勾选确认才会更新。
 
 本批发布同时将静态缓存升为 `ai-phone-pwa-v27`，以刷新个人云部署脚本副本。
+
+### 分神 · 叫醒 · 固定作息（2026-09-15）
+
+- 宿主：`chat.replyGate` 的 gate 新增 `distracted { title, minSec, maxSec, pullCount }`，`evaluateReplyGate` 多一个 pendingCount 参数（上次TA回复后你连发几条）；分神的短等待只在本机、不上云，再发消息不重新计时，连发够数立刻回。新增 `call.beforeConnect`（接不接、响多久、拒接说明）和 `call.ended` 事件（`lib/call-connect.ts`）：你打过去先问插件，没接通不写「发起了通话」，在对方名下记「未接 ×N · 最后一次」（30 分钟内合并）或「拒接 · 在上课」；没等接通就挂记成取消。聊天记录和会话列表预览按角色区分「对方拒接了你的…」。
+- 忙碌回复 1.2.0：固定作息（变量池 `routine`）不装挂念也生效，写了睡觉就不再用挂念的作息时间；今天的例外（`routineExceptions`）来自回复末尾看不见的 `[作息:推迟|…]` / `[作息:取消|…]` / `[作息:加|…]`，当轮生效、过点失效、可关；分神从固定作息或挂念此刻在做的事推出来；打电话睡着时 35% / 70% / 100% 逐通叫醒（5 分钟内算连打），没接到则醒来后主动问，叫醒后半小时算醒着；专注中拒接、忙完经 `ctx.chat.scheduleWake` 回过来；一般忙按概率接；紧急词一定接。
+- 在线状态 1.1.0：面板加「固定作息」编辑和「今天的例外」列表（× 撤销、手动推迟 / 取消 / 临时加），状态经 bus `availability.query` 由忙碌回复算，显示「分神 · 一边做饭一边看手机」「本该睡了 · 还在陪你」。
+- 未做：挂念排日程时读固定作息和例外（要改挂念 src、重打 APP 包，和另一批 `public/custom-apps/index.json` 改动搅在一起，放到挂念下一次攒批发版）；熬夜 / 半夜被吵醒对第二天精力的影响（挂念第二步）。
+- 验证：`npm run check:routine-plugin`（固定作息 / 例外 / 分神 / 来电四组）、`check-reply-gate` 新增分神段，`check-busy-reply-plugin`、`check:meetup-plugin` 通过；`check-chat-silence` 的「争执中」一条在 HEAD 插件上同样不过，与本次无关。

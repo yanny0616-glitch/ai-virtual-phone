@@ -101,7 +101,7 @@ import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
 // ── Call system message detection ──────────────────────────
 // Call messages are stored with user/assistant role for correct prompt alternation,
 // but should render as centered system notifications in the UI.
-const CALL_SYS_RE = /\[我(?:向.+)?(?:发起了|挂断了|拒绝了|取消了)(?:群?(?:语音|视频)通话)/;
+const CALL_SYS_RE = /\[我(?:向.+)?(?:发起了|挂断了|拒绝了|取消了|未接听)(?:群?(?:语音|视频)通话)/;
 function isCallSysMsg(msg: ChatMessage): boolean {
     return CALL_SYS_RE.test(msg.content);
 }
@@ -3278,8 +3278,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         text = text.replace(/\[我挂断了(.+?通话)\](?:\(时长\s*(.+?)\))?/, (_, callType, dur) =>
             dur ? `你挂断了${callType}，时长 ${dur}` : `你挂断了${callType}`
         );
-        // Reject: [我拒绝了XX通话]
-        text = text.replace(/\[我拒绝了(.+?通话)\]/, `你拒绝了$1`);
+        // Reject: [我拒绝了XX通话]；角色名下的是你打过去被挂掉，括号里是拒接说明
+        text = text.replace(/\[我拒绝了(.+?通话)\](?:\((.+?)\))?/, (_, callType, why) =>
+            msg?.role === "assistant" ? `${charN}拒接了你的${callType}${why ? ` · ${why}` : ""}` : `你拒绝了${callType}`
+        );
+        // Missed: [我未接听XX通话](N次，最后一次 HH:MM)
+        text = text.replace(/\[我未接听(.+?通话)\](?:\((\d+)次，最后一次\s*(.+?)\))?/, (_, callType, n, at) =>
+            n ? `${charN}没接你的${callType} ×${n} · 最后一次 ${at}` : `${charN}没接你的${callType}`
+        );
         // Cancel: [我取消了XX通话]
         text = text.replace(/\[我取消了(.+?通话)\]/, `你取消了$1`);
         // General user name → "你"
@@ -4035,9 +4041,22 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const replyGate = readEffectiveReplyGate(session.contactId);
         if (session.isGroup) { void triggerAIResponse(); return; }
         if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) return;
+        // 上次TA回复之后你连发了几条：分神时发够数，TA 就放下手里的事
+        const pendingCount = (() => {
+            let n = 0;
+            for (const m of [...loadChatMessages(session.id)].reverse()) { if (m.role === "assistant") break; if (m.role === "user") n++; }
+            return Math.max(1, n);
+        })();
+        // 分神的短等待不上云：没被拽过来就等原来那一下，不重新计时
+        const heldAny = readDeferredReply(session.id);
+        if (heldAny?.distracted && !heldAny.firedAt) {
+            const again = evaluateReplyGate(replyGate, text, undefined, pendingCount);
+            if (again.kind === "delay" && again.reason === "distracted") { setPendingGenerate(false); return; }
+            writeDeferredReply(session.id, null);
+        }
         // 已经押后了（睡着 / 忙着），再点「触发回复」也不该把TA叫起来：到点由桌面壳派回来。
         // 紧急词例外：闸门会判成立刻回，顺手把旧等待清掉，免得到点再生成一次
-        const held = readDeferredReply(session.id);
+        const held = heldAny?.distracted ? null : heldAny;
         if (held?.cloud && !held.firedAt && isUrgentReplyText(text, replyGate)) {
             void cancelDeferredReplyCloud(session.id).then(cancelled => { if (cancelled) void triggerAIResponse(); });
             return;
@@ -4055,10 +4074,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 : "消息已合并，正在等待本轮回复", 3000);
             return;
         }
-        const decision = evaluateReplyGate(replyGate, text);
+        const decision = evaluateReplyGate(replyGate, text, undefined, pendingCount);
         if (decision.kind === "now") {
             writeDeferredReply(session.id, decision.note ? { until: Date.now(), note: decision.note, firedAt: Date.now() } : null);
             void triggerAIResponse();
+            return;
+        }
+        if (decision.reason === "distracted") {
+            writeDeferredReply(session.id, { until: decision.until, note: decision.note, distracted: true });
+            setPendingGenerate(false);
+            showChatToast("TA手上有事，一会儿就回", 2000);
             return;
         }
         writeDeferredReply(session.id, {

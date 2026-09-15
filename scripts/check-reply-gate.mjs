@@ -140,13 +140,14 @@ assert.equal(make('会议', { focusedPeekProb: 'invalid' }).busy.focusedPeekProb
 const room = read('components/chat/chat-room.tsx');
 const start = room.indexOf('    const scheduleGatedReply =');
 const end = room.indexOf('    // 「触发回复」按钮', start);
-let generated = 0, pending;
+let generated = 0, pending, roomMessages = [];
 Object.assign(ctx, {
   session: { id: 's', contactId: 'c', isGroup: false },
   getChatPluginRuntime: () => ({ ensureReady: async () => {} }),
   queueDeferredReplyCloud() {}, cancelDeferredReplyCloud: async () => true,
   activeGenerationRuns: new Map(), isGeneratingRef: { current: false },
   triggerAIResponse: () => generated++, showChatToast() {}, setPendingGenerate: value => { pending = value; },
+  hasPendingXhsNotes: () => false, loadChatMessages: () => roomMessages,
 });
 vm.runInContext(stripTypeScriptTypes(room.slice(start, end)) + '\nglobalThis.send=scheduleGatedReply;', ctx);
 kv.clear(); install(make('整理资料'));
@@ -181,6 +182,30 @@ await ctx.send('继续补充');
 assert.equal(draws, 3);
 assert.equal(a.readDeferredReply('s').until, at('09:06'));
 now = at('09:00'); math.random = () => 0.5;
+
+// 分神：短等待不上云；连发够数就放下手里的事；还在等时再发不重新计时，到点直接回
+{
+  const distracted = a.normalizeReplyGate({ distracted: { title: '做饭', minSec: 30, maxSec: 90, pullCount: 3 } });
+  assert.deepEqual({ ...distracted.distracted }, { title: '做饭', minSec: 30, maxSec: 90, pullCount: 3 });
+  const first = a.evaluateReplyGate(distracted, '在吗', now, 1);
+  assert.equal(first.reason, 'distracted'); assert.equal(first.until, now + 60_000);
+  assert.match(a.evaluateReplyGate(distracted, '在吗', now, 3).note, /放下手里的事/);
+  assert.equal(a.evaluateReplyGate(a.normalizeReplyGate({ distracted: { pullCount: 0 } }), '在吗', now, 9).kind, 'delay');
+  assert.equal(a.evaluateReplyGate(a.normalizeReplyGate({ ...meeting, distracted: { title: '做饭' } }), '在吗', now, 9).reason, 'busy');
+  kv.clear(); install(distracted); generated = 0; roomMessages = [{ role: 'assistant' }, { role: 'user' }];
+  await ctx.send('在吗');
+  const held = a.readDeferredReply('s');
+  assert.equal(held.distracted, true); assert.equal(held.until, now + 60_000); assert.equal(generated, 0);
+  now += 5000; roomMessages.push({ role: 'user' }); await ctx.send('人呢');
+  assert.equal(a.readDeferredReply('s').until, held.until); assert.equal(generated, 0);
+  roomMessages.push({ role: 'user' }); await ctx.send('哼');
+  assert.equal(generated, 1); assert.match(a.readDeferredReply('s').note, /放下手里的事/);
+  kv.clear(); install(distracted); roomMessages = [{ role: 'user' }]; generated = 0;
+  await ctx.send('在吗');
+  assert.deepEqual([...a.takeDueDeferredReplies(a.readDeferredReply('s').until)], ['s']);
+  now = at('09:00'); roomMessages = [];
+}
+console.log('PASS distracted: short local wait, pulled by repeated sends, fired without re-evaluation');
 
 // The packaged app projects only explicit rest steps into the host gate.
 const app = read('custom-apps/gua-nian/index.html').match(/<script>([\s\S]*)<\/script>/)[1];
