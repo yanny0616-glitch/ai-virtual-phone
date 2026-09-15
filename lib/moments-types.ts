@@ -13,6 +13,8 @@ export type MomentPost = {
     photoGenerationStatus?: "pending" | "failed" | "generated";
     photoGenerationPrompt?: string;
     photoGenerationError?: string;
+    photoPositive?: string;         // 这张图单独改过的正向提示词，一键重新生图沿用
+    photoNegative?: string;
     photoCompressedAt?: string;
     photoCleanedAt?: string;
     visibility: string[];           // characterId[] of who can see this post

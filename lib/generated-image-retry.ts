@@ -146,6 +146,7 @@ export async function retryMomentGeneratedPhoto(
     post: MomentPost,
     nextDescription?: string,
     useReferenceImage?: boolean,
+    overrides?: { positive?: string | null; negative?: string | null },
 ): Promise<MomentPost> {
     const description = (nextDescription ?? post.photoDescription)?.trim();
     if (!description) throw new Error("缺少图片描述，无法重新生成");
@@ -153,11 +154,15 @@ export async function retryMomentGeneratedPhoto(
     const effectiveUseReference = useReferenceImage !== undefined
         ? useReferenceImage
         : (post.photoUseReferenceImage === true);
+    const positive = overrides?.positive === null ? undefined : (overrides?.positive ?? post.photoPositive);
+    const negative = overrides?.negative === null ? undefined : (overrides?.negative ?? post.photoNegative);
 
     // 同聊天：重试先置 pending 并广播，卡片立刻显示"图片生成中…"；成功/失败都会再写状态。
     updateMomentPost(post.id, {
         photoDescription: description,
         photoUseReferenceImage: effectiveUseReference,
+        photoPositive: positive,
+        photoNegative: negative,
         photoGenerationStatus: "pending",
         photoGenerationError: undefined,
     });
@@ -168,6 +173,8 @@ export async function retryMomentGeneratedPhoto(
             description,
             characterId: post.authorType === "character" ? post.authorId : undefined,
             useReferenceImage: effectiveUseReference,
+            positive,
+            negative,
         });
         if (!generated) throw new Error("生图配置未启用或不完整");
 
@@ -176,6 +183,8 @@ export async function retryMomentGeneratedPhoto(
             photoUrl: `asset://${assetId}`,
             photoDescription: description,
             photoUseReferenceImage: effectiveUseReference,
+            photoPositive: positive,
+            photoNegative: negative,
             photoGenerationStatus: "generated",
             photoGenerationPrompt: generated.prompt,
             photoGenerationError: undefined,
@@ -187,6 +196,8 @@ export async function retryMomentGeneratedPhoto(
         updateMomentPost(post.id, {
             photoDescription: description,
             photoUseReferenceImage: effectiveUseReference,
+            photoPositive: positive,
+            photoNegative: negative,
             photoGenerationStatus: "failed",
             photoGenerationError: errorToMessage(error),
         });
