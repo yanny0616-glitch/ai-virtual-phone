@@ -47,7 +47,7 @@ export type ReplyGate = {
 
 export type ReplyGateDecision =
     | { kind: "now"; note?: string }
-    | { kind: "delay"; until: number; note: string; reason: "sleep" | "busy" | "distracted"; busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean };
+    | { kind: "delay"; until: number; note: string; reason: "sleep" | "busy" | "distracted"; what?: string; busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean };
 
 export type DeferredReply = {
     cloud?: { key: string; projectUrl: string; revision: number; syncedRevision: number; acceptedMessageId?: string; attempted: boolean; cancelRequested?: boolean; state: "syncing" | "active" | "running" | "error" | "done" | "failed" | "cancelled" };
@@ -302,7 +302,7 @@ export function evaluateReplyGate(gate: ReplyGate | null, text: string, nowMs = 
         } else if (busy.adaptive) {
             note += "把等待期间对方发来的几条消息合起来回复，不必逐条点名，也别每次都重复解释自己在忙。";
         }
-        return { kind: "delay", until, reason: "busy", note, busyWindowKey: busyWindowKey(gate, win), busyUntil: end, busyAvailableUntil, busyCheck };
+        return { kind: "delay", until, reason: "busy", note, what: win.title || undefined, busyWindowKey: busyWindowKey(gate, win), busyUntil: end, busyAvailableUntil, busyCheck };
     }
     const distracted = gate.distracted;
     if (distracted) {
@@ -311,7 +311,7 @@ export function evaluateReplyGate(gate: ReplyGate | null, text: string, nowMs = 
             return { kind: "now", note: `你本来${what}，对方一连发了好几条，你放下手里的事，认真回。` };
         }
         const sec = distracted.minSec + Math.random() * (distracted.maxSec - distracted.minSec);
-        return { kind: "delay", until: nowMs + sec * 1000, reason: "distracted", note: `你${what}，一边做一边看手机：回得快但短，可能只接对方最后一句，偶尔带出手上在做的事。` };
+        return { kind: "delay", until: nowMs + sec * 1000, reason: "distracted", what: distracted.title || undefined, note: `你${what}，一边做一边看手机：回得快但短，可能只接对方最后一句，偶尔带出手上在做的事。` };
     }
     return { kind: "now" };
 }

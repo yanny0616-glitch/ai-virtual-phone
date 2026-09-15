@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, type CSSProperties } from "react";
+import { useState, useEffect, useMemo, useRef, type CSSProperties } from "react";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import {
     loadFollowUpConfig,
@@ -490,17 +490,22 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
    ══════════════════════════════════════════ */
 function ChatCSSEditor({ onBack }: { onBack: () => void }) {
     const [css, setCss] = useState(() => kvGet("chat-app-custom-css") || "");
+    const [saved, setSaved] = useState(css.trim());
+    const mounted = useRef(false);
+
+    useEffect(() => {
+        if (!mounted.current) { mounted.current = true; return; }
+        const timer = window.setTimeout(() => window.dispatchEvent(new CustomEvent("chat-app-css-preview", { detail: { css } })), 250);
+        return () => window.clearTimeout(timer);
+    }, [css]);
+    useEffect(() => () => { window.dispatchEvent(new CustomEvent("chat-app-css-preview", { detail: { css: null } })); }, []);
 
     const handleApply = () => {
         const trimmed = css.trim();
         if (trimmed) kvSet("chat-app-custom-css", trimmed);
         else kvRemove("chat-app-custom-css");
-        window.dispatchEvent(new CustomEvent("chat-app-css-updated"));
-    };
-
-    const handleClear = () => {
-        setCss("");
-        kvRemove("chat-app-custom-css");
+        setSaved(trimmed);
+        window.dispatchEvent(new CustomEvent("chat-app-css-preview", { detail: { css: null } }));
         window.dispatchEvent(new CustomEvent("chat-app-css-updated"));
     };
 
@@ -508,7 +513,7 @@ function ChatCSSEditor({ onBack }: { onBack: () => void }) {
         <PageShell title="自定义 CSS" onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); onBack(); }}>
             <div className="p-4 flex flex-col gap-3 flex-1">
                 <div className="ts-12 text-[var(--c-text)] opacity-70">
-                    在此输入 CSS 自定义聊天页面样式（联系人列表、朋友圈、聊天室默认样式等）。单独聊天室的 CSS 优先级更高。
+                    在此输入 CSS 自定义聊天页面样式（联系人列表、朋友圈、聊天室默认样式等）。单独聊天室的 CSS 优先级更高。停手就能看到效果，点「保存并应用」才会保存；不保存直接返回会恢复原样。
                 </div>
                 <textarea
                     value={css}
@@ -520,9 +525,10 @@ function ChatCSSEditor({ onBack }: { onBack: () => void }) {
                 <div className="flex gap-2 items-center">
                     <CSSSchemeBar target="chat_app" currentCSS={css} onLoad={setCss} />
                     <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCss(CHAT_APP_CSS_EXAMPLE)}>示例</button>
-                    <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={handleClear}>清除</button>
-                    <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={handleApply}>应用</button>
+                    <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCss("")}>清除</button>
+                    <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={handleApply}>保存并应用</button>
                 </div>
+                {css.trim() !== saved && <div className="ts-11 text-[var(--c-text)] opacity-60">预览中 · 还没保存</div>}
             </div>
         </PageShell>
     );

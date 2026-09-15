@@ -1393,6 +1393,8 @@ function TextScalePage({
   );
 }
 
+const GLOBAL_CSS_NODE_ID = "ai-phone-global-custom-css";
+
 function GlobalCSSPage({
   draft,
   onDraftChange,
@@ -1412,18 +1414,35 @@ function GlobalCSSPage({
     } catch { return draft.globalCustomCSS; }
   });
 
+  const [savedCSS, setSavedCSS] = useState(localCSS);
+  const appliedRef = useRef(draft.globalCustomCSS || "");
+  appliedRef.current = draft.globalCustomCSS || "";
+  // 预览直接改桌面注入的那个 <style>，不碰 draft：别的页面点「应用」时不会把没保存的预览一起存进去
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const node = document.getElementById(GLOBAL_CSS_NODE_ID);
+      if (node) node.textContent = localCSS;
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [localCSS]);
+  useEffect(() => () => {
+    const node = document.getElementById(GLOBAL_CSS_NODE_ID);
+    if (node) node.textContent = appliedRef.current;
+  }, []);
+
   function handleApply() {
     const next = normalizeThemeProfile({ ...draft, globalCustomCSS: localCSS });
     onDraftChange(next);
     onApply(next);
-    console.log("[GlobalCSS] Applied CSS length:", localCSS.length, "| preview:", localCSS.slice(0, 80));
-    onNotice("自定义 CSS 已应用");
+    appliedRef.current = localCSS;
+    setSavedCSS(localCSS);
+    onNotice("自定义 CSS 已保存");
   }
 
   return (
     <div className="theme-section-page">
       <p className="ts-13 text-[var(--c-text)] mb-3 leading-relaxed">
-        {"编写自定义 CSS，覆盖 :root 变量或为任意元素添加样式。修改后点击「应用」生效。"}
+        {"编写自定义 CSS，覆盖 :root 变量或为任意元素添加样式。停手就能看到效果，点「保存并应用」才会保存；不保存直接返回会恢复原样。"}
       </p>
       <textarea
         className="ui-textarea font-mono ts-13 leading-relaxed flex-1"
@@ -1436,8 +1455,9 @@ function GlobalCSSPage({
       <div className="flex gap-2 mt-3 items-center">
         <CSSSchemeBar target="global" currentCSS={localCSS} onLoad={setLocalCSS} />
         <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setLocalCSS("")}>清除</button>
-        <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={handleApply}>应用</button>
+        <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={handleApply}>保存并应用</button>
       </div>
+      {localCSS !== savedCSS && <p className="ts-11 text-[var(--c-text)] opacity-60 mt-2">{"预览中 · 还没保存"}</p>}
     </div>
   );
 }

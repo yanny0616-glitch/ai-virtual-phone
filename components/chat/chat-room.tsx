@@ -4083,7 +4083,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (decision.reason === "distracted") {
             writeDeferredReply(session.id, { until: decision.until, note: decision.note, distracted: true });
             setPendingGenerate(false);
-            showChatToast("TA手上有事，一会儿就回", 2000);
+            showChatToast(decision.what ? `TA在${decision.what.slice(0, 12)}，一会儿就回` : "TA手上有事，一会儿就回", 2000);
             return;
         }
         writeDeferredReply(session.id, {
@@ -4099,8 +4099,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return;
         }
         const at = new Date(decision.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+        const doing = decision.what ? `TA在${decision.what.slice(0, 12)}` : decision.busyCheck ? "TA正专注" : "TA正忙";
         showChatToast(decision.reason === "sleep" ? `TA睡着了，${at} 醒来再回`
-            : decision.busyCheck ? `TA正专注，${at} 左右再看有没有空` : `TA正忙，${at} 左右再回`, 3000);
+            : decision.busyCheck ? `${doing}，${at} 左右再看有没有空` : `${doing}，${at} 左右再回`, 3000);
     };
     // 「触发回复」按钮和收起键盘自动触发都走这里：和按回复键发一样过闸门，
     // 否则夜里点一下TA就得醒着回，提示词里却写着「在睡觉」。判据用你最后一句（紧急词能破门）
