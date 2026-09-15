@@ -220,6 +220,8 @@ export type ChatMessage = {
         imageGenerationUsedReference?: boolean;
         imageGenerationStatus?: "pending" | "failed" | "generated";
         imageGenerationError?: string;
+        imagePositive?: string;  // 这张图单独改过的正向提示词，一键重新生图沿用
+        imageNegative?: string;
         mediaCompressedAt?: string;
         mediaCleanedAt?: string;
         readingBookTitle?: string; // 阅读讨论所属书名，用于 prompt 短期记忆边界

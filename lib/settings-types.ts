@@ -263,6 +263,8 @@ export type ImageGenerationSettings = {
         assetId: string;
         updatedAt: number;
     }>;
+    /** 角色出镜（使用参考图）时把从人设提取的长相写进生图提示词；缺省为开 */
+    appearanceOn?: boolean;
     imageHosting: ImageHostingSettings;
 };
 

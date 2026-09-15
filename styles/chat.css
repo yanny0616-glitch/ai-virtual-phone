@@ -1770,6 +1770,154 @@
   text-align: left;
 }
 
+/* 点开图片 → 编辑 */
+.gi-edit {
+  max-width: 360px;
+  max-height: min(84vh, 640px);
+}
+
+.gi-edit-body {
+  gap: 10px;
+}
+
+.gi-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gi-edit-label {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--c-text-title);
+  font-size: calc(12px*var(--app-text-scale,1));
+  font-weight: 600;
+}
+
+.gi-edit-hint {
+  color: var(--c-icon);
+  font-size: calc(11px*var(--app-text-scale,1));
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.gi-edit-textarea {
+  min-height: 76px;
+  max-height: 30vh;
+  resize: vertical;
+  font-size: calc(13px*var(--app-text-scale,1));
+  line-height: 1.5;
+}
+
+.gi-edit-textarea--small {
+  min-height: 50px;
+  font-size: calc(12px*var(--app-text-scale,1));
+}
+
+.gi-edit-check {
+  flex-wrap: wrap;
+  min-height: 28px;
+}
+
+.gi-edit-cameo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c-icon-active) 6%, transparent);
+}
+
+.gi-edit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gi-edit-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.gi-edit-chip {
+  min-height: 28px;
+  padding: 3px 11px;
+  border: 1px solid color-mix(in srgb, var(--c-icon) 35%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-text);
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  cursor: pointer;
+}
+
+.gi-edit-chip[data-on] {
+  border-color: var(--c-icon-active);
+  background: var(--c-icon-active);
+  color: var(--c-bg, #fff);
+}
+
+.gi-edit-chip--add {
+  border-style: dashed;
+  color: var(--c-icon);
+}
+
+.gi-edit-chip-x {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--c-text-title);
+  color: var(--c-bg, #fff);
+  cursor: pointer;
+}
+
+.gi-edit-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gi-edit-name-input {
+  width: 96px;
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: calc(12px*var(--app-text-scale,1));
+}
+
+.gi-edit-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gi-edit-advanced > summary {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  color: var(--c-icon);
+  font-size: calc(12px*var(--app-text-scale,1));
+  cursor: pointer;
+  user-select: none;
+}
+
+.gi-edit-advanced[open] > summary {
+  margin-bottom: 6px;
+}
+
+.gi-edit-advanced > .gi-edit-field + .gi-edit-field {
+  margin-top: 8px;
+}
+
 @keyframes chat-generated-image-spin {
   to { transform: rotate(360deg); }
 }

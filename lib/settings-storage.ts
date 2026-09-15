@@ -855,6 +855,7 @@ function normalizeImageGenerationSettings(settings: Partial<ImageGenerationSetti
         activeOpenAiPresetId,
         novelai,
         characterReferences: refs,
+        appearanceOn: settings?.appearanceOn !== false,
         imageHosting: {
             ...DEFAULT_IMAGE_GENERATION_SETTINGS.imageHosting,
             ...hosting,

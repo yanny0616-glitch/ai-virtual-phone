@@ -856,6 +856,22 @@ export function ImageGenerationSettings() {
                 </div>
             </div>
 
+            <div className="menu-group">
+                <div className="menu-item">
+                    <span className="settings-tools-menu-copy">
+                        <span className="menu-label appearance-menu-item-label">角色出镜时加长相</span>
+                        <span className="menu-desc settings-tools-menu-desc">照片里有角色时，把从人设提取的长相写进提示词；人设改了会重新提取。点开图片 → 编辑 可以改。拍景物、食物不加。</span>
+                    </span>
+                    <span className="menu-right settings-tools-menu-toggle">
+                        <Toggle
+                            checked={settings.appearanceOn !== false}
+                            onChange={(appearanceOn) => updateSettings({ appearanceOn })}
+                            className="settings-toggle-control"
+                        />
+                    </span>
+                </div>
+            </div>
+
             {settings.provider === "novelai" ? (
                 <div className="flex flex-col gap-2">
                     <p className="settings-menu-section-title">Character References</p>
