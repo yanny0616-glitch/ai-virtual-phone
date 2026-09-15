@@ -7330,3 +7330,177 @@
   -webkit-user-select: none;
 }
 .chat-tool-fold-body > div + div { border-top: 1px solid rgba(0,0,0,0.05); padding-top: 4px; }
+
+/* ── 重新生成：附说明弹窗 / 选一版 ── */
+.chat-reroll-dialog,
+.chat-reply-version-dialog {
+  width: 86%;
+  max-width: 340px;
+  align-items: stretch;
+  max-height: min(78vh, 600px);
+}
+
+/* 宿主 .modal-dialog .modal-body 默认居中，这里要压过它 */
+.modal-dialog.chat-reroll-dialog .modal-body,
+.modal-dialog.chat-reply-version-dialog .modal-body {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.chat-reroll-hint {
+  margin-bottom: 10px;
+  font-size: calc(11px*var(--app-text-scale,1));
+  line-height: 1.5;
+  color: var(--c-icon);
+}
+
+.chat-reroll-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-reroll-chips .ui-chip {
+  padding: 4px 10px;
+}
+
+.chat-reroll-chips .ui-chip.chat-reroll-mine {
+  background: color-mix(in srgb, var(--c-icon-active) 10%, transparent);
+  color: var(--c-icon-active);
+}
+
+.chat-reroll-mine-remove {
+  margin-left: 2px;
+  opacity: 0.6;
+}
+
+.chat-reroll-textarea {
+  min-height: 64px;
+  max-height: 30vh;
+  margin-top: 10px;
+  resize: vertical;
+  font-size: calc(12.5px*var(--app-text-scale,1));
+}
+
+.chat-reroll-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0 6px;
+  font-size: calc(11px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+.chat-reroll-label-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-reroll-label button {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: inherit;
+  color: var(--c-icon-active);
+  cursor: pointer;
+}
+
+.chat-reroll-label button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-reroll-empty {
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+.chat-reroll-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  margin-top: 12px;
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.chat-reroll-check input {
+  margin: 0;
+}
+
+.chat-reroll-check span {
+  justify-self: start;
+}
+
+.chat-reroll-check small {
+  grid-column: 2;
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+.chat-reply-version-dialog .modal-title {
+  font-size: calc(14px*var(--app-text-scale,1));
+}
+
+.chat-reply-version-dialog .modal-footer .ui-btn {
+  font-size: calc(12px*var(--app-text-scale,1));
+}
+
+.chat-reply-version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-reply-version-card {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1.5px solid transparent;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c-icon) 8%, transparent);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-reply-version-card[data-current] {
+  border-color: var(--c-icon-active);
+  background: color-mix(in srgb, var(--c-icon-active) 6%, transparent);
+  cursor: default;
+}
+
+.chat-reply-version-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  font-size: calc(10px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+.chat-reply-version-meta b {
+  font-weight: 500;
+  color: var(--c-icon-active);
+}
+
+.chat-reply-version-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-line;
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  line-height: 1.5;
+}
+
+.chat-reply-version-note {
+  margin-top: 10px;
+  font-size: calc(10px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}

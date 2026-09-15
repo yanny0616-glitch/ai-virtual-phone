@@ -1311,6 +1311,17 @@ export async function persistChatMessages(messages: ChatMessage[], receipts: { s
     await dbPutMessageBatch(messages, sessions, receipts);
 }
 
+/** 放回一段先前移出的消息，接到会话末尾。必须换新 id：微信云同步已把旧 id 记成删除；
+ *  也要清掉 cloudSync：云端那份已随删除撤掉，带着「来自云端」标记会被上传筛掉。 */
+export async function restoreChatMessages(messages: ChatMessage[]): Promise<ChatMessage[]> {
+    if (messages.length === 0) return [];
+    let order = getNextMessageOrder(messages[0].sessionId);
+    const restored = messages.map(message => ({ ...message, id: createMessageId(), order: order++, cloudSync: undefined }));
+    await persistChatMessages(restored);
+    for (const message of restored) publishChatMessage(message, true);
+    return restored;
+}
+
 /** Import another page's committed bubbles without replaying plugins, unread
  * increments or mirror events. Do not overwrite this page's existing drafts. */
 export async function refreshChatSessionFromDisk(sessionId: string): Promise<void> {

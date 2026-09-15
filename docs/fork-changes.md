@@ -129,6 +129,8 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 - **网易云音乐**：`ncm-api` 容器挂在同域 `/ncm`，Caddy 侧 `strip_prefix`；默认地址由 `NEXT_PUBLIC_DEFAULT_NETEASE_API_BASE` 在 CI 里给。
 - **安全**：`lib/server/safe-outbound-fetch.ts` 所有出站请求校验目标 IP 防 SSRF，Undici 统一；`story-html-renderer.tsx` 渲染前清洗。
 - **聊天头像**（聊天设置 → 聊天头像）：单聊可单独设一张「微信里的头像」：聊天页、会话列表、通讯录、朋友圈、通话页、通知都用它（走 `loadWeixinCharacters()`），角色 APP 仍显示角色卡原图。选图后先在圆形取景框里拖动/捏合裁剪（`components/ui/avatar-crop-dialog.tsx`，可复用），存 `session.chatAvatar`（320px webp data URL），可一键恢复。
+- **聊天重新生成**（`lib/chat-reroll.ts`、`components/chat/reroll-dialogs.tsx`）：「重试以下」先弹说明框，快捷标签、自由说明、我的常用、附上一版对照可选；说明作为不落库的系统指令只跟这次请求走，单聊群聊都认。最新一轮回复重来过会留版本（每会话最多 8 版，存 kv），长按菜单「换一版 k/n」点选；发下条消息后作废。放回版本走 `restoreChatMessages`：换新 id、清 `cloudSync`，镜像与微信云同步按新消息上传。
+- **持久存储**（`components/pwa-registrar.tsx`）：启动时未获持久存储就申请一次。
 - 绑定管理有「App Defaults」入口；记忆库删长期记忆后总结进度回退；会话列表未读角标；桌面拖拽翻页优化；朋友圈动态回写照片标签按真实模式。
 - **自用放开的入口**：便签墙（日记内，`NOTE_WALL_UI_ENABLED`）；黑市可搜「黑市」/「black market」或点购物首页底部灰字进入。这些联网功能的表用 `docs/supabase-all-in-one.sql` 一次建齐。
 - 日历「暖桃」主题已移除，`LEGACY_THEME_MAP` 有 `peach → cream`。**以后删主题往这张表补一条**。

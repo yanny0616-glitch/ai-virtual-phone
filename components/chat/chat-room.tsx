@@ -6,7 +6,7 @@ import { extractXhsNoteUrls } from "@/lib/xhs-note";
 import { hasPendingXhsNotes, hydrateXhsNote, XHS_NOTE_UPDATED } from "@/lib/xhs-note-client";
 
 import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, markChatSessionRead, CHAT_MESSAGE_PUSHED_EVENT } from "@/lib/chat-storage";
+import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, markChatSessionRead, CHAT_MESSAGE_PUSHED_EVENT, restoreChatMessages } from "@/lib/chat-storage";
 import { cleanStreamText, splitStreamPreviewSegments, stripLiteralTexts, stripXmlTagBlocks } from "@/lib/stream-preview";
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
@@ -16,6 +16,8 @@ import { translateReasoningText } from "@/lib/reasoning-translate";
 import { MessageBubble, MediaDetailModal, prewarmStickerCache, BilingualTextBlock, isStandaloneHtmlPreviewContent, normalizeTextBubbleContent } from "./message-bubble";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { PhotoInputModal, TextPhotoModal, VoiceRecordModal, RedPacketModal, LocationInputModal, SystemInstructionModal } from "./rich-input-modals";
+import { RerollDialog, ReplyVersionPicker, type RerollRequest } from "./reroll-dialogs";
+import { buildRerollInstruction, describeReplyVersions, getLiveReplyVersions, planReplyVersionSwitch, recordReplyVersionBeforeRetry, type ReplyVersionView } from "@/lib/chat-reroll";
 import { EmojiPanel, StickerPanel } from "./emoji-panel";
 import { StickerSearchSuggest } from "./sticker-search-suggest";
 import { StateValuesPanel } from "./state-values-panel";
@@ -1323,6 +1325,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [expandedMonologueId, setExpandedThinkingId] = useState<string | null>(null);
     // 思维链底部弹窗：存当前查看的 reasoning 文本，null = 关闭
     const [reasoningSheetText, setReasoningSheetText] = useState<string | null>(null);
+    const [rerollTargetId, setRerollTargetId] = useState<string | null>(null);
+    const [versionPicker, setVersionPicker] = useState<ReplyVersionView[] | null>(null);
     // 思维链翻译（弹窗内点击翻译按钮生成，切换弹窗内容时重置）
     const [reasoningTranslation, setReasoningTranslation] = useState<string | null>(null);
     const [reasoningTranslating, setReasoningTranslating] = useState(false);
@@ -4580,11 +4584,22 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         }
     };
 
-    const handleRetry = async (msgId: string) => {
+    const handleRetry = async (msgId: string, request?: RerollRequest) => {
+        if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) {
+            showChatToast("请先等待对方回复");
+            return;
+        }
         const msgIndex = messages.findIndex(m => m.id === msgId);
         if (msgIndex === -1 || messages[msgIndex].role !== "assistant") return;
 
         const contextMessages = messages.slice(0, msgIndex);
+        const storedMessages = loadChatMessages(session.id);
+        const storedIndex = storedMessages.findIndex(m => m.id === msgId);
+        const removedTail = storedIndex >= 0 ? storedMessages.slice(storedIndex) : messages.slice(msgIndex);
+        if (storedIndex >= 0) recordReplyVersionBeforeRetry(session.id, storedMessages, storedIndex);
+        const instruction = request
+            ? buildRerollInstruction({ tags: request.tags, note: request.note, previousReply: request.attachPrevious ? removedTail : undefined })
+            : null;
 
         // Delete this message and everything after it
         deleteChatMessagesFrom(msgId);
@@ -4594,12 +4609,44 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         // Cancel any pending follow-up for this session
         cancelFollowUp(session.id);
 
+        // 重写要求只跟这一次请求走，不落库：落库会在聊天里多出一张系统指令卡片
+        const rerollNote: ChatMessage | null = instruction ? {
+            id: `reroll-note-${Date.now()}`,
+            sessionId: session.id,
+            role: "system",
+            content: instruction,
+            status: "sent",
+            createdAt: new Date().toISOString(),
+            mediaType: "system_instruction",
+        } : null;
+
         await runManagedGeneration({
-            history: contextMessages,
+            history: rerollNote ? [...contextMessages, rerollNote] : contextMessages,
             generationIntent: "regenerate",
             errorPrefix: "重试失败",
             onDecline: triggerReply,
         });
+    };
+
+    const handleSwitchReplyVersion = async (target: number) => {
+        setVersionPicker(null);
+        if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) {
+            showChatToast("请先等待对方回复");
+            return;
+        }
+        const plan = planReplyVersionSwitch(session.id, loadChatMessages(session.id), target);
+        if (!plan) return;
+        cancelFollowUp(session.id);
+        if (plan.removeFromId) deleteChatMessagesFrom(plan.removeFromId);
+        try {
+            await restoreChatMessages(plan.restore);
+            plan.commit();
+        } catch (error) {
+            await restoreChatMessages(plan.removed).catch(() => undefined);
+            showChatToast(`换版本失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+        markChatSessionRead(session.id);
+        syncMessagesFromStorage();
     };
 
     const handleRetractMessage = (msgId: string) => {
@@ -5130,8 +5177,17 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     {m.role === "user" && (
                         <button onClick={() => handleRetractMessage(storedMessageId)} className="ctx-menu-btn">撤回消息</button>
                     )}
+                    {m.role === "assistant" && (() => {
+                        const live = getLiveReplyVersions(session.id, loadChatMessages(session.id));
+                        if (!live || !live.tail.some(item => item.id === storedMessageId)) return null;
+                        return (
+                            <button onClick={() => { setActiveMessageId(null); setVersionPicker(describeReplyVersions(live)); }} className="ctx-menu-btn">
+                                换一版 {live.set.active + 1}/{live.set.versions.length}
+                            </button>
+                        );
+                    })()}
                     {m.role === "assistant" && (
-                        <button onClick={() => handleRetry(storedMessageId)} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
+                        <button onClick={() => { setActiveMessageId(null); setRerollTargetId(storedMessageId); }} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
                     )}
                 </div>
                 <div className="flex">
@@ -6695,6 +6751,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 <LocationInputModal
                     onSend={(loc) => { setRichModal(null); sendRichMessage("location", { label: loc }); }}
                     onClose={() => setRichModal(null)}
+                />
+            )}
+            {rerollTargetId && (
+                <RerollDialog
+                    onCancel={() => setRerollTargetId(null)}
+                    onConfirm={(request) => {
+                        const targetId = rerollTargetId;
+                        setRerollTargetId(null);
+                        void handleRetry(targetId, request);
+                    }}
+                />
+            )}
+            {versionPicker && (
+                <ReplyVersionPicker
+                    versions={versionPicker}
+                    onPick={(index) => void handleSwitchReplyVersion(index)}
+                    onClose={() => setVersionPicker(null)}
                 />
             )}
             {richModal === "system_instruction" && (
