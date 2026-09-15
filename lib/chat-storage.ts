@@ -386,7 +386,7 @@ export function getChatMessagePreview(msg: ChatMessage): string {
     if (isReadingDiscussMessage(msg)) return "";
 
     const userName = (() => { try { return resolveUserIdentity()?.name; } catch { return undefined; } })();
-    const toYou = (text: string) => userName ? text.replace(new RegExp(userName, "g"), "你") : text;
+    const toYou = (text: string) => userName ? text.split(userName).join("你") : text;
 
     // Retracted: "你/对方撤回了一条消息"
     if (msg.isRetracted) return (msg.role === "user" ? "你" : "对方") + "撤回了一条消息";
