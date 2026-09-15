@@ -11,10 +11,10 @@ export const BUILTIN_PRESET_VERSION = 264; // 升版本会用出厂内容重写�
 /** 只增不改的出厂条目补丁号。加了新的出厂条目时 +1，并把它的 identifier 写进
  *  PATCHABLE_PROMPT_IDS。和 BUILTIN_PRESET_VERSION 的区别是它一条已有内容都不动，
  *  所以改过内置预设的用户也能拿到新条目，不会被打回出厂。 */
-export const BUILTIN_PROMPT_PATCH_VERSION = 2;
+export const BUILTIN_PROMPT_PATCH_VERSION = 3;
 
 /** 必要入口清单，供内置预设补丁和用户主动「一键补齐功能条目」共用。仅列可独立补齐的接入项。 */
-export const PATCHABLE_PROMPT_IDS = ["custom_app_context", "custom_app_context_group", "chat_variables", "chat_block_actions", "block_reconsider_prompt", "friend_verify_prompt"];
+export const PATCHABLE_PROMPT_IDS = ["custom_app_context", "custom_app_context_group", "chat_variables", "chat_block_actions", "block_reconsider_prompt", "friend_verify_prompt", "reply_style", "call_extras", "call_summary_prompt"];
 
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
@@ -139,6 +139,9 @@ export function createBuiltinPreset(): PresetConfig {
             { identifier: "chat_block_actions", enabled: true },
             { identifier: "block_reconsider_prompt", enabled: true },
             { identifier: "friend_verify_prompt", enabled: true },
+            { identifier: "reply_style", enabled: true },
+            { identifier: "call_extras", enabled: true },
+            { identifier: "call_summary_prompt", enabled: true },
         ],
 
         prompts: [
@@ -1895,6 +1898,41 @@ export function createBuiltinPreset(): PresetConfig {
                 injection_depth: 0,
                 enabled: true,
                 tags: ["friend_verify"],
+            },
+            {
+                identifier: "reply_style",
+                name: "▸ 回复方式",
+                role: "system",
+                content: "{{replyStyle}}",
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["chat"],
+            },
+            {
+                identifier: "call_extras",
+                name: "▸ 通话细节",
+                role: "system",
+                content: "{{callExtras}}",
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["chat"],
+            },
+            {
+                identifier: "call_summary_prompt",
+                name: "▸ 通话小结",
+                role: "user",
+                content: [
+                    "上面是你和{{user}}刚打完的一通电话。用一句话记下这通电话聊了什么，30 字以内。",
+                    "- 用第三人称写，像通话记录旁边的备注，例如：「{{char}}说加班到九点，约好周六去看展」。",
+                    "- 只写发生了什么、定了什么，不评价、不抒情。",
+                    "- 只输出这一句，不要加引号、前缀或其他内容。",
+                ].join("\n"),
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["call_summary"],
             },
             {
                 identifier: "add_friend_prompt",

@@ -14,7 +14,6 @@ import { resolveVoiceConfig, synthesizeSpeech, playAudioBlob, playAudioBlobViaMe
 import { isCallRecordingSupported, resolveCloudSttConfig } from "@/lib/stt-cloud";
 import { useHoldToTalk } from "./use-hold-to-talk";
 import { suspendKeepAliveForCall, resumeKeepAliveAfterCall } from "@/lib/use-weixin-bridge";
-import { BilingualTextBlock } from "./message-bubble";
 import { splitBilingualText } from "@/lib/bilingual-text";
 import type { Character } from "@/lib/character-types";
 import { useCallKeyboardOffsetStyle } from "./use-call-keyboard-offset";
@@ -24,6 +23,8 @@ import { CallVolumeControl } from "./call-volume-control";
 import { startIncomingCallVibration } from "@/lib/call-vibration";
 import { emitCallEnded, recordUnansweredCall, resolveCallConnect } from "@/lib/call-connect";
 import type { CallBeforeConnectPayload } from "@/lib/chat-plugin-types";
+import { stripNarration, takeCallDirectives } from "@/lib/call-directives";
+import { CallScreenStyle, CallSubtitleText, useCallExtras } from "./use-call-extras";
 
 // ── Types ───────────────────────────────────────────
 
@@ -112,6 +113,10 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     const _initUi = resolveUserIdentity(session.contactId, "chat");
     const userNameRef = useRef<string>(_initUi?.name || "你");
     const userAvatarRef = useRef<string | null>(_initUi?.avatarUrl || null);
+    const userName = _initUi?.name || "你";
+    const { flags: callFlags, applyArt, portraitUrl, sceneUrl } = useCallExtras(session, character.id, "video");
+    const backdrop = sceneUrl || bgImageResolved;
+    const endCallRef = useRef<(by: "user" | "char") => void>(() => {});
 
     useEffect(() => { stateRef.current = callState; }, [callState]);
     useEffect(() => { minimizedRef.current = minimized; }, [minimized]);
@@ -349,6 +354,14 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
         }
     }, [callState]);
 
+    // 聊天信息 › 通话里开了「摄像头默认打开」：接通后自动开一次，之后你关了就不再管
+    const autoCameraRef = useRef(false);
+    useEffect(() => {
+        if (!callFlags.cameraDefault || autoCameraRef.current || callState === "CONNECTING" || callState === "ENDED") return;
+        autoCameraRef.current = true;
+        void startCameraStream(cameraFacingMode).then(ok => { if (ok) setCameraEnabled(true); });
+    }, [callFlags.cameraDefault, callState, cameraFacingMode, startCameraStream]);
+
     const formatTime = (seconds: number) => {
         const m = Math.floor(seconds / 60);
         const s = seconds % 60;
@@ -434,17 +447,25 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             }));
             if (stateRef.current === "ENDED") return;
 
-            const { cleanParts } = processAIResponse(aiResponseText);
+            const directives = takeCallDirectives(aiResponseText);
+            applyArt(directives);
+            const hangupAfter = directives.hangup && callFlags.hangup;
+            const { cleanParts } = processAIResponse(directives.text);
             const displayText = cleanParts.join("\n");
-            const speechText = stripBilingualForSpeech(displayText);
+            const speechText = stripNarration(stripBilingualForSpeech(displayText));
 
-            if (!displayText) { setCallState("IDLE"); return; }
+            if (!displayText) {
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
+                return;
+            }
 
             setSubtitles(prev => [...prev, { id: `ai-${Date.now()}`, role: "assistant", text: displayText }]);
 
             // 缩小为悬浮窗期间收到的回复：只静默记录文字，不播放语音
             if (minimizedRef.current) {
-                setCallState("IDLE");
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
                 return;
             }
 
@@ -453,7 +474,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             const voiceConfig = resolveVoiceConfig(session.contactId);
             if (voiceConfig && !isSpeakerMutedRef.current) {
                 try {
-                    const audioBlob = await synthesizeSpeech(speechText, voiceConfig);
+                    const audioBlob = speechText ? await synthesizeSpeech(speechText, voiceConfig) : null;
                     if (stateRef.current === "ENDED") return;
                     if (audioBlob && !isSpeakerMutedRef.current) {
                         const { promise, abort } = playCallAudio(audioBlob);
@@ -464,14 +485,17 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 } catch (e) { console.warn("[VideoCall] TTS failed:", e); }
             }
 
-            if (stateRef.current !== "ENDED") setCallState("IDLE");
+            if (stateRef.current !== "ENDED") {
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
+            }
         } catch (error: any) {
             if (stateRef.current !== "ENDED") {
                 setSubtitles(prev => [...prev, { id: `err-${Date.now()}`, role: "assistant", text: `⚠️ ${error?.message || "发送失败"}` }]);
                 setCallState("IDLE");
             }
         }
-    }, [session, processAIResponse, captureCameraFrame, playCallAudio]);
+    }, [session, processAIResponse, captureCameraFrame, playCallAudio, applyArt, callFlags.hangup]);
 
     // ── Auto-listen ────────────────────────────────
 
@@ -612,26 +636,29 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
         setTimeout(() => onEnd(), 1800);
     };
 
-    const handleHangup = useCallback(() => {
+    const endCall = useCallback((by: "user" | "char") => {
         setCallState("ENDED");
+        if (by === "char") setEndNote(`${character.name}挂断了`);
         if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
         if (audioAbortRef.current) { audioAbortRef.current(); audioAbortRef.current = null; }
         stopCameraStream();
         if (window.speechSynthesis) window.speechSynthesis.cancel();
 
         // 没等接通就挂了：记成取消，不留时长
-        const cancelled = !hasConnectedRef.current && initiator !== "character";
+        const cancelled = by === "user" && !hasConnectedRef.current && initiator !== "character";
         if (cancelled) pushStartMessage();
         const endMsg = pushChatMessage({
-            sessionId: session.id, role: "user",
+            sessionId: session.id, role: by === "char" ? "assistant" : "user",
             content: cancelled ? `[我取消了视频通话]` : `[我挂断了视频通话]`,
             mediaData: cancelled ? undefined : { callDuration: formatTime(callDuration) },
         });
         messagesRef.current = [...messagesRef.current, endMsg];
         emitCallEnded({ sessionId: session.id, characterId: session.contactId, kind: "video", outcome: cancelled ? "cancel" : "answer", durationSec: cancelled ? 0 : callDuration });
-        setTimeout(() => onEnd(), 1500);
+        setTimeout(() => onEnd(), by === "char" ? 2200 : 1500);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [session.id, session.contactId, callDuration, onEnd, stopCameraStream, initiator]);
+    }, [session.id, session.contactId, callDuration, onEnd, stopCameraStream, initiator, character.name]);
+    const handleHangup = useCallback(() => endCall("user"), [endCall]);
+    useEffect(() => { endCallRef.current = endCall; }, [endCall]);
 
     // 通话音频会话 + 卸载兜底：不经挂断键退出时释放识别与在途播放，
     // 防止识别自动重启循环在后台无限自我重启、麦克风永不归还（详见 voice-call-screen）。
@@ -652,7 +679,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             <button
                 type="button"
                 className="call-mini-window"
-                style={{ backgroundImage: `url(${bgImageResolved || character.avatar || ""})` }}
+                style={{ backgroundImage: `url(${backdrop || character.avatar || ""})` }}
                 onClick={onRestore}
                 aria-label={`返回与${character.name}的视频通话`}
                 title="点击返回通话"
@@ -664,7 +691,8 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     }
 
     return (
-        <div className="absolute inset-0 z-[100] flex flex-col bg-black text-white overflow-hidden call-keyboard-shift" style={keyboardOffsetStyle}>
+        <div className="absolute inset-0 z-[100] flex flex-col bg-black text-white overflow-hidden call-keyboard-shift call-screen" data-call-screen="video" style={keyboardOffsetStyle}>
+            <CallScreenStyle css={session.callCSS} />
             <CallVolumeControl />
 
             {onMinimize && callState !== "ENDED" && (
@@ -682,10 +710,11 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             )}
             {/* Full-screen blurred background (character avatar) */}
             <div
-                className="videocall-bg-blur"
+                className="videocall-bg-blur call-scene"
+                {...(portraitUrl && backdrop ? { "data-sharp": "" } : {})}
                 style={{
-                    backgroundImage: bgImageResolved
-                        ? `url(${bgImageResolved})`
+                    backgroundImage: backdrop
+                        ? `url(${backdrop})`
                         : character.avatar
                             ? `url(${character.avatar})`
                             : "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
@@ -716,11 +745,11 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                             <span className="ts-60 text-[var(--c-icon)]">{userNameRef.current?.[0] || "?"}</span>
                         </div>
                     )
-                ) : character.avatar ? (
+                ) : portraitUrl || character.avatar ? (
                     <img
-                        src={character.avatar}
+                        src={portraitUrl || character.avatar || undefined}
                         alt={character.name}
-                        className="w-full h-full object-cover transition-opacity duration-500 ease-in-out"
+                        className={`w-full h-full transition-opacity duration-500 ease-in-out call-portrait ${portraitUrl ? "call-portrait-art" : "object-cover"}`}
                         style={{
                             opacity: callState === "CONNECTING" ? 0.5 : 0.85,
                         }}
@@ -765,12 +794,12 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             </button>
 
             {/* Top info bar */}
-            <div className="relative z-10 gcall-topbar gcall-topbar-video">
-                <div className="gcall-topbar-title videocall-name">
+            <div className="relative z-10 gcall-topbar gcall-topbar-video call-topbar">
+                <div className="gcall-topbar-title videocall-name call-name">
                     {character.name}
                 </div>
                 <div
-                    className="gcall-topbar-sub videocall-name"
+                    className="gcall-topbar-sub videocall-name call-timer"
                     {...(callState === "CONNECTING" || callState === "PROCESSING" ? { "data-anim": "" } : {})}
                 >
                     {callState !== "CONNECTING" && callState !== "ENDED" ? `${formatTime(callDuration)} · ` : ""}
@@ -781,15 +810,16 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             {/* Subtitle log — scrollable */}
             <div
                 ref={subtitlesScrollRef}
-                className="call-subtitles-log"
+                className="call-subtitles-log call-subs"
             >
                 {subtitles.map((sub) => (
                     <div
                         key={sub.id}
-                        className="call-subtitle"
+                        className="call-subtitle call-sub"
                         data-role={sub.role}
+                        data-name={sub.role === "user" ? userName : character.name}
                     >
-                        <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
+                        <CallSubtitleText text={sub.text} expanded={session.collapseBilingualTranslation === false} />
                     </div>
                 ))}
                 {interimText && callState === "USER_SPEAKING" && (
@@ -861,7 +891,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             )}
 
             {/* Bottom controls */}
-            <div className={callState !== "ENDED" && callState !== "CONNECTING" && !androidTextInputOnly ? "videocall-controls-gradient videocall-controls-grid" : "videocall-controls-gradient"}>
+            <div className={callState !== "ENDED" && callState !== "CONNECTING" && !androidTextInputOnly ? "videocall-controls-gradient videocall-controls-grid call-controls" : "videocall-controls-gradient call-controls"}>
                 {callState !== "ENDED" && callState !== "CONNECTING" ? androidTextInputOnly ? (
                     /* 安卓纯文字模式：去掉的只有依赖语音识别的按钮（麦克风静音、语音/文字切换）；
                        摄像头开关、切换前后摄像头、扬声器静音在安卓完全可用，保留。 */
@@ -889,7 +919,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                         </button>
                         <button
                             onClick={handleHangup}
-                            className="ui-call-btn ui-call-btn-sm ui-call-btn-danger"
+                            className="ui-call-btn ui-call-btn-sm ui-call-btn-danger" data-call-hangup=""
                             aria-label="挂断"
                         >
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1037,7 +1067,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
 
                         <button
                             onClick={handleHangup}
-                            className="ui-call-btn ui-call-btn-sm ui-call-btn-danger"
+                            className="ui-call-btn ui-call-btn-sm ui-call-btn-danger" data-call-hangup=""
                             aria-label="挂断"
                         >
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1068,7 +1098,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                                 pushChatMessage({ sessionId: session.id, role: "user", content: `[我拒绝了视频通话]` });
                                 onEnd();
                             }}
-                            className="ui-call-btn ui-call-btn-danger"
+                            className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                         >
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
@@ -1091,7 +1121,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                             pushChatMessage({ sessionId: session.id, role: "user", content: `[我取消了视频通话]` });
                             onEnd();
                         }}
-                        className="ui-call-btn ui-call-btn-danger"
+                        className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                     >
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />

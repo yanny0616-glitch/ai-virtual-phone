@@ -13,6 +13,8 @@ export class MacroEngine {
     /** 绑了会话时 setvar/getvar 落进变量池，重开聊天也在；没绑（故事、推送预览等）只在本次展开里有效 */
     varStore: MacroVarStore | null = null;
     chatVariables: string = "";
+    replyStyle: string = "";
+    callExtras: string = "";
     charName: string;
     userName: string;
     lastUserMessage: string = "";
@@ -197,6 +199,8 @@ export class MacroEngine {
         if (body === "statusRegionComposition") return this.statusRegionComposition;
         if (body === "statusRegionFullExample") return this.statusRegionFullExample;
         if (body === "chatVariables") return this.chatVariables || TRIM_SENTINEL;
+        if (body === "replyStyle") return this.replyStyle || TRIM_SENTINEL;
+        if (body === "callExtras") return this.callExtras || TRIM_SENTINEL;
         if (body === "offlineBilingualInstruction") return this.offlineBilingualInstruction || "\x00TRIM\x00";
         if (body === "offlineSummaryTag") return this.offlineSummaryTag || "summary";
         if (body === "checkPhoneBilingualInstruction") return this.checkPhoneBilingualInstruction || "\x00TRIM\x00";

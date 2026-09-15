@@ -54,4 +54,5 @@ export function recordUnansweredCall(sessionId: string, kind: "voice" | "video",
 
 export function emitCallEnded(payload: CallEndedPayload): void {
     emitChatPluginEvent("call.ended", payload);
+    if (payload.outcome === "answer") void import("./call-records").then(m => m.summarizeLatestCall(payload.sessionId));
 }

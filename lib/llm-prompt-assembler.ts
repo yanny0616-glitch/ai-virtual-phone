@@ -98,6 +98,8 @@ export interface AssemblerInput {
     statusRegionComposition?: string;        // {{statusRegionComposition}} — 文字聊天模式【输出构成】行
     statusRegionFullExample?: string;        // {{statusRegionFullExample}} — 完整示例中的状态值+内心行
     chatVariables?: string;                  // {{chatVariables}} — 交给 AI 按规则维护的聊天变量
+    replyStyle?: string;                     // {{replyStyle}} — 聊天信息里设的回复长度/气泡/动作描写
+    callExtras?: string;                     // {{callExtras}} — 通话里的旁白、挂断、立绘场景
     macroVarStore?: MacroVarStore | null;    // 绑了会话时 {{setvar}} 存进变量池
     offlineBilingualInstruction?: string;    // offline-mode bilingual output rule for {{offlineBilingualInstruction}}
     offlineSummaryTag?: string;              // XML tag used for offline-mode summary output
@@ -714,6 +716,8 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
         engine.statusRegionComposition = input.statusRegionComposition ?? "";
         engine.statusRegionFullExample = input.statusRegionFullExample ?? "";
         engine.chatVariables = input.chatVariables ?? "";
+        engine.replyStyle = input.replyStyle ?? "";
+        engine.callExtras = input.callExtras ?? "";
         engine.varStore = input.macroVarStore ?? null;
         engine.offlineBilingualInstruction = input.offlineBilingualInstruction ?? "";
         engine.offlineSummaryTag = input.offlineSummaryTag ?? "summary";

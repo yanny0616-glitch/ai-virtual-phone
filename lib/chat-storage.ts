@@ -48,6 +48,30 @@ export type ChatSession = {
     chatAvatar?: string; // 仅聊天里显示的角色头像（data URL），空则用角色卡头像
     videoBackground?: string;
     voiceBackground?: string;
+    /** 回复长度：跟情绪（默认，沿用预设原话）/ 短 / 中 / 长 / 自定（replyMin～replyMax 句） */
+    replyLength?: "mood" | "short" | "mid" | "long" | "custom";
+    replyMin?: number;
+    replyMax?: number;
+    /** 一轮回复合成一个气泡，富媒体照旧单独一条 */
+    singleBubble?: boolean;
+    /** 线上允许 *动作* 描写，气泡里灰色斜体 */
+    onlineActions?: boolean;
+    /** 聊到见面角色自己切线下，分开了切回线上 */
+    autoModeSwitch?: boolean;
+    /** 通话里允许（旁白），语音不读；缺省为开 */
+    callNarration?: boolean;
+    /** 通话中角色可以写 [挂断] 主动挂；缺省为开 */
+    allowCharHangup?: boolean;
+    /** 挂断后写一句通话小结；缺省为开 */
+    callSummary?: boolean;
+    /** 视频通话接通就开前置摄像头 */
+    callCameraDefault?: boolean;
+    /** 通话场景按在线状态里 TA 在哪自动挑；缺省为开 */
+    callSceneFollow?: boolean;
+    /** 角色可以写 [立绘:…] [场景:…] 换；缺省为开 */
+    callArtSwitch?: boolean;
+    /** 通话界面自定义 CSS，作用域是 [data-call-screen] */
+    callCSS?: string;
     isBlacklisted?: boolean;
     /** 用户拉黑角色的时间；isBlacklisted 为真时有效 */
     blacklistedAt?: string;
@@ -223,6 +247,8 @@ export type ChatMessage = {
         callMissedCount?: number; // 你连着打、TA 没接的通数
         callLastAt?: string;      // 最后一通没接的时间
         callReason?: string;      // TA 拒接时界面上的说明（如「在开会」）
+        callSummary?: string;     // 挂断后 AI 写的一句小结，挂在挂断那条上
+        modeSwitch?: "offline" | "online"; // 角色自动切线上线下时留的那行提示
         voiceDuration?: number;   // 语音条时长（秒）
         synthesizedFromText?: string; // 语音条当前音频对应的合成文本
         ttsText?: string; // 含情绪/声音标记的朗读原文；label/content 保持可读文本

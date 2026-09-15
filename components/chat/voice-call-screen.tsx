@@ -15,7 +15,6 @@ import { isVoiceExpressionEnabled, resolveVoiceExpressionText, splitVoiceExpress
 import { isCallRecordingSupported, resolveCloudSttConfig } from "@/lib/stt-cloud";
 import { useHoldToTalk } from "./use-hold-to-talk";
 import { suspendKeepAliveForCall, resumeKeepAliveAfterCall } from "@/lib/use-weixin-bridge";
-import { BilingualTextBlock } from "./message-bubble";
 import type { Character } from "@/lib/character-types";
 import { useCallKeyboardOffsetStyle } from "./use-call-keyboard-offset";
 import { CallSttWarningDialog, hideCallSttWarningPermanently, isCallSttWarningHidden } from "./call-stt-warning-dialog";
@@ -24,6 +23,8 @@ import { CallVolumeControl } from "./call-volume-control";
 import { startIncomingCallVibration } from "@/lib/call-vibration";
 import { emitCallEnded, recordUnansweredCall, resolveCallConnect } from "@/lib/call-connect";
 import type { CallBeforeConnectPayload } from "@/lib/chat-plugin-types";
+import { stripNarration, takeCallDirectives } from "@/lib/call-directives";
+import { CallScreenStyle, CallSubtitleText, useCallExtras } from "./use-call-extras";
 
 // ── Types ───────────────────────────────────────────
 
@@ -96,6 +97,10 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const messagesRef = useRef<ChatMessage[]>([]);
     const _initUi = resolveUserIdentity(session.contactId, "chat");
     const userNameRef = useRef<string>(_initUi?.name || "你");
+    const userName = _initUi?.name || "你";
+    const { flags: callFlags, applyArt, sceneUrl } = useCallExtras(session, character.id, "voice");
+    const backdrop = sceneUrl || bgImageResolved;
+    const endCallRef = useRef<(by: "user" | "char") => void>(() => {});
 
     // Keep refs in sync
     useEffect(() => { stateRef.current = callState; }, [callState]);
@@ -357,11 +362,15 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             if (stateRef.current === "ENDED") return;
 
             // 4. Process response
-            const { cleanParts } = processAIResponse(aiResponseText);
+            const directives = takeCallDirectives(aiResponseText);
+            applyArt(directives);
+            const hangupAfter = directives.hangup && callFlags.hangup;
+            const { cleanParts } = processAIResponse(directives.text);
             const displayText = stripVoiceExpression(cleanParts.join("\n"));
 
             if (!displayText) {
-                setCallState("IDLE");
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
                 return;
             }
 
@@ -371,7 +380,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
             // 缩小为悬浮窗期间收到的回复：只静默记录文字，不播放语音
             if (minimizedRef.current) {
-                setCallState("IDLE");
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
                 return;
             }
 
@@ -386,7 +396,9 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                         : [cleanParts.join("\n")];
                     for (const segment of segments) {
                         if (stateRef.current === "ENDED") return;
-                        const speechText = resolveVoiceExpressionText(stripVoiceExpression(segment), segment, "call");
+                        const spoken = stripNarration(segment);
+                        if (!spoken) continue;
+                        const speechText = resolveVoiceExpressionText(stripVoiceExpression(spoken), spoken, "call");
                         const audioBlob = await synthesizeChatSpeech(speechText, voiceConfig);
                         if (stateRef.current === "ENDED") return;
 
@@ -403,7 +415,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             }
 
             if (stateRef.current !== "ENDED") {
-                setCallState("IDLE");
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
             }
         } catch (error: any) {
             console.error("[VoiceCall] Error:", error);
@@ -416,7 +429,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 setCallState("IDLE");
             }
         }
-    }, [session, processAIResponse, playCallAudio]);
+    }, [session, processAIResponse, playCallAudio, applyArt, callFlags.hangup]);
 
     // ── Auto-listen: 进入 IDLE 自动开始监听 ────────
 
@@ -608,8 +621,9 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         setTimeout(() => onEnd(), 1800);
     };
 
-    const handleHangup = useCallback(() => {
+    const endCall = useCallback((by: "user" | "char") => {
         setCallState("ENDED");
+        if (by === "char") setEndNote(`${character.name}挂断了`);
 
         // Stop any ongoing STT
         if (sttRef.current) {
@@ -629,11 +643,11 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         }
 
         // 没等接通就挂了：记成取消，不留时长
-        const cancelled = !hasConnectedRef.current && initiator !== "character";
+        const cancelled = by === "user" && !hasConnectedRef.current && initiator !== "character";
         if (cancelled) pushStartMessage();
         const endMsg = pushChatMessage({
             sessionId: session.id,
-            role: "user",
+            role: by === "char" ? "assistant" : "user",
             content: cancelled ? `[我取消了语音通话]` : `[我挂断了语音通话]`,
             mediaData: cancelled ? undefined : { callDuration: formatTime(callDuration) },
         });
@@ -641,9 +655,11 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         emitCallEnded({ sessionId: session.id, characterId: session.contactId, kind: "voice", outcome: cancelled ? "cancel" : "answer", durationSec: cancelled ? 0 : callDuration });
 
         // Delay then close
-        setTimeout(() => onEnd(), 1500);
+        setTimeout(() => onEnd(), by === "char" ? 2200 : 1500);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [session.id, session.contactId, callDuration, onEnd, initiator]);
+    }, [session.id, session.contactId, callDuration, onEnd, initiator, character.name]);
+    const handleHangup = useCallback(() => endCall("user"), [endCall]);
+    useEffect(() => { endCallRef.current = endCall; }, [endCall]);
 
     // ── Render ──────────────────────────────────────
 
@@ -652,7 +668,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             <button
                 type="button"
                 className="call-mini-window"
-                style={{ backgroundImage: `url(${bgImageResolved || character.avatar || ""})` }}
+                style={{ backgroundImage: `url(${backdrop || character.avatar || ""})` }}
                 onClick={onRestore}
                 aria-label={`返回与${character.name}的语音通话`}
                 title="点击返回通话"
@@ -665,13 +681,16 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
     return (
         <div
-            className="absolute inset-0 z-[100] flex flex-col text-white overflow-hidden call-bg-default call-keyboard-shift"
-            style={bgImageResolved ? { ...keyboardOffsetStyle, background: `url(${bgImageResolved}) center/cover no-repeat` } : keyboardOffsetStyle}
+            className="absolute inset-0 z-[100] flex flex-col text-white overflow-hidden call-bg-default call-keyboard-shift call-screen"
+            data-call-screen="voice"
+            style={keyboardOffsetStyle}
         >
+            <CallScreenStyle css={session.callCSS} />
+            {backdrop && <div className="call-scene" aria-hidden="true" style={{ backgroundImage: `url(${backdrop})` }} />}
             {/* Dark overlay for readability */}
             <div
                 className="call-overlay absolute inset-0 z-0"
-                {...(bgImageResolved ? { "data-has-image": "" } : {})}
+                {...(backdrop ? { "data-has-image": "" } : {})}
             />
 
             <CallVolumeControl />
@@ -693,12 +712,12 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             {/* Content wrapper — force white text so themes don't override call UI */}
             <div className="voicecall-controls gcall-body">
                 {/* Top: Duration + Status */}
-                <div className="gcall-topbar">
-                    <div className="gcall-topbar-title">
+                <div className="gcall-topbar call-topbar">
+                    <div className="gcall-topbar-title call-name">
                         {character.name}
                     </div>
                     <div
-                        className="gcall-topbar-sub"
+                        className="gcall-topbar-sub call-timer"
                         {...(callState === "CONNECTING" || callState === "PROCESSING" ? { "data-anim": "" } : {})}
                     >
                         {callState !== "CONNECTING" && callState !== "ENDED" ? `${formatTime(callDuration)} · ` : ""}
@@ -710,7 +729,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 <div className="flex-none flex justify-center items-center pt-[30px] pb-5">
                     <div className="relative flex items-center justify-center">
                         <div
-                            className="voicecall-avatar"
+                            className="voicecall-avatar call-avatar"
                             {...(callState === "AI_SPEAKING" ? { "data-speaking": "" } : {})}
                         >
                             {character.avatar ? (
@@ -753,16 +772,17 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 {/* Subtitle area — top fade via mask */}
                 <div
                     ref={subtitleScrollRef}
-                    className="voicecall-subtitle-mask flex-1 min-h-0 overflow-auto px-5 py-[10px] flex flex-col gap-2 relative"
+                    className="voicecall-subtitle-mask flex-1 min-h-0 overflow-auto px-5 py-[10px] flex flex-col gap-2 relative call-subs"
                     {...(inputMode === "text" && callState !== "CONNECTING" && callState !== "ENDED" ? { "data-text-input": "" } : {})}
                 >
                     {subtitles.map((sub) => (
                         <div
                             key={sub.id}
-                            className="call-subtitle"
+                            className="call-subtitle call-sub"
                             data-role={sub.role}
+                            data-name={sub.role === "user" ? userName : character.name}
                         >
-                            <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
+                            <CallSubtitleText text={sub.text} expanded={session.collapseBilingualTranslation === false} />
                         </div>
                     ))}
 
@@ -830,7 +850,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
                 {/* Bottom controls */}
                 <div
-                    className="flex justify-center items-center gap-[40px] p-5"
+                    className="flex justify-center items-center gap-[40px] p-5 call-controls"
                     style={{ paddingBottom: "max(30px, env(safe-area-inset-bottom))" }}
                 >
                     {callState !== "ENDED" && callState !== "CONNECTING" ? holdToTalk ? (
@@ -880,7 +900,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                             {/* Hangup */}
                             <button
                                 onClick={handleHangup}
-                                className="ui-call-btn ui-call-btn-danger"
+                                className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                                 aria-label="挂断"
                             >
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -892,7 +912,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                     ) : androidTextInputOnly ? (
                         <button
                             onClick={handleHangup}
-                            className="ui-call-btn ui-call-btn-danger"
+                            className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                             aria-label="挂断"
                         >
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -953,7 +973,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                             {/* Hangup button */}
                             <button
                                 onClick={handleHangup}
-                                className="ui-call-btn ui-call-btn-danger"
+                                className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                             >
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
@@ -973,7 +993,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                                     });
                                     onEnd();
                                 }}
-                                className="ui-call-btn ui-call-btn-danger"
+                                className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                             >
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
@@ -1001,7 +1021,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                                 });
                                 onEnd();
                             }}
-                            className="ui-call-btn ui-call-btn-danger"
+                            className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                         >
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />

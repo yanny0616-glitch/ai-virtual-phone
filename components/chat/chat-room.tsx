@@ -60,12 +60,15 @@ import { queueDeferredReplyCloud, cancelDeferredReplyCloud, DEFERRED_REPLY_CLOUD
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Braces, Check, Trash2, User, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Braces, Camera, Check, Trash2, User, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { arrangePlusMenu, CHAT_PLUS_MENU_CHANGED_EVENT, isFreshPlusItem, loadPlusMenuPrefs, savePlusMenuPrefs, type PlusMenuPrefs } from "@/lib/chat-plus-menu";
 import { PlusMenuEditor } from "./plus-menu-editor";
 import { ChatVariablesSheet } from "./chat-variables-sheet";
 import { ChatBlockBar, FriendVerifySheet, RejectTip } from "./chat-block-ui";
 import { takeChatDirectives } from "@/lib/chat-directives";
+import { CHAT_MODE_SWITCHED_EVENT, extractModeSwitch, mergeSingleBubble, switchChatMode } from "@/lib/reply-style";
+import { CallRecordsPage } from "@/components/chat/call-records-page";
+import { ChatScreenshotSheet } from "@/components/chat/chat-screenshot-sheet";
 import { CHAT_BLOCK_CHANGED_EVENT, maybeReconsiderCharBlock, readChatBlock, setUserBlacklist } from "@/lib/chat-block";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
@@ -1428,6 +1431,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [editingResponseRoundId, setEditingResponseRoundId] = useState<string | null>(null);
     const [editingResponseContent, setEditingResponseContent] = useState("");
     const [expandedVoiceCallIds, setExpandedVoiceCallIds] = useState<Set<string>>(new Set());
+    /** undefined 关着；null 打开列表；字符串直接打开那一通 */
+    const [callRecordsFor, setCallRecordsFor] = useState<string | null | undefined>(undefined);
+    const [showScreenshot, setShowScreenshot] = useState(false);
     const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
     const INITIAL_LOAD = CHAT_INITIAL_VISIBLE_MESSAGE_COUNT;
@@ -1927,6 +1933,24 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         };
         window.addEventListener(CHAT_OFFLINE_MODE_CHANGED_EVENT, handler);
         return () => window.removeEventListener(CHAT_OFFLINE_MODE_CHANGED_EVENT, handler);
+    }, [session.id]);
+
+    // TA 自己切了线上/线下：顶上挂 8 秒提示，点「切回去」连那条见面/分开的说明一起撤掉
+    const [modeSwitchNote, setModeSwitchNote] = useState<{ target: "offline" | "online"; charName: string } | null>(null);
+    useEffect(() => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const onSwitched = (e: Event) => {
+            const detail = (e as CustomEvent<{ sessionId?: string; target?: "offline" | "online"; charName?: string }>).detail;
+            if (!detail?.target || detail.sessionId !== session.id) return;
+            setModeSwitchNote({ target: detail.target, charName: detail.charName || "对方" });
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => setModeSwitchNote(null), 8000);
+        };
+        window.addEventListener(CHAT_MODE_SWITCHED_EVENT, onSwitched);
+        return () => {
+            window.removeEventListener(CHAT_MODE_SWITCHED_EVENT, onSwitched);
+            if (timer) clearTimeout(timer);
+        };
     }, [session.id]);
 
     const needsInitialScrollRef = useRef(true);
@@ -2977,7 +3001,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         // [变量 …] / [拉黑:…] 这类指令行先摘掉，气泡全部落库后再生效
         const directives = takeChatDirectives(aiResponseText, session);
         const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(directives.text, previousState);
-        const parts = stripInvalidStickerParts(rawParts);
+        const parts = stripInvalidStickerParts(session.singleBubble ? mergeSingleBubble(rawParts) : rawParts);
         throwIfGenerationStopped(options);
 
         // Detect call triggers and AI media actions, filter them out
@@ -3348,7 +3372,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         text = text.replace(/\[我发起了((?:语音|视频)通话)\]/, `${charN}发起了$1`);
         // Hangup: [我挂断了XX通话] (duration now in mediaData, not content)
         text = text.replace(/\[我挂断了(.+?通话)\](?:\(时长\s*(.+?)\))?/, (_, callType, dur) =>
-            dur ? `你挂断了${callType}，时长 ${dur}` : `你挂断了${callType}`
+            `${msg?.role === "assistant" ? msg.senderName || charN : "你"}挂断了${callType}${dur ? `，时长 ${dur}` : ""}`
         );
         // Reject: [我拒绝了XX通话]；角色名下的是你打过去被挂掉，括号里是拒接说明
         text = text.replace(/\[我拒绝了(.+?通话)\](?:\((.+?)\))?/, (_, callType, why) =>
@@ -4534,7 +4558,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     ? await generateGroupOfflineChatCompletion(session, history, { signal: offlineRun.controller.signal, onStreamDelta: onOfflineDelta })
                     : await generateOfflineChatCompletion(session, history, { signal: offlineRun.controller.signal, onStreamDelta: onOfflineDelta });
                 if (!isCurrentOfflineRun()) return;
-                const assistantContent = result.content.trim() || result.rawText.trim();
+                const modeSwitch = extractModeSwitch(result.content.trim() || result.rawText.trim());
+                const assistantContent = modeSwitch.text.trim();
                 if (!assistantContent) throw new Error("AI 没有返回线下正文");
                 if (!result.summary.trim()) showChatToast(`未提取到 <${result.summaryTag}> 摘要`);
                 const saved = appendChatOfflineTurn({
@@ -4549,6 +4574,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     thinkingTag: result.thinkingTag,
                 });
                 setOfflineTurns(prev => [...prev, saved]);
+                if (modeSwitch.target === "online" && session.autoModeSwitch && !session.isGroup) switchChatMode(session, "online", "char");
             } catch (error: any) {
                 if (!isCurrentOfflineRun() || isAbortLikeError(error)) return;
                 offlineTextInputRef.current?.setText(currentText);
@@ -5576,6 +5602,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     // Build a map: startMsgId → { startIdx, endIdx, duration }
     // and a set of all message indices that belong to a voice call group
+    const deleteCallMessages = (targets: ChatMessage[]) => deleteWeixinCloudBeforeLocal(targets, () => {
+        const ids = new Set(targets.map(m => m.id));
+        deleteChatMessagesByIds(session.id, [...ids]);
+        setMessages(prev => prev.filter(m => !ids.has(m.id)));
+    });
+
     const voiceCallGroups = useMemo(() => {
         const groups: { startId: string; startIdx: number; endIdx: number; duration: string; callType: "voice" | "video" }[] = [];
         const memberSet = new Set<number>();
@@ -5637,6 +5669,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         });
         return ids;
     }, [getMessageDisplayContent, getSelectableStoredMessageId, projectedMessages, voiceCallGroups.memberSet]);
+
+    const screenshotRows = useMemo(() => {
+        if (!showScreenshot) return [];
+        return projectedMessages.flatMap(msg => {
+            const storedId = getSelectableStoredMessageId(msg);
+            return storedId && selectedMessageIds.has(storedId) ? [{ renderId: msg.id, storedId, at: msg.createdAt }] : [];
+        });
+    }, [getSelectableStoredMessageId, projectedMessages, selectedMessageIds, showScreenshot]);
 
     const multiDeleteTargetIds = useMemo(() => {
         if (selectedMessageIds.size === 0) return [];
@@ -5812,7 +5852,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     } : undefined;
 
     return (
-        <div ref={wrapperRef} className={`session-${session.id} chat-room-wrapper page-shell inset-0 flex flex-col z-20`} style={chatRoomBackgroundStyle} {...(bgLoading ? { "data-loading": "" } : {})} {...(bgImageResolved ? { "data-has-bg-image": "" } : {})} {...(showSettings ? { "data-settings-open": "" } : {})}>
+        <div ref={wrapperRef} className={`session-${session.id} chat-room-wrapper page-shell inset-0 flex flex-col z-20`} style={chatRoomBackgroundStyle} {...(bgLoading ? { "data-loading": "" } : {})} {...(bgImageResolved ? { "data-has-bg-image": "" } : {})} {...(showSettings ? { "data-settings-open": "" } : {})} {...(session.onlineActions && !session.isGroup ? { "data-online-actions": "" } : {})}>
             {/* Custom CSS Injection for this session — scoped to prevent leaking */}
             {liveCSS && (
                 <SessionCustomCSS css={liveCSS} scope={`.session-${session.id}`} />
@@ -6075,6 +6115,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         const isExpanded = expandedVoiceCallIds.has(vcGroup.startId);
                         const groupMessages = projectedMessages.slice(vcGroup.startIdx, vcGroup.endIdx + 1);
                         const chatCount = groupMessages.filter(m => uiRole(m) !== "system").length;
+                        const vcSummary = groupMessages[groupMessages.length - 1]?.mediaData?.callSummary;
                         return (
                             <div key={`vc-${vcGroup.startId}`} className="flex flex-col gap-2">
                                 <div
@@ -6099,7 +6140,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             return next;
                                         });
                                     }}
-                                    className="chat-sys-msg flex items-center justify-center gap-[6px] py-[6px] px-[14px] mx-auto rounded-2xl cursor-pointer relative"
+                                    className="chat-sys-msg flex flex-wrap items-center justify-center gap-[6px] py-[6px] px-[14px] mx-auto rounded-2xl cursor-pointer relative"
                                     {...(activeMessageId === `vc-${vcGroup.startId}` ? { "data-active": "" } : {})}
                                 >
                                     {vcGroup.callType === "video" ? (
@@ -6116,6 +6157,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         className="ui-chevron-down-flip" {...(isExpanded ? { "data-open": "" } : {})}>
                                         <polyline points="6 9 12 15 18 9" />
                                     </svg>
+                                    {vcSummary && <span className="cx-vc-sum">{vcSummary}</span>}
                                     {activeMessageId === `vc-${vcGroup.startId}` && renderDeleteOnlyContextMenu(() => {
                                         const groupMsgIds = groupMessages.map(m => m.id);
                                         void deleteWeixinCloudBeforeLocal(groupMessages, () => {
@@ -6182,6 +6224,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 </div>
                                             )
                                         ))}
+                                        {!session.isGroup && (
+                                            <button type="button" className="cx-vc-link" onClick={() => setCallRecordsFor(getSelectableStoredMessageId(groupMessages[0]) ?? vcGroup.startId)}>查看通话记录 ›</button>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -6234,7 +6279,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     return (
                         <div key={msg.id} className="flex flex-col gap-4" {...(hiddenEmpty ? { style: { display: "none" } } : {})} {...(isEmptyBubble && renderMsg.reasoningText && !showTime ? { "data-reasoning-only": "" } : {})}>
                             {showTime && (
-                                <div className="flex justify-center w-full">
+                                <div className="flex justify-center w-full" data-time-row="">
                                     <span className="chat-sys-msg py-[2px] px-2 rounded select-none">
                                         {formatChatUiTime(msg.createdAt)}
                                     </span>
@@ -6603,6 +6648,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             </div>
 
             {/* Input Bar — absolute at bottom, same layer as header */}
+            {modeSwitchNote && (
+                <div className="cx-mode-note" role="status">
+                    <span>{modeSwitchNote.charName}把聊天切到了{modeSwitchNote.target === "offline" ? "线下" : "线上"}</span>
+                    <button type="button" onClick={() => {
+                        const notice = [...loadChatMessages(session.id)].reverse().find(m => m.mediaData?.modeSwitch === modeSwitchNote.target);
+                        if (notice) deleteChatMessage(notice.id);
+                        switchChatMode(session, modeSwitchNote.target === "offline" ? "online" : "offline", "user");
+                        setModeSwitchNote(null);
+                        syncMessagesFromStorage();
+                    }}>切回去</button>
+                    <button type="button" className="cx-mode-note-x" aria-label="关闭提示" onClick={() => setModeSwitchNote(null)}><X size={12} /></button>
+                </div>
+            )}
             {isMultiSelectMode && !offlineMode && (
                 <div className="chat-multi-select-bar chat-room-main-pane" data-ui="multi-select">
                     <button
@@ -6624,6 +6682,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     </div>
                     <button
                         type="button"
+                        className="chat-multi-select-delete-btn cx-shot-btn"
+                        disabled={selectedMessageIds.size === 0}
+                        onClick={() => setShowScreenshot(true)}
+                    >
+                        <Camera size={18} strokeWidth={1.8} />
+                        截图
+                    </button>
+                    <button
+                        type="button"
                         className="chat-multi-select-delete-btn"
                         disabled={selectedMessageIds.size === 0 || multiDeleteTargetIds.length === 0}
                         onClick={confirmMultiDelete}
@@ -6634,6 +6701,24 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 </div>
             )}
             {showChatVariables && <ChatVariablesSheet session={session} characterName={character?.name || "对方"} onClose={() => setShowChatVariables(false)} />}
+            {callRecordsFor !== undefined && (
+                <CallRecordsPage session={session} characterName={character?.name || "对方"} initialRecordId={callRecordsFor ?? undefined}
+                    onDeleteMessages={deleteCallMessages} onClose={() => setCallRecordsFor(undefined)} />
+            )}
+            {showScreenshot && (
+                <ChatScreenshotSheet
+                    rootRef={wrapperRef}
+                    rows={screenshotRows}
+                    title={session.isGroup ? session.groupName || "群聊" : character?.name || "对方"}
+                    onDeselect={ids => setSelectedMessageIds(prev => {
+                        const next = new Set(prev);
+                        ids.forEach(id => next.delete(id));
+                        return next;
+                    })}
+                    onSaved={() => { setShowScreenshot(false); cancelMultiSelect(); }}
+                    onClose={() => setShowScreenshot(false)}
+                />
+            )}
             {showFriendVerify && <FriendVerifySheet sessionId={session.id} charName={character?.name || "对方"} userName={userIdentity?.name || "我"} onClose={() => setShowFriendVerify(false)} />}
             {!isMultiSelectMode && (blockInfo.isBlacklisted ? (
                 <ChatBlockBar charName={character?.name || "对方"} onUnblock={() => setUserBlacklist(session.id, false)} />
@@ -6722,6 +6807,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         }}
                         onToolHistoryCleared={syncMessagesFromStorage}
                         offlineHistoryBusy={isOfflineGenerating}
+                        onDeleteMessages={deleteCallMessages}
                         onOfflineHistoryCleared={() => {
                             setOfflineTurns([]);
                             setOfflineVisibleCount(OFFLINE_INITIAL_LOAD);

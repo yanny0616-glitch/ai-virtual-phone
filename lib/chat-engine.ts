@@ -76,6 +76,8 @@ import { formatCustomAppChatContextForPrompt } from "./custom-app-chat-context";
 import { prepareCustomAppPromptContexts } from "./custom-app-prompt-context";
 import { formatReplyGateNoteForPrompt } from "./chat-reply-gate";
 import { buildChatVariablesPrompt, createMacroVarStore } from "./chat-variables";
+import { buildReplyStylePrompt } from "./reply-style";
+import { buildCallExtrasPrompt } from "./call-directives";
 import { loadAllTracks } from "./music-storage";
 import { getActiveAppTags } from "./content-tag-utils";
 import { isNeteaseConfigured, getUserPlaylists, getPlaylistTracks, checkLoginStatus, loadMusicApiConfig } from "./music-service";
@@ -1933,6 +1935,7 @@ export async function buildChatPromptMessages(
     const promptTimestampOptions = getPromptTimestampOptionsForTimeContext(promptTimeContext);
     const memConfig = loadMemoryConfig();
     const isOfflineMode = options?.appTags?.includes("offline") === true;
+    const callKind = options?.appTags?.includes("video") ? "video" as const : options?.appTags?.includes("voice") ? "voice" as const : null;
     const effectiveAppTags = mergeAppTags(options?.appTags, promptProfile?.appTags, resolvedAppId);
     const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode;
     const enabledTools = toolsAllowed ? getEnabledTools(resolvedAppId) : [];
@@ -2060,6 +2063,8 @@ export async function buildChatPromptMessages(
         statusRegionFullExample: resolveStatusRegionFullExample(statusRegionCfg),
         chatVariables: session.isGroup ? "" : buildChatVariablesPrompt(session.id, session.contactId),
         macroVarStore: createMacroVarStore(session.id),
+        replyStyle: session.isGroup ? "" : buildReplyStylePrompt(session, isOfflineMode ? "offline" : callKind ? "other" : "text"),
+        callExtras: session.isGroup || !callKind ? "" : buildCallExtrasPrompt(session, callKind, character.name),
         offlineBilingualInstruction,
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,

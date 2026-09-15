@@ -38,6 +38,7 @@ import { parseAIResponse } from "./rich-message-parser";
 import type { ParsedMessagePart } from "./rich-message-parser";
 import { getStatusRegionConfig, isCustomStatusRegionActive } from "./chat-status-region";
 import { takeChatDirectives } from "./chat-directives";
+import { mergeSingleBubble } from "./reply-style";
 import { isKnownStickerLabel } from "./sticker-data";
 import { loadCharacters } from "./character-storage";
 import { bgSetInterval, bgSetTimeout } from "./bg-timer";
@@ -968,7 +969,9 @@ export async function parseAndSaveResponse(
     const previousState = sess && !sess.isGroup ? getLatestCharacterStateValues(sess.contactId) : [];
 
     const directives = takeChatDirectives(options?.suppressReply ? stripChatSilenceMarker(rawText) : rawText, sess);
-    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(directives.text, previousState);
+    const parsed = parseAIResponse(directives.text, previousState);
+    const { stateValues, freshStateValues, statusPanel, innerMonologue } = parsed;
+    const parts = sess?.singleBubble ? mergeSingleBubble(parsed.parts) : parsed.parts;
 
     // 自定义状态栏渲染戳：追发/屏幕速聊/离线回传落库的消息此前从不盖
     // statusRegionMode，custom 模式下 [状态栏] 原文被当 markdown 渲染成一坨

@@ -29,6 +29,8 @@ import {
     type ChatBlockInfo,
 } from "@/lib/chat-block";
 import { ChatVariablesSheet } from "./chat-variables-sheet";
+import { CallSettingsRows, ReplyStyleRows, callSectionSummary } from "./chat-call-settings";
+import { CallRecordsPage } from "./call-records-page";
 import {
     GROUP_SELF_KEY,
     applyGroupAdminAction,
@@ -55,7 +57,7 @@ import { downloadFile } from "@/lib/download-utils";
 import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { KeyboardAutoSendDebounceItem } from "@/components/chat/keyboard-auto-send-debounce-item";
-import { Ban, Braces, ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, Palette, PanelTop, Puzzle, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
+import { Ban, Braces, ChevronRight, Phone, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, Palette, PanelTop, Puzzle, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -206,6 +208,8 @@ type ChatSettingsPanelProps = {
     onToolHistoryCleared?: () => void;
     onOfflineHistoryCleared?: () => void;
     offlineHistoryBusy?: boolean;
+    /** 通话记录里删一通电话：交给聊天页，先删微信云端那份 */
+    onDeleteMessages?: (messages: ChatMessage[]) => Promise<void> | void;
 };
 
 const chatInfoIconStyle = (color: string): CSSProperties => ({
@@ -465,6 +469,7 @@ export function ChatSettingsPanel({
     onToolHistoryCleared,
     onOfflineHistoryCleared,
     offlineHistoryBusy = false,
+    onDeleteMessages,
 }: ChatSettingsPanelProps) {
     const [backgroundImage, setBackgroundImage] = useState<string>(session.backgroundImage || "");
     const [alias, setAlias] = useState<string>(session.alias || "");
@@ -472,6 +477,7 @@ export function ChatSettingsPanel({
     const [chatAvatarCropSrc, setChatAvatarCropSrc] = useState<string | null>(null);
     const [videoBackground, setVideoBackground] = useState<string>(session.videoBackground || "");
     const [voiceBackground, setVoiceBackground] = useState<string>(session.voiceBackground || "");
+    const [showCallRecords, setShowCallRecords] = useState(false);
     const [isPinned, setIsPinned] = useState(session.isPinned || false);
     // 自定义状态栏（状态区）
     const [statusRegion, setStatusRegion] = useState<StatusRegionConfig>(() => getStatusRegionConfig(session.id));
@@ -1038,7 +1044,7 @@ export function ChatSettingsPanel({
     const lookSummary = [
         backgroundImage ? "自定背景" : "默认背景",
         chatAvatar && "换了头像",
-        (videoBackground || voiceBackground) && "通话背景",
+        session.isGroup && (videoBackground || voiceBackground) && "通话背景",
         customCSS && "自定义 CSS",
     ].filter(Boolean).join(" · ");
 
@@ -1046,6 +1052,8 @@ export function ChatSettingsPanel({
     const displayedSearchMessages = searchMode ? searchResults : searchHistoryMessages;
 
     return (
+        <>
+        {showCallRecords && <CallRecordsPage session={session} characterName={characterName} onDeleteMessages={onDeleteMessages} onClose={() => setShowCallRecords(false)} />}
         <PageShell title="聊天信息" onBack={onClose} className="absolute inset-0 z-[100]">
             {showChatVariables && <ChatVariablesSheet session={session} characterName={characterName} onClose={() => setShowChatVariables(false)} />}
             <div className="page-menu chat-info-menu">
@@ -1170,6 +1178,7 @@ export function ChatSettingsPanel({
                                 <Toggle checked={isPinned} onChange={c => { setIsPinned(c); updateSession({ isPinned: c }); }} />
                             </div>
                         </div>
+                        {!session.isGroup && <ReplyStyleRows session={session} updateSession={updateSession} InfoIcon={ChatInfoIcon} />}
                         <div className="menu-item">
                             <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
                             <div className="menu-label-group">
@@ -1410,7 +1419,7 @@ export function ChatSettingsPanel({
                                 <input type="file" accept="image/*" onChange={handleChatAvatarUpload} className="hidden" />
                             </label>
                         )}
-                        {session.isGroup ? (
+                        {session.isGroup && (
                             <>
                                 <div className="menu-item" style={{ cursor: "default" }}>
                                     <ChatInfoIcon icon={Video} color={BINDING_ACCENTS.voice} />
@@ -1444,27 +1453,17 @@ export function ChatSettingsPanel({
                                     </div>
                                     <input type="file" accept="image/*" onChange={e => handleGroupVideoBgUpload(e, "self")} className="hidden" />
                                 </label>
-                            </>
-                        ) : (
                             <label className="menu-item">
-                                <ChatInfoIcon icon={Video} color={BINDING_ACCENTS.voice} />
-                                <div className="menu-label-group"><span className="menu-label">视频通话背景</span></div>
+                                <ChatInfoIcon icon={Mic} color={BINDING_ACCENTS.voice} />
+                                <div className="menu-label-group"><span className="menu-label">语音通话背景</span></div>
                                 <div className="menu-right">
-                                    {videoBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVideoBackground(""); updateSession({ videoBackground: "" }); }}>清除</button></>}
+                                    {voiceBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVoiceBackground(""); updateSession({ voiceBackground: "" }); }}>清除</button></>}
                                     <ChevronRight size={16} />
                                 </div>
-                                <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVideoBackground, "videoBackground")} className="hidden" />
+                                <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVoiceBackground, "voiceBackground")} className="hidden" />
                             </label>
+                            </>
                         )}
-                        <label className="menu-item">
-                            <ChatInfoIcon icon={Mic} color={BINDING_ACCENTS.voice} />
-                            <div className="menu-label-group"><span className="menu-label">语音通话背景</span></div>
-                            <div className="menu-right">
-                                {voiceBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVoiceBackground(""); updateSession({ voiceBackground: "" }); }}>清除</button></>}
-                                <ChevronRight size={16} />
-                            </div>
-                            <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVoiceBackground, "voiceBackground")} className="hidden" />
-                        </label>
                         <button className="menu-item" onClick={() => setEditingCSS(true)}>
                             <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.embedding} />
                             <div className="menu-label-group"><span className="menu-label">自定义 CSS 样式</span></div>
@@ -1474,6 +1473,30 @@ export function ChatSettingsPanel({
                             </div>
                         </button>
                     </ChatInfoSection>
+                    {!session.isGroup && (
+                        <ChatInfoSection title="通话" desc={callSectionSummary(session)} icon={Phone} color={BINDING_ACCENTS.voice} open={openSection === "call"} onToggle={() => toggleSection("call")}>
+                            <CallSettingsRows session={session} updateSession={updateSession} InfoIcon={ChatInfoIcon} characterName={characterName} onOpenRecords={() => setShowCallRecords(true)}>
+                            <label className="menu-item">
+                                <ChatInfoIcon icon={Video} color={BINDING_ACCENTS.voice} />
+                                <div className="menu-label-group"><span className="menu-label">视频通话背景</span></div>
+                                <div className="menu-right">
+                                    {videoBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVideoBackground(""); updateSession({ videoBackground: "" }); }}>清除</button></>}
+                                    <ChevronRight size={16} />
+                                </div>
+                                <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVideoBackground, "videoBackground")} className="hidden" />
+                            </label>
+                        <label className="menu-item">
+                            <ChatInfoIcon icon={Mic} color={BINDING_ACCENTS.voice} />
+                            <div className="menu-label-group"><span className="menu-label">语音通话背景</span></div>
+                            <div className="menu-right">
+                                {voiceBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVoiceBackground(""); updateSession({ voiceBackground: "" }); }}>清除</button></>}
+                                <ChevronRight size={16} />
+                            </div>
+                            <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVoiceBackground, "voiceBackground")} className="hidden" />
+                        </label>
+                            </CallSettingsRows>
+                        </ChatInfoSection>
+                    )}
                     {!session.isGroup && (
                         <ChatInfoSection title="拉黑与删好友" desc={blockSummary(blockInfo, characterName)} icon={Ban} color={"var(--c-danger)"} open={openSection === "block"} onToggle={() => toggleSection("block")}>
                             <ChatBlockSection sessionId={session.id} charName={characterName} info={blockInfo} />
@@ -2022,5 +2045,6 @@ export function ChatSettingsPanel({
                 </div>
             )}
         </PageShell>
+        </>
     );
 }
