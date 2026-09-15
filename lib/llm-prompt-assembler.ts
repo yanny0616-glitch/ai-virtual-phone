@@ -7,6 +7,7 @@ import type { StateValue } from "./chat-storage";
 import { PresetConfig, Prompt, PromptOrderEntry, WorldBookConfig, RegexConfig, WorldBookEntry } from "./settings-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
 import { MacroEngine, postProcessTrim } from "./macro-engine";
+import type { MacroVarStore } from "./chat-variables";
 import type { RecentBlock, UnifiedRecentItem } from "./short-term-assembler";
 import { readDwellingLayoutCache } from "./dwelling-storage";
 import { formatDwellingContext } from "./dwelling-engine";
@@ -96,6 +97,8 @@ export interface AssemblerInput {
     statusRegionExampleLine?: string;        // {{statusRegionExampleLine}} — 主动消息输出示例中的状态区行
     statusRegionComposition?: string;        // {{statusRegionComposition}} — 文字聊天模式【输出构成】行
     statusRegionFullExample?: string;        // {{statusRegionFullExample}} — 完整示例中的状态值+内心行
+    chatVariables?: string;                  // {{chatVariables}} — 交给 AI 按规则维护的聊天变量
+    macroVarStore?: MacroVarStore | null;    // 绑了会话时 {{setvar}} 存进变量池
     offlineBilingualInstruction?: string;    // offline-mode bilingual output rule for {{offlineBilingualInstruction}}
     offlineSummaryTag?: string;              // XML tag used for offline-mode summary output
     checkPhoneBilingualInstruction?: string; // checkphone bilingual output rule for {{checkPhoneBilingualInstruction}}
@@ -542,6 +545,8 @@ function pushChronologicalShortTermBlocks(params: {
             || msg.mediaType === "tool_notice"
             || isNativeToolResultMessage(msg)
             || msg.mediaType === "memory_write_request") return;
+        // 角色拉黑/删了用户时发出的消息，角色根本没收到
+        if (msg.rejectedBy) return;
 
         const promptRole = resolveHistoryPromptRole(msg);
         const ts = (timeAware && msg.createdAt) ? formatChatTimestamp(msg.createdAt, timestampOptions) : "";
@@ -708,6 +713,8 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
         engine.statusRegionExampleLine = input.statusRegionExampleLine ?? "";
         engine.statusRegionComposition = input.statusRegionComposition ?? "";
         engine.statusRegionFullExample = input.statusRegionFullExample ?? "";
+        engine.chatVariables = input.chatVariables ?? "";
+        engine.varStore = input.macroVarStore ?? null;
         engine.offlineBilingualInstruction = input.offlineBilingualInstruction ?? "";
         engine.offlineSummaryTag = input.offlineSummaryTag ?? "summary";
         engine.checkPhoneBilingualInstruction = input.checkPhoneBilingualInstruction ?? "";

@@ -60,7 +60,13 @@ import { queueDeferredReplyCloud, cancelDeferredReplyCloud, DEFERRED_REPLY_CLOUD
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Braces, Check, Trash2, User, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { arrangePlusMenu, CHAT_PLUS_MENU_CHANGED_EVENT, isFreshPlusItem, loadPlusMenuPrefs, savePlusMenuPrefs, type PlusMenuPrefs } from "@/lib/chat-plus-menu";
+import { PlusMenuEditor } from "./plus-menu-editor";
+import { ChatVariablesSheet } from "./chat-variables-sheet";
+import { ChatBlockBar, FriendVerifySheet, RejectTip } from "./chat-block-ui";
+import { takeChatDirectives } from "@/lib/chat-directives";
+import { CHAT_BLOCK_CHANGED_EVENT, maybeReconsiderCharBlock, readChatBlock, setUserBlacklist } from "@/lib/chat-block";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -633,6 +639,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onCloseTheaterMode: () => void;
     onOpenRichModal: (modal: RichModalKind) => void;
     onOpenCustomPlusAction: (action: RegisteredCustomAppChatPlusAction) => void;
+    onOpenChatVariables: () => void;
     onStartVideoCall: () => void;
     onStartVoiceCall: () => void;
     onSendText: (text: string, options?: { autoReply?: boolean }) => boolean;
@@ -665,6 +672,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onCloseTheaterMode,
     onOpenRichModal,
     onOpenCustomPlusAction,
+    onOpenChatVariables,
     onStartVideoCall,
     onStartVoiceCall,
     onSendText,
@@ -729,19 +737,33 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         [isGroup, stickerCharacterIds, characterId],
     );
     const suggestEnabled = !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length > 0;
+    const [plusPrefs, setPlusPrefs] = useState<PlusMenuPrefs | null>(() => loadPlusMenuPrefs());
+    const [plusRestOpen, setPlusRestOpen] = useState(false);
+    const [plusEditorOpen, setPlusEditorOpen] = useState(false);
+    useEffect(() => {
+        const sync = () => setPlusPrefs(loadPlusMenuPrefs());
+        window.addEventListener(CHAT_PLUS_MENU_CHANGED_EVENT, sync);
+        return () => window.removeEventListener(CHAT_PLUS_MENU_CHANGED_EVENT, sync);
+    }, []);
+    useEffect(() => {
+        if (!showPlusMenu || loadPlusMenuPrefs()) return;
+        savePlusMenuPrefs({ order: [], hidden: [], seen: customPlusActions.map(action => `app:${action.appId}:${action.id}`) });
+    }, [showPlusMenu, customPlusActions]);
     const plusMenuItems = [
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
-        { icon: <AlertCircle size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "系统指令", onClick: () => onOpenRichModal("system_instruction") },
-        { icon: <Clapperboard size={22} strokeWidth={1.5} color={theaterMode ? "var(--c-icon-active)" : "var(--c-text)"} />, label: "番外指令模式", active: theaterMode, onClick: onToggleTheaterMode },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>, label: "视频通话", onClick: onStartVideoCall },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>, label: "语音通话", onClick: onStartVoiceCall },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>, label: "红包", onClick: () => onOpenRichModal("red_packet") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><text x="12" y="16" textAnchor="middle" fontSize="12" fill="var(--c-text)" stroke="none">¥</text></svg>, label: "转账", onClick: () => onOpenRichModal(isGroup ? "transfer_target" : "transfer") },
-        { icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>, label: "位置", onClick: () => onOpenRichModal("location") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" /></svg>, label: "语音条", onClick: () => onOpenRichModal("voice_msg") },
+        { id: "photo", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
+        { id: "text_image", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
+        { id: "system_instruction", icon: <AlertCircle size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "系统指令", onClick: () => onOpenRichModal("system_instruction") },
+        { id: "theater", icon: <Clapperboard size={22} strokeWidth={1.5} color={theaterMode ? "var(--c-icon-active)" : "var(--c-text)"} />, label: "番外指令模式", active: theaterMode, onClick: onToggleTheaterMode },
+        { id: "video_call", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>, label: "视频通话", onClick: onStartVideoCall },
+        { id: "voice_call", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>, label: "语音通话", onClick: onStartVoiceCall },
+        { id: "red_packet", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>, label: "红包", onClick: () => onOpenRichModal("red_packet") },
+        { id: "transfer", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><text x="12" y="16" textAnchor="middle" fontSize="12" fill="var(--c-text)" stroke="none">¥</text></svg>, label: "转账", onClick: () => onOpenRichModal(isGroup ? "transfer_target" : "transfer") },
+        { id: "gift", icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") },
+        { id: "location", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>, label: "位置", onClick: () => onOpenRichModal("location") },
+        { id: "voice_message", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" /></svg>, label: "语音条", onClick: () => onOpenRichModal("voice_msg") },
+        { id: "chat_variables", icon: <Braces size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "聊天变量", onClick: onOpenChatVariables },
         ...customPlusActions.map(action => ({
+            id: `app:${action.appId}:${action.id}`,
             icon: action.appIconDataUrl
                 ? <span className="chat-plus-custom-app-icon" style={{ backgroundImage: `url(${action.appIconDataUrl})` }} aria-hidden="true" />
                 : <Blocks size={22} strokeWidth={1.5} color="var(--c-text)" />,
@@ -749,6 +771,26 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             onClick: () => onOpenCustomPlusAction(action),
         })),
     ];
+    const plusArranged = arrangePlusMenu(plusMenuItems, plusPrefs);
+    const renderPlusItem = (item: (typeof plusMenuItems)[number], rest = false) => {
+        const fresh = isFreshPlusItem(item.id, plusPrefs);
+        return (
+            <div
+                key={item.id}
+                onClick={() => {
+                    if (fresh && plusPrefs) savePlusMenuPrefs({ ...plusPrefs, seen: [...plusPrefs.seen, item.id] });
+                    item.onClick();
+                }}
+                className={`chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer${rest ? " is-rest" : ""}${fresh ? " is-fresh" : ""}`}
+                {...(item.active ? { "data-active": "" } : {})}
+            >
+                <div className="chat-plus-icon-box">
+                    {item.icon}
+                </div>
+                <span className="ts-11 text-[var(--c-text)]">{item.label}</span>
+            </div>
+        );
+    };
 
     return (
         <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input">
@@ -894,16 +936,31 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 
             {showPlusMenu && (
                 <div className="chat-plus-menu">
-                    {plusMenuItems.map((item, i) => (
-                        <div key={`${item.label}-${i}`} onClick={item.onClick} className="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer" {...(item.active ? { "data-active": "" } : {})}>
-                            <div className="chat-plus-icon-box">
-                                {item.icon}
-                            </div>
-                            <span className="ts-11 text-[var(--c-text)]">{item.label}</span>
-                        </div>
-                    ))}
+                    {plusArranged.visible.map(item => renderPlusItem(item))}
                     <ChatPluginSlot name="chat.inputToolbar" slotProps={{ sessionId, isGroup }} className="chat-plugin-input-toolbar" />
+                    <div className="cx-plus-more">
+                        {plusArranged.rest.length > 0 ? (
+                            <button type="button" aria-expanded={plusRestOpen} onClick={() => setPlusRestOpen(open => !open)}>
+                                {plusRestOpen ? "收起" : `显示其余 ${plusArranged.rest.length} 个功能`}
+                                <ChevronDown size={12} />
+                            </button>
+                        ) : <span />}
+                        <button type="button" className="is-edit" onClick={() => setPlusEditorOpen(true)}>编辑</button>
+                    </div>
+                    {plusRestOpen && plusArranged.rest.map(item => renderPlusItem(item, true))}
                 </div>
+            )}
+            {plusEditorOpen && (
+                <PlusMenuEditor
+                    items={plusMenuItems.map(item => ({
+                        id: item.id,
+                        label: item.label,
+                        icon: item.icon,
+                        tag: item.id === "chat_variables" ? "新" : item.id.startsWith("app:") ? "APP" : undefined,
+                    }))}
+                    prefs={plusPrefs}
+                    onClose={() => setPlusEditorOpen(false)}
+                />
             )}
 
             {showEmojiPanel && (
@@ -1134,6 +1191,17 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [cloudDeletePending, setCloudDeletePending] = useState<{ count: number } | null>(null);
     const [showPlusMenu, setShowPlusMenu] = useState(false);
     const [customPlusActions, setCustomPlusActions] = useState<RegisteredCustomAppChatPlusAction[]>(() => loadCustomAppChatPlusActions());
+    const [showChatVariables, setShowChatVariables] = useState(false);
+    const [blockInfo, setBlockInfo] = useState(() => readChatBlock(session.id));
+    const [showFriendVerify, setShowFriendVerify] = useState(false);
+    useEffect(() => {
+        const sync = (e: Event) => {
+            if ((e as CustomEvent<{ sessionId?: string }>).detail?.sessionId === session.id) setBlockInfo(readChatBlock(session.id));
+        };
+        window.addEventListener(CHAT_BLOCK_CHANGED_EVENT, sync);
+        void maybeReconsiderCharBlock(session.id);
+        return () => window.removeEventListener(CHAT_BLOCK_CHANGED_EVENT, sync);
+    }, [session.id]);
     const [activeCustomChatPlus, setActiveCustomChatPlus] = useState<ActiveCustomChatPlus | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [showVoiceCall, setShowVoiceCall] = useState(false);
@@ -2906,7 +2974,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             ? getLatestStateValues(session.id)
             : getLatestCharacterStateValues(session.contactId);
 
-        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(aiResponseText, previousState);
+        // [变量 …] / [拉黑:…] 这类指令行先摘掉，气泡全部落库后再生效
+        const directives = takeChatDirectives(aiResponseText, session);
+        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(directives.text, previousState);
         const parts = stripInvalidStickerParts(rawParts);
         throwIfGenerationStopped(options);
 
@@ -2979,6 +3049,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 });
                 setMessages(prev => [...prev, aiMsg]);
             }
+            directives.apply();
             return { hasVisible: false, stateValues, triggerCall, hasDecline };
         }
 
@@ -3094,6 +3165,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             await Promise.allSettled(imageReplacementTasks);
             throwIfGenerationStopped(options);
         }
+        directives.apply();
         return { hasVisible: true, stateValues, triggerCall, hasDecline };
     };
 
@@ -3532,6 +3604,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return false;
         }
         cancelFollowUp(session.id);
+        if ((mediaType === "transfer" || mediaType === "red_packet") && !session.isGroup && readChatBlock(session.id).charBlock) {
+            showChatToast("对方拒收了你的消息，钱没有转出去");
+            return false;
+        }
 
         if (mediaType === "poke") {
             const pokeSender = userIdentity?.name || "你";
@@ -3661,7 +3737,18 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return sent;
     };
 
+    // TA 拉黑/删了你：不生成回复；冷静期过了就让 TA 重新想一次
+    const rejectIfBlocked = (quiet = false): boolean => {
+        if (session.isGroup) return false;
+        const block = readChatBlock(session.id).charBlock;
+        if (!block) return false;
+        if (!quiet) showChatToast(block.kind === "block" ? "消息被拒收了，TA 暂时不会回" : "你们已经不是好友了，先发送朋友验证");
+        void maybeReconsiderCharBlock(session.id);
+        return true;
+    };
+
     const triggerAIResponse = async () => {
+        if (rejectIfBlocked()) return;
         if (hasPendingXhsNotes(loadChatMessages(session.id))) {
             showChatToast("小红书笔记和配图还在加载，完成后再回复");
             return;
@@ -4033,6 +4120,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // 被动回复闸门：单聊里按 app（挂念）留下的作息判——睡着押到醒来再回、忙着偷空再回。
     // 已同步个人云的等待由云端执行；其余由桌面壳到点发回复请求。
     const scheduleGatedReply = async (text: string) => {
+        if (rejectIfBlocked(true)) return;
         if (hasPendingXhsNotes(loadChatMessages(session.id))) {
             showChatToast("小红书笔记和配图还在加载，完成后再回复");
             return;
@@ -4107,6 +4195,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // 否则夜里点一下TA就得醒着回，提示词里却写着「在睡觉」。判据用你最后一句（紧急词能破门）
     const triggerGatedReply = () => {
         if (session.isGroup) { void triggerAIResponse(); return; }
+        if (rejectIfBlocked()) return;
         const lastUser = [...loadChatMessages(session.id)].reverse().find(m => m.role === "user");
         scheduleGatedReply(lastUser?.content || "");
     };
@@ -6224,7 +6313,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                         const displayTarget = target === userIdentity?.name ? "你" : target;
                                                         return `${displaySender} 拍了拍 ${displayTarget}`;
                                                     })()
-                                                    : formatSysMsgForUI(msg.content, msg)}
+                                                    : (msg.uiText ?? formatSysMsgForUI(msg.content, msg))}
                                             </>
                                         )}
                                         {activeMessageId === msg.id && renderSystemContextMenu(msg)}
@@ -6306,6 +6395,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 </div>
                                             )
                                         )}
+                                        {msg.role === "user" && msg.rejectedBy && !isEmptyBubble && <span className="cx-bang" role="img" aria-label="被拒收">!</span>}
                                         {!isSilentThought && !isEmptyBubble && <div
                                             className={`chat-msg-content-wrap relative flex flex-col min-w-0 max-w-[70%] ${isStandaloneHtmlPreview ? "chat-msg-content-wrap-html" : ""}`}
                                             {...(isStandaloneHtmlPreview ? { "data-html": "true" } : {})}
@@ -6387,6 +6477,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     </>
                                 )}
                             </div>
+                            {msg.role === "user" && msg.rejectedBy && (
+                                <RejectTip
+                                    kind={msg.rejectedBy}
+                                    charName={character?.name || "对方"}
+                                    onVerify={blockInfo.charBlock?.kind === "delete" ? () => setShowFriendVerify(true) : undefined}
+                                />
+                            )}
                             {/* Voice message: text transcription bubble */}
                             {renderMsg.mediaType === "audio" && voiceTextIds.has(msg.id) && renderMsg.mediaData?.label && (
                                 <div className={`chat-msg-wrapper`} data-role={uiRole(msg)} style={{ marginTop: -12 }}>
@@ -6536,7 +6633,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     </button>
                 </div>
             )}
-            {!isMultiSelectMode && (offlineMode ? (
+            {showChatVariables && <ChatVariablesSheet session={session} characterName={character?.name || "对方"} onClose={() => setShowChatVariables(false)} />}
+            {showFriendVerify && <FriendVerifySheet sessionId={session.id} charName={character?.name || "对方"} userName={userIdentity?.name || "我"} onClose={() => setShowFriendVerify(false)} />}
+            {!isMultiSelectMode && (blockInfo.isBlacklisted ? (
+                <ChatBlockBar charName={character?.name || "对方"} onUnblock={() => setUserBlacklist(session.id, false)} />
+            ) : offlineMode ? (
                 <OfflineTextInputBar
                     key={session.id}
                     ref={offlineTextInputRef}
@@ -6578,8 +6679,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 	                onCloseTheaterMode={closeTheaterMode}
 	                onOpenRichModal={(modal) => { setShowPlusMenu(false); setRichModal(modal); }}
                 onOpenCustomPlusAction={handleOpenCustomPlusAction}
-                onStartVideoCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVideoCall(true); }}
-                onStartVoiceCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
+                onOpenChatVariables={() => { setShowPlusMenu(false); setShowChatVariables(true); }}
+                onStartVideoCall={() => { if (rejectIfBlocked()) return; cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVideoCall(true); }}
+                onStartVoiceCall={() => { if (rejectIfBlocked()) return; cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
                 onSendText={handleSendText}
                 onStopGeneration={clearStuckGeneration}
                 onTriggerAIResponse={triggerGatedReply}

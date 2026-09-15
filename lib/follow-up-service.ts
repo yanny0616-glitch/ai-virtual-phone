@@ -37,6 +37,7 @@ import { loadFollowUpConfig } from "./settings-storage";
 import { parseAIResponse } from "./rich-message-parser";
 import type { ParsedMessagePart } from "./rich-message-parser";
 import { getStatusRegionConfig, isCustomStatusRegionActive } from "./chat-status-region";
+import { takeChatDirectives } from "./chat-directives";
 import { isKnownStickerLabel } from "./sticker-data";
 import { loadCharacters } from "./character-storage";
 import { bgSetInterval, bgSetTimeout } from "./bg-timer";
@@ -178,6 +179,13 @@ export function stopFollowUpService() {
 export function scheduleFollowUp(sessionId: string, count: number, stateValues?: StateValue[]) {
     const config = loadFollowUpConfig();
 
+    // TA 拉黑/删了你：不会再追着你发
+    if (loadChatSessions().find(s => s.id === sessionId)?.charBlock) {
+        clearFollowUpSchedule(sessionId);
+        cancelFollowUpBailout(sessionId);
+        return;
+    }
+
     if (!stateValues || stateValues.length === 0) {
         console.log(`[FollowUp] No state values, not scheduling.`);
         clearFollowUpSchedule(sessionId);
@@ -215,6 +223,7 @@ export async function requestBackgroundChatReply(sessionId: string): Promise<{ o
     if (backgroundReplyFiringSet.has(sessionId)) return { ok: false, skipped: "already_running" };
     const session = loadChatSessions().find(s => s.id === sessionId);
     if (!session) return { ok: false, skipped: "missing_session" };
+    if (session.charBlock) return { ok: false, skipped: "blocked" };
 
     backgroundReplyFiringSet.add(sessionId);
     try {
@@ -958,9 +967,8 @@ export async function parseAndSaveResponse(
     const sess = sessions.find(s => s.id === sessionId);
     const previousState = sess && !sess.isGroup ? getLatestCharacterStateValues(sess.contactId) : [];
 
-    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(
-        options?.suppressReply ? stripChatSilenceMarker(rawText) : rawText, previousState,
-    );
+    const directives = takeChatDirectives(options?.suppressReply ? stripChatSilenceMarker(rawText) : rawText, sess);
+    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(directives.text, previousState);
 
     // 自定义状态栏渲染戳：追发/屏幕速聊/离线回传落库的消息此前从不盖
     // statusRegionMode，custom 模式下 [状态栏] 原文被当 markdown 渲染成一坨
@@ -978,6 +986,7 @@ export async function parseAndSaveResponse(
             innerMonologue, reasoningText, stateValues, freshStateValues,
         });
         if (batch) await batch.commit();
+        directives.apply();
         return { hasVisible: false, newCount: currentCount, stateValues };
     }
 
@@ -1099,6 +1108,7 @@ export async function parseAndSaveResponse(
         if (triggerCall && typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId, type: triggerCall } }));
         }
+        directives.apply();
         return { hasVisible: false, newCount: MAX_FOLLOW_UPS, stateValues };
     }
 
@@ -1235,5 +1245,6 @@ export async function parseAndSaveResponse(
         window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId, type: triggerCall } }));
     }
 
+    directives.apply();
     return { hasVisible: true, newCount: currentCount + 1, stateValues };
 }

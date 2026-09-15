@@ -16,8 +16,19 @@ import {
     removeChatContact,
     normalizeVisionImagePromptLimit,
     MAX_VISION_IMAGE_PROMPT_LIMIT,
+    CHAT_BLOCK_INBOX_EVENT,
     type ChatMessage,
 } from "@/lib/chat-storage";
+import {
+    BLOCK_COOLDOWN_CHOICES,
+    CHAT_BLOCK_CHANGED_EVENT,
+    clearCharBlock,
+    readChatBlock,
+    setCharBlockCooldown,
+    setUserBlacklist,
+    type ChatBlockInfo,
+} from "@/lib/chat-block";
+import { ChatVariablesSheet } from "./chat-variables-sheet";
 import {
     GROUP_SELF_KEY,
     applyGroupAdminAction,
@@ -44,7 +55,7 @@ import { downloadFile } from "@/lib/download-utils";
 import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { KeyboardAutoSendDebounceItem } from "@/components/chat/keyboard-auto-send-debounce-item";
-import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, Palette, PanelTop, Puzzle, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
+import { Ban, Braces, ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, Palette, PanelTop, Puzzle, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -307,6 +318,111 @@ function ChatInfoSection({ children, ...head }: Parameters<typeof ChatInfoSectio
         <>
             <ChatInfoSectionHead {...head} />
             {head.open && <div className="chat-info-section-body">{children}</div>}
+        </>
+    );
+}
+
+const BLOCK_COOLDOWN_LABELS: Record<number, string> = { 30: "30 分钟", 120: "2 小时", 360: "6 小时", 1440: "1 天" };
+
+function spanLabel(ms: number): string {
+    const min = Math.max(1, Math.round(ms / 60000));
+    if (min < 60) return `${min} 分钟`;
+    const hours = Math.round(min / 60);
+    return hours < 48 ? `${hours} 小时` : `${Math.round(hours / 24)} 天`;
+}
+
+function inboxTime(at: string): string {
+    const d = new Date(at);
+    if (Number.isNaN(d.getTime())) return "";
+    const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function blockSummary(info: ChatBlockInfo, charName: string): string {
+    if (info.charBlock) return `${charName}${info.charBlock.kind === "block" ? "拉黑了你" : "删了你"} · ${spanLabel(Date.now() - Date.parse(info.charBlock.at))}前`;
+    if (info.isBlacklisted) return `你拉黑了 ${charName}${info.blockedInbox?.length ? ` · 拦下 ${info.blockedInbox.length} 条` : ""}`;
+    return "双方正常";
+}
+
+function ChatBlockSection({ sessionId, charName, info }: { sessionId: string; charName: string; info: ChatBlockInfo }) {
+    const [peek, setPeek] = useState(false);
+    const [now] = useState(() => Date.now());
+    const block = info.charBlock;
+    const inbox = info.blockedInbox ?? [];
+    const due = block ? Date.parse(block.checkedAt || block.at) + block.cooldownMin * 60000 - now : 0;
+    const userSide = info.isBlacklisted
+        ? `拉黑中${info.blacklistedAt ? ` · 已 ${spanLabel(now - Date.parse(info.blacklistedAt))}` : ""}`
+        : info.lastBlacklist
+            ? `上次拉黑拦下 ${info.lastBlacklist.count} 条，解除时 TA 已经知道`
+            : "TA 的回复、主动消息和推送都会被拒收；解除后 TA 会知道";
+    return (
+        <>
+            <div className="menu-item" style={{ cursor: "default" }}>
+                <ChatInfoIcon icon={Ban} color={block ? "var(--c-danger)" : BINDING_ACCENTS.memory} />
+                <div className="menu-label-group">
+                    <span className="menu-label">TA 对你</span>
+                    <span className="menu-desc">
+                        {block
+                            ? `${block.kind === "block" ? "拉黑了你" : "删了你的好友"} · ${spanLabel(now - Date.parse(block.at))}前${block.reason ? `「${block.reason}」` : ""}`
+                            : `聊崩了 ${charName} 也会拉黑你或删你`}
+                    </span>
+                </div>
+                {block && <div className="menu-right"><span className="cx-pill">{block.kind === "block" ? "被拉黑" : "被删除"}</span></div>}
+            </div>
+            {block && (
+                <>
+                    <div className="menu-item" style={{ cursor: "default" }}>
+                        <ChatInfoIcon icon={AlertCircle} color={BINDING_ACCENTS.preset} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">冷静期</span>
+                            <span className="menu-desc">{due > 0 ? `还剩 ${spanLabel(due)}，之后你发消息或打开聊天，TA 会重新想一想` : "已经过了，你发消息或打开聊天时 TA 会重新想一想"}</span>
+                        </div>
+                    </div>
+                    <div className="cx-minis cx-info-minis" role="radiogroup" aria-label="冷静期">
+                        {BLOCK_COOLDOWN_CHOICES.map(min => (
+                            <button key={min} type="button" role="radio" aria-checked={block.cooldownMin === min} onClick={() => setCharBlockCooldown(sessionId, min)}>
+                                {BLOCK_COOLDOWN_LABELS[min] ?? `${min} 分钟`}
+                            </button>
+                        ))}
+                    </div>
+                    <button type="button" className="menu-item" onClick={() => clearCharBlock(sessionId)}>
+                        <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.api} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">{block.kind === "block" ? "直接解除" : "直接恢复好友"}</span>
+                            <span className="menu-desc">上帝视角：一键回到正常，{charName} 不会知道</span>
+                        </div>
+                    </button>
+                </>
+            )}
+            <div className="menu-item">
+                <ChatInfoIcon icon={UserMinus} color="var(--c-danger)" />
+                <div className="menu-label-group">
+                    <span className="menu-label">拉黑 {charName}</span>
+                    <span className="menu-desc">{userSide}</span>
+                </div>
+                <div className="menu-right">
+                    <Toggle checked={!!info.isBlacklisted} onChange={c => setUserBlacklist(sessionId, c)} />
+                </div>
+            </div>
+            {info.isBlacklisted && inbox.length > 0 && (
+                <>
+                    <button type="button" className="menu-item cx-peek-head" aria-expanded={peek} onClick={() => setPeek(p => !p)}>
+                        <ChatInfoIcon icon={Search} color={BINDING_ACCENTS.voice} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">偷看 TA 想发的</span>
+                            <span className="menu-desc">{inbox.length} 条 · TA 不知道你看得到</span>
+                        </div>
+                        <div className="menu-right"><ChevronRight size={16} className="cx-chev-rot" /></div>
+                    </button>
+                    {peek && (
+                        <div className="cx-peek">
+                            {[...inbox].reverse().map((item, i) => (
+                                <div key={`${item.at}-${i}`}><time>{inboxTime(item.at)}</time><span>{item.content}</span></div>
+                            ))}
+                        </div>
+                    )}
+                </>
+            )}
         </>
     );
 }
@@ -892,6 +1008,19 @@ export function ChatSettingsPanel({
     };
 
     const [openSection, setOpenSection] = useState<string | null>(null);
+    const [showChatVariables, setShowChatVariables] = useState(false);
+    const [blockInfo, setBlockInfo] = useState(() => readChatBlock(session.id));
+    useEffect(() => {
+        const sync = (e: Event) => {
+            if ((e as CustomEvent<{ sessionId?: string }>).detail?.sessionId === session.id) setBlockInfo(readChatBlock(session.id));
+        };
+        window.addEventListener(CHAT_BLOCK_CHANGED_EVENT, sync);
+        window.addEventListener(CHAT_BLOCK_INBOX_EVENT, sync);
+        return () => {
+            window.removeEventListener(CHAT_BLOCK_CHANGED_EVENT, sync);
+            window.removeEventListener(CHAT_BLOCK_INBOX_EVENT, sync);
+        };
+    }, [session.id]);
     const toggleSection = (key: string) => setOpenSection(current => current === key ? null : key);
     const pluginRuntime = getChatPluginRuntime();
     const pluginSlotsVersion = useSyncExternalStore(pluginRuntime.subscribeSlotsChanged, () => pluginRuntime.getSlotsVersion(), () => 0);
@@ -918,6 +1047,7 @@ export function ChatSettingsPanel({
 
     return (
         <PageShell title="聊天信息" onBack={onClose} className="absolute inset-0 z-[100]">
+            {showChatVariables && <ChatVariablesSheet session={session} characterName={characterName} onClose={() => setShowChatVariables(false)} />}
             <div className="page-menu chat-info-menu">
                 {/* Basic Info & Search */}
                 <div className="menu-group">
@@ -932,6 +1062,14 @@ export function ChatSettingsPanel({
                     <button className="menu-item" onClick={openSearchPanel}>
                         <ChatInfoIcon icon={Search} color={BINDING_ACCENTS.api} />
                         <div className="menu-label-group"><span className="menu-label">查找聊天记录</span></div>
+                        <div className="menu-right"><ChevronRight size={16} /></div>
+                    </button>
+                    <button className="menu-item" onClick={() => setShowChatVariables(true)}>
+                        <ChatInfoIcon icon={Braces} color={BINDING_ACCENTS.preset} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">聊天变量</span>
+                            <span className="menu-desc">状态栏数值、插件记的、你自己建的</span>
+                        </div>
                         <div className="menu-right"><ChevronRight size={16} /></div>
                     </button>
                     {!session.isGroup && isAgentComputerConfigured() && (
@@ -1336,6 +1474,11 @@ export function ChatSettingsPanel({
                             </div>
                         </button>
                     </ChatInfoSection>
+                    {!session.isGroup && (
+                        <ChatInfoSection title="拉黑与删好友" desc={blockSummary(blockInfo, characterName)} icon={Ban} color={"var(--c-danger)"} open={openSection === "block"} onToggle={() => toggleSection("block")}>
+                            <ChatBlockSection sessionId={session.id} charName={characterName} info={blockInfo} />
+                        </ChatInfoSection>
+                    )}
                     <ChatInfoSection title="清理与删除" desc={session.isGroup ? "清空记录 · 解散群聊" : "清空记录 · 删除会话 · 删除好友"} icon={Trash2} color={"var(--c-danger)"} danger open={openSection === "danger"} onToggle={() => toggleSection("danger")}>
                         {!session.isGroup && (
                         <button className="menu-item" onClick={() => setShowConfirmDelete(true)}>

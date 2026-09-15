@@ -49,6 +49,14 @@ export type ChatSession = {
     videoBackground?: string;
     voiceBackground?: string;
     isBlacklisted?: boolean;
+    /** 用户拉黑角色的时间；isBlacklisted 为真时有效 */
+    blacklistedAt?: string;
+    /** 用户拉黑角色期间角色发来的消息：被拒收、不进聊天，只留给用户在聊天信息页偷看 */
+    blockedInbox?: { at: string; content: string }[];
+    /** 上一次用户拉黑角色的起止和期间被拒收的条数，解除后留在聊天信息页 */
+    lastBlacklist?: { from: string; to: string; count: number };
+    /** 角色因为剧情拉黑了用户（block）或删了用户好友（delete） */
+    charBlock?: CharBlockState;
     customCSS?: string;
     isMuted?: boolean;
     bilingualTranslationEnabled?: boolean;
@@ -79,6 +87,17 @@ export type ChatSession = {
     groupMutes?: Record<string, string>; // (characterId | "self") → mute expiry ISO
     allowAdminActionsOnUser?: boolean; // characters may kick/mute the user (default off)
     isSpectator?: boolean; // 围观群：用户不在群内，只能生成/线下
+};
+
+export type CharBlockState = {
+    kind: "block" | "delete";
+    at: string;
+    /** 角色自己写的理由，只给用户在聊天信息页看 */
+    reason?: string;
+    /** 冷静期（分钟）：过了之后用户再发消息或打开聊天，角色会重新想一次 */
+    cooldownMin: number;
+    checkedAt?: string;
+    verifyRejectedAt?: string;
 };
 
 export type ChatMessageStatus = "sending" | "sent" | "read" | "failed";
@@ -245,6 +264,8 @@ export type ChatMessage = {
     isTyping?: boolean; // temporary flag for UI rendering
     statusPanel?: string; // AI display-only status content from [状态栏] tags
     statusRegionMode?: "custom"; // 该消息生成时会话处于自定义状态栏模式（缺省=原生渲染）
+    rejectedBy?: "block" | "delete"; // 发出时角色已拉黑/删了用户：红色感叹号，角色没收到，不进 AI 上下文
+    uiText?: string; // 系统提示在界面上显示的文字；content 是给 AI 看的第三人称说法
     innerMonologue?: string; // AI inner monologue content from [内心] tags
     silentUpdate?: boolean; // 沉默轮的后台更新记录，不显示、不计未读、不作为对话历史
     reasoningText?: string; // 模型思维链（reasoning/CoT）内容，挂在回复批次的第一条气泡上
@@ -1274,7 +1295,32 @@ function prepareChatMessage(msg: NewChatMessage): ChatMessage {
 }
 
 export function pushChatMessage(msg: NewChatMessage): ChatMessage {
-    return publishChatMessage(prepareChatMessage(msg));
+    const prepared = prepareChatMessage(msg);
+    if (divertBlockedAssistantMessage(prepared)) return prepared;
+    return publishChatMessage(prepared);
+}
+
+export const CHAT_BLOCK_INBOX_EVENT = "chat-block-inbox-updated";
+
+/** 单聊拉黑中：用户拉黑了角色 → 角色发来的收进 blockedInbox；角色拉黑/删了用户 → 角色不该再发，丢掉，
+ *  用户这时发的消息照常落库但标上被拒收（不进 AI 上下文）。
+ *  所有来源（回复、追发、推送回传、APP、各种发送入口）都经过这里，所以在这一处截。 */
+function divertBlockedAssistantMessage(msg: ChatMessage): boolean {
+    if (msg.role !== "assistant" && msg.role !== "user") return false;
+    const session = _sessionsCache.find(s => s.id === msg.sessionId);
+    if (!session || session.isGroup) return false;
+    if (msg.role === "user") {
+        if (session.charBlock) msg.rejectedBy = session.charBlock.kind;
+        return false;
+    }
+    if (session.isBlacklisted) {
+        const content = (getChatMessagePreview(msg) || msg.content || "").slice(0, 300);
+        session.blockedInbox = [...(session.blockedInbox ?? []), { at: msg.createdAt || new Date().toISOString(), content }].slice(-50);
+        dbPutSessions([session]);
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(CHAT_BLOCK_INBOX_EVENT, { detail: { sessionId: session.id } }));
+        return true;
+    }
+    return !!session.charBlock;
 }
 
 /** 已提交的气泡再进入内存与事件管线，复用普通聊天的预览/未读更新。 */
@@ -1390,6 +1436,7 @@ export function createChatMessageBatch(retryKey?: string, options?: { insertByCr
             const draftKey = JSON.stringify([msg.sessionId, msg.role, msg.content, msg.mediaType, msg.responseBatchId, msg.senderCharacterId, msg.senderName]);
             const index = reusable.findIndex(item => item.draftKey === draftKey);
             const item = index >= 0 ? reusable.splice(index, 1)[0] : { draftKey, message: prepareChatMessage(msg) };
+            if (divertBlockedAssistantMessage(item.message)) return item.message;
             prepared.push(item);
             messages.push(item.message);
             return item.message;
@@ -2042,7 +2089,7 @@ export async function persistMessageVoiceAudio(
 
 export function updateChatMessage(
     messageId: string,
-    patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData">>,
+    patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData" | "stateValues" | "freshStateValues">>,
 ): ChatMessage | null {
     const idx = _messagesCache.findIndex(m => m.id === messageId);
     if (idx === -1) return null;
@@ -2438,6 +2485,20 @@ function isBeforeStateCutoff(
     const beforeTime = getMessageTimeValue(before);
     if (msgTime !== beforeTime) return msgTime < beforeTime;
     return msg.id < before.id;
+}
+
+/** 角色最新一份状态值挂在哪条消息上（聊天变量面板手动改数值时改这条） */
+export function getLatestCharacterStateMessage(characterId: string): ChatMessage | null {
+    if (!characterId) return null;
+    const sessionsById = new Map(loadChatSessions().map(session => [session.id, session]));
+    let best: ChatMessage | null = null;
+    for (const msg of _loadAllMessages()) {
+        if (getStateOwnerCharacterId(msg, sessionsById) !== characterId) continue;
+        if (!best) { best = msg; continue; }
+        const diff = getMessageTimeValue(msg) - getMessageTimeValue(best);
+        if (diff > 0 || (diff === 0 && msg.id.localeCompare(best.id) > 0)) best = msg;
+    }
+    return best;
 }
 
 /** Scan all direct and group chat messages for a character's latest stateValues. */

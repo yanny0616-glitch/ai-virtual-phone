@@ -75,6 +75,7 @@ import { formatCustomAppChatDirectivesForPrompt } from "./custom-app-chat-direct
 import { formatCustomAppChatContextForPrompt } from "./custom-app-chat-context";
 import { prepareCustomAppPromptContexts } from "./custom-app-prompt-context";
 import { formatReplyGateNoteForPrompt } from "./chat-reply-gate";
+import { buildChatVariablesPrompt, createMacroVarStore } from "./chat-variables";
 import { loadAllTracks } from "./music-storage";
 import { getActiveAppTags } from "./content-tag-utils";
 import { isNeteaseConfigured, getUserPlaylists, getPlaylistTracks, checkLoginStatus, loadMusicApiConfig } from "./music-service";
@@ -2057,6 +2058,8 @@ export async function buildChatPromptMessages(
         statusRegionExampleLine: resolveStatusRegionExampleLine(statusRegionCfg),
         statusRegionComposition: resolveStatusRegionComposition(statusRegionCfg),
         statusRegionFullExample: resolveStatusRegionFullExample(statusRegionCfg),
+        chatVariables: session.isGroup ? "" : buildChatVariablesPrompt(session.id, session.contactId),
+        macroVarStore: createMacroVarStore(session.id),
         offlineBilingualInstruction,
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,

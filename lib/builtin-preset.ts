@@ -11,10 +11,10 @@ export const BUILTIN_PRESET_VERSION = 264; // 升版本会用出厂内容重写�
 /** 只增不改的出厂条目补丁号。加了新的出厂条目时 +1，并把它的 identifier 写进
  *  PATCHABLE_PROMPT_IDS。和 BUILTIN_PRESET_VERSION 的区别是它一条已有内容都不动，
  *  所以改过内置预设的用户也能拿到新条目，不会被打回出厂。 */
-export const BUILTIN_PROMPT_PATCH_VERSION = 1;
+export const BUILTIN_PROMPT_PATCH_VERSION = 2;
 
 /** 必要入口清单，供内置预设补丁和用户主动「一键补齐功能条目」共用。仅列可独立补齐的接入项。 */
-export const PATCHABLE_PROMPT_IDS = ["custom_app_context", "custom_app_context_group"];
+export const PATCHABLE_PROMPT_IDS = ["custom_app_context", "custom_app_context_group", "chat_variables", "chat_block_actions", "block_reconsider_prompt", "friend_verify_prompt"];
 
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
@@ -135,6 +135,10 @@ export function createBuiltinPreset(): PresetConfig {
             // 往上挪进 shortTermMemory 之前（system 区）会让整段系统提示词每轮都重算缓存。
             { identifier: "custom_app_context", enabled: true },
             { identifier: "custom_app_context_group", enabled: true },
+            { identifier: "chat_variables", enabled: true },
+            { identifier: "chat_block_actions", enabled: true },
+            { identifier: "block_reconsider_prompt", enabled: true },
+            { identifier: "friend_verify_prompt", enabled: true },
         ],
 
         prompts: [
@@ -1815,6 +1819,82 @@ export function createBuiltinPreset(): PresetConfig {
                 injection_depth: 0,
                 enabled: true,
                 tags: ["adventure"],
+            },
+            {
+                identifier: "chat_variables",
+                name: "▸ 聊天变量",
+                role: "system",
+                content: "{{chatVariables}}",
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["chat", "text"],
+            },
+            {
+                identifier: "chat_block_actions",
+                name: "▸ 拉黑与删好友",
+                role: "system",
+                content: [
+                    "### 拉黑 / 删除好友（慎用）",
+                    "只有剧情里真的被伤透、忍无可忍才用；普通吵架、闹别扭、赌气都不要用。",
+                    "【格式】单独一行，放在回复最后：",
+                    "[拉黑:只有你自己知道的理由]",
+                    "[删除好友:理由]",
+                    "- 拉黑后你收不到{{user}}的消息；删好友后{{user}}得重新发朋友验证，由你决定通不通过。",
+                    "- 冷静期过后会单独问你：继续，还是解除拉黑、把{{user}}加回来。",
+                    "- 如果是{{user}}拉黑了你，你发出去的消息会显示「被拒收」，心里有数就行。",
+                ].join("\n"),
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["chat", "text"],
+            },
+            {
+                identifier: "block_reconsider_prompt",
+                name: "▸ 拉黑冷静期",
+                role: "user",
+                content: [
+                    "{{timeContext}}",
+                    "",
+                    "上面最后一条系统说明写了你现在和{{user}}的状况。根据你的人设和你们之间发生过的事，想想现在的心情，选下面其中一个输出。",
+                    "",
+                    "# 还不想理",
+                    "【指令】继续",
+                    "",
+                    "# 解除拉黑，给{{user}}发消息（你拉黑了{{user}}时用）",
+                    "【指令】[解除拉黑]你想对{{user}}说的话",
+                    "",
+                    "# 把{{user}}加回好友（你删了{{user}}时用）",
+                    "【指令】[添加好友]好友申请里的留言",
+                    "",
+                    "注意：只输出指令，不要输出其他内容。",
+                ].join("\n"),
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["block_reconsider"],
+            },
+            {
+                identifier: "friend_verify_prompt",
+                name: "▸ 收到朋友验证",
+                role: "user",
+                content: [
+                    "{{timeContext}}",
+                    "",
+                    "你之前删了{{user}}的好友。现在{{user}}发来了朋友验证，留言在上面最后一条系统说明里。根据你的人设和你们之间发生过的事决定通不通过，选下面其中一个输出。",
+                    "",
+                    "# 通过",
+                    "【指令】[通过]通过后你想发给{{user}}的第一句话（不想说可以只写 [通过]）",
+                    "",
+                    "# 不通过",
+                    "【指令】拒绝",
+                    "",
+                    "注意：只输出指令，不要输出其他内容。",
+                ].join("\n"),
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["friend_verify"],
             },
             {
                 identifier: "add_friend_prompt",

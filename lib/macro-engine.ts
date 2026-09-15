@@ -3,12 +3,16 @@
 // Uses regex-based iterative innermost-first expansion.
 
 import { buildCharacterTimeContext, getSystemTimeZone } from "./character-time";
+import type { MacroVarStore } from "./chat-variables";
 
 const TRIM_SENTINEL = "\x00TRIM\x00";
 
 export class MacroEngine {
     localVars: Map<string, string> = new Map();
     globalVars: Map<string, string> = new Map();
+    /** 绑了会话时 setvar/getvar 落进变量池，重开聊天也在；没绑（故事、推送预览等）只在本次展开里有效 */
+    varStore: MacroVarStore | null = null;
+    chatVariables: string = "";
     charName: string;
     userName: string;
     lastUserMessage: string = "";
@@ -192,6 +196,7 @@ export class MacroEngine {
         if (body === "statusRegionExampleLine") return this.statusRegionExampleLine;
         if (body === "statusRegionComposition") return this.statusRegionComposition;
         if (body === "statusRegionFullExample") return this.statusRegionFullExample;
+        if (body === "chatVariables") return this.chatVariables || TRIM_SENTINEL;
         if (body === "offlineBilingualInstruction") return this.offlineBilingualInstruction || "\x00TRIM\x00";
         if (body === "offlineSummaryTag") return this.offlineSummaryTag || "summary";
         if (body === "checkPhoneBilingualInstruction") return this.checkPhoneBilingualInstruction || "\x00TRIM\x00";
@@ -280,6 +285,7 @@ export class MacroEngine {
                 const name = parts[0];
                 const value = parts.slice(1).join("::");
                 this.localVars.set(name, value);
+                this.varStore?.set("local", name, value);
             }
             return "";
         }
@@ -287,7 +293,7 @@ export class MacroEngine {
         // getvar::name
         if (body.startsWith("getvar::")) {
             const name = body.substring(8);
-            return this.localVars.get(name) ?? "";
+            return this.localVars.get(name) ?? this.varStore?.get("local", name) ?? "";
         }
 
         // setglobalvar::name::value
@@ -297,6 +303,7 @@ export class MacroEngine {
                 const name = parts[0];
                 const value = parts.slice(1).join("::");
                 this.globalVars.set(name, value);
+                this.varStore?.set("global", name, value);
             }
             return "";
         }
@@ -304,7 +311,7 @@ export class MacroEngine {
         // getglobalvar::name
         if (body.startsWith("getglobalvar::")) {
             const name = body.substring(14);
-            return this.globalVars.get(name) ?? "";
+            return this.globalVars.get(name) ?? this.varStore?.get("global", name) ?? "";
         }
 
         // random::a::b::c  (:: separated)

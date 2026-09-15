@@ -81,6 +81,9 @@ export async function triggerRejectReaction(characterId: string): Promise<void> 
         content: `${userName}拒绝了${char.name}的好友申请`,
     });
 
+    // TA 删了你后自己来加回、你没通过：等下一次冷静期，不走「你删了 TA」那套挽回
+    if (session.charBlock) return;
+
     // Call LLM for next round
     await generateAndStoreFriendRequest(session, characterId, currentRound + 1);
 }
@@ -119,6 +122,7 @@ export async function handleAcceptFriendRequest(
     const sessIdx = sessions.findIndex(s => s.id === session.id);
     if (sessIdx !== -1) {
         sessions[sessIdx].autoReplied = true; // Mark as handled
+        delete sessions[sessIdx].charBlock; // TA 删了你后自己来加回：你一通过就恢复
         saveChatSessions(sessions);
     }
 
