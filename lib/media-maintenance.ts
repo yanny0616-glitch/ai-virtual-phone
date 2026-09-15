@@ -403,12 +403,14 @@ async function runMomentImageMaintenance(result: MediaMaintenanceResult, nowMs: 
   for (const post of posts) {
     if (!post.photoUrl) continue;
     if (isOlderThan(post.createdAt, CLEAN_AFTER_MS, nowMs)) {
-      const updated = updateMomentPost(post.id, { photoUrl: undefined, photoCleanedAt: nowIso });
+      const all = post.photoUrls?.length ? post.photoUrls : [post.photoUrl];
+      const updated = updateMomentPost(post.id, { photoUrl: undefined, photoUrls: undefined, photoCleanedAt: nowIso });
       if (updated) await momentsDb.posts.put(updated);
-      result.freedBytes += estimateValueBytes(post.photoUrl);
+      for (const url of all) result.freedBytes += estimateValueBytes(url);
       result.momentImagesCleaned += 1;
       continue;
     }
+    // 压缩仍只处理第一张：多图是 asset:// 引用，本来就已经压过一轮。
     if (post.photoCompressedAt || !isOlderThan(post.createdAt, COMPRESS_AFTER_MS, nowMs)) continue;
     const assetId = themeAssetIdFromUrl(post.photoUrl);
     if (assetId) {

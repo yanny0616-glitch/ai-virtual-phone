@@ -84,6 +84,28 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
         };
     }, [post.photoUrl]);
 
+    // 多图：整组一起解析，两张以上按九宫格铺；一张仍走下面单图那条路（带重新生图等按钮）
+    const [resolvedPhotos, setResolvedPhotos] = useState<string[]>([]);
+    const photoUrlsKey = (post.photoUrls || []).join("|");
+    useEffect(() => {
+        let cancelled = false;
+        const list = post.photoUrls?.length ? post.photoUrls : [];
+        if (list.length < 2) return () => { cancelled = true; };
+        Promise.all(list.map(async raw => {
+            if (!raw) return null;
+            if (!raw.startsWith("asset://")) return raw;
+            return await getChatImageFromIndexedDB(raw.slice(8)).catch(() => null);
+        })).then(urls => {
+            if (cancelled) return;
+            setResolvedPhotos(urls.filter((url): url is string => !!url));
+        });
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [photoUrlsKey]);
+    // 帖子的图被清理掉后 resolvedPhotos 可能还留着旧值，两个数都要够才按多图渲染
+    const multiPhotoCount = post.photoUrls?.length ?? 0;
+    const isMultiPhoto = multiPhotoCount > 1 && resolvedPhotos.length > 1;
+
     // 如果落库状态为 pending 但实际并没有任何异步任务在跑（比如被刷新/大退杀掉了），
     // 且帖子本身已有正常 photoUrl，将残留的 pending 复位，防止变成僵尸任务。
     useEffect(() => {
@@ -290,7 +312,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
             data-moment-post-id={post.id}
             data-author={post.authorType}
             data-has-img={post.photoUrl || post.photoDescription ? "1" : "0"}
-            data-img-count={post.photoUrl ? "1" : "0"}
+            data-img-count={String(post.photoUrls?.length || (post.photoUrl ? 1 : 0))}
             data-photo-status={post.photoGenerationStatus || (post.photoUrl ? "generated" : "none")}
             data-liked={isLikedByUser ? "1" : "0"}
             data-like-count={post.likes.length}
@@ -370,9 +392,21 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
             {/* Photo area —— 四块内容全无时整个容器不渲染：空壳会照样吃掉自己的下边距
                 （flex 容器不会自塌陷），无配图的帖子正文和时间行之间就凭空多出一截，看着像空了一行。
                 间距用 mb-3 与卡片其余部分（头像行/正文/位置）对齐，media 原本的 mb-5 是全卡唯一的孤例。 */}
-            {(resolvedPhotoUrl || fallbackPhotoDescription) && (
+            {(isMultiPhoto || resolvedPhotoUrl || fallbackPhotoDescription) && (
             <div className="feed-post-media mb-3 w-full flex flex-col gap-2">
-                {resolvedPhotoUrl && (
+                {isMultiPhoto && (
+                    <div className="feed-post-photo-grid" data-count={Math.min(resolvedPhotos.length, multiPhotoCount)}>
+                        {resolvedPhotos.slice(0, multiPhotoCount).map((url, i) => (
+                            <MediaImageWithPreview
+                                key={`${post.id}-photo-${i}`}
+                                url={url}
+                                title=""
+                                filename={`moment-${post.id}-${i + 1}.png`}
+                            />
+                        ))}
+                    </div>
+                )}
+                {!isMultiPhoto && resolvedPhotoUrl && (
                     <MediaImageWithPreview
                         url={resolvedPhotoUrl}
                         title=""

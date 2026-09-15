@@ -338,3 +338,11 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 - **通知横幅**：新消息横幅 `data-notif-kind="message"` + `data-group` + `data-session`，来电横幅 `data-notif-kind="call"` + `data-call-type` + `data-group`。
 - **通知横幅版式变量**（`styles/chat.css`）：`--notif-layout`（row / row-reverse / column，column 配大头像就是拍立得样式）、`--notif-align` `--notif-justify` `--notif-gap`、位置与宽度（`--notif-top` `--notif-left` `--notif-right` `--notif-width` `--notif-margin`）、`--notif-min-height` `--notif-padding` `--notif-radius` `--notif-text-align`、头像那一块（`--notif-info-layout` `--notif-info-align` `--notif-info-gap` `--notif-avatar-w` `--notif-avatar-h` `--notif-avatar-radius`）、`--notif-text-width` 和「查看」按钮的 `--notif-action-order` `--notif-action-align`。
 - **会话 CSS 作用域修补**（`lib/css-scoper.ts`）：`:root` 后面紧跟属性或伪类的写法（`:root[data-time-of-day="night"] .x`、`:root:hover`）之前会被当成普通选择器加前缀，写出来的时辰主题不生效；现在和 `:root ` `:root.` 一样改写成作用域选择器本身。
+### 朋友圈多图 · 聊天多选发图（2026-09-16）
+
+- **数据**：`MomentPost` 加 `photoUrls?: string[]`（`lib/moments-types.ts`）。整组图都写进 `photoUrls`，第一张同时写进原来的 `photoUrl`，所以查手机、短期记忆、生图重试、朋友圈提示词这些只读 `photoUrl` 的地方照常能用——不用逐个改。
+- **发帖**（`components/chat/moments-compose.tsx`）：文件框加 `multiple`，最多 9 张，每张照旧压到 800px / JPEG 0.8 存进图片库；还在压缩落库的图占位显示「处理中」，这期间发表按钮锁住，避免把没存完的图丢掉。删除按张删。
+- **展示**（`components/chat/moment-post-card.tsx`）：两张以上按 `.feed-post-photo-grid` 铺（2 张和 4 张两列，其余三列方格，`object-fit: cover`），每格仍是 `MediaImageWithPreview`，点开能放大保存。单图和 AI 生图那条路完全不动，重新生图 / 改提示词的按钮只在单图时出现。帖子被清理过图之后 `photoUrls` 为空，靠 `multiPhotoCount` 兜住，不会渲染残留的旧解析结果。
+- **提示词**（`lib/moments-engine.ts`）：多图时写「配图：见附图（共 N 张，附的是第 1 张）」——视觉附件仍只发第一张，不让模型以为全看到了。
+- **存储**（`lib/storage-space.ts`、`lib/media-maintenance.ts`）：占用统计和按天清理都按整组算，清理时 `photoUrl` 和 `photoUrls` 一起置空。压缩仍只处理第一张：多图从发帖起就是 `asset://` 引用，已经压过一轮。
+- **聊天发图**（`components/chat/rich-input-modals.tsx` + `chat-room.tsx` 调用处）：`PhotoInputModal` 改成多选，`onSend(description, imageDataUrls)`，缩略图可逐张移除；发送时按选择顺序连发 N 条图片消息，描述只跟第一张，中途遇到「等对方回复」就停下。

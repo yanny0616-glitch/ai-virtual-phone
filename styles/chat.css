@@ -7670,3 +7670,68 @@
   order: var(--notif-action-order, 0);
   align-self: var(--notif-action-align, auto);
 }
+
+/* 朋友圈多图：两张四张走两列，其余九宫格 */
+.feed-post-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+}
+.feed-post-photo-grid[data-count="2"],
+.feed-post-photo-grid[data-count="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.feed-post-photo-grid .chat-media-file-wrap,
+.feed-post-photo-grid .chat-media-file-card {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.feed-post-photo-grid .chat-media-file-card {
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 4px;
+}
+.feed-post-photo-grid .chat-media-file-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 发照片弹窗：多选后的缩略图 */
+.photo-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+.photo-modal-thumb {
+  position: relative;
+  aspect-ratio: 1 / 1;
+}
+.photo-modal-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.photo-modal-thumb-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 2;
+}
+
+/* 朋友圈发帖：图还在压缩时的占位 */
+.compose-photo-block-preview[data-loading] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-input);
+  border-radius: 6px;
+}
+.compose-photo-loading {
+  font-size: calc(12px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}

@@ -6918,7 +6918,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             )}
             {richModal === "photo" && (
                 <PhotoInputModal
-                    onSend={(desc, imageDataUrl) => { setRichModal(null); sendRichMessage("image", { label: desc }, "", imageDataUrl); }}
+                    onSend={(desc, imageDataUrls) => {
+                        setRichModal(null);
+                        // 多张按选择顺序连发；描述只跟第一张，免得每条都重复一遍
+                        for (const [i, url] of imageDataUrls.entries()) {
+                            if (!sendRichMessage("image", { label: i === 0 ? desc : "" }, "", url)) break;
+                        }
+                    }}
                     onClose={() => setRichModal(null)}
                 />
             )}

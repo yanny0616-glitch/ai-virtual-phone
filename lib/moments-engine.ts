@@ -1363,7 +1363,9 @@ function buildMomentUiSnapshot(
     parts.push(`发帖人：${authorName}`);
     parts.push(`正文：${post.content}`);
     if (post.location) parts.push(`地点：${post.location}`);
-    if (post.photoUrl) parts.push("配图：见附图");
+    const photoCount = post.photoUrls?.length || (post.photoUrl ? 1 : 0);
+    if (photoCount > 1) parts.push(`配图：见附图（共 ${photoCount} 张，附的是第 1 张）`);
+    else if (post.photoUrl) parts.push("配图：见附图");
     else if (post.photoDescription) parts.push(`配图：${post.photoDescription}`);
     const likes = characterId
         ? getVisibleMomentLikesForCharacter(post, characterId, post.likes)

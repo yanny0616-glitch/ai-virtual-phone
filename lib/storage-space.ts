@@ -39,6 +39,12 @@ import { loadXiaohongshuState, saveXiaohongshuState } from "./xiaohongshu-storag
  *   重启应用。
  */
 
+/** 一条朋友圈的全部配图：多图存 photoUrls，单图仍在 photoUrl。 */
+function momentPhotoUrls(post: { photoUrl?: string; photoUrls?: string[] }): string[] {
+  const list = post.photoUrls?.length ? post.photoUrls : (post.photoUrl ? [post.photoUrl] : []);
+  return list.filter((url): url is string => typeof url === "string" && url.trim() !== "");
+}
+
 export type StorageCategoryId =
   | "chat_images"
   | "chat_voice"
@@ -232,14 +238,15 @@ export async function scanStorageSpace(onProgress?: (detail: string) => void): P
   let momentsCount = 0;
   // 同聊天：游标逐条，避免整表二次进内存
   await momentsDb.posts.each((post) => {
-    if (!post.photoUrl) return;
-    const assetId = themeAssetIdFromUrl(post.photoUrl);
-    const bytes = assetId
-      ? themeBytesById.get(assetId) ?? 0
-      : mediaRefBytes(post.photoUrl, new Set(), mediaBytesById);
-    if (bytes <= 0) return;
-    momentsBytes += bytes;
-    momentsCount += 1;
+    for (const url of momentPhotoUrls(post)) {
+      const assetId = themeAssetIdFromUrl(url);
+      const bytes = assetId
+        ? themeBytesById.get(assetId) ?? 0
+        : mediaRefBytes(url, new Set(), mediaBytesById);
+      if (bytes <= 0) continue;
+      momentsBytes += bytes;
+      momentsCount += 1;
+    }
   }).catch(() => undefined);
   stats.push(makeStat("moments_images", momentsBytes, momentsCount));
 
@@ -378,11 +385,14 @@ async function clearMomentsImages(keepDays?: number): Promise<StorageClearResult
   let freedBytes = 0;
   let strippedThemeAssetRefs = false;
   for (const post of posts) {
-    if (!post.photoUrl) continue;
+    const urls = momentPhotoUrls(post);
+    if (!urls.length) continue;
     if (!isBeforeCutoff(post.createdAt, cutoff)) continue;
-    if (themeAssetIdFromUrl(post.photoUrl)) strippedThemeAssetRefs = true;
-    else freedBytes += estimateValueBytes(post.photoUrl);
-    const updated = updateMomentPost(post.id, { photoUrl: undefined, photoCleanedAt: nowIso });
+    for (const url of urls) {
+      if (themeAssetIdFromUrl(url)) strippedThemeAssetRefs = true;
+      else freedBytes += estimateValueBytes(url);
+    }
+    const updated = updateMomentPost(post.id, { photoUrl: undefined, photoUrls: undefined, photoCleanedAt: nowIso });
     if (updated) await momentsDb.posts.put(updated);
     cleared += 1;
   }

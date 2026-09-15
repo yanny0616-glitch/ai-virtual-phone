@@ -8,6 +8,7 @@ export type MomentPost = {
     content: string;
     requestId?: string;             // 自定义 APP 发帖重试的稳定标识
     photoUrl?: string;              // user-uploaded base64 image
+    photoUrls?: string[];           // 多图：整组图；第一张同时写进 photoUrl，老代码照常读第一张
     photoDescription?: string;      // AI-generated photo description (for placeholder rendering)
     photoUseReferenceImage?: boolean; // AI-generated photo should use character reference image
     photoGenerationStatus?: "pending" | "failed" | "generated";
