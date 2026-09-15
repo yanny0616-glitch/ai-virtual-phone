@@ -26,6 +26,7 @@
     forkLevel: 1,        // 日子的起伏：0 平稳 · 1 平常 · 2 多事（生成时埋几个岔子、概率乘几倍）
     forkPeek: false,     // 提前看还没揭晓的变数（会剧透）
     forkBurst: true,     // 变数落到「忍不住」时主动来说（占主动额度，守免打扰）
+    routineOn: true,     // 生成TA的一天时照着「忙碌回复」插件里的固定作息和今天的例外
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }

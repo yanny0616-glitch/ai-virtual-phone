@@ -81,13 +81,14 @@
         const remote = await cloudFetchBounded("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: date });
         if (remote.plan && remote.plan.context && remote.plan.context.generatedBy === "cloud") continue;
         const expectedVersion = remote.plan ? remote.plan.state_version : 0;
-        const existing = fixedCalendarItems(await readCalendarOn(cx, date));
+        const routine = await routineFor(cx, date);
+        const existing = withRoutine(fixedCalendarItems(await readCalendarOn(cx, date)), routine);
         const cal = calendarReality(dateOf(date));
         const past = await recentDaysBrief(cx, 7, date);
         const ctx = cloudContext(cx);
         ctx.day = null; // 还没生成的那天不该拿今天的生活面去自发起念
         ctx.genKit = {
-          date: date, instruction: buildDayInstruction(cal, at, past, existing, S.settings.threadsOn ? threadLines(cx, dateOf(date).getTime() + 8 * 3600000) : []),
+          date: date, instruction: buildDayInstruction(cal, at, past, existing, S.settings.threadsOn ? threadLines(cx, dateOf(date).getTime() + 8 * 3600000) : [], routine),
           existing: existing.map((it) => ({ id: it.id, startTime: it.startTime, endTime: it.endTime || "", title: it.title, location: it.location || "", lock: it.lock || "" })),
           autoGenAt: at, tz: -new Date().getTimezoneOffset(),
           tplDaily: tpl.daily, tplImpulse: tpl.impulse,
@@ -128,7 +129,7 @@
     try {
       const genAt = +ctx.genAt || Date.now();
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull, { cloudAdopting: true }));
+        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull, routineSleep(await routineFor(cx, todayStr())), { cloudAdopting: true }));
       const existing = await readTodayCalendar(cx);
       const wrote = await syncCalendar(cx, existing);
       const items = (Array.isArray(p.items) ? p.items : []).map((w) => ({

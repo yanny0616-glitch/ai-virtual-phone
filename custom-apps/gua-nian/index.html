@@ -1787,6 +1787,7 @@ return Object.freeze(exports);
     forkLevel: 1,        // 日子的起伏：0 平稳 · 1 平常 · 2 多事（生成时埋几个岔子、概率乘几倍）
     forkPeek: false,     // 提前看还没揭晓的变数（会剧透）
     forkBurst: true,     // 变数落到「忍不住」时主动来说（占主动额度，守免打扰）
+    routineOn: true,     // 生成TA的一天时照着「忙碌回复」插件里的固定作息和今天的例外
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
@@ -2401,13 +2402,14 @@ return Object.freeze(exports);
         const remote = await cloudFetchBounded("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: date });
         if (remote.plan && remote.plan.context && remote.plan.context.generatedBy === "cloud") continue;
         const expectedVersion = remote.plan ? remote.plan.state_version : 0;
-        const existing = fixedCalendarItems(await readCalendarOn(cx, date));
+        const routine = await routineFor(cx, date);
+        const existing = withRoutine(fixedCalendarItems(await readCalendarOn(cx, date)), routine);
         const cal = calendarReality(dateOf(date));
         const past = await recentDaysBrief(cx, 7, date);
         const ctx = cloudContext(cx);
         ctx.day = null; // 还没生成的那天不该拿今天的生活面去自发起念
         ctx.genKit = {
-          date: date, instruction: buildDayInstruction(cal, at, past, existing, S.settings.threadsOn ? threadLines(cx, dateOf(date).getTime() + 8 * 3600000) : []),
+          date: date, instruction: buildDayInstruction(cal, at, past, existing, S.settings.threadsOn ? threadLines(cx, dateOf(date).getTime() + 8 * 3600000) : [], routine),
           existing: existing.map((it) => ({ id: it.id, startTime: it.startTime, endTime: it.endTime || "", title: it.title, location: it.location || "", lock: it.lock || "" })),
           autoGenAt: at, tz: -new Date().getTimezoneOffset(),
           tplDaily: tpl.daily, tplImpulse: tpl.impulse,
@@ -2448,7 +2450,7 @@ return Object.freeze(exports);
     try {
       const genAt = +ctx.genAt || Date.now();
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull, { cloudAdopting: true }));
+        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull, routineSleep(await routineFor(cx, todayStr())), { cloudAdopting: true }));
       const existing = await readTodayCalendar(cx);
       const wrote = await syncCalendar(cx, existing);
       const items = (Array.isArray(p.items) ? p.items : []).map((w) => ({
@@ -2833,6 +2835,60 @@ return Object.freeze(exports);
     return { label: d.getFullYear() + "-" + pad(m) + "-" + pad(day) + " 周" + "日一二三四五六"[wd] + (tags.length ? "（" + tags.join("、") + "）" : ""), season: season };
   }
   // 前几天的生活面：给模型看骨架防止天天一样，也让昨天开了头的事今天有下文
+  /* ---- 「忙碌回复」插件的固定作息和今天的例外：生成那天时当成日程表上定死的安排 ---- */
+  // 作息存 HH:MM + 星期；例外存绝对时间戳（加 / 推迟 / 不去了），过了 until 就作废。
+  const ROUTINE_LOCK = { focus: "busy", busy: "busy", distracted: "free", sleep: "busy" };
+  const ROUTINE_NAME = { focus: "专注", busy: "忙", distracted: "分神", sleep: "午睡" };
+  const ROUTINE_HM = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const mins = (v) => +v.slice(0, 2) * 60 + +v.slice(3, 5);
+  async function routineVar(cx, name) {
+    if (!AiPhone.variables || !AiPhone.variables.get) return [];
+    try {
+      const v = await AiPhone.variables.get(name, { scope: "character", characterId: cx.character.id });
+      return v && Array.isArray(v.items) ? v.items.filter((x) => x && typeof x === "object") : [];
+    } catch (e) { return []; }
+  }
+  // 不到 3 小时的「睡觉」当午睡排进日程，够长的才定起床和上床
+  async function routineFor(cx, date) {
+    const out = { items: [], wake: "", bed: "" };
+    if (!S.settings.routineOn || !cx.character) return out;
+    const day = dateOf(date);
+    const d0 = day.getTime(), d1 = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+    const item = (id, from, to, title, kind) => ({ id: "routine_" + id, startTime: from, endTime: to, title: title || ROUTINE_NAME[kind], location: "", lock: ROUTINE_LOCK[kind] });
+    for (const it of await routineVar(cx, "routine")) {
+      if (!ROUTINE_HM.test(it.from) || !ROUTINE_HM.test(it.to) || it.from === it.to || !ROUTINE_LOCK[it.kind]) continue;
+      const days = Array.isArray(it.days) ? it.days : [];
+      const on = (off) => !days.length || days.includes((day.getDay() + off + 7) % 7);
+      const title = String(it.title || "").slice(0, 20);
+      if (it.kind === "sleep" && (mins(it.to) - mins(it.from) + 1440) % 1440 >= 180) {
+        const cross = it.from > it.to;
+        if (!out.wake && on(cross ? -1 : 0)) out.wake = it.to;
+        if (!out.bed && on(cross ? 0 : 1)) out.bed = it.from;
+      } else if (on(0)) out.items.push(item(it.id || it.from, it.from, it.to, title, it.kind));
+    }
+    const now = Date.now(), inDay = (ms) => ms >= d0 && ms < d1;
+    for (const ex of await routineVar(cx, "routineExceptions")) {
+      if (!(+ex.until > now)) continue;
+      const title = String(ex.title || "").slice(0, 20), mask = +(ex.maskFrom != null ? ex.maskFrom : ex.from);
+      // 推迟睡觉：今晚上床的时刻跟着挪，挪过零点也算今晚
+      if (ex.op === "shift" && ex.kind === "sleep") { if (inDay(mask)) out.bed = fmtHM(+ex.from); continue; }
+      if ((ex.op === "skip" || ex.op === "shift") && inDay(mask)) {
+        const i = out.items.findIndex((x) => x.title === title && x.startTime === fmtHM(mask));
+        if (i >= 0) out.items.splice(i, 1);
+      }
+      if ((ex.op === "add" || ex.op === "shift") && inDay(+ex.from) && ROUTINE_LOCK[ex.kind]) out.items.push(item(ex.id || ex.from, fmtHM(+ex.from), fmtHM(+ex.to), title, ex.kind));
+    }
+    return out;
+  }
+  // 日历上本来就有同一时刻的安排时，以日历为准
+  function withRoutine(existing, routine) {
+    const taken = new Set(existing.map((it) => it.startTime));
+    return existing.concat(routine.items.filter((it) => !taken.has(it.startTime)))
+      .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+  }
+  function routineSleep(routine) {
+    return Object.assign({}, routine.wake ? { wake: routine.wake } : {}, routine.bed ? { bed: routine.bed } : {});
+  }
   /* ================= 惦记账本：跨天记住话头、约定、日子 =================
      一行一件事 { id, kind: topic|promise|date, text, due, yearly, since, at, by, done, nudge }。
      云端 push-recheck 有 threadAlive / threadDueMs / threadLines 的 tz 算术版副本，改这里要同步那边。 */
@@ -3257,7 +3313,7 @@ return Object.freeze(exports);
       + "tell 看TA的性子和这件事的分量：想分享、憋不住的写忍不住；觉得不值一提、等聊到再说的写聊到才说；丢脸、难过、怕人担心的写憋着。岔子TA事先并不知道，别提前写进 schedule 的 note、mood 或其他字段。";
   }
   // 本地生成和寄给云端的 genKit 共用这段指令；云端直接使用寄存文本。
-  function buildDayInstruction(cal, nowHM, past, existing, threads) {
+  function buildDayInstruction(cal, nowHM, past, existing, threads, routine) {
     let inst = [
       "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
       String(S.settings.dayPrompt || "").trim() || DEFAULT_DAY_PROMPT,
@@ -3276,6 +3332,8 @@ return Object.freeze(exports);
       "schedule 给 5 到 9 条，从起床后第一件事到睡前最后一件事；有主线也有琐碎，时间不均匀；不用把每个小时填满，事与事之间可以留空档（空档里TA就是自己待着）；有的日子轻（3、4 条），有的日子满；最后一件事结束到 bed 之间是TA自己的睡前时间；「睡觉」本身不要写成一条日程。",
       forkGuide(nowHM),
     ].filter(Boolean).join("\n");
+    const fix = routine ? routineSleep(routine) : {};
+    if (fix.wake || fix.bed) inst += "\nTA的作息是定好的：" + [fix.wake ? fix.wake + " 起床" : "", fix.bed ? fix.bed + " 上床" : ""].filter(Boolean).join("，") + "，wake 和 bed 照抄。";
     if (existing.length) {
       inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，带 busy 的照抄 busy，围绕它们补全其余的一天）：\n" +
         JSON.stringify(existing.map((it) => Object.assign({ time: it.startTime, title: it.title, note: it.location || "" }, it.lock ? { busy: it.lock === "busy" } : {})));
@@ -3338,21 +3396,22 @@ return Object.freeze(exports);
     cx.busy = true; cx._planLock = true; render();
     try {
       const calendarItems = await readTodayCalendar(cx);
-      const existing = fixedCalendarItems(calendarItems); // 排除挂念上次生成的结果
+      const routine = await routineFor(cx, todayStr());
+      const existing = withRoutine(fixedCalendarItems(calendarItems), routine); // 排除挂念上次生成的结果
       const cal = calendarReality(new Date());
       const past = await recentDaysBrief(cx, 7);
-      const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing, S.settings.threadsOn ? threadLines(cx) : []);
+      const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing, S.settings.threadsOn ? threadLines(cx) : [], routine);
       const d = await generateJson(cx, {
         characterId: cx.character.id,
         appTags: ["companion", "daily"],
         instruction: inst,
       });
-      const parsed = parseDayResult(d, existing, S.settings, Date.now());
+      const parsed = Object.assign(parseDayResult(d, existing, S.settings, Date.now()), routineSleep(routine));
       const sched = parsed.schedule, wake = parsed.wake, bed = parsed.bed, bodyConds = parsed.conds;
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
         Object.assign({ date: todayStr(), characterId: cx.character.id, by: "local", forkSeed: todayStr() + "|" + cx.character.id }, parsed));
       const wrote = await syncCalendar(cx, calendarItems); // 清理旧产物仍需要完整日历
-      await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "") + (parsed.forks.length ? "，埋了 " + parsed.forks.length + " 个岔子" : "")
+      await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条" + (routine.items.length || routine.wake ? "，含固定作息" : "") + "，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "") + (parsed.forks.length ? "，埋了 " + parsed.forks.length + " 个岔子" : "")
         + (cx.day.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）"));
       cx.busy = false; cx._planLock = false;
       await orchestrate(cx); // 生活面就绪后立即编排心动时刻
@@ -5687,6 +5746,9 @@ return Object.freeze(exports);
         { type: "seg", key: "forkLevel", options: [[0, "平稳", "三天一次"], [1, "平常", "一天一次"], [2, "多事", "一天两三次"]] },
         { type: "toggles", items: [{ key: "forkPeek", label: "提前看今天的变数（会剧透）" }, { key: "forkBurst", label: "忍不住时主动来说" }] },
       ], hint: "说不说，看关系：好感高时更愿意跟你讲。倾向由生成日程时一起给，这里不用调。<br>档位从下一次生成TA的一天起生效。「忍不住」的那次主动占今天的额度，也守免打扰和TA的睡眠；约不上就改成聊到再说。" },
+      { title: "固定作息", sub: "读「忙碌回复」插件里写的", fields: [
+        { type: "toggles", items: [{ key: "routineOn", label: "排TA的一天时照着固定作息" }] },
+      ], hint: "当天的固定作息（上课、上班、做饭…）和还没过期的例外（临时加、推迟、不去了）当成定好的安排排进去；「睡觉」那条定起床和上床时间。日历上同一时刻已有安排的，以日历为准。<br>只在生成那一刻读，生成后再改例外，今天的日程不跟着变；回复快慢仍由插件判。没装插件或没写作息，就和以前一样。" },
       { title: "什么时候生效", adv: true, fields: [], hint: "保存后本机设置立即更新；开着云端复核且已有今天的计划时，会同步现有计划的规则，是否成功看页面上的同步结果。<br>随用随判：同步成功后，下一次云端复核按新规则起念，不必为了上传设置而重置今天。<br>已经排好的时刻不会因保存而重排。要按新额度、间隔、免打扰、倾向或锚点重新安排，去「心动」页点「重新编排／重置今天」。切换起念模式会改变后续判断，但不会自动转换已有预约；如需整理今天的预约，也在该页操作。保留的临时起念不会随重排重建，其原预约的未回应降速阈值也不随保存更新。<br>今天的计划同步不等于明日生成原料已更新；明日原料在下次打开挂念或重新编排时刷新。", open: true },
     ] },
     { id: "pace", name: "分寸", groups: [

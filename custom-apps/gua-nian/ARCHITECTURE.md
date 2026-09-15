@@ -2,7 +2,7 @@
 
 维护 `src/`，构建得到 `index.html`，安装包仍用单 HTML 入口。根目录的 `index.html` 是提交到仓库的生成产物，不直接编辑。
 
-当前结构包括 26 个 JS 片段（23 个原有片段及回执查询、同步状态展示、变数结算三个新增片段）与 6 个独立模块（含共享的在线状态、历史窗口两个 TypeScript 模块）。片段仍共享原来的 IIFE 闭包，`S` 是应用状态，各角色的 `cx` 保存当天计划、账本和运行状态；时间计算与规则评分已抽到 `src/domain/`，有独立作用域和明确导出，不读取 `S`、宿主 SDK、存储或系统当前时间。其他片段之间仍有双向调用。
+当前结构包括 27 个 JS 片段（23 个原有片段及回执查询、同步状态展示、变数结算、固定作息四个新增片段）与 6 个独立模块（含共享的在线状态、历史窗口两个 TypeScript 模块）。片段仍共享原来的 IIFE 闭包，`S` 是应用状态，各角色的 `cx` 保存当天计划、账本和运行状态；时间计算与规则评分已抽到 `src/domain/`，有独立作用域和明确导出，不读取 `S`、宿主 SDK、存储或系统当前时间。其他片段之间仍有双向调用。
 
 ## 独立模块接口
 
@@ -43,6 +43,7 @@
 | `src/planning/generation.js` | 应用模型给出的惦记变更、生成一天、提示词与结果解析 | 生活面生成 |
 | `src/planning/wakes.js` | 规则评分、预约、取消、哨兵、编排 | 主动消息计划 |
 | `src/planning/recheck.js` | 打开/定时动态复核、临时起念 | 调整当天计划 |
+| `src/planning/routine.js` | 生成那天前读「忙碌回复」插件的固定作息和今天的例外，折成已定安排和起床 / 上床时间 | 固定作息 |
 | `src/planning/forks.js` | 变数揭晓落库、忍不住时约主动消息、时间线与记录里的变数展示 | 突发事件 |
 | `src/chat/context.js` | 预览、提示词注入、回复门、好感和在线状态 | 与宿主聊天的联动 |
 | `src/ui/sync-status.js` | 跨页签显示计划同步结果、绑定重试入口 | 本地保存与云端同步反馈 |
@@ -376,3 +377,7 @@ settings 的日程字段在配置页渲染隐藏草稿和编辑按钮，独立 d
 App 在打开、每分钟循环和生成之后调用 `revealForks` 落库；忍不住走一次普通心动预约（`adj: "fork"`），只有管事那台约。云端不落库：push-recheck / push-generate 读 `context.day` 时用 `guanianForkDay` 按日程时区重算，所以和 App 的结果一致。`forkSeed` = 日期|角色 id，生成时写进 day，随 `dayForCloud` 寄上去；云端生成的那天由 push-recheck 写进 `dayFull`。
 
 两份云函数里的副本逐字相同，`scripts/check-gua-nian-forks.mjs` 把它转译后和 App 模块逐条对照。
+
+## 固定作息（0.9.40）
+
+`routineFor(cx, date)` 读变量池里本角色的 `routine` 和 `routineExceptions`（「忙碌回复」插件写的），返回 `{ items, wake, bed }`：`items` 是和日历条目同形的已定安排（`id` 前缀 `routine_`，`lock` 按插件的档位：专注 / 忙 → busy，分神 → free），`withRoutine` 并进 `fixedCalendarItems` 的结果，同一 `startTime` 以日历为准。本地 `generateDay` 和寄给云端的 `uploadGenKitCloud` 走同一套，所以云端不用改；`wake`/`bed` 本地落库时覆盖模型输出，`adoptCloudDay` 接管时再覆盖一次。设置 `routineOn` 默认开。只在生成时读，不订阅插件的 `routine.exception`。

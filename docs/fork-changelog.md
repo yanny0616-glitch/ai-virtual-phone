@@ -1203,3 +1203,10 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 今天页默认只露「✦ 变数」小标记，点开看细节；没揭晓的只有开「提前看」才露。记录页列出当天碰上的事，第二天生成时带上。
 - 云函数：push-recheck / push-generate 加变数副本和 `day-forks-v1` 能力，部署包代号 5 → 6，用户要重新部署。
 - 验证：`check-gua-nian-forks`（归一、结算、幂等、锚点挪动 / 删除、好感挪档、两份云端副本逐字相同且与 App 结果一致、时区换算），gua-nian domain / promises / energy / scheduler-app、reply-gate、busy-reply、`check:push` 通过；`check-gua-nian-delivery`、`p1`、`p2`、`scheduler` 在干净 HEAD 上同样失败，与本次无关。今天页和设置用构建产物 + 演示数据在 390px Chromium 截图核对。
+
+### 挂念 0.9.40：照着固定作息排（2026-09-15）
+
+- 生成TA的一天时读「忙碌回复」插件的固定作息和还没过期的例外（加 / 推迟 / 不去了），当成日程表上的已定安排交给模型；专注 / 忙记成顾不上手机，分神记成顾得上；日历同一时刻已有安排的以日历为准。
+- 够 3 小时的睡觉定起床和上床（提示里照抄，落库和接管云端生成时再覆盖）；推迟睡觉改今晚上床时刻；不到 3 小时的当午睡。
+- 云端生成明天的原料在本机算好再寄，不改云函数、不用重新部署。设置 →「固定作息」可关，默认开。
+- 验证：用桩变量池跑工作日 / 周末、午睡、跳过、推迟、临时加、过期、推迟睡觉过零点、关开关几种情况；gua-nian forks / domain / promises / energy、reply-gate、busy-reply 通过；delivery、p1、p2 仍是干净 HEAD 上就有的失败。
