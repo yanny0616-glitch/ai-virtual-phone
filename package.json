@@ -40,6 +40,7 @@
     "shiguang:browser": "node scripts/check-shiguang-app-browser.mjs",
     "check:regex-history-role": "node scripts/check-regex-history-role.mjs",
     "check:memory-recall": "node scripts/check-memory-recall.mjs",
+    "check:menstrual-predict": "node scripts/check-menstrual-predict.mjs",
     "check:chat-silence": "node scripts/check-chat-silence.mjs && node scripts/check-busy-reply-plugin.mjs",
     "gua-nian:scheduler-test": "node scripts/check-gua-nian-scheduler.mjs && node scripts/check-gua-nian-scheduler-app.mjs",
     "check:cloud-messages": "node scripts/check-cloud-message-repair.mjs",

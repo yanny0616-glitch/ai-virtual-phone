@@ -16,10 +16,13 @@ import {
     type OfflineShortcutContinuation,
 } from "./offline-shortcut-capability";
 import {
+    EVE_REMINDER_GRACE_MS,
+    getMenstrualEveReminder,
     getMenstrualPeriodCareEvent,
     hasMenstrualPeriodCareTriggered,
     loadMenstrualConfig,
     loadMenstrualRecords,
+    type MenstrualPeriodCareEvent,
 } from "./menstrual-storage";
 import { isGuanianTemplateWake, loadTimedWakeSchedules, type TimedWakeSchedule } from "./timed-wake-storage";
 import {
@@ -619,7 +622,7 @@ export async function armTemplateBailout(input: {
     }
 }
 
-/** 经期关怀兜底：预测未来 7 天内的关怀日，为选中的角色各挂一单（每周期幂等）。 */
+/** 经期关怀兜底：未来 7 天内最近的关怀日和前一晚提醒，为选中的角色各挂一单（每周期幂等）。 */
 export async function armPeriodCareBailouts(): Promise<void> {
     if (!bailoutEnabled()) return;
     try {
@@ -629,6 +632,7 @@ export async function armPeriodCareBailouts(): Promise<void> {
 
         const records = loadMenstrualRecords();
         const now = new Date();
+        const planned: { event: MenstrualPeriodCareEvent; executeAtMs: number }[] = [];
         for (let dayOffset = 0; dayOffset <= 7; dayOffset += 1) {
             const target = new Date(now.getTime() + dayOffset * 86_400_000);
             const targetDate = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
@@ -638,8 +642,16 @@ export async function armPeriodCareBailouts(): Promise<void> {
             // 当天 09:30 触发；已过则 10 分钟后
             const fireAt = new Date(target.getFullYear(), target.getMonth(), target.getDate(), 9, 30).getTime();
             const executeAtMs = Math.max(fireAt, Date.now() + 10 * 60_000);
-            if (isWithinPushQuietHours(executeAtMs)) return;
+            if (!isWithinPushQuietHours(executeAtMs)) planned.push({ event, executeAtMs });
+            break; // 只挂最近的一个关怀日
+        }
+        const eve = getMenstrualEveReminder(records, config, now);
+        if (eve && eve.fireAtMs - Date.now() <= 7 * 86_400_000 && Date.now() < eve.fireAtMs + EVE_REMINDER_GRACE_MS) {
+            const executeAtMs = Math.max(eve.fireAtMs, Date.now() + 10 * 60_000);
+            if (!isWithinPushQuietHours(executeAtMs)) planned.push({ event: eve, executeAtMs });
+        }
 
+        for (const { event, executeAtMs } of planned) {
             const sessions = loadChatSessions()
                 .filter(session => !session.isGroup && config.periodCareCharacterIds.includes(session.contactId))
                 .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -679,12 +691,11 @@ export async function armPeriodCareBailouts(): Promise<void> {
                         appId: "chat",
                         appTags: ["chat", "text", "period_care"],
                         tzOffsetMin: -new Date().getTimezoneOffset(),
-                armAt: new Date(executeAtMs).toISOString(),
+                        armAt: new Date(executeAtMs).toISOString(),
                         periodCare: { characterId: session.contactId, cycleKey: event.cycleKey },
                     },
                 });
             }
-            return; // 只挂最近的一个关怀日
         }
     } catch (err) {
         console.warn("[PushBailout] period care arm failed:", err);

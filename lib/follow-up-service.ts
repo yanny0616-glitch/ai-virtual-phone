@@ -54,6 +54,8 @@ import {
     type TimedWakeSchedule,
 } from "./timed-wake-storage";
 import {
+    EVE_REMINDER_GRACE_MS,
+    getMenstrualEveReminder,
     getMenstrualPeriodCareEvent,
     hasMenstrualPeriodCareTriggered,
     loadMenstrualConfig,
@@ -413,8 +415,12 @@ function pollMenstrualPeriodCare(now: number) {
     if (!config.periodCareEnabled || config.periodCareCharacterIds.length === 0) return;
 
     const records = loadMenstrualRecords();
-    const event = getMenstrualPeriodCareEvent(records, config);
-    if (!event) return;
+    const events: MenstrualPeriodCareEvent[] = [];
+    const careEvent = getMenstrualPeriodCareEvent(records, config);
+    if (careEvent) events.push(careEvent);
+    const eveReminder = getMenstrualEveReminder(records, config, new Date(now));
+    if (eveReminder && now >= eveReminder.fireAtMs && now < eveReminder.fireAtMs + EVE_REMINDER_GRACE_MS) events.push(eveReminder);
+    if (events.length === 0) return;
 
     const selectedIds = new Set(config.periodCareCharacterIds);
     const sessions = loadChatSessions()
@@ -427,18 +433,20 @@ function pollMenstrualPeriodCare(now: number) {
         }
     }
 
-    for (const characterId of selectedIds) {
-        if (hasMenstrualPeriodCareTriggered(characterId, event.cycleKey)) continue;
-        const session = latestSessionByCharacter.get(characterId);
-        if (!session) continue;
-        const firingKey = `${characterId}:${event.cycleKey}`;
-        if (periodCareFiringSet.has(firingKey)) continue;
-        console.log(`[PeriodCare] Firing now for session=${session.id}, cycle=${event.cycleKey}`);
-        fireMenstrualPeriodCare({
-            sessionId: session.id,
-            characterId,
-            event,
-        });
+    for (const event of events) {
+        for (const characterId of selectedIds) {
+            if (hasMenstrualPeriodCareTriggered(characterId, event.cycleKey)) continue;
+            const session = latestSessionByCharacter.get(characterId);
+            if (!session) continue;
+            const firingKey = `${characterId}:${event.cycleKey}`;
+            if (periodCareFiringSet.has(firingKey)) continue;
+            console.log(`[PeriodCare] Firing now for session=${session.id}, cycle=${event.cycleKey}`);
+            fireMenstrualPeriodCare({
+                sessionId: session.id,
+                characterId,
+                event,
+            });
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 import { formatIsoDate, parseIsoDate } from "./calendar-utils";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { carePhaseForWindow, daysFrom, estimateCycle, eveReminderDate, predictWindow, windowsUntil, type CycleEstimate, type PredictionWindow } from "./menstrual-predict";
 
 const MENSTRUAL_CONFIG_KEY = "ai_phone_menstrual_config_v1";
 const MENSTRUAL_RECORDS_KEY = "ai_phone_menstrual_records_v1";
@@ -18,6 +19,9 @@ export type MenstrualConfig = {
   periodCareEnabled: boolean;
   periodCareCharacterIds: string[];
   periodCareLeadDays: MenstrualPeriodCareLeadDays;
+  autoPredict: boolean;
+  // "" 表示不提醒
+  eveReminderTime: string;
 };
 
 export type MenstrualRecord = {
@@ -34,9 +38,10 @@ export type MenstrualDayState = {
   type: MenstrualDayType;
   label: string;
   shortLabel: string;
+  peak?: boolean;
 };
 
-export type MenstrualPeriodCarePhase = "before" | "active" | "ended";
+export type MenstrualPeriodCarePhase = "before" | "active" | "ended" | "late" | "eve";
 
 export type MenstrualPeriodCareEvent = {
   cycleKey: string;
@@ -60,7 +65,12 @@ const DEFAULT_CONFIG: MenstrualConfig = {
   periodCareEnabled: false,
   periodCareCharacterIds: [],
   periodCareLeadDays: 1,
+  autoPredict: true,
+  eveReminderTime: "21:30",
 };
+
+// 晚于这个时间才打开 App 就不补发了：半夜收到「今晚早点睡」不对劲
+export const EVE_REMINDER_GRACE_MS = 3 * 3_600_000;
 
 function addDays(dateText: string, offset: number): string {
   const date = parseIsoDate(dateText);
@@ -88,6 +98,11 @@ function normalizePeriodCareLeadDays(value: unknown): MenstrualPeriodCareLeadDay
   return (normalized === 2 || normalized === 3 ? normalized : 1) as MenstrualPeriodCareLeadDays;
 }
 
+function normalizeEveReminderTime(value: unknown): string {
+  if (value === undefined) return DEFAULT_CONFIG.eveReminderTime;
+  return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? value : "";
+}
+
 function normalizeCharacterIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return Array.from(new Set(value.map(item => String(item).trim()).filter(Boolean)));
@@ -99,16 +114,16 @@ function daysBetween(startDate: string, endDate: string): number {
   return Math.round((end - start) / 86400000);
 }
 
-function getCycleKeyForActualStart(records: MenstrualRecord[], config: MenstrualConfig, actualStartDate: string): string {
+function getCycleKeyForActualStart(records: MenstrualRecord[], cycleLength: number, actualStartDate: string): string {
   const previous = records.find(record => record.startDate < actualStartDate) ?? null;
   if (!previous) return actualStartDate;
 
-  let predicted = addDays(previous.startDate, config.cycleLength);
-  while (addDays(predicted, config.cycleLength) <= actualStartDate) {
-    predicted = addDays(predicted, config.cycleLength);
+  let predicted = addDays(previous.startDate, cycleLength);
+  while (addDays(predicted, cycleLength) <= actualStartDate) {
+    predicted = addDays(predicted, cycleLength);
   }
 
-  const previousPredicted = addDays(predicted, -config.cycleLength);
+  const previousPredicted = addDays(predicted, -cycleLength);
   const candidates = [predicted, previousPredicted];
   const closest = candidates.reduce((best, candidate) => (
     Math.abs(daysBetween(candidate, actualStartDate)) < Math.abs(daysBetween(best, actualStartDate)) ? candidate : best
@@ -145,6 +160,8 @@ export function loadMenstrualConfig(): MenstrualConfig {
       periodCareEnabled: parsed.periodCareEnabled === true,
       periodCareCharacterIds: normalizeCharacterIds(parsed.periodCareCharacterIds),
       periodCareLeadDays: normalizePeriodCareLeadDays(parsed.periodCareLeadDays),
+      autoPredict: parsed.autoPredict !== false,
+      eveReminderTime: normalizeEveReminderTime(parsed.eveReminderTime),
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -160,6 +177,8 @@ export function saveMenstrualConfig(config: MenstrualConfig): MenstrualConfig {
     periodCareEnabled: config.periodCareEnabled === true,
     periodCareCharacterIds: normalizeCharacterIds(config.periodCareCharacterIds),
     periodCareLeadDays: normalizePeriodCareLeadDays(config.periodCareLeadDays),
+    autoPredict: config.autoPredict !== false,
+    eveReminderTime: normalizeEveReminderTime(config.eveReminderTime ?? ""),
   });
 }
 
@@ -321,6 +340,27 @@ function getPredictionAnchorDate(records: MenstrualRecord[], config: MenstrualCo
   return null;
 }
 
+export function getCycleEstimate(records: MenstrualRecord[], config: MenstrualConfig): CycleEstimate {
+  const starts = records.map(record => record.startDate);
+  if (config.currentPeriodStartDate) starts.push(config.currentPeriodStartDate);
+  return estimateCycle(
+    starts,
+    [...records].reverse(),
+    { cycleLength: config.cycleLength, periodLength: config.periodLength },
+    config.autoPredict !== false,
+  );
+}
+
+export function getNextPeriodWindow(
+  records: MenstrualRecord[],
+  config: MenstrualConfig,
+  today = formatIsoDate(new Date()),
+): PredictionWindow | null {
+  if (!config.enabled) return null;
+  const anchorDate = getPredictionAnchorDate(records, config);
+  return anchorDate ? predictWindow(anchorDate, getCycleEstimate(records, config), today) : null;
+}
+
 export function buildMenstrualDayMap(
   rangeStart: string,
   rangeEnd: string,
@@ -330,6 +370,7 @@ export function buildMenstrualDayMap(
   const result = new Map<string, MenstrualDayState>();
   if (!config.enabled) return result;
   const today = formatIsoDate(new Date());
+  const estimate = getCycleEstimate(records, config);
 
   for (const record of records) {
     for (const date of eachDateInclusive(record.startDate, record.endDate)) {
@@ -339,7 +380,7 @@ export function buildMenstrualDayMap(
   }
 
   if (config.currentPeriodStartDate) {
-    const predictedCurrentEnd = addDays(config.currentPeriodStartDate, Math.max(config.periodLength - 1, 0));
+    const predictedCurrentEnd = addDays(config.currentPeriodStartDate, Math.max(estimate.periodLength - 1, 0));
     const actualCurrentEnd = today < predictedCurrentEnd ? today : predictedCurrentEnd;
     const currentActiveEnd = actualCurrentEnd < rangeEnd ? actualCurrentEnd : rangeEnd;
     if (config.currentPeriodStartDate <= currentActiveEnd) {
@@ -364,21 +405,16 @@ export function buildMenstrualDayMap(
   const anchorDate = getPredictionAnchorDate(records, config);
   if (!anchorDate) return result;
 
-  let predictedStart = addDays(anchorDate, config.cycleLength);
-  const predictionStartThreshold = addDays(rangeStart, -config.cycleLength);
-  while (predictedStart < predictionStartThreshold) {
-    predictedStart = addDays(predictedStart, config.cycleLength);
-  }
-
-  const predictionEndThreshold = addDays(rangeEnd, config.cycleLength);
-  while (predictedStart <= predictionEndThreshold) {
-    for (let offset = 0; offset < config.periodLength; offset += 1) {
-      const date = addDays(predictedStart, offset);
+  for (const window of windowsUntil(predictWindow(anchorDate, estimate, today), estimate, rangeEnd)) {
+    for (let offset = -estimate.spread; offset <= estimate.spread; offset += 1) {
+      const date = addDays(window.peak, offset);
       if (date < rangeStart || date > rangeEnd) continue;
-      setDayState(result, date, { type: "predicted_period", label: "预计经期", shortLabel: "预计" });
+      setDayState(result, date, offset === 0
+        ? { type: "predicted_period", label: "最可能来", shortLabel: "最可能", peak: true }
+        : { type: "predicted_period", label: "可能来", shortLabel: "可能" });
     }
 
-    const ovulationDate = addDays(predictedStart, -14);
+    const ovulationDate = addDays(window.peak, -14);
     if (ovulationDate >= rangeStart && ovulationDate <= rangeEnd) {
       setDayState(result, ovulationDate, { type: "ovulation", label: "预计排卵", shortLabel: "排卵" });
     }
@@ -387,8 +423,6 @@ export function buildMenstrualDayMap(
       if (date < rangeStart || date > rangeEnd) continue;
       setDayState(result, date, { type: "fertile", label: "易孕期", shortLabel: "易孕" });
     }
-
-    predictedStart = addDays(predictedStart, config.cycleLength);
   }
 
   return result;
@@ -399,14 +433,7 @@ export function getNextPredictedPeriodStart(
   config: MenstrualConfig,
   fromDate = formatIsoDate(new Date()),
 ): string | null {
-  if (!config.enabled) return null;
-  const anchorDate = getPredictionAnchorDate(records, config);
-  if (!anchorDate) return null;
-  let next = addDays(anchorDate, config.cycleLength);
-  while (next < fromDate) {
-    next = addDays(next, config.cycleLength);
-  }
-  return next;
+  return getNextPeriodWindow(records, config, fromDate)?.peak ?? null;
 }
 
 export function getMenstrualPeriodCareEvent(
@@ -415,11 +442,12 @@ export function getMenstrualPeriodCareEvent(
   targetDate = formatIsoDate(new Date()),
 ): MenstrualPeriodCareEvent | null {
   if (!config.enabled || !config.periodCareEnabled) return null;
+  const estimate = getCycleEstimate(records, config);
 
   if (config.currentPeriodStartDate && config.currentPeriodStartDate <= targetDate) {
     const startDate = config.currentPeriodStartDate;
-    const cycleKey = getCycleKeyForActualStart(records, config, startDate);
-    const predictedEndDate = addDays(startDate, Math.max(config.periodLength - 1, 0));
+    const cycleKey = getCycleKeyForActualStart(records, estimate.cycleLength, startDate);
+    const predictedEndDate = addDays(startDate, Math.max(estimate.periodLength - 1, 0));
     const dayIndex = daysBetween(startDate, targetDate) + 1;
     if (targetDate <= predictedEndDate) {
       return {
@@ -445,7 +473,7 @@ export function getMenstrualPeriodCareEvent(
     const daysAfterActualEnd = daysBetween(latest.endDate, targetDate);
     if (daysAfterActualEnd <= 5) {
       return {
-        cycleKey: getCycleKeyForActualStart(records, config, latest.startDate),
+        cycleKey: getCycleKeyForActualStart(records, estimate.cycleLength, latest.startDate),
         phase: "ended",
         context: `{{user}}已记录经期已于${latest.endDate}结束，是${formatEndedDistance(daysAfterActualEnd)}结束的。`,
       };
@@ -454,44 +482,55 @@ export function getMenstrualPeriodCareEvent(
 
   const anchorDate = getPredictionAnchorDate(records, config);
   if (!anchorDate) return null;
-
-  let predictedStart = addDays(anchorDate, config.cycleLength);
-  while (addDays(predictedStart, config.cycleLength) <= targetDate) {
-    predictedStart = addDays(predictedStart, config.cycleLength);
-  }
-
-  if (targetDate < predictedStart) {
-    const daysUntil = daysBetween(targetDate, predictedStart);
-    if (daysUntil <= config.periodCareLeadDays) {
-      return {
-        cycleKey: predictedStart,
-        phase: "before",
-        context: `按预测，{{user}}的经期预计还有${daysUntil}天到来，预计开始日期为${predictedStart}。`,
-      };
-    }
-    return null;
-  }
-
-  const predictedEndDate = addDays(predictedStart, Math.max(config.periodLength - 1, 0));
-  const dayIndex = daysBetween(predictedStart, targetDate) + 1;
-  if (targetDate <= predictedEndDate) {
+  const window = predictWindow(anchorDate, estimate, targetDate);
+  const phase = carePhaseForWindow(window, targetDate, config.periodCareLeadDays, !!config.eveReminderTime);
+  if (phase === "before") {
     return {
-      cycleKey: predictedStart,
-      phase: "active",
-      context: `按预测，{{user}}的经期可能已经来了，现在约第${dayIndex}天，预计开始日期为${predictedStart}。`,
+      cycleKey: window.peak,
+      phase,
+      context: `按预测，{{user}}的经期可能在${window.start}到${window.end}之间来，最可能是${window.peak}，还有${daysFrom(targetDate, window.peak)}天。`,
     };
   }
-
-  const daysAfterPredictedEnd = daysBetween(predictedEndDate, targetDate);
-  if (daysAfterPredictedEnd <= 5) {
+  if (phase === "active") {
     return {
-      cycleKey: predictedStart,
-      phase: "ended",
-      context: `按预测，{{user}}的经期可能已经走了${daysAfterPredictedEnd}天，预计结束日期为${predictedEndDate}。`,
+      cycleKey: window.peak,
+      phase,
+      context: `按预测，{{user}}的经期可能已经来了（最可能是${window.peak}），但{{user}}还没有记录。`,
     };
   }
-
+  if (phase === "late") {
+    return {
+      cycleKey: `${window.peak}:late`,
+      phase,
+      context: `按预测，{{user}}的经期本该在${window.start}到${window.end}之间来，现在过了${window.lateDays}天还没有记录，也可能只是忘了记。只关心{{user}}最近身体和心情怎么样，不追问，不猜原因，别让{{user}}紧张。`,
+    };
+  }
   return null;
+}
+
+export type MenstrualEveReminder = MenstrualPeriodCareEvent & { date: string; fireAtMs: number };
+
+export function getMenstrualEveReminder(
+  records: MenstrualRecord[],
+  config: MenstrualConfig,
+  now = new Date(),
+): MenstrualEveReminder | null {
+  if (!config.enabled || !config.periodCareEnabled || !config.eveReminderTime) return null;
+  const today = formatIsoDate(now);
+  const window = getNextPeriodWindow(records, config, today);
+  if (!window) return null;
+  const date = eveReminderDate(window);
+  if (date < today) return null;
+  const fireAt = parseIsoDate(date);
+  const [hour, minute] = config.eveReminderTime.split(":").map(Number);
+  fireAt.setHours(hour, minute, 0, 0);
+  return {
+    cycleKey: `${window.peak}:eve`,
+    phase: "eve",
+    date,
+    fireAtMs: fireAt.getTime(),
+    context: `按预测，{{user}}的经期最早可能明天（${window.start}）来，最可能是${window.peak}。现在是前一晚，提醒{{user}}一句：包里备好卫生巾、早点休息、别吃冰的。用你自己的方式自然地说，别说教，也别像闹钟。`,
+  };
 }
 
 export function getMenstrualSummary(records: MenstrualRecord[], config: MenstrualConfig, targetDate = formatIsoDate(new Date())) {
