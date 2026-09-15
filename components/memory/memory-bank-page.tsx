@@ -47,6 +47,10 @@ const MEMORY_TOKEN_BUDGET_STEP: Record<MemoryBudgetKey, number> = {
     longTermTokenBudget: 1000,
 };
 const MANUAL_MEMORY_CONTENT_LIMIT = 3000;
+const LONG_TERM_RECALL_MODES: { value: MemoryConfig["longTermRecallMode"]; label: string }[] = [
+    { value: "all", label: "全部放入" },
+    { value: "relevant", label: "按话题挑" },
+];
 // 详情页时间线最多解析渲染的条数：全量历史可能有几万条，
 // 一次性解析+渲染会把 iOS Safari 的单页内存顶爆（灰屏杀页）
 const MEMORY_TIMELINE_ENTRY_CAP = 2000;
@@ -1009,6 +1013,55 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                             }} />
                         </div>
                     </div>
+                </div>
+
+                <p className="menu-group-desc mx-2">长期记忆怎么放进提示词</p>
+                <div className="menu-group">
+                    <div className="menu-item">
+                        <MemorySettingsIcon icon={Filter} color={BINDING_ACCENTS.memory} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">注入方式</span>
+                            <span className="menu-desc">
+                                {config.longTermRecallMode === "relevant"
+                                    ? "每轮只挑和眼下话题相关的几条，按发生先后排，前面标上日期；配了向量模型会一起参与挑选"
+                                    : "按「长期记忆」预算从新到旧塞满，原来的做法"}
+                            </span>
+                            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                                {LONG_TERM_RECALL_MODES.map(mode => (
+                                    <button
+                                        key={mode.value}
+                                        type="button"
+                                        className="ui-chip"
+                                        {...(config.longTermRecallMode === mode.value ? { "data-selected": "" } : {})}
+                                        onClick={() => {
+                                            const next = { ...config, longTermRecallMode: mode.value };
+                                            setConfig(next);
+                                            saveMemoryConfig(next);
+                                        }}
+                                    >
+                                        {mode.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                    {config.longTermRecallMode === "relevant" && (
+                        <MemorySettingsSliderItem
+                            icon={Search}
+                            color={BINDING_ACCENTS.embedding}
+                            label="每轮最多几条"
+                            desc="挑出来的同时不超过下面的「长期记忆」预算"
+                            value={config.longTermRecallTopK}
+                            min={1}
+                            max={20}
+                            step={1}
+                            onChange={value => {
+                                const next = { ...config, longTermRecallTopK: value };
+                                setConfig(next);
+                                saveMemoryConfig(next);
+                            }}
+                        />
+                    )}
                 </div>
 
                 {/* Token budget sliders */}

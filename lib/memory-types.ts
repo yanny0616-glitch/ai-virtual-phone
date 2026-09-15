@@ -32,6 +32,8 @@ export type MemoryConfig = {
     shortTermTokenBudget: number;           // token limit for short-term event log
     coreMemoryTokenBudget: number;          // token limit for injected core memories
     longTermTokenBudget: number;            // token limit for injected long-term memories
+    longTermRecallMode: "all" | "relevant"; // all：按预算从新到旧塞满（原来的做法）；relevant：按话题挑、标日期
+    longTermRecallTopK: number;
     summarizationPrompt: string;            // user-editable prompt template for memory summarization
     coreMemoryPrompt: string;               // user-editable prompt template for core-memory extraction
     vnSummaryPrompt: string;                // user-editable prompt for VN chapter summarization
@@ -123,6 +125,8 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     shortTermTokenBudget: 100000,
     coreMemoryTokenBudget: 100000,
     longTermTokenBudget: 100000,
+    longTermRecallMode: "all",
+    longTermRecallTopK: 8,
     summarizationPrompt: DEFAULT_SUMMARIZATION_PROMPT,
     coreMemoryPrompt: DEFAULT_CORE_MEMORY_PROMPT,
     vnSummaryPrompt: "",
