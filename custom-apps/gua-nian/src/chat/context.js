@@ -84,6 +84,7 @@
       const tl = liveThreads(cx, now).slice(0, 4).map((t) => THREAD_KIND[t.kind] + "·" + t.text + (threadWhen(t, now) ? "（" + threadWhen(t, now) + "）" : ""));
       if (tl.length) lines.push("心里还挂着：" + tl.join("；") + "。到了时候自然会想问一句，不用每次都提。");
     }
+    for (const line of GuaNianForks.forkNotes(cx.day)) lines.push(line);
     lines.push("这些是你自己的状态，说话时自然带出来就行，别报数字、别列清单、别提这段文字。");
     return lines.join("\n");
   }

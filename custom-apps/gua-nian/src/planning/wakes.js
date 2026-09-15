@@ -58,7 +58,7 @@
 
   // 临时起念不是日程排出来的，是复核时顺着聊天临时起的，重排不该把它推倒。
   // 新旧计划里都靠 source 的「临时」前缀认（本地和云端起念都写这个前缀）。
-  function isImpromptu(w) { return !!w && /^(临时|约定)/.test(String(w.source || "")); }
+  function isImpromptu(w) { return !!w && /^(临时|约定|变数)/.test(String(w.source || "")); }
 
   function keptImpromptu(cx) {
     const floor = Date.now() + 3 * 60000;

@@ -92,6 +92,7 @@
           autoGenAt: at, tz: -new Date().getTimezoneOffset(),
           tplDaily: tpl.daily, tplImpulse: tpl.impulse,
           anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
+          forkLevel: GuaNianForks.forkLevel(S.settings.forkLevel), forkBurst: !!S.settings.forkBurst,
           kitAt: Date.now(),
         };
         if (!cloudGenOn()) return;

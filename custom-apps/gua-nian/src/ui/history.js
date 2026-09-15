@@ -79,6 +79,8 @@
           (plan && plan.chatUsed ? '<span class="chip">💬 判断时读了 ' + plan.chatUsed + " 句聊天</span>" : "") +
           "</div>";
       }
+      const hits = forkHits(day, cx.character.id);
+      if (hits.length) body += hits.map((f) => '<div class="arc-fork"><b>✦ ' + esc(f.at) + "</b>" + esc(f.what) + '<span class="say">' + esc(FORK_SAY[f.say] || "") + "</span></div>").join("");
       if (items.length) {
         // 起念的时刻是主角，逐条展开讲；未起念的只是「日程里没被选中的时刻」，
         // 折叠成一行，免得整张卡片读起来像把日程复读一遍

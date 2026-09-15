@@ -47,6 +47,7 @@
         if (generationStopState(cx) && generationStopState(cx).status !== "synced") await stopCloudGeneration(cx);
         await syncChatContext(cx, true);
         await adoptCloudDay(cx);
+        await revealForks(cx).catch((e) => log(cx, "变数结算失败：" + (e && e.message || e)));
         uploadGenKitCloud(cx).catch(() => { /* 已在函数内记日志 */ });
       }
       render();
@@ -85,6 +86,7 @@
           await flushJudgeFinish(cx).catch(() => {});
           await maybeAutoGen(cx).catch(() => { /* 已在函数内记日志 */ });
           await settleFired(cx).catch(() => { /* 已在函数内记日志 */ });
+          await revealForks(cx).catch((e) => log(cx, "变数结算失败：" + (e && e.message || e)));
           await syncChatContext(cx).catch(() => { /* 已在函数内记日志 */ });
           if (S.settings && S.settings.recheckMin > 0 && Date.now() - (cx._rcTry || 0) >= S.settings.recheckMin * 60000) {
             cx._rcTry = Date.now();

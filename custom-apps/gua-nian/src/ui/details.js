@@ -45,7 +45,7 @@
   }
 
   /* ================= 时刻详情弹层 ================= */
-  const HIST_KIND = { promise: "约定预约", plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对" };
+  const HIST_KIND = { promise: "约定预约", plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对", fork: "变数" };
 
   function detailHtml(w, plan) {
     const cx = cur();

@@ -96,6 +96,17 @@
     if (S.sub === "usage") renderUsage(); else renderDiag();
   }
   function bindPanels(cx, v) {
+    v.querySelectorAll(".tl-vchip").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const open = S._forkOpen = S._forkOpen || {}, id = b.dataset.fid;
+        open[id] = !open[id];
+        b.classList.toggle("on", open[id]);
+        const box = b.closest(".tl-item").querySelector('.tl-var[data-fid="' + id + '"]');
+        if (box) box.hidden = !open[id];
+      };
+    });
+    v.querySelectorAll(".tl-var").forEach((el) => { el.onclick = (e) => e.stopPropagation(); });
     v.querySelectorAll(".tl-item.sched").forEach((el) => {
       el.onclick = () => { const i = +el.dataset.si; if (i >= 0) openSchedDetail(i); };
     });
@@ -363,12 +374,18 @@
       } else {
         {
           const steps = Array.isArray(m.it.steps) ? m.it.steps.length : 0;
-          tl += '<div class="tl-item sched' + (past ? " past" : "") + (cur ? " cur" : "") + '" data-si="'
+          // 变数默认收着：那件事后面一个小标记，点开才是整段；还没揭晓的只有开了「提前看」才露
+          const fks = m.it.fork ? [] : (c.day.forks || []).filter((f) => f && f.item === m.it.title && (f.state === "hit" || (!f.state && S.settings.forkPeek)));
+          const open = S._forkOpen || {};
+          tl += '<div class="tl-item sched' + (past ? " past" : "") + (cur ? " cur" : "") + (m.it.fork ? " inserted" : "") + '" data-si="'
             + ((cx.day && cx.day.schedule) || []).indexOf(m.it) + '" ' + delay + '><span class="dot"></span>'
-            + '<div class="row1"><span class="tm">' + esc(m.time) + (m.it.end ? '<span class="tm-end">–' + esc(m.it.end) + "</span>" : "") + '</span><span class="tt">' + esc(m.it.title) + "</span></div>"
+            + '<div class="row1"><span class="tm">' + esc(m.time) + (m.it.end ? '<span class="tm-end">–' + esc(m.it.end) + "</span>" : "") + '</span><span class="tt">' + esc(m.it.title) + "</span>"
+            + fks.map((f) => '<button class="tl-vchip' + (f.state ? "" : " pre") + (open[f.id] ? " on" : "") + '" data-fid="' + esc(f.id) + '">' + (f.state ? "✦ 变数" : "可能有岔子") + "</button>").join("")
+            + (m.it.moved ? '<span class="tl-tag">推迟过</span>' : "") + "</div>"
             + (m.it.note ? '<div class="nt">' + esc(m.it.note) + "</div>" : "")
             + (steps ? '<div class="nt more">…点开看这段时间里的 ' + steps + " 件事</div>"
-               : m.it.detail ? '<div class="nt more">…点开看细化的部分</div>' : "") + "</div>";
+               : m.it.detail ? '<div class="nt more">…点开看细化的部分</div>' : "")
+            + fks.map((f) => forkBlock(f, m.it, !!open[f.id])).join("") + "</div>";
         }
       }
     }
@@ -402,6 +419,7 @@
     if (w.held && w.fireAt >= Date.now()) return '<span class="badge cool">押后 ' + esc(fmtHM(w.fireAt)) + "</span>";
     if (w.adj === "cooled") return '<span class="badge cool">降温</span>';
     if (w.adj === "extra") return '<span class="badge cool">临时起念</span>';
+    if (w.adj === "fork") return '<span class="badge cool">变数</span>';
     if (w.adj === "recheck") return '<span class="badge cool">复核调整</span>';
     if (w.adj === "cloud") return '<span class="badge cool">云端复核</span>';
     return "";

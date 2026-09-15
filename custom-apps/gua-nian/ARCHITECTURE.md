@@ -2,7 +2,7 @@
 
 维护 `src/`，构建得到 `index.html`，安装包仍用单 HTML 入口。根目录的 `index.html` 是提交到仓库的生成产物，不直接编辑。
 
-当前结构包括 25 个 JS 片段（23 个原有片段及回执查询、同步状态展示两个新增片段）与 4 个独立模块（含共享的历史窗口 TypeScript 模块）。片段仍共享原来的 IIFE 闭包，`S` 是应用状态，各角色的 `cx` 保存当天计划、账本和运行状态；时间计算与规则评分已抽到 `src/domain/`，有独立作用域和明确导出，不读取 `S`、宿主 SDK、存储或系统当前时间。其他片段之间仍有双向调用。
+当前结构包括 26 个 JS 片段（23 个原有片段及回执查询、同步状态展示、变数结算三个新增片段）与 6 个独立模块（含共享的在线状态、历史窗口两个 TypeScript 模块）。片段仍共享原来的 IIFE 闭包，`S` 是应用状态，各角色的 `cx` 保存当天计划、账本和运行状态；时间计算与规则评分已抽到 `src/domain/`，有独立作用域和明确导出，不读取 `S`、宿主 SDK、存储或系统当前时间。其他片段之间仍有双向调用。
 
 ## 独立模块接口
 
@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | `domain/time.mjs` | `localDateKey`、`formatLocalTime`、`parseLocalDate`、`normalizeTime`、`timeOnLocalDay`、`addMinutes`、`isInTimeWindow`、`getSleepWindow`、`isAsleep` | 日期、时间戳、时间字符串、作息设置由调用方传入；按运行环境本地时区计算 |
 | `domain/scoring.mjs` | `fitScore`、`calculateScore`、`countUnansweredRounds` | 明确传入当地小时数、预约时间、已预约数量、未回应轮数、额度、间隔；统计轮数时传入 `nowMs` |
+| `domain/forks.mjs` | `forkRoll`、`forkLevel`、`normalizeForks`、`forkSay`、`applyDueForks`、`forkNotes` | 日程、档位、此刻 HH:MM、种子、好感和揭晓时刻换算由调用方传入；已结算的岔子原样返回 |
 
 模块可由 Node 直接 `import`，不需要模拟 `AiPhone` 或加载 APP。它们不修改参数；时钟留在旧调用位置的薄封装中，设置按每次调用时的当前值传入，避免缓存旧设置。
 
@@ -25,6 +26,7 @@
 | `src/styles.css` | 所有界面样式 | 颜色、布局、字体 |
 | `src/domain/time.mjs` | 独立的日期、时间窗和作息计算 | 时间边界 |
 | `src/domain/scoring.mjs` | 独立的评分与未回应轮次计算 | 评分公式 |
+| `src/domain/forks.mjs` | 独立的变数归一、固定种子结算、说不说 | 变数规则（云端有带类型副本，改完跑 `check-gua-nian-forks`） |
 | `src/core/runtime.js` | `S`、角色上下文、日期和 DOM 工具、toast、日志 | 共享状态和日志 |
 | `src/core/model.js` | JSON 解析、模型调用、用量汇总和日期解析 | 生成调用与用量限制 |
 | `src/core/character-state.js` | 作息、精力、情绪、情况衰减、读取聊天 | TA 此刻的生活状态 |
@@ -41,6 +43,7 @@
 | `src/planning/generation.js` | 应用模型给出的惦记变更、生成一天、提示词与结果解析 | 生活面生成 |
 | `src/planning/wakes.js` | 规则评分、预约、取消、哨兵、编排 | 主动消息计划 |
 | `src/planning/recheck.js` | 打开/定时动态复核、临时起念 | 调整当天计划 |
+| `src/planning/forks.js` | 变数揭晓落库、忍不住时约主动消息、时间线与记录里的变数展示 | 突发事件 |
 | `src/chat/context.js` | 预览、提示词注入、回复门、好感和在线状态 | 与宿主聊天的联动 |
 | `src/ui/sync-status.js` | 跨页签显示计划同步结果、绑定重试入口 | 本地保存与云端同步反馈 |
 | `src/ui/main.js` | 主渲染、页签、总览卡片与事件 | 首页和心动页 |
@@ -365,3 +368,11 @@ ui/diagnostics.js 的 diagnosticJobGroups 先判角色，再分消息任务、�
 ## 0.9.37：提示词编辑抽屉
 
 settings 的日程字段在配置页渲染隐藏草稿和编辑按钮，独立 day-prompt-sheet 复用 sheet/txt-in/mini/big-btn 样式。专用遮罩不关闭父设置层；关闭丢弃弹窗草稿，完成复制回隐藏字段，恢复默认仅编辑弹窗。打开期间父设置 inert，Esc关闭、Tab限制在弹窗内，关闭恢复入口焦点。云端逻辑不变。
+
+## 变数
+
+`domain/forks.mjs` 是纯规则。`normalizeForks` 归一模型给的 forks：按档位截个数、乘概率，锚点必须在日程里，move / drop 只能动揭晓之后的事，按揭晓先后排序。`applyDueForks` 只结算没结算过且到了揭晓时刻的岔子：发生与否 = FNV(`forkSeed|id`) % 100 < p；发生了就改写日程（插入项带 `fork`、挪过的带 `moved`），追加一条 conds，`say` 由模型倾向按好感挪档。已结算的原样返回，重复调用结果不变。锚点先按标题、再按原时刻找，聊天挪过也跟得上，删了就作废（`void`）。
+
+App 在打开、每分钟循环和生成之后调用 `revealForks` 落库；忍不住走一次普通心动预约（`adj: "fork"`），只有管事那台约。云端不落库：push-recheck / push-generate 读 `context.day` 时用 `guanianForkDay` 按日程时区重算，所以和 App 的结果一致。`forkSeed` = 日期|角色 id，生成时写进 day，随 `dayForCloud` 寄上去；云端生成的那天由 push-recheck 写进 `dayFull`。
+
+两份云函数里的副本逐字相同，`scripts/check-gua-nian-forks.mjs` 把它转译后和 App 模块逐条对照。

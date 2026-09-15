@@ -15,6 +15,7 @@
   "planning/generation.js",
   "planning/wakes.js",
   "planning/recheck.js",
+  "planning/forks.js",
   "chat/context.js",
   "ui/sync-status.js",
   "ui/main.js",

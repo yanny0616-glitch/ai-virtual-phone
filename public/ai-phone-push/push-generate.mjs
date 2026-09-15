@@ -674,6 +674,7 @@ type GuanianCond = { startAt?: number; halfLifeMin?: number; intensity?: number;
 type GuanianDay = {
   tz?: number; mood?: string; energy?: number; location?: string; doing?: string;
   wake?: string; bed?: string; schedule?: GuanianSched[]; conds?: GuanianCond[];
+  forks?: any[]; forkSeed?: string; forkBurst?: number;
 };
 // 睡眠窗：bed 起到 wake 止，允许过零点；老版本 App 没寄 wake/bed 时退回免打扰时段。与 App 端 asleepAt 同步。
 function guanianAsleep(day: GuanianDay, hm: string, quietStart?: string, quietEnd?: string): boolean {
@@ -741,6 +742,155 @@ function guanianThreadLines(threads: unknown, nowMs: number, tzMin: number): str
   }
   return out;
 }
+// ── 变数（App 同名 domain/forks.mjs 的带类型副本；push-recheck 和 push-generate 里这一段逐字相同，scripts/check-gua-nian-forks.mjs 对照）
+const GUANIAN_FORK_LEVELS = [{ n: 1, mult: 0.45 }, { n: 2, mult: 1 }, { n: 3, mult: 1.35 }];
+const GUANIAN_FORK_TELL: Record<string, string> = { 忍不住: "burst", 聊到才说: "hint", 憋着: "keep", burst: "burst", hint: "hint", keep: "keep" };
+const GUANIAN_FORK_SAYS = ["keep", "hint", "burst"];
+function guanianForkHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+function guanianForkRoll(seed: unknown): number {
+  return guanianForkHash(String(seed)) % 100;
+}
+function guanianForkHM(v: unknown): string {
+  const m = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(String(v == null ? "" : v));
+  return m ? String(Math.min(23, +m[1])).padStart(2, "0") + ":" + String(Math.min(59, +(m[2] || 0))).padStart(2, "0") : "";
+}
+function guanianForkMins(t: string): number {
+  return +t.slice(0, 2) * 60 + +t.slice(3, 5);
+}
+function guanianForkHMOf(n: number): string {
+  const t = Math.max(0, Math.min(n, 23 * 60 + 59));
+  return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+}
+function guanianForkInt(v: unknown, lo: number, hi: number, dflt: number): number {
+  const n = Math.round(Number(v));
+  return v !== "" && v != null && Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt;
+}
+function guanianForkLevel(level: unknown): number {
+  return typeof level === "number" && [0, 1, 2].includes(level) ? level : 1;
+}
+function guanianNormalizeForks(raw: unknown, schedule: unknown, level: unknown): any[] {
+  const lv = GUANIAN_FORK_LEVELS[guanianForkLevel(level)];
+  const sched: any[] = (Array.isArray(schedule) ? schedule : []).filter((it: any) => it && typeof it.time === "string");
+  const out: any[] = [];
+  for (const f of (Array.isArray(raw) ? raw : []) as any[]) {
+    if (out.length >= lv.n) break;
+    if (!f || typeof f !== "object") continue;
+    const at = guanianForkHM(f.at), what = String(f.what || "").trim().slice(0, 60);
+    const item = at ? sched.find((it) => it.time === at) : null;
+    if (!item || !what || out.some((x) => x.at === at)) continue;
+    const span = item.end && item.end > at ? guanianForkMins(item.end) - guanianForkMins(at) : 120;
+    const rv = guanianForkHM(f.time);
+    const off = rv && rv >= at ? Math.min(guanianForkMins(rv) - guanianForkMins(at), span) : Math.min(10, span);
+    const reveal = guanianForkHMOf(guanianForkMins(at) + off);
+    const later = (t: unknown): string => {
+      const x = guanianForkHM(t);
+      return x && x >= reveal && x !== at && sched.some((it) => it.time === x) ? x : "";
+    };
+    const titleAt = (t: string): string => String((sched.find((it) => it.time === t) || {}).title || "");
+    let add: any = null;
+    if (f.add && typeof f.add === "object" && String(f.add.title || "").trim()) {
+      const t = guanianForkHM(f.add.time), time = t && t >= reveal ? t : reveal, end = guanianForkHM(f.add.end);
+      add = {
+        time, end: end > time ? end : "", title: String(f.add.title).trim().slice(0, 16),
+        place: String(f.add.place || "").trim().slice(0, 16), cost: guanianForkInt(f.add.cost, -15, 15, 0),
+        busy: f.add.busy === true || /^(true|是|1)$/i.test(String(f.add.busy || "").trim()),
+      };
+    }
+    const move = (Array.isArray(f.move) ? f.move : []).slice(0, 3)
+      .map((m: any) => ({ time: later(m && m.time), to: guanianForkHM(m && (m.newTime || m.to)) }))
+      .filter((m: any) => m.time && m.to > m.time)
+      .map((m: any) => ({ time: m.time, to: m.to, title: titleAt(m.time) }));
+    const drop = (Array.isArray(f.drop) ? f.drop : []).slice(0, 2).map(later)
+      .filter((t: string) => t && !move.some((m: any) => m.time === t))
+      .map((t: string) => ({ time: t, title: titleAt(t) }));
+    out.push({
+      id: "f" + guanianForkHash(at + "|" + item.title + "|" + what).toString(36),
+      at, item: String(item.title || ""), off, what,
+      label: String(f.label || "").trim().slice(0, 10) || what.slice(0, 8),
+      p: Math.max(3, Math.min(90, Math.round(guanianForkInt(f.p, 0, 100, 30) * lv.mult))),
+      mood: String(f.mood || "").trim().slice(0, 24),
+      energy: guanianForkInt(f.energy, -10, 10, 0),
+      tell: GUANIAN_FORK_TELL[String(f.tell || "").trim()] || "hint",
+      add, move, drop, state: "",
+    });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+function guanianForkSay(tell: unknown, score: unknown): string {
+  let i = GUANIAN_FORK_SAYS.indexOf(GUANIAN_FORK_TELL[String(tell || "")] || "hint");
+  if (typeof score === "number" && Number.isFinite(score)) {
+    if (score >= 80) i += 1;
+    else if (score >= 60 && i === 0) i = 1;
+    else if (score < 15) i -= 1;
+    else if (score < 35 && i === 2) i = 1;
+  }
+  return GUANIAN_FORK_SAYS[Math.max(0, Math.min(2, i))];
+}
+function guanianApplyForks(day: any, nowHM: string, opts?: { seed?: string; score?: unknown; at?: (hm: string) => number }): { day: any; revealed: any[] } {
+  const forks: any[] = day && Array.isArray(day.forks) ? day.forks : [];
+  const now = guanianForkHM(nowHM), o = opts || {};
+  if (!now || !forks.some((f) => f && !f.state)) return { day, revealed: [] };
+  let sched: any[] = (Array.isArray(day.schedule) ? day.schedule : []).filter((it: any) => it && typeof it.time === "string").map((it: any) => ({ ...it }));
+  let conds: any[] = Array.isArray(day.conds) ? day.conds.slice() : [];
+  const revealed: any[] = [];
+  const next = forks.map((f) => {
+    if (!f || f.state) return f;
+    const anchor = sched.find((it) => !it.fork && it.title === f.item) || sched.find((it) => !it.fork && it.time === f.at);
+    if (!anchor) {
+      const gone = { ...f, state: "void" };
+      revealed.push(gone);
+      return gone;
+    }
+    const reveal = guanianForkHMOf(guanianForkMins(anchor.time) + (Number(f.off) || 0));
+    if (reveal > now) return f;
+    const done: any = { ...f, at: reveal, state: guanianForkRoll(String(o.seed || "") + "|" + f.id) < (Number(f.p) || 0) ? "hit" : "miss" };
+    revealed.push(done);
+    if (done.state !== "hit") return done;
+    done.say = guanianForkSay(f.tell, o.score);
+    const own = (it: any, t: string) => it !== anchor && !it.fork && it.time === t && t >= reveal;
+    for (const d of f.drop || []) sched = sched.filter((it) => !own(it, d.time));
+    for (const m of f.move || []) {
+      const it = sched.find((x) => own(x, m.time));
+      if (!it) continue;
+      const shift = guanianForkMins(m.to) - guanianForkMins(it.time);
+      if (it.end && it.end > it.time) it.end = guanianForkHMOf(guanianForkMins(it.end) + shift);
+      it.time = m.to;
+      it.moved = true;
+    }
+    if (f.add) {
+      const t = f.add.time > reveal ? f.add.time : reveal;
+      sched.push({ time: t, end: f.add.end > t ? f.add.end : "", title: f.add.title, place: f.add.place, note: "", cost: Number(f.add.cost) || 0, busy: !!f.add.busy, fork: f.id });
+    }
+    sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    const ms = f.mood && typeof o.at === "function" ? o.at(reveal) : 0;
+    if (ms) conds = conds.concat([{ mood: f.mood, cause: f.label, energyDelta: Number(f.energy) || 0, intensity: 70, halfLifeMin: 240, startAt: ms }]).slice(-8);
+    return done;
+  });
+  return revealed.length ? { day: { ...day, schedule: sched, conds, forks: next }, revealed } : { day, revealed };
+}
+function guanianForkNotes(day: any): string[] {
+  return (day && Array.isArray(day.forks) ? day.forks : []).filter((f: any) => f && f.state === "hit").slice(-3)
+    .map((f: any) => "今天 " + f.at + " 碰上一件事：" + f.what + (f.say === "keep"
+      ? "。你不想主动提，用户问起或聊到很贴近的事才可能说。"
+      : f.say === "burst"
+        ? "。你憋不住想跟用户说：还没说过的话，找个空当说出来；说过了别重复。"
+        : "。还没跟用户说过的话，聊到相关的自然提起；说过了别重复。"));
+}
+// 云端没有 App 的本地时钟：按日程里的时区换算此刻和揭晓时刻；结果不落库，每次读都重算，和 App 结算的一样
+function guanianForkDay(day: GuanianDay, nowMs: number, affection?: unknown): GuanianDay {
+  if (!day || !Array.isArray(day.forks) || !day.forks.length) return day;
+  const tz = Number(day.tz) || 0;
+  const local = new Date(nowMs + tz * 60_000);
+  const hm = String(local.getUTCHours()).padStart(2, "0") + ":" + String(local.getUTCMinutes()).padStart(2, "0");
+  const base = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - tz * 60_000;
+  const score = affection && typeof affection === "object" ? (affection as { score?: unknown }).score : undefined;
+  return guanianApplyForks(day, hm, { seed: String(day.forkSeed || ""), score, at: (t: string) => base + guanianForkMins(t) * 60_000 }).day;
+}
+// ── 变数副本结束
 function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, quietEnd?: string, affection?: GuanianAffection, threads?: string[]): string {
   const tz = Number.isFinite(Number(day.tz)) ? Number(day.tz) : 0;
   const local = new Date(nowMs + tz * 60_000);
@@ -827,6 +977,7 @@ function guanianStateNote(day: GuanianDay, nowMs: number, quietStart?: string, q
     lines.push(`对TA：${affection.tier || "说不上"}；两人现在的关系：${affection.relation || "没定"}。说话的分寸按这个来。`);
   }
   if (threads && threads.length) lines.push(`心里还挂着：${threads.join("；")}。和这次要说的事有关就顺口带上，无关就别硬提。`);
+  for (const line of guanianForkNotes(day)) lines.push(line);
   lines.push("这些是你自己的状态，说话时自然带出来就行，别报数字、别列清单、别提这段文字。]");
   return lines.join("\n");
 }
@@ -881,7 +1032,7 @@ Deno.serve(async (req: Request) => {
     return new Response("forbidden", { status: 403 });
   }
 
-  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2", "chat-silence-v1", "guanian-history-v1", "promise-tasks-v2", "scheduler-state-v1", "history-window-v1"] });
+  if (action === "capabilities") return Response.json({ capabilities: ["deferred-reply-v1", "deferred-reply-v2", "chat-silence-v1", "guanian-history-v1", "promise-tasks-v2", "scheduler-state-v1", "history-window-v1", "day-forks-v1"] });
   if (!jobId) return new Response("bad request", { status: 400 });
 
   const claim = await rest(`push_jobs?id=eq.${encodeURIComponent(jobId)}&status=eq.pending&kind=neq.bridge_scan&execute_at=lte.${encodeURIComponent(new Date().toISOString())}`, {
@@ -1225,7 +1376,7 @@ Deno.serve(async (req: Request) => {
       const ctxQuiet = guanianPlan.row.context as { quietStart?: unknown; quietEnd?: unknown };
       const qs = typeof ctxQuiet.quietStart === "string" ? ctxQuiet.quietStart : undefined;
       const qe = typeof ctxQuiet.quietEnd === "string" ? ctxQuiet.quietEnd : undefined;
-      const day = guanianPlan.row.context.day as GuanianDay;
+      const day = guanianForkDay(guanianPlan.row.context.day as GuanianDay, Date.now(), (guanianPlan.row.context as Record<string, unknown>).affection);
       const tzMin = Number.isFinite(Number(day.tz)) ? Number(day.tz) : 0;
       const localNow = new Date(Date.now() + tzMin * 60_000);
       const localHM = `${String(localNow.getUTCHours()).padStart(2, "0")}:${String(localNow.getUTCMinutes()).padStart(2, "0")}`;

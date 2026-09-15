@@ -155,6 +155,26 @@
   .tl-item.sched { cursor: pointer; border-radius: var(--r-sm); }
   .tl-item.sched:active { background: rgba(160, 110, 100, .07); }
   .tl-item .more { color: var(--tx3); opacity: .55; font-size: 11px; }
+  .tl-vchip { display: inline-flex; align-items: center; gap: 3px; border: 0; border-radius: 999px; padding: 1px 7px; font: inherit; font-size: 10.5px; font-weight: 600; line-height: 1.6; cursor: pointer; background: color-mix(in srgb, var(--acc2) 12%, transparent); color: var(--acc2); }
+  .tl-vchip::after { content: "›"; font-size: 12px; line-height: 1; transition: transform .2s; }
+  .tl-vchip.on::after { transform: rotate(90deg); }
+  .tl-vchip.pre { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tx3) 45%, transparent); color: var(--tx3); font-weight: 500; }
+  .tl-var { margin: 7px 0 3px; padding: 8px 10px 9px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--acc2) 7%, transparent); border: 1px solid color-mix(in srgb, var(--acc2) 20%, transparent); cursor: default; }
+  .tl-var .vh { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--acc2); }
+  .tl-var .vh i { font-style: normal; font-weight: 500; color: var(--tx3); margin-left: auto; }
+  .tl-var .vt { font-size: 12.5px; line-height: 1.6; margin-top: 3px; overflow-wrap: anywhere; }
+  .tl-var .vf { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; font-size: 11px; color: var(--tx2); }
+  .tl-var .say { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--acc2) 14%, transparent); color: var(--acc2); font-weight: 600; }
+  .tl-var.pre { background: transparent; border-style: dashed; border-color: color-mix(in srgb, var(--tx3) 45%, transparent); }
+  .tl-var.pre .vh { color: var(--tx3); }
+  .tl-item.past:has(.tl-var:not([hidden])) { opacity: 1; }
+  .tl-item.inserted .dot { border-style: dashed; }
+  .tl-tag { font-size: 10.5px; font-weight: 500; padding: 0 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--tx3) 45%, transparent); color: var(--tx3); line-height: 1.6; }
+  .arc-fork { font-size: 12px; line-height: 1.6; color: var(--tx2); margin: 4px 0; }
+  .arc-fork b { color: var(--acc2); font-weight: 700; margin-right: 6px; font-variant-numeric: tabular-nums; }
+  .arc-fork .say { margin-left: 6px; font-size: 10.5px; color: var(--tx3); }
+  .seg + .tgl-row { margin-top: 10px; }
+  .seg button small { display: block; font-size: 10.5px; font-weight: 400; opacity: .7; margin-top: 1px; }
   .sd-ask { margin-top: 14px; }
   .sd-ask input {
     width: 100%; box-sizing: border-box; padding: 10px 12px; font: inherit; font-size: 13px;
@@ -840,6 +860,178 @@ function promiseIntent(t, localDue) {
     return `核对约定 [${t.id}]：${promiseSubjectLabel(t.subject)}约好在 ${localDue} ${t.text}。`
         + "这是明确约定，到点核对最新时间、双方对话和当前行程。角色自己的承诺应交代进展；用户的事情只能询问，不能替用户宣称完成。"
         + "时间到了不等于事情已完成；有事实支持才能说到了或做完了，延误就按现在的情况说明，不能照搬旧时间。已改期、取消、完成且交代过则作罢。";
+}
+
+return Object.freeze(exports);
+})();
+  const GuaNianForks = (() => {
+const exports = Object.create(null);
+"use strict";
+// 变数：生成日程时埋在某件事上的岔子，到那件事开始后揭晓。发没发生只看固定种子，
+// App 和云端各算各的、结果一样，不用互相同步，也不用补报。
+// push-recheck / push-generate 里有带类型的副本（scripts/check-gua-nian-forks.mjs 逐条对照），改这里要同步那边。
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.forkRoll = forkRoll;
+exports.forkLevel = forkLevel;
+exports.normalizeForks = normalizeForks;
+exports.forkSay = forkSay;
+exports.applyDueForks = applyDueForks;
+exports.forkNotes = forkNotes;
+const LEVELS = [{ n: 1, mult: 0.45 }, { n: 2, mult: 1 }, { n: 3, mult: 1.35 }];
+const TELL = { 忍不住: "burst", 聊到才说: "hint", 憋着: "keep", burst: "burst", hint: "hint", keep: "keep" };
+const SAYS = ["keep", "hint", "burst"];
+function hash(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++)
+        h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    return h >>> 0;
+}
+function forkRoll(seed) {
+    return hash(String(seed)) % 100;
+}
+function hm(v) {
+    const m = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(String(v == null ? "" : v));
+    return m ? String(Math.min(23, +m[1])).padStart(2, "0") + ":" + String(Math.min(59, +(m[2] || 0))).padStart(2, "0") : "";
+}
+function minsOf(t) {
+    return +t.slice(0, 2) * 60 + +t.slice(3, 5);
+}
+function hmOf(n) {
+    const t = Math.max(0, Math.min(n, 23 * 60 + 59));
+    return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+}
+function clampInt(v, lo, hi, dflt) {
+    const n = Math.round(Number(v));
+    return v !== "" && v != null && Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt;
+}
+function forkLevel(level) {
+    return typeof level === "number" && [0, 1, 2].includes(level) ? level : 1;
+}
+function normalizeForks(raw, schedule, level) {
+    const lv = LEVELS[forkLevel(level)];
+    const sched = (Array.isArray(schedule) ? schedule : []).filter((it) => it && typeof it.time === "string");
+    const out = [];
+    for (const f of Array.isArray(raw) ? raw : []) {
+        if (out.length >= lv.n)
+            break;
+        if (!f || typeof f !== "object")
+            continue;
+        const at = hm(f.at), what = String(f.what || "").trim().slice(0, 60);
+        const item = at ? sched.find((it) => it.time === at) : null;
+        if (!item || !what || out.some((x) => x.at === at))
+            continue;
+        const span = item.end && item.end > at ? minsOf(item.end) - minsOf(at) : 120;
+        const rv = hm(f.time);
+        const off = rv && rv >= at ? Math.min(minsOf(rv) - minsOf(at), span) : Math.min(10, span);
+        const reveal = hmOf(minsOf(at) + off);
+        const later = (t) => {
+            const x = hm(t);
+            return x && x >= reveal && x !== at && sched.some((it) => it.time === x) ? x : "";
+        };
+        const titleAt = (t) => String((sched.find((it) => it.time === t) || {}).title || "");
+        let add = null;
+        if (f.add && typeof f.add === "object" && String(f.add.title || "").trim()) {
+            const t = hm(f.add.time), time = t && t >= reveal ? t : reveal, end = hm(f.add.end);
+            add = {
+                time, end: end > time ? end : "", title: String(f.add.title).trim().slice(0, 16),
+                place: String(f.add.place || "").trim().slice(0, 16), cost: clampInt(f.add.cost, -15, 15, 0),
+                busy: f.add.busy === true || /^(true|是|1)$/i.test(String(f.add.busy || "").trim()),
+            };
+        }
+        const move = (Array.isArray(f.move) ? f.move : []).slice(0, 3)
+            .map((m) => ({ time: later(m && m.time), to: hm(m && (m.newTime || m.to)) }))
+            .filter((m) => m.time && m.to > m.time)
+            .map((m) => ({ time: m.time, to: m.to, title: titleAt(m.time) }));
+        const drop = (Array.isArray(f.drop) ? f.drop : []).slice(0, 2).map(later)
+            .filter((t) => t && !move.some((m) => m.time === t))
+            .map((t) => ({ time: t, title: titleAt(t) }));
+        out.push({
+            id: "f" + hash(at + "|" + item.title + "|" + what).toString(36),
+            at, item: String(item.title || ""), off, what,
+            label: String(f.label || "").trim().slice(0, 10) || what.slice(0, 8),
+            p: Math.max(3, Math.min(90, Math.round(clampInt(f.p, 0, 100, 30) * lv.mult))),
+            mood: String(f.mood || "").trim().slice(0, 24),
+            energy: clampInt(f.energy, -10, 10, 0),
+            tell: TELL[String(f.tell || "").trim()] || "hint",
+            add, move, drop, state: "",
+        });
+    }
+    return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+// 说不说：模型给的倾向再按好感挪一档。没装好感插件就照模型的。
+function forkSay(tell, score) {
+    let i = SAYS.indexOf(TELL[String(tell || "")] || "hint");
+    if (typeof score === "number" && Number.isFinite(score)) {
+        if (score >= 80)
+            i += 1;
+        else if (score >= 60 && i === 0)
+            i = 1;
+        else if (score < 15)
+            i -= 1;
+        else if (score < 35 && i === 2)
+            i = 1;
+    }
+    return SAYS[Math.max(0, Math.min(2, i))];
+}
+// 只结算还没结算、且到了揭晓时刻的岔子；已结算的原样保留，所以重复调用结果不变。
+// 锚点按标题找、找不到再按原时刻找：聊天改过日程也跟得上，那件事被删了就作废。
+function applyDueForks(day, nowHM, opts) {
+    const forks = day && Array.isArray(day.forks) ? day.forks : [];
+    const now = hm(nowHM), o = opts || {};
+    if (!now || !forks.some((f) => f && !f.state))
+        return { day, revealed: [] };
+    let sched = (Array.isArray(day.schedule) ? day.schedule : []).filter((it) => it && typeof it.time === "string").map((it) => ({ ...it }));
+    let conds = Array.isArray(day.conds) ? day.conds.slice() : [];
+    const revealed = [];
+    const next = forks.map((f) => {
+        if (!f || f.state)
+            return f;
+        const anchor = sched.find((it) => !it.fork && it.title === f.item) || sched.find((it) => !it.fork && it.time === f.at);
+        if (!anchor) {
+            const gone = { ...f, state: "void" };
+            revealed.push(gone);
+            return gone;
+        }
+        const reveal = hmOf(minsOf(anchor.time) + (Number(f.off) || 0));
+        if (reveal > now)
+            return f;
+        const done = { ...f, at: reveal, state: forkRoll(String(o.seed || "") + "|" + f.id) < (Number(f.p) || 0) ? "hit" : "miss" };
+        revealed.push(done);
+        if (done.state !== "hit")
+            return done;
+        done.say = forkSay(f.tell, o.score);
+        const own = (it, t) => it !== anchor && !it.fork && it.time === t && t >= reveal;
+        for (const d of f.drop || [])
+            sched = sched.filter((it) => !own(it, d.time));
+        for (const m of f.move || []) {
+            const it = sched.find((x) => own(x, m.time));
+            if (!it)
+                continue;
+            const shift = minsOf(m.to) - minsOf(it.time);
+            if (it.end && it.end > it.time)
+                it.end = hmOf(minsOf(it.end) + shift);
+            it.time = m.to;
+            it.moved = true;
+        }
+        if (f.add) {
+            const t = f.add.time > reveal ? f.add.time : reveal;
+            sched.push({ time: t, end: f.add.end > t ? f.add.end : "", title: f.add.title, place: f.add.place, note: "", cost: Number(f.add.cost) || 0, busy: !!f.add.busy, fork: f.id });
+        }
+        sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+        const ms = f.mood && typeof o.at === "function" ? o.at(reveal) : 0;
+        if (ms)
+            conds = conds.concat([{ mood: f.mood, cause: f.label, energyDelta: Number(f.energy) || 0, intensity: 70, halfLifeMin: 240, startAt: ms }]).slice(-8);
+        return done;
+    });
+    return revealed.length ? { day: { ...day, schedule: sched, conds, forks: next }, revealed } : { day, revealed };
+}
+function forkNotes(day) {
+    return (day && Array.isArray(day.forks) ? day.forks : []).filter((f) => f && f.state === "hit").slice(-3)
+        .map((f) => "今天 " + f.at + " 碰上一件事：" + f.what + (f.say === "keep"
+        ? "。你不想主动提，用户问起或聊到很贴近的事才可能说。"
+        : f.say === "burst"
+            ? "。你憋不住想跟用户说：还没说过的话，找个空当说出来；说过了别重复。"
+            : "。还没跟用户说过的话，聊到相关的自然提起；说过了别重复。"));
 }
 
 return Object.freeze(exports);
@@ -1592,6 +1784,9 @@ return Object.freeze(exports);
     userSleepStart: "23:30", userSleepEnd: "08:00",
     autoGen: false,      // 每天到点自动生成TA的一天（要挂念开着；错过了下次打开时补）
     autoGenAt: "07:30",
+    forkLevel: 1,        // 日子的起伏：0 平稳 · 1 平常 · 2 多事（生成时埋几个岔子、概率乘几倍）
+    forkPeek: false,     // 提前看还没揭晓的变数（会剧透）
+    forkBurst: true,     // 变数落到「忍不住」时主动来说（占主动额度，守免打扰）
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
@@ -1878,12 +2073,14 @@ return Object.freeze(exports);
       wake: String(cx.day.wake || ""), bed: String(cx.day.bed || ""),
       schedule: (cx.day.schedule || []).map((it) => ({
         time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: Math.max(-15, Math.min(15, Math.round(+it.cost || 0))), mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined,
+        fork: it.fork || undefined, moved: it.moved || undefined,
         steps: Array.isArray(it.steps) ? it.steps.map((x) => ({ time: x.time, what: x.what })) : undefined,
       })),
       conds: (cx.day.conds || []).filter((c) => condWeight(c, Date.now()) > 0.08).map((c) => ({
         startAt: c.startAt, halfLifeMin: c.halfLifeMin, intensity: c.intensity,
         energyDelta: c.energyDelta, mood: c.mood, cause: c.cause,
       })),
+      forks: Array.isArray(cx.day.forks) ? cx.day.forks : [], forkSeed: forkSeedOf(cx), forkBurst: S.settings.forkBurst ? 1 : 0,
     };
   }
   function userSleepContext() {
@@ -2215,6 +2412,7 @@ return Object.freeze(exports);
           autoGenAt: at, tz: -new Date().getTimezoneOffset(),
           tplDaily: tpl.daily, tplImpulse: tpl.impulse,
           anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
+          forkLevel: GuaNianForks.forkLevel(S.settings.forkLevel), forkBurst: !!S.settings.forkBurst,
           kitAt: Date.now(),
         };
         if (!cloudGenOn()) return;
@@ -3040,7 +3238,7 @@ return Object.freeze(exports);
         .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, n || 5);
       const lines = past.map((r) => "- " + r.date + (r.mood ? " 心情「" + r.mood + "」" : "") + "："
         + ((r.schedule || []).map((it) => it.title).filter(Boolean).join("、") || "没生成日程")
-        + (r.bed ? "（" + r.bed + " 睡）" : ""));
+        + (r.bed ? "（" + r.bed + " 睡）" : "") + forkBrief(r));
       const yd = dateOf(upto); yd.setDate(yd.getDate() - 1);
       const y = past.find((r) => r.date === yd.getFullYear() + "-" + pad(yd.getMonth() + 1) + "-" + pad(yd.getDate()));
       const residue = [];
@@ -3051,6 +3249,12 @@ return Object.freeze(exports);
       }
       return { lines: lines, residue: residue };
     } catch (e) { return { lines: [], residue: [] }; }
+  }
+  function forkGuide(nowHM) {
+    const n = ["0 到 1", "1 到 2", "2 到 3"][GuaNianForks.forkLevel(S.settings.forkLevel)];
+    return "forks 是今天可能出的岔子：从 schedule 里挑 " + n + " 件 " + nowHM + " 以后才开始的事，各埋一个。岔子要从这件事本身长出来（面试→来的是老同学，出门→下雨没带伞，开店→熟客抱来一只猫），好事坏事都要有，别全是倒霉事，也别狗血。"
+      + "p 是真实的可能性：平常的小意外 20 到 40，少见的 10 左右。发生后只改写它之后的安排：add 插进一件因此多出来的事，move 把后面的事往后挪，drop 取消后面的事，用不上就给 null 或空数组。"
+      + "tell 看TA的性子和这件事的分量：想分享、憋不住的写忍不住；觉得不值一提、等聊到再说的写聊到才说；丢脸、难过、怕人担心的写憋着。岔子TA事先并不知道，别提前写进 schedule 的 note、mood 或其他字段。";
   }
   // 本地生成和寄给云端的 genKit 共用这段指令；云端直接使用寄存文本。
   function buildDayInstruction(cal, nowHM, past, existing, threads) {
@@ -3063,13 +3267,14 @@ return Object.freeze(exports);
       threads && threads.length ? "惦记账本（已了结项仅供判重，不再安排；未了结事项：约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + threads.join("\n") : null,
       "最近聊天中角色明确要做的事、未取消的承诺，以及双方已明确说定的共同安排，应落进 schedule；仅提过但没说定的共同活动不要当作约定。",
       "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
-      '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-8到8的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-15到15的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
+      '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-8到8的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-15到15的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}],"forks":[{"at":"埋在哪条日程上（抄那条的 time）","time":"那件事开始后岔子冒出来的时刻HH:MM","what":"发生了什么（30字内，具体）","label":"发生后TA身上带着的状态（6字内：淋了雨/被夸了/捡了只猫）","p":发生的可能性10到60的整数,"mood":"发生后的情绪（8字内）","energy":对精力的影响-10到10的整数,"tell":"TA会不会跟用户说：忍不住/聊到才说/憋着 选一","add":{"time":"HH:MM","end":"HH:MM","title":"因此多出来的事（8字内）","place":"在哪（6字内）","busy":true或false}或null,"move":[{"time":"被挤走的那条原来的time","newTime":"挪到的HH:MM"}],"drop":["因此不做了的那条原来的time"]}]}',
       "body 是今天真实带在身上的状况，多数日子是空数组，最多两条；有近期经历依据才写，不要每天编造胃痛、头闷。轻微不适扣 1 到 3，明显不适扣 4 到 8；情绪低落本身不扣身体精力。",
       "情绪写法：用可感的状态词（迷糊、清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空、粘人）再带一点原因或身体感受，例如「开完会后脑子发紧」；一天里要有起伏，别每条都差不多；情绪要和 cost 对得上，耗神的事之后不该是「轻松」，回血的事之后不该是「疲惫」；底色 mood 要能从 sleep 和昨天的余波推出来。",
       "energy 是身体的电量，和情绪底色是两回事：心情差但睡饱了 energy 照样高，心情好但熬了夜 energy 照样低。不要把「今天不开心」「性格沉闷」翻译成「精力低」。",
       "energy 是扣除 body 之前的起床基线，正常睡眠通常 70 到 90；睡眠不足可为 50 到 69，低于 50 需要明确的生病、通宵或严重睡眠不足依据。不能因为角色心情低落就给低精力，也不要把同一身体不适同时扣进基线和 body。",
       "cost 是整段活动做完的总变化，负数=消耗，正数=恢复，不是每小时扣费。普通通勤/事务扣 1 到 3，普通会议/工作扣 3 到 8，连续数小时高强度活动才扣 9 到 15；吃饭/散步恢复 2 到 5，午睡/充分休息恢复 5 到 12，平淡的事给 0。自然清醒消耗由 APP 另算，不要重复扣；日程必须包含真实的吃饭和休息。普通一天日程净消耗尽量不超过 30，避免正常生活还没到中午就接近 0。",
       "schedule 给 5 到 9 条，从起床后第一件事到睡前最后一件事；有主线也有琐碎，时间不均匀；不用把每个小时填满，事与事之间可以留空档（空档里TA就是自己待着）；有的日子轻（3、4 条），有的日子满；最后一件事结束到 bed 之间是TA自己的睡前时间；「睡觉」本身不要写成一条日程。",
+      forkGuide(nowHM),
     ].filter(Boolean).join("\n");
     if (existing.length) {
       inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，带 busy 的照抄 busy，围绕它们补全其余的一天）：\n" +
@@ -3124,6 +3329,7 @@ return Object.freeze(exports);
       sleep: String(pickField(d, ["sleep", "睡眠", "昨晚"]) || "").slice(0, 40),
       schedule: sched,
       conds: bodyConds,
+      forks: GuaNianForks.normalizeForks(pickField(d, ["forks", "变数", "岔子"]), sched, settings.forkLevel),
     };
   }
   async function generateDay(cx) {
@@ -3144,12 +3350,13 @@ return Object.freeze(exports);
       const parsed = parseDayResult(d, existing, S.settings, Date.now());
       const sched = parsed.schedule, wake = parsed.wake, bed = parsed.bed, bodyConds = parsed.conds;
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "local" }, parsed));
+        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "local", forkSeed: todayStr() + "|" + cx.character.id }, parsed));
       const wrote = await syncCalendar(cx, calendarItems); // 清理旧产物仍需要完整日历
-      await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "")
+      await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "") + (parsed.forks.length ? "，埋了 " + parsed.forks.length + " 个岔子" : "")
         + (cx.day.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）"));
       cx.busy = false; cx._planLock = false;
       await orchestrate(cx); // 生活面就绪后立即编排心动时刻
+      await revealForks(cx).catch((e) => log(cx, "变数结算失败：" + (e && e.message || e)));
       await syncChatContext(cx, true);
     } catch (e) {
       cx.busy = false; cx._planLock = false;
@@ -3247,7 +3454,7 @@ return Object.freeze(exports);
 
   // 临时起念不是日程排出来的，是复核时顺着聊天临时起的，重排不该把它推倒。
   // 新旧计划里都靠 source 的「临时」前缀认（本地和云端起念都写这个前缀）。
-  function isImpromptu(w) { return !!w && /^(临时|约定)/.test(String(w.source || "")); }
+  function isImpromptu(w) { return !!w && /^(临时|约定|变数)/.test(String(w.source || "")); }
 
   function keptImpromptu(cx) {
     const floor = Date.now() + 3 * 60000;
@@ -3724,6 +3931,105 @@ return Object.freeze(exports);
       finally { cx._planLock = false; }
     }
   }
+  /* ---- 变数：生成日程时埋在某件事上的岔子，到点揭晓；发生了就改写当天后面的安排，说不说看关系 ---- */
+  const FORK_SAY = { burst: "忍不住", hint: "聊到才说", keep: "憋着" };
+  function forkSeedOf(cx) {
+    return (cx.day && cx.day.forkSeed) || ((cx.day && cx.day.date) || todayStr()) + "|" + cx.character.id;
+  }
+  // 过去的日子挂念可能一整天没开、没结算过：按固定种子补算，和那天云端看到的一样
+  function forkHits(day, cid) {
+    if (!day || !Array.isArray(day.forks)) return [];
+    const forks = day.date && day.date < todayStr()
+      ? GuaNianForks.applyDueForks(day, "23:59", { seed: day.forkSeed || day.date + "|" + cid }).day.forks
+      : day.forks;
+    return forks.filter((f) => f && f.state === "hit");
+  }
+  function forkBrief(day) {
+    const hits = forkHits(day, day.characterId);
+    return hits.length ? "；那天碰上的事：" + hits.map((f) => f.what).join("；") : "";
+  }
+  function forkEffect(f) {
+    const parts = [];
+    if (f.add) parts.push("插进「" + f.add.title + "」");
+    for (const m of f.move || []) parts.push(m.time + " 的" + (m.title || "安排") + "推到 " + m.to);
+    for (const d of f.drop || []) parts.push("「" + (d.title || d.time) + "」不做了");
+    return parts.join("，");
+  }
+  function forkBlock(f, it, open) {
+    const eff = forkEffect(f) || (f.mood ? "心情变成「" + f.mood + "」" : "");
+    const say = f.state
+      ? FORK_SAY[f.say] + (f.say === "burst" && f.wakeAt ? " · " + fmtHM(f.wakeAt) + " 来找你" : "")
+      : FORK_SAY[f.tell] || "";
+    return '<div class="tl-var' + (f.state ? "" : " pre") + '" data-fid="' + esc(f.id) + '"' + (open ? "" : " hidden") + ">"
+      + '<div class="vh">' + (f.state
+        ? "✦ 变数 · " + esc(f.at) + "<i>已发生</i>"
+        : "可能的岔子 · " + esc(addMin(it.time, +f.off || 0)) + " 揭晓<i>约 " + (+f.p || 0) + "%</i>") + "</div>"
+      + '<div class="vt">' + esc(f.what) + "</div>"
+      + (eff || say ? '<div class="vf">' + (eff ? "<span>" + (f.state ? "→ " : "发生了会：") + esc(eff) + "</span>" : "")
+        + (say ? '<span class="say">' + esc(say) + "</span>" : "") + "</div>" : "")
+      + "</div>";
+  }
+  async function revealForks(cx) {
+    if (!cx.character || !cx.day || cx.day.date !== todayStr() || cx.busy || cx._planLock) return 0;
+    if (!Array.isArray(cx.day.forks) || !cx.day.forks.some((f) => f && !f.state)) return 0;
+    const nowMs = Date.now();
+    const r = GuaNianForks.applyDueForks(cx.day, fmtHM(nowMs), {
+      seed: forkSeedOf(cx), score: cx.aff ? cx.aff.score : undefined, at: (hm) => timeToMs(hm, nowMs),
+    });
+    if (!r.revealed.length) return 0;
+    cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
+      { schedule: r.day.schedule, conds: r.day.conds, forks: r.day.forks });
+    const hits = r.revealed.filter((f) => f.state === "hit");
+    for (const f of r.revealed) {
+      await log(cx, f.state === "hit" ? "变数 · " + f.at + " 发生了：" + f.what + (forkEffect(f) ? "（" + forkEffect(f) + "）" : "") + "，" + FORK_SAY[f.say]
+        : f.state === "miss" ? "变数 · " + f.at + " 没发生，「" + f.item + "」平平过去"
+        : "变数作废：「" + f.item + "」已经不在今天的日程里");
+    }
+    if (hits.some((f) => f.add || (f.move || []).length || (f.drop || []).length)) {
+      await syncCalendar(cx, await readTodayCalendar(cx)).catch(() => { /* 系统日程写不进不影响挂念自己的日程 */ });
+    }
+    for (const f of hits) {
+      if (f.say === "burst") await forkBurst(cx, f, nowMs).catch((e) => log(cx, "变数：约主动消息失败——" + (e && e.message || e)));
+    }
+    await syncChatContext(cx, true);
+    if (hits.length) { cx.archive = null; render(); }
+    return hits.length;
+  }
+  // 忍不住：过一会儿主动来说，走心动时刻的预约，照样占额度、守免打扰和睡眠；约不上就退成聊到才说
+  async function forkBurst(cx, f, nowMs) {
+    if (!owns(cx)) return;
+    const settle = async (patch, note) => {
+      cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
+        { forks: (cx.day.forks || []).map((x) => x.id === f.id ? { ...x, ...patch } : x) });
+      await log(cx, note);
+    };
+    const hint = (why) => settle({ say: "hint", sayNote: why }, "变数：想马上跟你说「" + f.label + "」，但" + why + "，改成聊到再说");
+    if (!S.settings.forkBurst) return hint("你关了「忍不住时主动来说」");
+    if (!cx.plan || !AiPhone.push || !AiPhone.push.wake) return hint("今天的心动还没编排");
+    const revealMs = timeToMs(f.at, nowMs) || nowMs;
+    if (nowMs - revealMs > 90 * 60000) return hint("那阵劲儿已经过了");
+    const anchor = (cx.day.schedule || []).find((it) => !it.fork && it.title === f.item);
+    const busyEnd = anchor && anchor.end && isBusyItem(anchor) ? timeToMs(anchor.end, nowMs) || 0 : 0;
+    const wait = (8 + GuaNianForks.forkRoll(forkSeedOf(cx) + "|" + f.id + "|wait") % 18) * 60000;
+    const fireAt = Math.max(Math.max(revealMs, busyEnd) + wait, nowMs + 3 * 60000);
+    const hm = fmtHM(fireAt);
+    if (inQuiet(hm) || asleepAt(cx.day, hm)) return hint("赶上免打扰或睡觉的时候");
+    const items = (cx.plan.items || []).slice();
+    if (GuaNianPromises.ordinaryQuota(items) >= S.settings.quota) return hint("今天的主动额度用完了");
+    if (items.some((w) => w.act && w.kind !== "promise" && w.fireAt > nowMs && Math.abs(w.fireAt - fireAt) < 20 * 60000)) return hint("正好挨着一个想找你的时刻");
+    const intent = "刚碰上一件事：" + f.what + "——憋不住想跟用户说说";
+    const res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt, intent, source: "tool", cooldownRounds: S.settings.maxUnanswered });
+    items.push({
+      time: hm, fireAt, until: fireAt + 3 * 3600000, source: "变数·" + f.label, act: true, adj: "fork",
+      why: f.what.slice(0, 20), intent, delivery: res.armed ? "push" : "local", reason: res.reason || "", wakeId: res.id,
+      sem: "分享", topic: f.label, from: "", score: calcScore(fireAt, GuaNianPromises.ordinaryQuota(items), 0, 0),
+      hist: [{ at: nowMs, kind: "fork", note: f.what }],
+    });
+    items.sort((a, b) => a.fireAt - b.fireAt);
+    cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id, { items });
+    await settle({ wakeAt: fireAt }, "变数：憋不住，" + hm + " 来找你说「" + f.label + "」");
+    uploadPlanCloud(cx, false).catch(() => { /* 同步结果在页面上显示 */ });
+  }
   /* ================= 预览 ================= */
   async function preview(cx) {
     if (S._previewing) return; S._previewing = true;
@@ -3810,6 +4116,7 @@ return Object.freeze(exports);
       const tl = liveThreads(cx, now).slice(0, 4).map((t) => THREAD_KIND[t.kind] + "·" + t.text + (threadWhen(t, now) ? "（" + threadWhen(t, now) + "）" : ""));
       if (tl.length) lines.push("心里还挂着：" + tl.join("；") + "。到了时候自然会想问一句，不用每次都提。");
     }
+    for (const line of GuaNianForks.forkNotes(cx.day)) lines.push(line);
     lines.push("这些是你自己的状态，说话时自然带出来就行，别报数字、别列清单、别提这段文字。");
     return lines.join("\n");
   }
@@ -4048,6 +4355,17 @@ return Object.freeze(exports);
     if (S.sub === "usage") renderUsage(); else renderDiag();
   }
   function bindPanels(cx, v) {
+    v.querySelectorAll(".tl-vchip").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const open = S._forkOpen = S._forkOpen || {}, id = b.dataset.fid;
+        open[id] = !open[id];
+        b.classList.toggle("on", open[id]);
+        const box = b.closest(".tl-item").querySelector('.tl-var[data-fid="' + id + '"]');
+        if (box) box.hidden = !open[id];
+      };
+    });
+    v.querySelectorAll(".tl-var").forEach((el) => { el.onclick = (e) => e.stopPropagation(); });
     v.querySelectorAll(".tl-item.sched").forEach((el) => {
       el.onclick = () => { const i = +el.dataset.si; if (i >= 0) openSchedDetail(i); };
     });
@@ -4315,12 +4633,18 @@ return Object.freeze(exports);
       } else {
         {
           const steps = Array.isArray(m.it.steps) ? m.it.steps.length : 0;
-          tl += '<div class="tl-item sched' + (past ? " past" : "") + (cur ? " cur" : "") + '" data-si="'
+          // 变数默认收着：那件事后面一个小标记，点开才是整段；还没揭晓的只有开了「提前看」才露
+          const fks = m.it.fork ? [] : (c.day.forks || []).filter((f) => f && f.item === m.it.title && (f.state === "hit" || (!f.state && S.settings.forkPeek)));
+          const open = S._forkOpen || {};
+          tl += '<div class="tl-item sched' + (past ? " past" : "") + (cur ? " cur" : "") + (m.it.fork ? " inserted" : "") + '" data-si="'
             + ((cx.day && cx.day.schedule) || []).indexOf(m.it) + '" ' + delay + '><span class="dot"></span>'
-            + '<div class="row1"><span class="tm">' + esc(m.time) + (m.it.end ? '<span class="tm-end">–' + esc(m.it.end) + "</span>" : "") + '</span><span class="tt">' + esc(m.it.title) + "</span></div>"
+            + '<div class="row1"><span class="tm">' + esc(m.time) + (m.it.end ? '<span class="tm-end">–' + esc(m.it.end) + "</span>" : "") + '</span><span class="tt">' + esc(m.it.title) + "</span>"
+            + fks.map((f) => '<button class="tl-vchip' + (f.state ? "" : " pre") + (open[f.id] ? " on" : "") + '" data-fid="' + esc(f.id) + '">' + (f.state ? "✦ 变数" : "可能有岔子") + "</button>").join("")
+            + (m.it.moved ? '<span class="tl-tag">推迟过</span>' : "") + "</div>"
             + (m.it.note ? '<div class="nt">' + esc(m.it.note) + "</div>" : "")
             + (steps ? '<div class="nt more">…点开看这段时间里的 ' + steps + " 件事</div>"
-               : m.it.detail ? '<div class="nt more">…点开看细化的部分</div>' : "") + "</div>";
+               : m.it.detail ? '<div class="nt more">…点开看细化的部分</div>' : "")
+            + fks.map((f) => forkBlock(f, m.it, !!open[f.id])).join("") + "</div>";
         }
       }
     }
@@ -4354,6 +4678,7 @@ return Object.freeze(exports);
     if (w.held && w.fireAt >= Date.now()) return '<span class="badge cool">押后 ' + esc(fmtHM(w.fireAt)) + "</span>";
     if (w.adj === "cooled") return '<span class="badge cool">降温</span>';
     if (w.adj === "extra") return '<span class="badge cool">临时起念</span>';
+    if (w.adj === "fork") return '<span class="badge cool">变数</span>';
     if (w.adj === "recheck") return '<span class="badge cool">复核调整</span>';
     if (w.adj === "cloud") return '<span class="badge cool">云端复核</span>';
     return "";
@@ -4429,7 +4754,7 @@ return Object.freeze(exports);
   }
 
   /* ================= 时刻详情弹层 ================= */
-  const HIST_KIND = { promise: "约定预约", plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对" };
+  const HIST_KIND = { promise: "约定预约", plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对", fork: "变数" };
 
   function detailHtml(w, plan) {
     const cx = cur();
@@ -4833,6 +5158,8 @@ return Object.freeze(exports);
           (plan && plan.chatUsed ? '<span class="chip">💬 判断时读了 ' + plan.chatUsed + " 句聊天</span>" : "") +
           "</div>";
       }
+      const hits = forkHits(day, cx.character.id);
+      if (hits.length) body += hits.map((f) => '<div class="arc-fork"><b>✦ ' + esc(f.at) + "</b>" + esc(f.what) + '<span class="say">' + esc(FORK_SAY[f.say] || "") + "</span></div>").join("");
       if (items.length) {
         // 起念的时刻是主角，逐条展开讲；未起念的只是「日程里没被选中的时刻」，
         // 折叠成一行，免得整张卡片读起来像把日程复读一遍
@@ -5356,6 +5683,10 @@ return Object.freeze(exports);
         { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }, { key: "cloudGen", label: "浏览器关着也生成（云端）" }] },
         { type: "timeRange", keys: ["autoGenAt"], label: "每天几点" },
       ], hint: "到点自动生成TA今天的状态、日程和心动时刻。挂念在后台也算开着。<br>开了「云端」：每次打开挂念会把明天的生成原料和一份和本地同源的提示词模板寄到你的个人云，到点由云函数生成并编排，你打开时直接接管；云端 45 分钟没生成会本地补。需要云连接和离线推送。<br>错过了这个点，下次打开时补。浏览器一整天没开就生成不了，那天只有云端的兜底问候。" },
+      { title: "日子的起伏", sub: "给几件事埋岔子，到点才揭晓", fields: [
+        { type: "seg", key: "forkLevel", options: [[0, "平稳", "三天一次"], [1, "平常", "一天一次"], [2, "多事", "一天两三次"]] },
+        { type: "toggles", items: [{ key: "forkPeek", label: "提前看今天的变数（会剧透）" }, { key: "forkBurst", label: "忍不住时主动来说" }] },
+      ], hint: "说不说，看关系：好感高时更愿意跟你讲。倾向由生成日程时一起给，这里不用调。<br>档位从下一次生成TA的一天起生效。「忍不住」的那次主动占今天的额度，也守免打扰和TA的睡眠；约不上就改成聊到再说。" },
       { title: "什么时候生效", adv: true, fields: [], hint: "保存后本机设置立即更新；开着云端复核且已有今天的计划时，会同步现有计划的规则，是否成功看页面上的同步结果。<br>随用随判：同步成功后，下一次云端复核按新规则起念，不必为了上传设置而重置今天。<br>已经排好的时刻不会因保存而重排。要按新额度、间隔、免打扰、倾向或锚点重新安排，去「心动」页点「重新编排／重置今天」。切换起念模式会改变后续判断，但不会自动转换已有预约；如需整理今天的预约，也在该页操作。保留的临时起念不会随重排重建，其原预约的未回应降速阈值也不随保存更新。<br>今天的计划同步不等于明日生成原料已更新；明日原料在下次打开挂念或重新编排时刷新。", open: true },
     ] },
     { id: "pace", name: "分寸", groups: [
@@ -5455,7 +5786,7 @@ return Object.freeze(exports);
     }
     if (f.type === "seg") {
       return '<div class="seg" id="set-' + f.key + '">' +
-        (f.options || []).map((o) => '<button data-v="' + o[0] + '">' + esc(o[1]) + "</button>").join("") + "</div>";
+        (f.options || []).map((o) => '<button data-v="' + o[0] + '">' + esc(o[1]) + (o[2] ? "<small>" + esc(o[2]) + "</small>" : "") + "</button>").join("") + "</div>";
     }
     if (f.type === "toggles") {
       return '<div class="tgl-row">' +
@@ -5781,6 +6112,7 @@ return Object.freeze(exports);
         if (generationStopState(cx) && generationStopState(cx).status !== "synced") await stopCloudGeneration(cx);
         await syncChatContext(cx, true);
         await adoptCloudDay(cx);
+        await revealForks(cx).catch((e) => log(cx, "变数结算失败：" + (e && e.message || e)));
         uploadGenKitCloud(cx).catch(() => { /* 已在函数内记日志 */ });
       }
       render();
@@ -5819,6 +6151,7 @@ return Object.freeze(exports);
           await flushJudgeFinish(cx).catch(() => {});
           await maybeAutoGen(cx).catch(() => { /* 已在函数内记日志 */ });
           await settleFired(cx).catch(() => { /* 已在函数内记日志 */ });
+          await revealForks(cx).catch((e) => log(cx, "变数结算失败：" + (e && e.message || e)));
           await syncChatContext(cx).catch(() => { /* 已在函数内记日志 */ });
           if (S.settings && S.settings.recheckMin > 0 && Date.now() - (cx._rcTry || 0) >= S.settings.recheckMin * 60000) {
             cx._rcTry = Date.now();

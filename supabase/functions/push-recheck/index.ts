@@ -106,6 +106,7 @@ type GuanianCond = { startAt?: number; halfLifeMin?: number; intensity?: number;
 type GuanianDay = {
   tz?: number; mood?: string; energy?: number; location?: string; doing?: string;
   wake?: string; bed?: string; schedule?: GuanianSched[]; conds?: GuanianCond[];
+  forks?: any[]; forkSeed?: string; forkBurst?: number;
 };
 // 睡眠窗：bed 起到 wake 止，允许过零点；老版本 App 没寄 wake/bed 时退回免打扰时段。与 App 端 asleepAt 同步。
 function guanianAsleep(day: GuanianDay, hm: string, quietStart?: string, quietEnd?: string): boolean {
@@ -119,7 +120,7 @@ function affectionLine(aff: { tier?: string; relation?: string } | null | undefi
   return `你对用户：${aff.tier || "说不上"}；两人现在的关系：${aff.relation || "没定"}。想不想找TA、找了说什么，都按这个分寸来。`;
 }
 // 自发起念的由头分五种，各有口径：想念不催回复、余韵不求回应、惦记像随口问起、安静太久才是搭话
-const SELF_KIND: Record<string, string> = { thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久" };
+const SELF_KIND: Record<string, string> = { thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久", fork: "碰上事" };
 // 沉默无法证明不喜欢：不把未接话次数交给模型当负反馈。
 function fbLine(fb: FbBook | undefined, kind: string): string {
   const rec = fb && Array.isArray(fb[kind]) ? fb[kind] : [0, 0];
@@ -137,7 +138,7 @@ function selfBrief(kind: string, reason: string): string {
 // 曲线不是统一衰减：刚忙完几小时内掉光，约定靠近到点反而涨，想念断得越久越重，安静太久是平的
 const KIND_VAL: Record<string, [number, number, number]> = {
   thread: [0.7, 0.6, 0.7], done: [0.6, 0.5, 0.4], miss: [0.6, 0.9, 0.3], echo: [0.4, 0.7, 0.2],
-  quiet: [0.3, 0.5, 0.2], extra: [0.7, 0.6, 0.6], plan: [0.5, 0.5, 0.4],
+  quiet: [0.3, 0.5, 0.2], extra: [0.7, 0.6, 0.6], plan: [0.5, 0.5, 0.4], fork: [0.8, 0.7, 0.8],
 };
 type FbBook = Record<string, [number, number]>;
 // 只用正反馈：至少 3 次接话后轻微加权，最多 1.2 倍；未回应不会降低已有权重。
@@ -548,7 +549,7 @@ function momentsBudget(context: PlanContext, nowMs: number, tzMin: number): { we
   return { weekStart, weekN, ok };
 }
 function lifeRoll(context: PlanContext, nowMs: number): { patch: Record<string, unknown>; post: Outbox | null } | null {
-  const day = context.day && typeof context.day === "object" ? context.day : null;
+  const day = context.day && typeof context.day === "object" ? guanianForkDay(context.day as GuanianDay, nowMs, context.affection) : null;
   if (Number(context.momentsOn) !== 1 || !day) return null;
   const tz = Number(day.tz) || 0;
   const hourKey = Math.floor((nowMs + tz * 60_000) / 3600_000);
@@ -824,11 +825,13 @@ type GenKit = {
   existing?: { id?: string; startTime?: string; endTime?: string; title?: string; location?: string; lock?: string }[];
   tplDaily?: string; tplImpulse?: string;
   anchorMorning?: boolean; anchorSleep?: boolean; moodGate?: boolean; kitAt?: number;
+  forkLevel?: number; forkBurst?: boolean;
 };
 type GenDay = {
   wake: string; bed: string; mood: string; moodEmoji: string; energy: number; doing: string; location: string; sleep: string;
   schedule: { time: string; end?: string; title: string; place?: string; note?: string; mood?: string; cost?: number; busy?: boolean }[];
   conds: { mood: string; cause: string; energyDelta: number; intensity: number; halfLifeMin: number; startAt: number }[];
+  forks: any[]; forkSeed?: string;
 };
 const GEN_PLACEHOLDER = "__CUSTOM_APP_INSTRUCTION__";
 const GEN_MAX_TRIES = 3;
@@ -875,8 +878,157 @@ function addMin(hm: string, n: number): string {
   const t = Math.min(+m[1] * 60 + +m[2] + n, 23 * 60 + 59);
   return pad2(Math.floor(t / 60)) + ":" + pad2(t % 60);
 }
+// ── 变数（App 同名 domain/forks.mjs 的带类型副本；push-recheck 和 push-generate 里这一段逐字相同，scripts/check-gua-nian-forks.mjs 对照）
+const GUANIAN_FORK_LEVELS = [{ n: 1, mult: 0.45 }, { n: 2, mult: 1 }, { n: 3, mult: 1.35 }];
+const GUANIAN_FORK_TELL: Record<string, string> = { 忍不住: "burst", 聊到才说: "hint", 憋着: "keep", burst: "burst", hint: "hint", keep: "keep" };
+const GUANIAN_FORK_SAYS = ["keep", "hint", "burst"];
+function guanianForkHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+function guanianForkRoll(seed: unknown): number {
+  return guanianForkHash(String(seed)) % 100;
+}
+function guanianForkHM(v: unknown): string {
+  const m = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(String(v == null ? "" : v));
+  return m ? String(Math.min(23, +m[1])).padStart(2, "0") + ":" + String(Math.min(59, +(m[2] || 0))).padStart(2, "0") : "";
+}
+function guanianForkMins(t: string): number {
+  return +t.slice(0, 2) * 60 + +t.slice(3, 5);
+}
+function guanianForkHMOf(n: number): string {
+  const t = Math.max(0, Math.min(n, 23 * 60 + 59));
+  return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+}
+function guanianForkInt(v: unknown, lo: number, hi: number, dflt: number): number {
+  const n = Math.round(Number(v));
+  return v !== "" && v != null && Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt;
+}
+function guanianForkLevel(level: unknown): number {
+  return typeof level === "number" && [0, 1, 2].includes(level) ? level : 1;
+}
+function guanianNormalizeForks(raw: unknown, schedule: unknown, level: unknown): any[] {
+  const lv = GUANIAN_FORK_LEVELS[guanianForkLevel(level)];
+  const sched: any[] = (Array.isArray(schedule) ? schedule : []).filter((it: any) => it && typeof it.time === "string");
+  const out: any[] = [];
+  for (const f of (Array.isArray(raw) ? raw : []) as any[]) {
+    if (out.length >= lv.n) break;
+    if (!f || typeof f !== "object") continue;
+    const at = guanianForkHM(f.at), what = String(f.what || "").trim().slice(0, 60);
+    const item = at ? sched.find((it) => it.time === at) : null;
+    if (!item || !what || out.some((x) => x.at === at)) continue;
+    const span = item.end && item.end > at ? guanianForkMins(item.end) - guanianForkMins(at) : 120;
+    const rv = guanianForkHM(f.time);
+    const off = rv && rv >= at ? Math.min(guanianForkMins(rv) - guanianForkMins(at), span) : Math.min(10, span);
+    const reveal = guanianForkHMOf(guanianForkMins(at) + off);
+    const later = (t: unknown): string => {
+      const x = guanianForkHM(t);
+      return x && x >= reveal && x !== at && sched.some((it) => it.time === x) ? x : "";
+    };
+    const titleAt = (t: string): string => String((sched.find((it) => it.time === t) || {}).title || "");
+    let add: any = null;
+    if (f.add && typeof f.add === "object" && String(f.add.title || "").trim()) {
+      const t = guanianForkHM(f.add.time), time = t && t >= reveal ? t : reveal, end = guanianForkHM(f.add.end);
+      add = {
+        time, end: end > time ? end : "", title: String(f.add.title).trim().slice(0, 16),
+        place: String(f.add.place || "").trim().slice(0, 16), cost: guanianForkInt(f.add.cost, -15, 15, 0),
+        busy: f.add.busy === true || /^(true|是|1)$/i.test(String(f.add.busy || "").trim()),
+      };
+    }
+    const move = (Array.isArray(f.move) ? f.move : []).slice(0, 3)
+      .map((m: any) => ({ time: later(m && m.time), to: guanianForkHM(m && (m.newTime || m.to)) }))
+      .filter((m: any) => m.time && m.to > m.time)
+      .map((m: any) => ({ time: m.time, to: m.to, title: titleAt(m.time) }));
+    const drop = (Array.isArray(f.drop) ? f.drop : []).slice(0, 2).map(later)
+      .filter((t: string) => t && !move.some((m: any) => m.time === t))
+      .map((t: string) => ({ time: t, title: titleAt(t) }));
+    out.push({
+      id: "f" + guanianForkHash(at + "|" + item.title + "|" + what).toString(36),
+      at, item: String(item.title || ""), off, what,
+      label: String(f.label || "").trim().slice(0, 10) || what.slice(0, 8),
+      p: Math.max(3, Math.min(90, Math.round(guanianForkInt(f.p, 0, 100, 30) * lv.mult))),
+      mood: String(f.mood || "").trim().slice(0, 24),
+      energy: guanianForkInt(f.energy, -10, 10, 0),
+      tell: GUANIAN_FORK_TELL[String(f.tell || "").trim()] || "hint",
+      add, move, drop, state: "",
+    });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+function guanianForkSay(tell: unknown, score: unknown): string {
+  let i = GUANIAN_FORK_SAYS.indexOf(GUANIAN_FORK_TELL[String(tell || "")] || "hint");
+  if (typeof score === "number" && Number.isFinite(score)) {
+    if (score >= 80) i += 1;
+    else if (score >= 60 && i === 0) i = 1;
+    else if (score < 15) i -= 1;
+    else if (score < 35 && i === 2) i = 1;
+  }
+  return GUANIAN_FORK_SAYS[Math.max(0, Math.min(2, i))];
+}
+function guanianApplyForks(day: any, nowHM: string, opts?: { seed?: string; score?: unknown; at?: (hm: string) => number }): { day: any; revealed: any[] } {
+  const forks: any[] = day && Array.isArray(day.forks) ? day.forks : [];
+  const now = guanianForkHM(nowHM), o = opts || {};
+  if (!now || !forks.some((f) => f && !f.state)) return { day, revealed: [] };
+  let sched: any[] = (Array.isArray(day.schedule) ? day.schedule : []).filter((it: any) => it && typeof it.time === "string").map((it: any) => ({ ...it }));
+  let conds: any[] = Array.isArray(day.conds) ? day.conds.slice() : [];
+  const revealed: any[] = [];
+  const next = forks.map((f) => {
+    if (!f || f.state) return f;
+    const anchor = sched.find((it) => !it.fork && it.title === f.item) || sched.find((it) => !it.fork && it.time === f.at);
+    if (!anchor) {
+      const gone = { ...f, state: "void" };
+      revealed.push(gone);
+      return gone;
+    }
+    const reveal = guanianForkHMOf(guanianForkMins(anchor.time) + (Number(f.off) || 0));
+    if (reveal > now) return f;
+    const done: any = { ...f, at: reveal, state: guanianForkRoll(String(o.seed || "") + "|" + f.id) < (Number(f.p) || 0) ? "hit" : "miss" };
+    revealed.push(done);
+    if (done.state !== "hit") return done;
+    done.say = guanianForkSay(f.tell, o.score);
+    const own = (it: any, t: string) => it !== anchor && !it.fork && it.time === t && t >= reveal;
+    for (const d of f.drop || []) sched = sched.filter((it) => !own(it, d.time));
+    for (const m of f.move || []) {
+      const it = sched.find((x) => own(x, m.time));
+      if (!it) continue;
+      const shift = guanianForkMins(m.to) - guanianForkMins(it.time);
+      if (it.end && it.end > it.time) it.end = guanianForkHMOf(guanianForkMins(it.end) + shift);
+      it.time = m.to;
+      it.moved = true;
+    }
+    if (f.add) {
+      const t = f.add.time > reveal ? f.add.time : reveal;
+      sched.push({ time: t, end: f.add.end > t ? f.add.end : "", title: f.add.title, place: f.add.place, note: "", cost: Number(f.add.cost) || 0, busy: !!f.add.busy, fork: f.id });
+    }
+    sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    const ms = f.mood && typeof o.at === "function" ? o.at(reveal) : 0;
+    if (ms) conds = conds.concat([{ mood: f.mood, cause: f.label, energyDelta: Number(f.energy) || 0, intensity: 70, halfLifeMin: 240, startAt: ms }]).slice(-8);
+    return done;
+  });
+  return revealed.length ? { day: { ...day, schedule: sched, conds, forks: next }, revealed } : { day, revealed };
+}
+function guanianForkNotes(day: any): string[] {
+  return (day && Array.isArray(day.forks) ? day.forks : []).filter((f: any) => f && f.state === "hit").slice(-3)
+    .map((f: any) => "今天 " + f.at + " 碰上一件事：" + f.what + (f.say === "keep"
+      ? "。你不想主动提，用户问起或聊到很贴近的事才可能说。"
+      : f.say === "burst"
+        ? "。你憋不住想跟用户说：还没说过的话，找个空当说出来；说过了别重复。"
+        : "。还没跟用户说过的话，聊到相关的自然提起；说过了别重复。"));
+}
+// 云端没有 App 的本地时钟：按日程里的时区换算此刻和揭晓时刻；结果不落库，每次读都重算，和 App 结算的一样
+function guanianForkDay(day: GuanianDay, nowMs: number, affection?: unknown): GuanianDay {
+  if (!day || !Array.isArray(day.forks) || !day.forks.length) return day;
+  const tz = Number(day.tz) || 0;
+  const local = new Date(nowMs + tz * 60_000);
+  const hm = String(local.getUTCHours()).padStart(2, "0") + ":" + String(local.getUTCMinutes()).padStart(2, "0");
+  const base = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - tz * 60_000;
+  const score = affection && typeof affection === "object" ? (affection as { score?: unknown }).score : undefined;
+  return guanianApplyForks(day, hm, { seed: String(day.forkSeed || ""), score, at: (t: string) => base + guanianForkMins(t) * 60_000 }).day;
+}
+// ── 变数副本结束
 // App 同名 parseDayResult
-function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, settings: { quietStart?: string; quietEnd?: string }, nowMs: number): GenDay {
+function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, settings: { quietStart?: string; quietEnd?: string; forkLevel?: number }, nowMs: number): GenDay {
   const schedRaw = pickField(d, ["schedule", "日程", "日程表"]);
   if (!Array.isArray(schedRaw)) throw new Error("日程缺失（模型返回的字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）");
   const sched: GenDay["schedule"] = schedRaw.slice(0, 10).map((it: any) => ({
@@ -920,6 +1072,7 @@ function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, setti
     sleep: String(pickField(d, ["sleep", "睡眠", "昨晚"]) || "").slice(0, 40),
     schedule: sched,
     conds: bodyConds,
+    forks: guanianNormalizeForks(pickField(d, ["forks", "变数", "岔子"]), sched, settings.forkLevel),
   };
 }
 // App 同名 buildImpulseInstruction
@@ -1134,6 +1287,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
       quietStart: String(context.quietStart || ""), quietEnd: String(context.quietEnd || ""),
       minGapMin: Number(context.minGapMin) || 0, maxUnanswered: Number(context.maxUnanswered) || 0,
       moodGate: kit.moodGate !== false, anchorMorning: kit.anchorMorning === true, anchorSleep: kit.anchorSleep !== false,
+      forkLevel: kit.forkLevel,
     };
 
     // ── 生成TA的一天（与 App generateDay 同一份指令、同一套归一）
@@ -1143,11 +1297,13 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
     const raw = await generateJsonWith(tplDaily, instruction, log, record);
     if (!await active()) return;
     const dayFull = parseDayResult(raw, existing, settings, nowMs);
+    dayFull.forkSeed = planDate + "|" + characterId;
     const day: GuanianDay & Record<string, unknown> = {
       tz, mood: dayFull.mood, energy: dayFull.energy, location: dayFull.location, doing: dayFull.doing,
       wake: dayFull.wake, bed: dayFull.bed,
       schedule: dayFull.schedule.map(it => ({ time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +(it.cost || 0), mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined })),
       conds: dayFull.conds.map(c => ({ startAt: c.startAt, halfLifeMin: c.halfLifeMin, intensity: c.intensity, energyDelta: c.energyDelta, mood: c.mood, cause: c.cause })),
+      forks: dayFull.forks, forkSeed: dayFull.forkSeed, forkBurst: kit.forkBurst === false ? 0 : 1,
     };
     log("生成今日生活面：" + dayFull.schedule.length + " 条日程（日程表已定 " + existing.length + " 条），作息 " + dayFull.wake + " 起 " + dayFull.bed + " 睡，心情「" + dayFull.mood + "」"
       + (dayFull.sleep ? "，昨晚" + dayFull.sleep : "") + (dayFull.conds.length ? "，身上：" + dayFull.conds.map(c => c.cause).join("、") : "")
@@ -1355,7 +1511,7 @@ Deno.serve(async (req: Request) => {
   const cronSecret = secretRows[0]?.cron_secret || "";
   const payloadKey = secretRows[0]?.payload_key || "";
   if (!cronSecret || String(token) !== cronSecret) return new Response("forbidden", { status: 403 });
-  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1", "promise-tasks-v1", "promise-tasks-v2", "scheduler-state-v1", "history-window-v1"] });
+  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1", "promise-tasks-v1", "promise-tasks-v2", "scheduler-state-v1", "history-window-v1", "day-forks-v1"] });
   if (!userId || !characterId || !planDate) return new Response("bad request", { status: 400 });
   if (!payloadKey) return new Response("payload_key missing", { status: 200 });
 
@@ -1516,7 +1672,7 @@ Deno.serve(async (req: Request) => {
   // 自发起念：没有新聊天也可以起念，由头是TA自己这一天里的事——刚做完一件有分量的日程，
   // 或者双方安静太久。每一次都是一次裁决调用，所以另有每日上限（selfImpulseCap），
   // 用掉的次数记在 context.selfUsed，App 上传计划时会原样带回来，重新编排才清零。
-  let day = context.day && typeof context.day === "object" ? context.day : null;
+  let day = context.day && typeof context.day === "object" ? guanianForkDay(context.day as GuanianDay, nowMs, context.affection) : null;
   let selfUsed = Number(context.selfUsed) || 0;
   let selfReason = "";
   let threadNudged: { id: string; mark: string; reason: string } | null = null;
@@ -1610,7 +1766,7 @@ Deno.serve(async (req: Request) => {
       if (Array.isArray(latest.decisions)) priorDecisions.splice(0, priorDecisions.length, ...latest.decisions.filter(d => d.kind !== "gate"));
     }
   } catch (e) { return failPlan("约定同步失败：" + String(e instanceof Error ? e.message : e)); }
-  day = context.day && typeof context.day === "object" ? context.day : null;
+  day = context.day && typeof context.day === "object" ? guanianForkDay(context.day as GuanianDay, nowMs, context.affection) : null;
   selfUsed = Number(context.selfUsed) || 0;
   if (planWriteFailed) return failPlan("计划保存失败，等待恢复");
   if (planConflict) return new Response("plan changed; retry fresh snapshot", { status: 200 });
@@ -1708,6 +1864,20 @@ Deno.serve(async (req: Request) => {
           selfCurve = Math.min(1, 0.5 + absentDays / 14 * 0.5);
           return "";
         }
+      }
+      // 由头零：刚碰上的变数，TA憋不住想说。App 开着时已经约过、或改成聊到再说的，不再起念
+      const forkDayNow = day as GuanianDay;
+      const forkSince = Number.isFinite(lastRecheckMs)
+        && Math.floor((lastRecheckMs + tzM * 60_000) / 86_400_000) === Math.floor((nowMs + tzM * 60_000) / 86_400_000)
+        ? guanianNow(forkDayNow, lastRecheckMs, qs, qe).hm : "00:00";
+      const burst = Number(forkDayNow.forkBurst) === 1
+        ? (forkDayNow.forks || []).filter((f: any) => f && f.state === "hit" && f.say === "burst" && !f.wakeAt && String(f.at) > forkSince && String(f.at) <= now.hm).pop()
+        : null;
+      const burstMin = burst ? guanianForkMins(now.hm) - guanianForkMins(String(burst.at)) : 0;
+      if (burst && burstMin <= 90) {
+        selfKind = "fork"; selfReason = `刚碰上一件事：${burst.what}，憋不住想跟用户说`;
+        selfCurve = Math.max(0.3, 1 - burstMin / 90);
+        return "";
       }
       // 由头一：上次裁决之后新开始了一条日程（严格模式还要求耗神/回血明显或有情绪余味）
       const tzMs = tzM * 60_000;
