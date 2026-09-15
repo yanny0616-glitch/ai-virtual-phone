@@ -1226,3 +1226,12 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 验证：`tsc --noEmit` 无报错；改动行 eslint 无新问题；`check-preset-entry-sync`、`check-preset-feature-repair` 通过；逐字对比和「此刻 / 画面」拆分用 node 跑了样例。宿主页面没法本机构建，缩放手势未在手机上实测。
 
 - 补：朋友圈配图也换成同一套（预览三按钮 + 编辑面板），单独正负向存在动态的 `photoPositive / photoNegative`。
+
+### 推理深度 · 地址纠错 · 存不上横幅 · 更新日志 · 排错清单（2026-09-15）
+
+- API 配置加推理深度，按模型名换写法（Claude 新一代自适应 + effort、4.5 及更早 token 预算、GPT reasoning_effort、Gemini 思考预算 / 档位），缺省什么都不发。
+- Base URL 发请求前纠错（补 https、只填域名补版本段、去掉多填的端点），设置页显示「实际会请求」。
+- 所有本地库挂写入监测，存不上弹横幅可重试；存储用到 90% 提醒。
+- 更新日志：`public/changelog.json`，更新后弹一次、关于页能翻、自托管更新卡片列出还没更新到的；备份中不触发更新。
+- 设置加「排错清单」，7 类 21 项现查。
+- 验证：`tsc --noEmit` 无报错；改动行 eslint 只有 phone-settings-app 第 4 行三个原来就没用的图标；推理深度和地址纠错用 node 跑了 40 多条样例；写入监测用 fake-indexeddb 跑了克隆失败、配额失败后重试成功、主键冲突不计、普通读写 / modify / 事务不受影响；`check:qa` 通过；`check-fork-regressions` 补上 `reasoningRequestFor` 桩后和干净 HEAD 停在同一处（第 480 行 409≠200），`check-persistence-and-proxy` 在干净 HEAD 上同样失败，与本次无关。宿主页面没法本机构建，界面没截图实测。

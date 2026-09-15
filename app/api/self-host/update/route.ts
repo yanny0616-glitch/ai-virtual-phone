@@ -33,11 +33,22 @@ async function fetchGithubJson(url: string): Promise<Record<string, unknown> | n
   }
 }
 
+// main 分支上的更新日志，客户端拿它和本机那份比，列出「还没更新到」的条目
+async function fetchRemoteChangelog(): Promise<unknown> {
+  try {
+    const res = await fetch(`https://raw.githubusercontent.com/${REPO}/main/public/changelog.json`, { headers: { "User-Agent": GITHUB_HEADERS["User-Agent"] }, cache: "no-store" });
+    return res.ok ? await res.json() as unknown : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
-  const [current, release, head] = await Promise.all([
+  const [current, release, head, changelog] = await Promise.all([
     readCurrentSha(),
     fetchGithubJson(`https://api.github.com/repos/${REPO}/releases/latest`),
     fetchGithubJson(`https://api.github.com/repos/${REPO}/commits/main`),
+    fetchRemoteChangelog(),
   ]);
   const tag = typeof release?.tag_name === "string" ? release.tag_name : "";
   const releaseSha = /^float-build-([0-9a-f]{12})$/.exec(tag)?.[1] ?? "";
@@ -54,6 +65,7 @@ export async function GET() {
     // main 领先于最新 Release：多半在构建，也可能是 [skip ci] 提交
     building: Boolean(mainSha && releaseSha && mainSha !== releaseSha),
     updateAvailable: Boolean(releaseSha && current && releaseSha !== current.slice(0, 12)),
+    changelog,
   });
 }
 

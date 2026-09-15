@@ -4,6 +4,7 @@
 
 import type { ApiConfig } from "./settings-types";
 import { pushApiLog } from "./api-log-store";
+import { correctApiBaseUrl } from "./api-url";
 
 const SIMPLE_ANTHROPIC_AUTO_MAX_TOKENS = 8192;
 
@@ -13,7 +14,7 @@ const SIMPLE_ANTHROPIC_AUTO_MAX_TOKENS = 8192;
  * Supports all 11 UI providers + Custom (relies on baseUrl field).
  */
 export function determineBaseUrl(config: { provider: string; baseUrl?: string }): string {
-    if (config.baseUrl) return config.baseUrl;
+    if (config.baseUrl?.trim()) return correctApiBaseUrl(config.provider, config.baseUrl);
     switch (config.provider) {
         case "OpenAI":      return "https://api.openai.com/v1";
         case "Anthropic":   return "https://api.anthropic.com/v1";

@@ -168,6 +168,8 @@ export type ApiConfig = {
     /** 提示缓存：Anthropic 打 cache_control 断点，官方 OpenAI 带 prompt_cache_key。
      *  按配置开关，缺省关闭——缓存写入按 1.25 倍计费，短聊单发的场景反而更贵。 */
     promptCache?: boolean;
+    /** 推理深度；缺省＝按服务商默认，请求里不带任何推理参数。按模型名换写法见 lib/reasoning-effort.ts */
+    reasoningEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
 };
 
 // --- VoiceApiConfig (migrated from voice-settings.tsx) ---

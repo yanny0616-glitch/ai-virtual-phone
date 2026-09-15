@@ -3,6 +3,7 @@
 // Same pattern as chat-db.ts: in-memory cache + async fire-and-forget writes.
 
 import Dexie from "dexie";
+import "./storage-health";
 import type { PresetConfig, WorldBookConfig, RegexConfig } from "./settings-types";
 
 // ── Database Schema ──────────────────────────────

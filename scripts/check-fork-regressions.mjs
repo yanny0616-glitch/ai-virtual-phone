@@ -210,7 +210,7 @@ await test('Cached unsupported capability expires automatically',async()=>{
   return {automaticRecovery:true};
 });
 await test('Anthropic prompt viewer retains presets with caching, streaming and native tools',async()=>{
-  const a=moduleVM('lib/llm-provider-adapter.ts',{
+  const a=moduleVM('lib/llm-provider-adapter.ts',{reasoningRequestFor:()=>null,
     resolveEnabledGenerationParameters:()=>new Set(),
     shouldOmitDeprecatedSamplingParameters:()=>false,
     buildRequestHeaders:()=>({}),

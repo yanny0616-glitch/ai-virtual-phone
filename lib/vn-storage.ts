@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import "./storage-health";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import type { VnSession, VnMessage, VnChapterMeta, VnLayoutPrefs, VnBeat, VnFrameAudio } from "./vn-types";
 export type { VnSession, VnMessage, VnChapterMeta, VnLayoutPrefs, VnBeat };

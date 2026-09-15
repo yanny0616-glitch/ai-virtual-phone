@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import "./storage-health";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 
 export type StoryUiPrefs = {

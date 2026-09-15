@@ -10,6 +10,7 @@ import {
     stripHallucinatedTimestamps,
 } from "./api-helpers";
 import { resolveEnabledGenerationParameters } from "./generation-parameters";
+import { reasoningRequestFor } from "./reasoning-effort";
 
 export type LlmProviderKind = "openai-compatible" | "anthropic" | "gemini";
 export type NativeToolProtocol = "openai-compatible" | "anthropic" | "gemini";
@@ -584,6 +585,8 @@ function buildOpenAICompatibleRequest(
             body.stream_options = { include_usage: true };
         }
     }
+    const reasoning = reasoningRequestFor(config, "openai", { toolContinuation: isToolContinuation(messages) });
+    if (reasoning) Object.assign(body, reasoning.send);
     if (options.tools?.length) {
         body.tools = options.tools.map((tool) => ({
             type: "function",
@@ -601,6 +604,10 @@ function buildOpenAICompatibleRequest(
         providerKind: "openai-compatible",
         messagesForLog: messages.map(messageForLog),
     };
+}
+
+function isToolContinuation(messages: LlmRequestMessage[]): boolean {
+    return messages.length > 0 && messages[messages.length - 1].role === "tool";
 }
 
 function shouldEchoReasoningContent(config: ApiConfig): boolean {
@@ -636,6 +643,18 @@ function buildAnthropicRequest(
     if (!omitSampling && enabled.has("temperature")) body.temperature = preset?.temperature ?? 0.8;
     if (!omitSampling && preset && enabled.has("top_p")) body.top_p = preset.top_p ?? 1;
     if (!omitSampling && enabled.has("top_k")) body.top_k = preset?.top_k ?? 0;
+    const reasoning = reasoningRequestFor(config, "anthropic", { toolContinuation: isToolContinuation(messages) });
+    if (reasoning) {
+        Object.assign(body, reasoning.send);
+        // 开着思考时 Claude 不收温度 / top_k，top_p 也只收 0.95 以上
+        if (reasoning.thinking) {
+            delete body.temperature;
+            delete body.top_p;
+            delete body.top_k;
+        }
+        const floor = reasoning.budget ? reasoning.budget + 4096 : reasoning.minMaxTokens;
+        if (floor && Number(body.max_tokens) < floor) body.max_tokens = floor;
+    }
     if (system) {
         // 开缓存时 system 必须写成内容块数组才能挂 cache_control。
         body.system = options.promptCache
@@ -726,6 +745,14 @@ function buildGeminiRequest(
         generationConfig.maxOutputTokens = Math.floor(options.maxTokens);
     } else if (enabled.has("max_tokens") && preset?.openai_max_tokens && preset.openai_max_tokens > 0) {
         generationConfig.maxOutputTokens = preset.openai_max_tokens;
+    }
+    const reasoning = reasoningRequestFor(config, "gemini");
+    if (reasoning) {
+        Object.assign(generationConfig, reasoning.send);
+        const out = generationConfig.maxOutputTokens;
+        if (reasoning.budget && typeof out === "number" && out < reasoning.budget + 4096) {
+            generationConfig.maxOutputTokens = reasoning.budget + 4096;
+        }
     }
     const body: Record<string, unknown> = {
         contents: compactGeminiContents(rest),

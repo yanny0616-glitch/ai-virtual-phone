@@ -3,6 +3,7 @@
 // Provides async persistence behind the synchronous in-memory cache in chat-storage.ts.
 
 import Dexie from "dexie";
+import "./storage-health";
 import type { ChatMessage, ChatSession, ChatContact } from "./chat-storage";
 
 // ── Database Schema ──────────────────────────────
