@@ -144,11 +144,17 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 
 \`ctx.prompts.set(text, { sessionId? })\`：设置一段持续注入系统提示词的文本（不传 sessionId 为全局，传则只对该会话生效）；text 传空串或 \`ctx.prompts.clear()\` 清除。与 prompt.system transform 的区别：这个是持久的、无需每次拦截。
 
+## ctx.chat —— 会话动作
+
+- \`ctx.chat.requestReply(sessionId)\` —— 让这个会话的角色现在回一轮（聊天室开着由它接，没开走后台生成）。发完卡片想让TA马上回应时用
+- \`ctx.chat.offline.get(sessionId)\` / \`.set(sessionId, on)\` —— 读/切线下模式，聊天室开着会立刻切过去；\`.turns(sessionId)\` → 线下剧情记录 [{ userContent, assistantContent, summary, createdAt }]
+- \`await ctx.chat.scheduleWake({ characterId, fireAt, intent, key })\` —— 到点让角色主动发一条，intent 写TA到点时想着什么；App 关着走离线推送（返回 { id, armed, reason }，armed=false 表示只在 App 开着时生效）。同一插件同一 key 只留一条；fireAt 1 分钟～7 天内。\`ctx.chat.cancelWake(key)\` 取消
+
 ## ctx.ui —— 界面
 
 - \`ctx.ui.toast(text, opts?)\` 聊天顶部轻提示，默认约 2.4s 消失。做"识别中/加载中"这类进行中提示时传 \`{ durationMs: 0 }\` 让它常驻，用返回的 \`close()\` 在完成时手动关闭：\`const t = ctx.ui.toast("处理中…", { durationMs: 0 }); try { …await… } finally { t.close(); }\`
 - \`ctx.ui.slot(坑位名, (el, props) => { ...; return 可选清理函数 })\` —— 认领一块 **React 不管辖的裸 DOM 容器**，随便渲染：
-  - "chat.header"：聊天标题栏下方（props: { sessionId, isGroup }）
+  - "chat.header"：聊天标题栏下方（props: { sessionId, isGroup, offlineMode }；切线下/线上时重挂载）
   - "chat.presence"：聊天页标题名字下面那一行，只在单聊出现（props: { sessionId, characterId }）
   - "list.avatar"：聊天列表每行头像上的角标层，只在单聊行出现（props: { sessionId, characterId }）；容器盖满头像且 pointer-events:none，自己 absolute 定位放点或徽章
   - "chat.inputToolbar"：输入栏"+"面板的网格里，和内置按钮排在一起（props: { sessionId, isGroup }）。想和内置按钮长得一样，用这段结构：\`<div class="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer"><div class="chat-plus-icon-box">图标</div><span class="ts-11">标签</span></div>\`
@@ -156,6 +162,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
   - "message.panel"：整条消息行下方、内置状态卡片旁的独立区域（props: { sessionId, message }），用于原位展开卡片，不受气泡裁切；可与 message.side 按钮联动
   - "message.side"：每条文本气泡旁边，贴着气泡垂直居中（对方消息在右、自己的在左），只放一个小图标之类；气泡本身有长按菜单，图标的 pointerdown 记得 stopPropagation
   - "settings.section"：插件管理页的自定义设置区
+  - "chatInfo.section"：聊天信息页里本插件的一栏，宿主按分类折叠，标题用插件名（props: { sessionId, isGroup, characterId }）；放这个角色单独的设置，别放全局设置。在容器上写 `el.dataset.summary = "一句话"`，折叠时显示在标题下；什么都不画（比如群聊里 return 掉）这一栏就不出现
 - \`ctx.ui.messageAction({ id, label, filter?, onSelect })\` —— 消息长按菜单加一项；onSelect(msg, { updateMessage, toast })
 - \`ctx.ui.messageKind(kind, (el, msg) => {})\` —— 注册自定义消息类型；配合 \`ctx.data.messages.push({ ..., mediaType: "plugin:" + kind, mediaData: {...} })\` 发出由你渲染的卡片消息
 - \`ctx.ui.injectCSS(css)\` —— 注入全局样式（禁用自动移除）

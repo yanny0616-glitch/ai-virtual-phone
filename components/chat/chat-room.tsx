@@ -6,7 +6,7 @@ import { extractXhsNoteUrls } from "@/lib/xhs-note";
 import { hasPendingXhsNotes, hydrateXhsNote, XHS_NOTE_UPDATED } from "@/lib/xhs-note-client";
 
 import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, markChatSessionRead, CHAT_MESSAGE_PUSHED_EVENT, restoreChatMessages } from "@/lib/chat-storage";
+import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, CHAT_OFFLINE_MODE_PREFIX, CHAT_OFFLINE_MODE_CHANGED_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, markChatSessionRead, CHAT_MESSAGE_PUSHED_EVENT, restoreChatMessages } from "@/lib/chat-storage";
 import { cleanStreamText, splitStreamPreviewSegments, stripLiteralTexts, stripXmlTagBlocks } from "@/lib/stream-preview";
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
@@ -295,7 +295,6 @@ function isHiddenChatFlowMessage(msg: ChatMessage, displayContent?: string): boo
 // ── Background generation tracking ──────────────────────────
 const GENERATING_PREFIX = "chat-generating:";
 const CHAT_BG_COMPLETE = "chat-bg-complete";
-const CHAT_OFFLINE_MODE_PREFIX = "chat-offline-mode:";
 const CHAT_THEATER_MODE_PREFIX = "chat-theater-mode:";
 const GENERATING_LOCK_TTL_MS = 5 * 60 * 1000;
 const OFFLINE_INITIAL_LOAD = 10;
@@ -1845,6 +1844,21 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             kvRemove(pendingKey);
             void runManagedGeneration({ history: msgs, onDecline: triggerReply });
         }
+    }, [session.id]);
+
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent<{ sessionId?: string; on?: boolean }>).detail;
+            if (!detail || detail.sessionId !== session.id) return;
+            setShowPlusMenu(false);
+            setRichModal(null);
+            setActiveOfflineTarget(null);
+            setOfflineTurns(loadChatOfflineTurns(session.id));
+            setOfflineVisibleCount(OFFLINE_INITIAL_LOAD);
+            setOfflineMode(detail.on === true);
+        };
+        window.addEventListener(CHAT_OFFLINE_MODE_CHANGED_EVENT, handler);
+        return () => window.removeEventListener(CHAT_OFFLINE_MODE_CHANGED_EVENT, handler);
     }, [session.id]);
 
     const needsInitialScrollRef = useRef(true);
@@ -5721,7 +5735,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             </header>
             <ChatPluginSlot
                 name="chat.header"
-                slotProps={{ sessionId: session.id, isGroup: !!session.isGroup }}
+                slotProps={{ sessionId: session.id, isGroup: !!session.isGroup, offlineMode }}
                 className="chat-plugin-header chat-room-main-pane"
             />
 

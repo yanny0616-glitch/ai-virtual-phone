@@ -226,6 +226,7 @@ export type ChatPluginEventPayloadMap = {
  *   message.footer     每条文本消息气泡下方
  *   message.side       每条文本消息气泡旁边（对方消息在右侧、自己的在左侧），放小图标用
  *   settings.section   插件管理页内该插件的自定义设置区
+ *   chatInfo.section   聊天信息页里本插件的一栏（折叠分类，标题用插件名；props 带 characterId）
  */
 export type ChatPluginSlotName =
     | "chat.header"
@@ -235,7 +236,8 @@ export type ChatPluginSlotName =
     | "message.footer"
     | "message.side"
     | "message.panel"
-    | "settings.section";
+    | "settings.section"
+    | "chatInfo.section";
 
 export type ChatPluginSlotProps = {
     sessionId?: string;
@@ -244,6 +246,8 @@ export type ChatPluginSlotProps = {
     characterId?: string;
     /** message.footer / message.side / message.panel 坑位携带当前消息 */
     message?: ChatMessage;
+    /** chat.header 坑位：会话当前是否在线下模式（切换时坑位重挂载） */
+    offlineMode?: boolean;
 };
 
 export type ChatPluginSlotMount = (
@@ -358,6 +362,25 @@ export type ChatPluginContext = {
         /** text 传空串等于清除；sessionId 缺省为全局片段 */
         set(text: string, opts?: { sessionId?: string }): void;
         clear(opts?: { sessionId?: string }): void;
+    };
+
+    /** 会话动作：让角色回一轮、切线下、到点唤醒 */
+    chat: {
+        /** 让该会话的角色现在回复一轮（聊天室开着由它接，没开走后台生成） */
+        requestReply(sessionId: string): void;
+        offline: {
+            get(sessionId: string): boolean;
+            /** 切线下模式；聊天室开着会立刻切过去 */
+            set(sessionId: string, on: boolean): void;
+            /** 线下剧情记录（只读，按时间先后） */
+            turns(sessionId: string): { userContent: string; assistantContent: string; summary: string; createdAt: string }[];
+        };
+        /**
+         * 到点让角色主动发一条（App 关着走离线推送，前提是开了离线推送）。
+         * 同一插件同一 key 只留一条，重复预约即覆盖。fireAt 至少 1 分钟后、最多 7 天内。
+         */
+        scheduleWake(input: { characterId: string; fireAt: number; intent: string; key: string }): Promise<{ id: string; armed: boolean; reason?: string }>;
+        cancelWake(key: string): void;
     };
 
     ui: {

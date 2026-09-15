@@ -50,8 +50,10 @@
 
 - 官方插件在 `chat-plugins/`，构建时复制到 `public/chat-plugins/` 并生成 `index.json`（`npm run plugins:build-dist`）；`lib/chat-plugin-official.ts` 是清单，已装的启动时静默升级。
 - 钩子（`lib/chat-plugin-types.ts`）：`app.ready` `plugins.changed` `session.opened` `user.beforeSend` `prompt.system` `llm.request` `llm.streamChunk` `llm.response` `message.beforePersist` `message.persisted` `message.beforeReveal` `message.updated` `message.deleted` `chat.read` `chat.write` `chat.replyGate` `moments.beforePost` `moments.schedule` `variables.changed`。
-- UI 坑位：`chat.header` `chat.presence` `chat.inputToolbar` `message.side` `message.footer` `message.panel` `list.avatar` `settings.section`。
+- UI 坑位：`chat.header` `chat.presence` `chat.inputToolbar` `message.side` `message.footer` `message.panel` `list.avatar` `settings.section` `chatInfo.section`。
+- 聊天信息页（`components/chat/chat-settings-panel.tsx`）除备注 / 查找 / TA 的电脑 / 群成员外按类折叠：聊天、生成、插件各一栏（`chatInfo.section`，插件在容器上写 `data-summary` 当摘要）、状态栏、外观、清理与删除；一次只展开一类，标题下一行是当前状态摘要。
 - **共享变量池**：插件 `ctx.data.variables` 与自定义 APP `AiPhone.variables.*` 读写同一个池。
+- **会话动作** `ctx.chat`：`requestReply` 让角色回一轮；`offline.get/set/turns` 切线下（聊天室听 `CHAT_OFFLINE_MODE_CHANGED_EVENT` 跟着切）、读线下记录；`scheduleWake/cancelWake` 复用宿主定时唤醒，App 关着走 timed_task 兜底。插件唤醒 id 以 `chat_plugin_` 开头，普通唤醒的「一会话一条」和 `clearTimedWakeSchedule` 都不动它们。`chat.header` 坑位带 `offlineMode`，切线下时重挂载。
 - **忙碌回复状态提示**：使用中文摘要，仅读取当前状态、活动/进展、地点、心情、精力、下一安排、有效手动状态；不再读取好感与关系变量。当前关系、好感分数、同步元数据、内部 ID、好感/关系历史不进入这段提示，存储及面板不受影响。
 - 离线回传（`lib/push-outbox-client.ts`）也跑 `llm.response` → 输出正则 → 消息解析，固定批次 ID 防重复结算。
 
@@ -63,6 +65,7 @@
 | `moments-rhythm` | 1.0.0 | 每小时按作息/精力掷骰决定发不发朋友圈，不再到点必发 |
 | `typing-rhythm` | 1.0.0 | `message.beforeReveal` 控制多气泡显示节奏 |
 | `profile-signature` | 1.0.0 | 朋友圈个人主页个性签名 |
+| `meetup` | 1.0.0 | 约见面：你约或TA主动约，TA按日程答应 / 改时间 / 推掉；到点推送，去赴约切线下，散场写一句回执；卡片票根 / 简约 / 信笺三种样式（类名 `mt-*`），角色可单独设 |
 
 ## 5. 自定义 APP SDK 扩展
 

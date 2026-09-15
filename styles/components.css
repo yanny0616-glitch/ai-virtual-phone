@@ -3086,6 +3086,39 @@
   box-shadow: none;
 }
 
+.chat-info-section-chev {
+  opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+
+.chat-info-section-head[aria-expanded="true"] .chat-info-section-chev {
+  transform: rotate(90deg);
+}
+
+.chat-info-section-body {
+  background: color-mix(in srgb, var(--c-text) 5%, transparent);
+}
+
+.chat-info-menu .chat-info-section-body .menu-item {
+  padding: 14px 24px 14px 32px;
+}
+
+.chat-info-section-body .chat-info-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.chat-info-section-body .chat-info-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-info-section-chev {
+    transition: none;
+  }
+}
+
 .profile-settings-menu .menu-label-group > .menu-label {
   font-weight: 600;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import {
     CHAT_INITIAL_VISIBLE_MESSAGE_COUNT,
     CHAT_LOAD_MORE_MESSAGE_COUNT,
@@ -44,7 +44,7 @@ import { downloadFile } from "@/lib/download-utils";
 import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { KeyboardAutoSendDebounceItem } from "@/components/chat/keyboard-auto-send-debounce-item";
-import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
+import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, Palette, PanelTop, Puzzle, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -52,6 +52,9 @@ import { AvatarCropDialog } from "@/components/ui/avatar-crop-dialog";
 import { CHAT_SESSION_CSS_EXAMPLE } from "@/lib/css-examples";
 import { Toggle, Input } from "@/components/ui/form";
 import { PageShell } from "@/components/ui/page-shell";
+import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
+import { getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
+import type { ChatPluginSlotProps } from "@/lib/chat-plugin-types";
 
 // 自定义状态栏预填模板：微博主页（契约=「状态栏」章节整段正文，含【逻辑】【格式】与包裹要求）
 // 预览用的默认示例数据：契约没有自带示例时兜底，字段与下面的微博模板对应
@@ -281,6 +284,59 @@ function ChatInfoIcon({ icon: Icon, color }: { icon: LucideIcon; color: string }
         <span className="chat-info-icon" style={chatInfoIconStyle(color)}>
             <Icon size={22} strokeWidth={1.75} />
         </span>
+    );
+}
+
+function ChatInfoSectionHead({ title, desc, icon, color, danger, open, onToggle }: {
+    title: string; desc?: string; icon: LucideIcon; color: string; danger?: boolean; open: boolean; onToggle: () => void;
+}) {
+    return (
+        <button type="button" className="menu-item chat-info-section-head" aria-expanded={open} onClick={onToggle}>
+            <ChatInfoIcon icon={icon} color={color} />
+            <div className="menu-label-group">
+                <span className={danger ? "menu-label menu-label-danger" : "menu-label"}>{title}</span>
+                {desc && <span className="menu-desc">{desc}</span>}
+            </div>
+            <div className="menu-right"><ChevronRight size={16} className="chat-info-section-chev" /></div>
+        </button>
+    );
+}
+
+function ChatInfoSection({ children, ...head }: Parameters<typeof ChatInfoSectionHead>[0] & { children: ReactNode }) {
+    return (
+        <>
+            <ChatInfoSectionHead {...head} />
+            {head.open && <div className="chat-info-section-body">{children}</div>}
+        </>
+    );
+}
+
+// 插件栏一直挂着（收起时 hidden）：插件在容器上写 data-summary 当标题下的摘要；什么都没画（如群聊里）就整栏不显示
+function PluginInfoSection({ pluginId, title, slotProps, open, onToggle }: {
+    pluginId: string; title: string; slotProps: ChatPluginSlotProps; open: boolean; onToggle: () => void;
+}) {
+    const bodyRef = useRef<HTMLDivElement>(null);
+    const [summary, setSummary] = useState("");
+    const [hasContent, setHasContent] = useState(false);
+    useEffect(() => {
+        const el = bodyRef.current;
+        if (!el) return;
+        const read = () => {
+            setSummary(el.querySelector<HTMLElement>("[data-summary]")?.dataset.summary ?? "");
+            setHasContent(Array.from(el.querySelectorAll("[data-chat-plugin]")).some(node => node.childNodes.length > 0));
+        };
+        read();
+        const observer = new MutationObserver(read);
+        observer.observe(el, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-summary"] });
+        return () => observer.disconnect();
+    }, []);
+    return (
+        <>
+            {hasContent && <ChatInfoSectionHead title={title} desc={summary} icon={Puzzle} color={BINDING_ACCENTS.memory} open={open} onToggle={onToggle} />}
+            <div ref={bodyRef} className="chat-info-section-body" hidden={!open || !hasContent}>
+                <ChatPluginSlot name="chatInfo.section" pluginId={pluginId} slotProps={slotProps} />
+            </div>
+        </>
     );
 }
 
@@ -835,6 +891,28 @@ export function ChatSettingsPanel({
         );
     };
 
+    const [openSection, setOpenSection] = useState<string | null>(null);
+    const toggleSection = (key: string) => setOpenSection(current => current === key ? null : key);
+    const pluginRuntime = getChatPluginRuntime();
+    const pluginSlotsVersion = useSyncExternalStore(pluginRuntime.subscribeSlotsChanged, () => pluginRuntime.getSlotsVersion(), () => 0);
+    const pluginSectionIds = useMemo(
+        () => Array.from(new Set(pluginRuntime.getSlotRegistrations("chatInfo.section").map(r => r.pluginId))),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [pluginSlotsVersion],
+    );
+    const chatSummary = [isPinned && "已置顶", bilingualTranslationEnabled && "双语翻译", visionImagePromptLimit > 0 ? `带最近 ${visionImagePromptLimit} 张图` : "不带图"].filter(Boolean).join(" · ");
+    const generationSummary = [
+        streamOnline && streamOffline ? "线上、线下都流式" : streamOnline ? "线上流式" : streamOffline ? "线下流式" : "整段返回",
+        offlineSummaryRetry && "摘要自动补提",
+    ].filter(Boolean).join(" · ");
+    const statusSummary = statusRegion.mode === "native" ? "原生状态栏" : isCustomStatusRegionActive(statusRegion) ? "自定义状态栏" : "关闭";
+    const lookSummary = [
+        backgroundImage ? "自定背景" : "默认背景",
+        chatAvatar && "换了头像",
+        (videoBackground || voiceBackground) && "通话背景",
+        customCSS && "自定义 CSS",
+    ].filter(Boolean).join(" · ");
+
     const searchMode = submittedSearchQuery.trim().length > 0;
     const displayedSearchMessages = searchMode ? searchResults : searchHistoryMessages;
 
@@ -944,103 +1022,49 @@ export function ChatSettingsPanel({
                     </div>
                 )}
 
-                {/* 状态栏（状态区）：原生开关 + 自定义契约/渲染。
-                    群聊同样支持：群回复按 [角色名]: 切段后每段各自解析，
-                    一份契约 + 一份渲染，群里每个角色各出一条状态栏。 */}
-                {(
-                    <div className="menu-group">
+                {/* 其余设置按类折叠，一次只展开一类；插件在 chatInfo.section 坑位各占一类 */}
+                <div className="menu-group chat-info-sections">
+                    <ChatInfoSection title="聊天" desc={chatSummary} icon={MessageSquare} color={CONTENT_APP_ACCENTS.chat} open={openSection === "chat"} onToggle={() => toggleSection("chat")}>
                         <div className="menu-item">
-                            <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.preset} />
-                            <div className="menu-label-group">
-                                <span className="menu-label">原生状态栏</span>
-                                <span className="menu-desc">{statusPresetSupported ? "状态值与内心的默认输出（关闭后整块从提示词移除）" : "当前预设未声明状态区宏，仅默认预设支持"}</span>
-                            </div>
+                            <ChatInfoIcon icon={Pin} color={BINDING_ACCENTS.preset} />
+                            <div className="menu-label-group"><span className="menu-label">置顶聊天</span></div>
                             <div className="menu-right">
-                                <Toggle
-                                    checked={statusRegion.mode === "native"}
-                                    disabled={!statusPresetSupported}
-                                    onChange={c => {
-                                        if (!statusPresetSupported) return;
-                                        saveStatusRegion({
-                                            ...statusRegion,
-                                            mode: c ? "native" : (statusRegion.contract.trim() && statusRegion.renderHtml.trim() ? "custom" : "off"),
-                                        });
-                                    }}
+                                <Toggle checked={isPinned} onChange={c => { setIsPinned(c); updateSession({ isPinned: c }); }} />
+                            </div>
+                        </div>
+                        <div className="menu-item">
+                            <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">传入最近图片数</span>
+                                <span className="menu-desc">进入模型视觉上下文的最近图片数量，0 表示不传图片内容</span>
+                            </div>
+                            <div className="menu-right gap-2">
+                                <button
+                                    type="button"
+                                    className="ui-btn ui-btn-ghost h-8 w-8 p-0"
+                                    onClick={() => updateVisionImagePromptLimit(visionImagePromptLimit - 1)}
+                                    disabled={visionImagePromptLimit <= 0}
+                                >
+                                    -
+                                </button>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={MAX_VISION_IMAGE_PROMPT_LIMIT}
+                                    value={visionImagePromptLimit}
+                                    onChange={e => updateVisionImagePromptLimit(e.target.value)}
+                                    className="ui-input h-8 w-14 text-center"
                                 />
+                                <button
+                                    type="button"
+                                    className="ui-btn ui-btn-ghost h-8 w-8 p-0"
+                                    onClick={() => updateVisionImagePromptLimit(visionImagePromptLimit + 1)}
+                                    disabled={visionImagePromptLimit >= MAX_VISION_IMAGE_PROMPT_LIMIT}
+                                >
+                                    +
+                                </button>
                             </div>
                         </div>
-                        {statusPresetSupported && statusRegion.mode !== "native" && (
-                            <div className="menu-item cursor-pointer" onClick={openStatusRegionDialog}>
-                                <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
-                                <div className="menu-label-group">
-                                    <span className="menu-label">自定义状态栏</span>
-                                    <span className="menu-desc">{isCustomStatusRegionActive(statusRegion)
-                                        ? "已启用——点此编辑契约与渲染"
-                                        : statusRegion.contract.trim() && statusRegion.renderHtml.trim()
-                                            ? "已停用——配置保留，拨开关重新启用"
-                                            : "未配置——点此填写契约与渲染"}</span>
-                                </div>
-                                <div className="menu-right" onClick={e => e.stopPropagation()}>
-                                    <Toggle
-                                        checked={isCustomStatusRegionActive(statusRegion)}
-                                        onChange={c => {
-                                            if (!c) { saveStatusRegion({ ...statusRegion, mode: "off" }); return; }
-                                            if (statusRegion.contract.trim() && statusRegion.renderHtml.trim()) {
-                                                saveStatusRegion({ ...statusRegion, mode: "custom" });
-                                            } else {
-                                                openStatusRegionDialog(); // 还没配置：先进弹窗填，保存即启用
-                                            }
-                                        }}
-                                    />
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* Toggles */}
-                <div className="menu-group">
-                    <div className="menu-item">
-                        <ChatInfoIcon icon={Pin} color={BINDING_ACCENTS.preset} />
-                        <div className="menu-label-group"><span className="menu-label">置顶聊天</span></div>
-                        <div className="menu-right">
-                            <Toggle checked={isPinned} onChange={c => { setIsPinned(c); updateSession({ isPinned: c }); }} />
-                        </div>
-                    </div>
-                    <div className="menu-item">
-                        <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
-                        <div className="menu-label-group">
-                            <span className="menu-label">传入最近图片数</span>
-                            <span className="menu-desc">进入模型视觉上下文的最近图片数量，0 表示不传图片内容</span>
-                        </div>
-                        <div className="menu-right gap-2">
-                            <button
-                                type="button"
-                                className="ui-btn ui-btn-ghost h-8 w-8 p-0"
-                                onClick={() => updateVisionImagePromptLimit(visionImagePromptLimit - 1)}
-                                disabled={visionImagePromptLimit <= 0}
-                            >
-                                -
-                            </button>
-                            <input
-                                type="number"
-                                min={0}
-                                max={MAX_VISION_IMAGE_PROMPT_LIMIT}
-                                value={visionImagePromptLimit}
-                                onChange={e => updateVisionImagePromptLimit(e.target.value)}
-                                className="ui-input h-8 w-14 text-center"
-                            />
-                            <button
-                                type="button"
-                                className="ui-btn ui-btn-ghost h-8 w-8 p-0"
-                                onClick={() => updateVisionImagePromptLimit(visionImagePromptLimit + 1)}
-                                disabled={visionImagePromptLimit >= MAX_VISION_IMAGE_PROMPT_LIMIT}
-                            >
-                                +
-                            </button>
-                        </div>
-                    </div>
-                    <>
                         <div className="menu-item">
                             <ChatInfoIcon icon={MessageSquare} color={CONTENT_APP_ACCENTS.chat} />
                             <div className="menu-label-group">
@@ -1105,6 +1129,19 @@ export function ChatSettingsPanel({
                                 />
                             </div>
                         </div>
+                        <button className="menu-item" onClick={() => setShowScreenEffects(true)}>
+                            <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">全屏特效</span>
+                                <span className="menu-desc">消息包含触发词时播放表情雨/礼花，全局生效</span>
+                            </div>
+                            <div className="menu-right">
+                                <ChevronRight size={16} />
+                            </div>
+                        </button>
+                        <KeyboardAutoSendDebounceItem sessionId={session.id} />
+                    </ChatInfoSection>
+                    <ChatInfoSection title="生成" desc={generationSummary} icon={Sparkles} color={BINDING_ACCENTS.api} open={openSection === "gen"} onToggle={() => toggleSection("gen")}>
                         <div className="menu-item">
                             <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.api} />
                             <div className="menu-label-group">
@@ -1153,172 +1190,212 @@ export function ChatSettingsPanel({
                                 />
                             </div>
                         </div>
-                        <button className="menu-item" onClick={() => setShowScreenEffects(true)}>
-                            <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
+                    </ChatInfoSection>
+                    {pluginSectionIds.map(pluginId => (
+                        <PluginInfoSection
+                            key={pluginId}
+                            pluginId={pluginId}
+                            title={getChatPluginRuntime().getPluginName(pluginId)}
+                            slotProps={{ sessionId: session.id, isGroup: !!session.isGroup, characterId: session.isGroup ? undefined : session.contactId }}
+                            open={openSection === `plugin:${pluginId}`}
+                            onToggle={() => toggleSection(`plugin:${pluginId}`)}
+                        />
+                    ))}
+                    <ChatInfoSection title="状态栏" desc={statusSummary} icon={PanelTop} color={BINDING_ACCENTS.preset} open={openSection === "status"} onToggle={() => toggleSection("status")}>
+                        <div className="menu-item">
+                            <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.preset} />
                             <div className="menu-label-group">
-                                <span className="menu-label">全屏特效</span>
-                                <span className="menu-desc">消息包含触发词时播放表情雨/礼花，全局生效</span>
+                                <span className="menu-label">原生状态栏</span>
+                                <span className="menu-desc">{statusPresetSupported ? "状态值与内心的默认输出（关闭后整块从提示词移除）" : "当前预设未声明状态区宏，仅默认预设支持"}</span>
                             </div>
                             <div className="menu-right">
+                                <Toggle
+                                    checked={statusRegion.mode === "native"}
+                                    disabled={!statusPresetSupported}
+                                    onChange={c => {
+                                        if (!statusPresetSupported) return;
+                                        saveStatusRegion({
+                                            ...statusRegion,
+                                            mode: c ? "native" : (statusRegion.contract.trim() && statusRegion.renderHtml.trim() ? "custom" : "off"),
+                                        });
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        {statusPresetSupported && statusRegion.mode !== "native" && (
+                            <div className="menu-item cursor-pointer" onClick={openStatusRegionDialog}>
+                                <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
+                                <div className="menu-label-group">
+                                    <span className="menu-label">自定义状态栏</span>
+                                    <span className="menu-desc">{isCustomStatusRegionActive(statusRegion)
+                                        ? "已启用——点此编辑契约与渲染"
+                                        : statusRegion.contract.trim() && statusRegion.renderHtml.trim()
+                                            ? "已停用——配置保留，拨开关重新启用"
+                                            : "未配置——点此填写契约与渲染"}</span>
+                                </div>
+                                <div className="menu-right" onClick={e => e.stopPropagation()}>
+                                    <Toggle
+                                        checked={isCustomStatusRegionActive(statusRegion)}
+                                        onChange={c => {
+                                            if (!c) { saveStatusRegion({ ...statusRegion, mode: "off" }); return; }
+                                            if (statusRegion.contract.trim() && statusRegion.renderHtml.trim()) {
+                                                saveStatusRegion({ ...statusRegion, mode: "custom" });
+                                            } else {
+                                                openStatusRegionDialog(); // 还没配置：先进弹窗填，保存即启用
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </ChatInfoSection>
+                    <ChatInfoSection title="外观" desc={lookSummary} icon={Palette} color={BINDING_ACCENTS.voice} open={openSection === "look"} onToggle={() => toggleSection("look")}>
+                        <label className="menu-item">
+                            <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
+                            <div className="menu-label-group"><span className="menu-label">聊天背景</span></div>
+                            <div className="menu-right">
+                                {backgroundImage && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setBackgroundImage(""); updateSession({ backgroundImage: "" }); }}>清除</button></>}
+                                <ChevronRight size={16} />
+                            </div>
+                            <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setBackgroundImage, "backgroundImage")} className="hidden" />
+                        </label>
+                        {!session.isGroup && (
+                            <label className="menu-item">
+                                <div className="w-[24px] h-[24px] rounded-full overflow-hidden bg-[var(--c-input)] shrink-0">
+                                    {chatAvatar ? <img src={chatAvatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
+                                </div>
+                                <div className="menu-label-group"><span className="menu-label">聊天头像</span><span className="menu-desc">只换这个聊天里的头像，角色卡不动</span></div>
+                                <div className="menu-right">
+                                    {chatAvatar && <button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setChatAvatar(""); updateSession({ chatAvatar: "" }); }}>恢复</button>}
+                                    <ChevronRight size={16} />
+                                </div>
+                                <input type="file" accept="image/*" onChange={handleChatAvatarUpload} className="hidden" />
+                            </label>
+                        )}
+                        {session.isGroup ? (
+                            <>
+                                <div className="menu-item" style={{ cursor: "default" }}>
+                                    <ChatInfoIcon icon={Video} color={BINDING_ACCENTS.voice} />
+                                    <div className="menu-label-group"><span className="menu-label">视频通话背景</span></div>
+                                </div>
+                                {groupChars.map(c => c && (
+                                    <label key={c.id} className="menu-item" style={{ paddingLeft: 72 }}>
+                                        <div className="w-[24px] h-[24px] rounded-full overflow-hidden bg-[var(--c-input)] shrink-0">
+                                            {c.avatar ? <img src={c.avatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
+                                        </div>
+                                        <div className="menu-label-group"><span className="menu-label">{c.name}</span></div>
+                                        <div className="menu-right">
+                                            {groupVideoBgs[c.id] && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); const updated = { ...groupVideoBgs }; delete updated[c.id]; setGroupVideoBgs(updated); updateSession({ groupVideoBackgrounds: updated }); }}>清除</button></>}
+                                            <ChevronRight size={14} />
+                                        </div>
+                                        <input type="file" accept="image/*" onChange={e => handleGroupVideoBgUpload(e, c.id)} className="hidden" />
+                                    </label>
+                                ))}
+                                <label className="menu-item" style={{ paddingLeft: 72 }}>
+                                    <div className="w-[24px] h-[24px] rounded-full overflow-hidden bg-[var(--c-input)] shrink-0 flex items-center justify-center">
+                                        {userIdentity?.avatarUrl ? (
+                                            <img src={userIdentity.avatarUrl} className="w-full h-full object-cover" alt="" />
+                                        ) : (
+                                            <span className="ts-11">{(userIdentity?.name || "我")[0]}</span>
+                                        )}
+                                    </div>
+                                    <div className="menu-label-group"><span className="menu-label">{userIdentity?.name || "我"}</span></div>
+                                    <div className="menu-right">
+                                        {groupVideoBgs["self"] && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); const updated = { ...groupVideoBgs }; delete updated["self"]; setGroupVideoBgs(updated); updateSession({ groupVideoBackgrounds: updated }); }}>清除</button></>}
+                                        <ChevronRight size={14} />
+                                    </div>
+                                    <input type="file" accept="image/*" onChange={e => handleGroupVideoBgUpload(e, "self")} className="hidden" />
+                                </label>
+                            </>
+                        ) : (
+                            <label className="menu-item">
+                                <ChatInfoIcon icon={Video} color={BINDING_ACCENTS.voice} />
+                                <div className="menu-label-group"><span className="menu-label">视频通话背景</span></div>
+                                <div className="menu-right">
+                                    {videoBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVideoBackground(""); updateSession({ videoBackground: "" }); }}>清除</button></>}
+                                    <ChevronRight size={16} />
+                                </div>
+                                <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVideoBackground, "videoBackground")} className="hidden" />
+                            </label>
+                        )}
+                        <label className="menu-item">
+                            <ChatInfoIcon icon={Mic} color={BINDING_ACCENTS.voice} />
+                            <div className="menu-label-group"><span className="menu-label">语音通话背景</span></div>
+                            <div className="menu-right">
+                                {voiceBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVoiceBackground(""); updateSession({ voiceBackground: "" }); }}>清除</button></>}
+                                <ChevronRight size={16} />
+                            </div>
+                            <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVoiceBackground, "voiceBackground")} className="hidden" />
+                        </label>
+                        <button className="menu-item" onClick={() => setEditingCSS(true)}>
+                            <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.embedding} />
+                            <div className="menu-label-group"><span className="menu-label">自定义 CSS 样式</span></div>
+                            <div className="menu-right">
+                                {customCSS && <span className="menu-desc mr-1">已设置</span>}
                                 <ChevronRight size={16} />
                             </div>
                         </button>
-                    </>
+                    </ChatInfoSection>
+                    <ChatInfoSection title="清理与删除" desc={session.isGroup ? "清空记录 · 解散群聊" : "清空记录 · 删除会话 · 删除好友"} icon={Trash2} color={"var(--c-danger)"} danger open={openSection === "danger"} onToggle={() => toggleSection("danger")}>
+                        {!session.isGroup && (
+                        <button className="menu-item" onClick={() => setShowConfirmDelete(true)}>
+                            <ChatInfoIcon icon={UserMinus} color="var(--c-danger)" />
+                            <div className="menu-label-group"><span className="menu-label menu-label-danger">删除好友</span></div>
+                        </button>
+                        )}
+                        <button className="menu-item" onClick={() => setShowConfirmClearTools(true)}>
+                            <ChatInfoIcon icon={Code} color="var(--c-danger)" />
+                            <div className="menu-label-group">
+                                <span className="menu-label menu-label-danger">清理原生tool调用历史——防报错</span>
+                                <span className="menu-desc">切换到文本协议 API 前使用</span>
+                            </div>
+                        </button>
+                        <button className="menu-item" onClick={() => setShowConfirmClear(true)}>
+                            <ChatInfoIcon icon={Trash2} color="var(--c-danger)" />
+                            <div className="menu-label-group">
+                                <span className="menu-label menu-label-danger">清空线上聊天记录</span>
+                                <span className="menu-desc">不影响线下模式记录</span>
+                            </div>
+                        </button>
+                        <button
+                            className="menu-item"
+                            disabled={offlineHistoryBusy}
+                            onClick={() => {
+                                if (!offlineHistoryBusy) setShowConfirmClearOffline(true);
+                            }}
+                            style={offlineHistoryBusy ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
+                        >
+                            <ChatInfoIcon icon={Trash2} color="var(--c-danger)" />
+                            <div className="menu-label-group">
+                                <span className="menu-label menu-label-danger">清空线下聊天记录</span>
+                                <span className="menu-desc">
+                                    {offlineHistoryBusy ? "线下回复生成中，完成后再清空" : "同步移除该会话的线下短期记忆事件"}
+                                </span>
+                            </div>
+                        </button>
+                        <button
+                            className="menu-item"
+                            disabled={offlineHistoryBusy}
+                            onClick={() => {
+                                if (!offlineHistoryBusy) setShowConfirmDeleteSession(true);
+                            }}
+                            style={offlineHistoryBusy ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
+                        >
+                            <ChatInfoIcon icon={Trash2} color="var(--c-danger)" />
+                            <div className="menu-label-group">
+                                <span className="menu-label menu-label-danger">删除会话</span>
+                                <span className="menu-desc">
+                                    {offlineHistoryBusy
+                                        ? "线下回复生成中，完成后再删除"
+                                        : session.isGroup
+                                            ? "解散并移除该群聊，线上线下记录一并删除"
+                                            : "移除该会话及线上线下记录，好友保留"}
+                                </span>
+                            </div>
+                        </button>
+                    </ChatInfoSection>
                 </div>
 
-                {/* Backgrounds & UI */}
-                <div className="menu-group">
-                    <label className="menu-item">
-                        <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
-                        <div className="menu-label-group"><span className="menu-label">聊天背景</span></div>
-                        <div className="menu-right">
-                            {backgroundImage && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setBackgroundImage(""); updateSession({ backgroundImage: "" }); }}>清除</button></>}
-                            <ChevronRight size={16} />
-                        </div>
-                        <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setBackgroundImage, "backgroundImage")} className="hidden" />
-                    </label>
-                    {!session.isGroup && (
-                        <label className="menu-item">
-                            <div className="w-[24px] h-[24px] rounded-full overflow-hidden bg-[var(--c-input)] shrink-0">
-                                {chatAvatar ? <img src={chatAvatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
-                            </div>
-                            <div className="menu-label-group"><span className="menu-label">聊天头像</span><span className="menu-desc">只换这个聊天里的头像，角色卡不动</span></div>
-                            <div className="menu-right">
-                                {chatAvatar && <button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setChatAvatar(""); updateSession({ chatAvatar: "" }); }}>恢复</button>}
-                                <ChevronRight size={16} />
-                            </div>
-                            <input type="file" accept="image/*" onChange={handleChatAvatarUpload} className="hidden" />
-                        </label>
-                    )}
-                    {session.isGroup ? (
-                        <>
-                            <div className="menu-item" style={{ cursor: "default" }}>
-                                <ChatInfoIcon icon={Video} color={BINDING_ACCENTS.voice} />
-                                <div className="menu-label-group"><span className="menu-label">视频通话背景</span></div>
-                            </div>
-                            {groupChars.map(c => c && (
-                                <label key={c.id} className="menu-item" style={{ paddingLeft: 72 }}>
-                                    <div className="w-[24px] h-[24px] rounded-full overflow-hidden bg-[var(--c-input)] shrink-0">
-                                        {c.avatar ? <img src={c.avatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
-                                    </div>
-                                    <div className="menu-label-group"><span className="menu-label">{c.name}</span></div>
-                                    <div className="menu-right">
-                                        {groupVideoBgs[c.id] && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); const updated = { ...groupVideoBgs }; delete updated[c.id]; setGroupVideoBgs(updated); updateSession({ groupVideoBackgrounds: updated }); }}>清除</button></>}
-                                        <ChevronRight size={14} />
-                                    </div>
-                                    <input type="file" accept="image/*" onChange={e => handleGroupVideoBgUpload(e, c.id)} className="hidden" />
-                                </label>
-                            ))}
-                            <label className="menu-item" style={{ paddingLeft: 72 }}>
-                                <div className="w-[24px] h-[24px] rounded-full overflow-hidden bg-[var(--c-input)] shrink-0 flex items-center justify-center">
-                                    {userIdentity?.avatarUrl ? (
-                                        <img src={userIdentity.avatarUrl} className="w-full h-full object-cover" alt="" />
-                                    ) : (
-                                        <span className="ts-11">{(userIdentity?.name || "我")[0]}</span>
-                                    )}
-                                </div>
-                                <div className="menu-label-group"><span className="menu-label">{userIdentity?.name || "我"}</span></div>
-                                <div className="menu-right">
-                                    {groupVideoBgs["self"] && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); const updated = { ...groupVideoBgs }; delete updated["self"]; setGroupVideoBgs(updated); updateSession({ groupVideoBackgrounds: updated }); }}>清除</button></>}
-                                    <ChevronRight size={14} />
-                                </div>
-                                <input type="file" accept="image/*" onChange={e => handleGroupVideoBgUpload(e, "self")} className="hidden" />
-                            </label>
-                        </>
-                    ) : (
-                        <label className="menu-item">
-                            <ChatInfoIcon icon={Video} color={BINDING_ACCENTS.voice} />
-                            <div className="menu-label-group"><span className="menu-label">视频通话背景</span></div>
-                            <div className="menu-right">
-                                {videoBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVideoBackground(""); updateSession({ videoBackground: "" }); }}>清除</button></>}
-                                <ChevronRight size={16} />
-                            </div>
-                            <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVideoBackground, "videoBackground")} className="hidden" />
-                        </label>
-                    )}
-                    <label className="menu-item">
-                        <ChatInfoIcon icon={Mic} color={BINDING_ACCENTS.voice} />
-                        <div className="menu-label-group"><span className="menu-label">语音通话背景</span></div>
-                        <div className="menu-right">
-                            {voiceBackground && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setVoiceBackground(""); updateSession({ voiceBackground: "" }); }}>清除</button></>}
-                            <ChevronRight size={16} />
-                        </div>
-                        <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVoiceBackground, "voiceBackground")} className="hidden" />
-                    </label>
-                </div>
-
-                {/* Advanced */}
-                <div className="menu-group">
-                    <KeyboardAutoSendDebounceItem sessionId={session.id} />
-                    <button className="menu-item" onClick={() => setEditingCSS(true)}>
-                        <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.embedding} />
-                        <div className="menu-label-group"><span className="menu-label">自定义 CSS 样式</span></div>
-                        <div className="menu-right">
-                            {customCSS && <span className="menu-desc mr-1">已设置</span>}
-                            <ChevronRight size={16} />
-                        </div>
-                    </button>
-                </div>
-
-                {/* Destructive Actions */}
-                <div className="menu-group">
-                    {!session.isGroup && (
-                    <button className="menu-item" onClick={() => setShowConfirmDelete(true)}>
-                        <ChatInfoIcon icon={UserMinus} color="var(--c-danger)" />
-                        <div className="menu-label-group"><span className="menu-label menu-label-danger">删除好友</span></div>
-                    </button>
-                    )}
-                    <button className="menu-item" onClick={() => setShowConfirmClearTools(true)}>
-                        <ChatInfoIcon icon={Code} color="var(--c-danger)" />
-                        <div className="menu-label-group">
-                            <span className="menu-label menu-label-danger">清理原生tool调用历史——防报错</span>
-                            <span className="menu-desc">切换到文本协议 API 前使用</span>
-                        </div>
-                    </button>
-                    <button className="menu-item" onClick={() => setShowConfirmClear(true)}>
-                        <ChatInfoIcon icon={Trash2} color="var(--c-danger)" />
-                        <div className="menu-label-group">
-                            <span className="menu-label menu-label-danger">清空线上聊天记录</span>
-                            <span className="menu-desc">不影响线下模式记录</span>
-                        </div>
-                    </button>
-                    <button
-                        className="menu-item"
-                        disabled={offlineHistoryBusy}
-                        onClick={() => {
-                            if (!offlineHistoryBusy) setShowConfirmClearOffline(true);
-                        }}
-                        style={offlineHistoryBusy ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
-                    >
-                        <ChatInfoIcon icon={Trash2} color="var(--c-danger)" />
-                        <div className="menu-label-group">
-                            <span className="menu-label menu-label-danger">清空线下聊天记录</span>
-                            <span className="menu-desc">
-                                {offlineHistoryBusy ? "线下回复生成中，完成后再清空" : "同步移除该会话的线下短期记忆事件"}
-                            </span>
-                        </div>
-                    </button>
-                    <button
-                        className="menu-item"
-                        disabled={offlineHistoryBusy}
-                        onClick={() => {
-                            if (!offlineHistoryBusy) setShowConfirmDeleteSession(true);
-                        }}
-                        style={offlineHistoryBusy ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
-                    >
-                        <ChatInfoIcon icon={Trash2} color="var(--c-danger)" />
-                        <div className="menu-label-group">
-                            <span className="menu-label menu-label-danger">删除会话</span>
-                            <span className="menu-desc">
-                                {offlineHistoryBusy
-                                    ? "线下回复生成中，完成后再删除"
-                                    : session.isGroup
-                                        ? "解散并移除该群聊，线上线下记录一并删除"
-                                        : "移除该会话及线上线下记录，好友保留"}
-                            </span>
-                        </div>
-                    </button>
-                </div>
 
             </div>
 

@@ -297,6 +297,9 @@ export const CHAT_MESSAGES_DELETED_EVENT = "chat-messages-deleted";
 /** 单条消息内容被编辑：携带编辑后的整条消息，供聊天镜像等就地覆盖。 */
 export const CHAT_MESSAGE_EDITED_EVENT = "chat-message-edited";
 export const CHAT_REQUEST_REPLY_EVENT = "chat-request-reply";
+export const CHAT_OFFLINE_MODE_PREFIX = "chat-offline-mode:";
+/** 线下模式被聊天室以外的地方切换（插件等），detail: { sessionId, on } */
+export const CHAT_OFFLINE_MODE_CHANGED_EVENT = "chat-offline-mode-changed";
 /** 长按编辑整批回复后重建消息：携带新消息与编辑后的原文，供云同步回写。 */
 export const CHAT_RESPONSE_BATCH_REPLACED_EVENT = "chat-response-batch-replaced";
 
