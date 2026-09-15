@@ -1,5 +1,6 @@
 "use client";
 
+import { ambientAttrs, useAmbientContext } from "@/lib/ui-context-attrs";
 import { groupToolNotices } from "@/lib/tool-notice-groups";
 import { ToolNoticeGroup } from "./tool-notice-group";
 import { extractXhsNoteUrls } from "@/lib/xhs-note";
@@ -1308,6 +1309,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [bgLoading, setBgLoading] = useState(!!session.backgroundImage);
 
     const wrapperRef = useRef<HTMLDivElement>(null);
+    // T4：会话 CSS 作用域就在这个元素上，时辰属性挂这儿，用户写 :root[data-time-of-day="night"] 才生效
+    const ambient = useAmbientContext();
 
     // 全屏特效：命中触发词的新消息播放表情雨/礼花（微信同款）
     const [activeScreenEffect, setActiveScreenEffect] = useState<ActiveScreenEffect | null>(null);
@@ -5852,7 +5855,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     } : undefined;
 
     return (
-        <div ref={wrapperRef} className={`session-${session.id} chat-room-wrapper page-shell inset-0 flex flex-col z-20`} style={chatRoomBackgroundStyle} {...(bgLoading ? { "data-loading": "" } : {})} {...(bgImageResolved ? { "data-has-bg-image": "" } : {})} {...(showSettings ? { "data-settings-open": "" } : {})} {...(session.onlineActions && !session.isGroup ? { "data-online-actions": "" } : {})}>
+        <div ref={wrapperRef} className={`session-${session.id} chat-room-wrapper page-shell inset-0 flex flex-col z-20`} style={chatRoomBackgroundStyle} {...ambientAttrs(ambient)} {...(bgLoading ? { "data-loading": "" } : {})} {...(bgImageResolved ? { "data-has-bg-image": "" } : {})} {...(showSettings ? { "data-settings-open": "" } : {})} {...(session.onlineActions && !session.isGroup ? { "data-online-actions": "" } : {})}>
             {/* Custom CSS Injection for this session — scoped to prevent leaking */}
             {liveCSS && (
                 <SessionCustomCSS css={liveCSS} scope={`.session-${session.id}`} />

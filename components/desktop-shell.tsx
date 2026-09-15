@@ -1,5 +1,6 @@
 "use client";
 
+import { ambientAttrs, useAmbientContext } from "@/lib/ui-context-attrs";
 import { Component, memo, useCallback, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type ReactNode } from "react";
 
 import { updateStatusBarTone } from "@/lib/bg-tone";
@@ -1116,6 +1117,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     isGroup?: boolean;
   } | null>(null);
   const chatMessageNoticeTimerRef = useRef<number | null>(null);
+  // T4：根容器的时辰 / 深浅色语境，主题 CSS 靠它写「入夜换配色」
+  const ambient = useAmbientContext();
   // Swipe-up-to-dismiss state for the chat message notice banner.
   const [noticeDragY, setNoticeDragY] = useState(0);
   const noticeDragRef = useRef({ startY: 0, dy: 0, dragging: false, far: false });
@@ -4302,6 +4305,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               ref={shellRef}
               className={activeApp ? "phone-shell app-open-shell" : "phone-shell"}
               data-ui="phone-screen"
+              {...ambientAttrs(ambient)}
               data-active-app={activeApp || ""}
               data-app={activeApp || ""}
               data-shadows={Number(draftTheme.cssOverrides["--desktop-global-shadow"] ?? (draftTheme.enableGlobalShadows ? "0.5" : "0")) > 0 ? "on" : "off"}
@@ -4475,7 +4479,12 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
 
               {/* Incoming call bar — global overlay */}
               {incomingCall && (
-                <div className="incoming-call-bar">
+                <div
+                  className="incoming-call-bar"
+                  data-notif-kind="call"
+                  data-call-type={incomingCall.type}
+                  data-group={incomingCall.isGroup ? "1" : "0"}
+                >
                   <div className="incoming-call-bar-info">
                     {incomingCall.charAvatar ? (
                       <img src={incomingCall.charAvatar} alt="" className="incoming-call-bar-avatar" />
@@ -4558,6 +4567,9 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                 <button
                   type="button"
                   className="chat-message-notice-bar"
+                  data-notif-kind="message"
+                  data-group={chatMessageNotice.isGroup ? "1" : "0"}
+                  data-session={chatMessageNotice.sessionId}
                   style={{
                     transform: noticeDragY ? `translateY(${noticeDragY}px)` : undefined,
                     opacity: noticeDragY < 0 ? Math.max(0, 1 + noticeDragY / 160) : 1,

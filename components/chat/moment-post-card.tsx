@@ -1,5 +1,6 @@
 "use client";
 
+import { timeSlotAttrs } from "@/lib/ui-context-attrs";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { MomentPost, MomentComment } from "@/lib/moments-types";
@@ -285,7 +286,16 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
     }, [onUpdate, post]);
 
     return (
-        <div data-moment-post-id={post.id} className="feed-post relative border-b-[2.5px] border-[var(--c-card-border)] pb-5 mb-5 w-full bg-transparent px-4 pt-2">
+        <div
+            data-moment-post-id={post.id}
+            data-author={post.authorType}
+            data-has-img={post.photoUrl || post.photoDescription ? "1" : "0"}
+            data-img-count={post.photoUrl ? "1" : "0"}
+            data-photo-status={post.photoGenerationStatus || (post.photoUrl ? "generated" : "none")}
+            data-liked={isLikedByUser ? "1" : "0"}
+            data-like-count={post.likes.length}
+            {...timeSlotAttrs(post.createdAt)}
+            className="feed-post relative border-b-[2.5px] border-[var(--c-card-border)] pb-5 mb-5 w-full bg-transparent px-4 pt-2">
             {/* Header row: avatar + name */}
             <div className="feed-post-header flex items-center gap-3 mb-3">
                 <div

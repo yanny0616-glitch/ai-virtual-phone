@@ -1,5 +1,6 @@
 "use client";
 
+import { sessionItemAttrs, sessionItemVars } from "@/lib/ui-context-attrs";
 import React, { useState, useEffect, useSyncExternalStore } from "react";
 import { ChevronLeft } from "lucide-react";
 import { loadChatSessions, loadChatContacts, ChatSession, createOrGetSession, createGroupSession, pushChatMessage, addChatContact, loadChatMessages, getLastVisibleSessionMessage, getChatMessagePreview, CHAT_UNREAD_UPDATED_EVENT } from "@/lib/chat-storage";
@@ -312,9 +313,9 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                                 const bTime = getSessionListTime(b);
                                 return parseTime(bTime) - parseTime(aTime);
                             })
-                            .map(s => (
+                            .map((s, index) => (
                                 <div key={s.id}>
-                                    <SessionItem session={s} onSelect={() => onSelectSession(s)} isPinned={!!s.isPinned} />
+                                    <SessionItem session={s} onSelect={() => onSelectSession(s)} isPinned={!!s.isPinned} index={index} />
                                 </div>
                             ));
                             if (!showMascot && regularItems.length === 0) {
@@ -756,7 +757,7 @@ function ContactPicker({ onClose, onSelect }: { onClose: () => void; onSelect: (
     );
 }
 
-function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, onSelect: () => void, isPinned?: boolean }) {
+function SessionItem({ session, onSelect, isPinned, index = 0 }: { session: ChatSession, onSelect: () => void, isPinned?: boolean, index?: number }) {
     const chars = loadWeixinCharacters();
     const character = chars.find(c => c.id === session.contactId);
     const lastVisibleMessage = getLastVisibleSessionMessage(session.id);
@@ -787,10 +788,25 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
         ].slice(0, 4)
         : [];
 
+    // T3：列表项的语境属性，主题 CSS 靠它区分未读多少、最后一条是什么、几点来的
+    const itemContext = {
+        index,
+        unread,
+        pinned: !!isPinned,
+        muted: !!session.isMuted,
+        group: !!isGroup,
+        preview: preview || "",
+        lastMessage: offlineIsNewer ? null : lastVisibleMessage,
+        lastTime: displayTime,
+        avatarUrl: isGroup ? "" : (session.chatAvatar || character?.avatar || ""),
+    };
+
     return (
         <div
             className={`minimal-list-item${isPinned ? ' chat-pinned' : ''}`}
             onClick={onSelect}
+            {...sessionItemAttrs(itemContext)}
+            style={sessionItemVars(itemContext) as React.CSSProperties}
         >
             <div className="relative shrink-0">
             {isGroup ? (

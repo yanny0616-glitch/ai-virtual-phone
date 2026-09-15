@@ -135,12 +135,14 @@ function scopeSingleSelector(sel: string, scope: string): string {
   if (lower === "body" || lower === "html" || lower === ":root") {
     return scope;
   }
-  // Selectors starting with body/html/:root — replace the element part
-  if (/^(body|html|:root)\s/i.test(sel)) {
-    return scope + " " + sel.replace(/^(body|html|:root)\s*/i, "");
-  }
-  if (/^(body|html|:root)\./i.test(sel)) {
-    return scope + sel.replace(/^(body|html|:root)/i, "");
+  // Selectors starting with body/html/:root — replace the element part.
+  // 紧跟属性或伪类的写法也要认（`:root[data-time-of-day="night"] .x`、`:root:hover`），
+  // 否则会被当成普通选择器加前缀，写出来的时辰主题不生效。
+  const rootHead = sel.match(/^(body|html|:root)(?=$|[\s.,:\[#>~+])/i);
+  if (rootHead) {
+    const rest = sel.slice(rootHead[0].length);
+    if (!rest.trim()) return scope;
+    return /^\s/.test(rest) ? scope + " " + rest.trim() : scope + rest;
   }
   // 选择器就是 scope 本身（如用户写 .chat-app { --var: ... }）：直接返回 scope，
   // 否则会被错误地变成 ".chat-app .chat-app"，导致变量没法挂到 scope 元素上

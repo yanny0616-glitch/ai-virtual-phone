@@ -6498,20 +6498,26 @@
   color: #fff;
 }
 
+/* T8 版式变量：换的是布局不只是配色。
+   --notif-layout: row / row-reverse / column（column 时把头像变成大图，就是拍立得样式）
+   其余变量见 lib/theme-types.ts 顶部的契约清单。 */
 .chat-message-notice-bar {
   position: absolute;
-  top: 54px;
-  left: 10px;
-  right: 10px;
+  top: var(--notif-top, 54px);
+  left: var(--notif-left, 10px);
+  right: var(--notif-right, 10px);
+  width: var(--notif-width, auto);
+  margin: var(--notif-margin, 0);
   z-index: 190;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 66px;
-  padding: 11px 12px;
+  flex-direction: var(--notif-layout, row);
+  align-items: var(--notif-align, center);
+  justify-content: var(--notif-justify, space-between);
+  gap: var(--notif-gap, 12px);
+  min-height: var(--notif-min-height, 66px);
+  padding: var(--notif-padding, 11px 12px);
   border: 0;
-  border-radius: 18px;
+  border-radius: var(--notif-radius, 18px);
   background: color-mix(in srgb, var(--c-surface) 88%, white 12%);
   color: var(--c-text);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.2);
@@ -6519,7 +6525,7 @@
   -webkit-backdrop-filter: blur(var(--ui-blur));
   animation: incoming-call-slide-in 0.3s ease-out;
   cursor: pointer;
-  text-align: left;
+  text-align: var(--notif-text-align, left);
 }
 
 .chat-message-notice-bar:active {
@@ -6528,16 +6534,17 @@
 
 .chat-message-notice-info {
   display: flex;
-  align-items: center;
+  flex-direction: var(--notif-info-layout, row);
+  align-items: var(--notif-info-align, center);
   min-width: 0;
   flex: 1;
-  gap: 10px;
+  gap: var(--notif-info-gap, 10px);
 }
 
 .chat-message-notice-avatar {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
+  width: var(--notif-avatar-w, 42px);
+  height: var(--notif-avatar-h, var(--notif-avatar-w, 42px));
+  border-radius: var(--notif-avatar-radius, 50%);
   flex-shrink: 0;
   object-fit: cover;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
@@ -7651,4 +7658,15 @@
   margin-top: 10px;
   font-size: calc(10px*var(--app-text-scale,1));
   color: var(--c-icon);
+}
+
+/* T8：横幅里三块的顺序和对齐也交给变量，column 布局下文字块要能占满宽度 */
+.chat-message-notice-text {
+  text-align: inherit;
+  width: var(--notif-text-width, auto);
+}
+
+.chat-message-notice-action {
+  order: var(--notif-action-order, 0);
+  align-self: var(--notif-action-align, auto);
 }
