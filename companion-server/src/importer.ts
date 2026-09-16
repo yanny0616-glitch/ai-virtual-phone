@@ -43,7 +43,9 @@ export async function importFromCloud(rest: Rest, store: Store, userId: string, 
     if (existing && !opts.force) { entry.skipped = "已迁入过（force 才覆盖）"; continue; }
 
     const settings: Partial<Ctx> = { tzOffsetMin: tz };
-    for (const key of SETTING_KEYS) if (ctx[key] !== undefined && key !== "tzOffsetMin") (settings as Record<string, unknown>)[key] = ctx[key];
+    // recheckEnabled / genEnabled 在云端是「云端复核 / 云端生成」开关，切到后端时会被关掉，不能跟着迁
+    const cloudOnly = new Set(["tzOffsetMin", "recheckEnabled", "genEnabled"]);
+    for (const key of SETTING_KEYS) if (ctx[key] !== undefined && !cloudOnly.has(key)) (settings as Record<string, unknown>)[key] = ctx[key];
     const kit = plans.map(p => p.context?.genKit).find(k => k && typeof k === "object");
     if (kit) {
       if (kit.autoGenAt) settings.autoGenAt = kit.autoGenAt;
