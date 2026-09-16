@@ -1,0 +1,16 @@
+[Unit]
+Description=Float 挂念后端（companion-server）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/float-companion/companion-server
+EnvironmentFile=/etc/float-companion/env
+ExecStart=/usr/local/bin/node --no-warnings src/main.ts
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
