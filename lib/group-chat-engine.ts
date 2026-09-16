@@ -1103,7 +1103,7 @@ export async function generateGroupChatCompletion(
 export async function generateGroupRawCompletion(
     session: ChatSession,
     history: ChatMessage[],
-    options?: GroupChatPromptBuildOptions & { signal?: AbortSignal; appId?: string },
+    options?: GroupChatPromptBuildOptions & { signal?: AbortSignal; appId?: string; onStreamDelta?: (delta: string) => void },
 ): Promise<{ text: string; model: string; presetName: string }> {
     const { llmMessages, config, preset, regexes } = await buildGroupChatPromptMessages(
         session,
@@ -1115,14 +1115,18 @@ export async function generateGroupRawCompletion(
             apiConfigId: options?.apiConfigId,
         },
     );
-    const rawOutput = await sendLLMRequest(config, preset, llmMessages, regexes, {
+    const meta = {
         characterName: `群聊:${session.groupName || "群聊"}`,
-    }, {
+    };
+    const requestOptions = {
         appId: options?.appId ?? "group_chat",
         appTags: options?.appTags ?? [],
         debugSessionId: session.id,
         signal: options?.signal,
-    });
+    };
+    const rawOutput = options?.onStreamDelta
+        ? (await sendLLMStreamRequest(config, preset, llmMessages, regexes, meta, requestOptions, { onDelta: options.onStreamDelta })).content
+        : await sendLLMRequest(config, preset, llmMessages, regexes, meta, requestOptions);
     return {
         text: rawOutput,
         model: config.defaultModel,

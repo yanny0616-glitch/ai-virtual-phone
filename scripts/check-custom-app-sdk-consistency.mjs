@@ -51,7 +51,7 @@ const wrapperActions = new Set();        // 外壳会发送的 action
     const topMethod = line.match(/^\s{4}(\w+):\s*(?:function|onEvent|offEvent)/);
     if (topMethod) { wrapperMethods.add(topMethod[1]); }
     const method = line.match(/^\s{6,}(\w+):\s*function/);
-    const req = line.match(/request\((['"])([\w.]+)\1/);
+    const req = line.match(/request(?:Generation)?\((['"])([\w.]+)\1/);
     if (method && ns) {
       const key = `${ns}.${method[1]}`;
       wrapperMethods.add(key);

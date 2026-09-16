@@ -381,3 +381,16 @@ App 在打开、每分钟循环和生成之后调用 `revealForks` 落库；忍�
 ## 固定作息（0.9.40）
 
 `routineFor(cx, date)` 读变量池里本角色的 `routine` 和 `routineExceptions`（「忙碌回复」插件写的），返回 `{ items, wake, bed }`：`items` 是和日历条目同形的已定安排（`id` 前缀 `routine_`，`lock` 按插件的档位：专注 / 忙 → busy，分神 → free），`withRoutine` 并进 `fixedCalendarItems` 的结果，同一 `startTime` 以日历为准。本地 `generateDay` 和寄给云端的 `uploadGenKitCloud` 走同一套，所以云端不用改；`wake`/`bed` 本地落库时覆盖模型输出，`adoptCloudDay` 接管时再覆盖一次。设置 `routineOn` 默认开。只在生成时读，不订阅插件的 `routine.exception`。
+
+
+## 0.9.41：跨类型事项去重
+
+`src/domain/matters.mjs` 是无 IO 的纯模块，由 APP 构建器编为 `GuaNianMatters`，同时由 push:build-dist 内联进两个 worker，并由 check:push 校验同源。`matterId` 标识具体沟通目的：旧数据使用 thread/wake/slot 编号，新事项使用本轮时间和 new:1/2 派生编号。模型在现有复核请求中通过 `links` 把不同措辞的旧念头关联到同一编号，extra/keep 携带事项编号；不增加独立判重模型调用。
+
+复核提示提供全部当前任务/账本及最近 12 条实际云端成文（每条最多 4000 字），普通聊天继续沿用已有窗口。本机复核读取 guanian-history 的最近 50 条记录，云端沿用原先最多 200 条输出窗口；硬规则使用各自已读取的全部输出，已清理或窗口以外记录不保证可判重。网关仅补充返回 guanianContext 的 matterId/eventId，不暴露完整 outbox meta。
+
+`prepareMatters` 校验事项引用，统一同轮 keep/extra 与旧任务的编号；`matterBlock` 在预约及发送前执行：已了结阻止跟进，同事项明确约定优先，普通事项只留一个有效任务；有实际发送证据后须 relation=followup 且引用更晚的用户消息或线下摘要。角色主动消息本身不能成为再次催问的证据。重复任务持久化 matterSuppressed，约定同版本不再重挂。事项关联不刷新话头存活时间或提醒间隔。
+
+本机先处理 keep/settle 再处理 extra，防同一模型返回同时创建约定和临时念头。云端依原计划版本条件写回，由现有数据库规则撤普通旧预约；约定任务即使仍在队列，发送端也因 inactive/suppressed 拦截。成文后再次读取计划检查，防生成期间已被去重仍交付。outbox 保存事项编号，当前计划不再含旧任务时仍可按编号核对发送证据。既有无编号正文仍由模型语义判断关联，不宣称语义判重绝对准确。
+
+网关、APP 上传与下载保留事项字段；`matter-dedup-v1` 要求网关同时核对两个 worker，混合版本不报告支持。沿用 schema 12；未变更设备锁和正文预览。专项覆盖纯函数、本机真实 recheck、云端真实 recheck、发送 worker、成文期间撤销和读取失败，不含手机端实测。上线需发布宿主分发产物、升级挂念，并重新部署三个个人云函数。

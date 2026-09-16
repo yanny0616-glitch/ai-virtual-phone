@@ -3,7 +3,7 @@
 // verify_jwt 必须关闭；请求改用用户自己的 service_role key 做逐次校验。
 
 // BEGIN PERSONAL PUSH VERSION
-const PERSONAL_PUSH_FUNCTIONS_VERSION = 6;
+const PERSONAL_PUSH_FUNCTIONS_VERSION = 9;
 // END PERSONAL PUSH VERSION
 
 type SubscriptionRow = { endpoint: string; p256dh: string; auth: string };
@@ -113,6 +113,7 @@ function cleanThreads(value: unknown): Record<string, unknown>[] {
       status: ["pending", "completed", "cancelled"].includes(String(t.status)) ? String(t.status) : "pending",
       revision: Math.max(1, Number(t.revision) || 1),
       sourceMessageId: cleanText(t.sourceMessageId, 100),
+      matterId: cleanText(t.matterId, 300), matterRelation: cleanText(t.matterRelation, 12), matterEvidenceId: cleanText(t.matterEvidenceId, 150),
       mentionedAt: Number(t.mentionedAt) || 0,
       yearly: t.yearly === true,
       since: Number(t.since) || 0,
@@ -1042,11 +1043,11 @@ Deno.serve(async (request: Request) => {
       if (!/^[A-Za-z0-9_-]{1,160}$/.test(sessionId)) return json({ ok: false, error: "缺少有效会话编号。" }, 400);
       const response = await rest(`push_outbox?user_id=eq.${OWNER_ID}&session_id=eq.${encodeURIComponent(sessionId)}`
         + "&trigger_key=like.timedwake:timed_wake_capp_*gua.nian_*"
-        + "&select=id,job_id,session_id,trigger_key,raw_text,created_at,consumed_at&order=created_at.desc&limit=50");
+        + "&select=id,job_id,session_id,trigger_key,raw_text,created_at,consumed_at,matter:meta->guanianContext&order=created_at.desc&limit=50");
       if (!response.ok) return json({ ok: false, error: "读取云端发送记录失败，请重试。" }, 503);
-      const rows = await response.json() as { id: string; job_id: string; session_id: string; trigger_key: string; raw_text: string; created_at: string; consumed_at: string | null }[];
+      const rows = await response.json() as { id: string; job_id: string; session_id: string; trigger_key: string; raw_text: string; created_at: string; consumed_at: string | null; matter?: { matterId?: string; eventId?: string } }[];
       const entries = rows.filter(row => row.session_id === sessionId && /^timedwake:timed_wake_capp_(?:app_)?gua\.nian_/.test(row.trigger_key));
-      return json({ ok: true, sessionId, entries });
+      return json({ ok: true, sessionId, entries: entries.map(({ matter, ...entry }) => ({ ...entry, meta: { guanianContext: { matterId: cleanText(matter?.matterId, 300), eventId: cleanText(matter?.eventId, 16) } } })) });
     }
 
     if (action === "outbox") {
@@ -1284,7 +1285,7 @@ Deno.serve(async (request: Request) => {
         if (probe.ok) worker = await probe.json().catch(() => null);
       } catch { /* 旧 worker 或网络失败，不执行写入，也不报告支持 */ }
       let capabilities = worker?.ok && Array.isArray(worker.capabilities) ? worker.capabilities : [];
-      let promiseGeneratorReady = false, schedulerGeneratorReady = false, historyGeneratorReady = false;
+      let promiseGeneratorReady = false, schedulerGeneratorReady = false, historyGeneratorReady = false, matterGeneratorReady = false;
       if (capabilities.includes("promise-tasks-v1")) {
         const meta = await rest("ai_phone_cloud_meta?id=eq.personal-cloud&select=schema_version&limit=1");
         const version = meta.ok ? Number((await meta.json())[0]?.schema_version) : 0;
@@ -1294,6 +1295,7 @@ Deno.serve(async (request: Request) => {
         promiseGeneratorReady = features?.capabilities?.includes("promise-tasks-v2") === true;
         schedulerGeneratorReady = features?.capabilities?.includes("scheduler-state-v1") === true;
         historyGeneratorReady = features?.capabilities?.includes("history-window-v1") === true;
+        matterGeneratorReady = features?.capabilities?.includes("matter-dedup-v1") === true;
         if (version < 11 || !features?.capabilities?.includes("guanian-history-v1")) capabilities = capabilities.filter(c => c !== "promise-tasks-v1");
       }
       if (capabilities.includes("promise-tasks-v2")) {
@@ -1305,6 +1307,7 @@ Deno.serve(async (request: Request) => {
         const ready = await rest("rpc/push_scheduler_storage_ready", { method: "POST", body: "{}" });
         if (!schedulerGeneratorReady || !ready.ok || await ready.json() !== true || !meta.ok || Number((await meta.json())[0]?.schema_version) < 12) capabilities = capabilities.filter(c => c !== "scheduler-state-v1");
       }
+      if (!matterGeneratorReady) capabilities = capabilities.filter(c => c !== "matter-dedup-v1");
       if (!historyGeneratorReady) capabilities = capabilities.filter(c => c !== "history-window-v1");
       if (action === "recheck-capabilities" && request.method === "GET") return json({ ok: true, capabilities });
       if (action === "generation-stop" && request.method === "POST") {
@@ -1420,6 +1423,7 @@ Deno.serve(async (request: Request) => {
             // 念头的保质期和改约前的原时刻：云端改约、到点押后都拿它们封顶
             until: Number(it.until) || 0,
             origFireAt: Number(it.origFireAt) || 0, held: it.held === true, promiseRevision: Math.max(1, Number(it.promiseRevision) || 1),
+            matterId: cleanText(it.matterId, 300), matterRelation: cleanText(it.matterRelation, 12), matterEvidenceId: cleanText(it.matterEvidenceId, 150), matterSuppressed: it.matterSuppressed === true,
             from: cleanText(it.from, 16).replace(/[^A-Za-z0-9_-]/g, ""),
             kind: cleanText(it.kind, 12).replace(/[^a-z]/g, ""),
           };

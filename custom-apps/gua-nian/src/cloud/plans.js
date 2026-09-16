@@ -143,7 +143,7 @@
     await finish("syncing", "正在同步今天的计划…", reset);
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
-      await requireRecheckFeatures(["scheduler-state-v1"]);
+      await requireRecheckFeatures(["scheduler-state-v1", "matter-dedup-v1"]);
       if (GuaNianHistory.guanianHasWindow(S.settings)) await requireRecheckFeatures(["history-window-v1"]);
       if (cx.plan.cloudStateUrl !== cloudCfg().url || !Number.isFinite(cx.plan.cloudStateVersion)) await pullCloudDecisionsBody(cx, true);
       if (S.settings.threadsOn) await requireRecheckFeatures(["promise-tasks-v2"]);
@@ -160,6 +160,7 @@
           resetDecisions: reset,
           context: cloudContext(cx),
           items: cx.plan.items.map((w) => ({
+            ...GuaNianMatters.matterFields(w), matterSuppressed: !!w.matterSuppressed,
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
             wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0, from: w.from || "",

@@ -117,6 +117,9 @@ await new Promise((resolve, reject) => webpack({ mode: 'development', devtool: f
 await fs.writeFile(path.join(out,'index.html'),'<!doctype html><meta charset="utf-8"><style>.w-full{width:100%}.h-full{height:100%}</style><div id="root" style="width:360px;height:250px"></div><script>window.onerror=function(m){document.body.dataset.result="FAIL: "+m;};window.onunhandledrejection=function(e){document.body.dataset.result="FAIL: "+e.reason;};</script><script src="bundle.js"></script>');
 const profile=await fs.mkdtemp('/tmp/float-mascot-browser-');
 const child=spawn(process.env.CHROMIUM_BIN||'chromium',['--headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--allow-file-access-from-files','--user-data-dir='+profile,'--remote-debugging-port=0','about:blank']);
+// 脚本中途抛错或被打断也要把子进程带走，不然孤儿 Chromium 会一直吃 CPU
+process.on('exit', () => { try { child.kill('SIGKILL'); } catch {} });
+if (!globalThis.__exitHooksInstalled) { globalThis.__exitHooksInstalled = true; process.on('uncaughtException', e => { console.error(e); process.exit(1); }); process.on('unhandledRejection', e => { console.error(e); process.exit(1); }); process.on('SIGINT', () => process.exit(130)); process.on('SIGTERM', () => process.exit(143)); }
 let socket; const pending=new Map(); let serial=0; let errors='';
 try {
   const address=await new Promise((resolve,reject)=>{

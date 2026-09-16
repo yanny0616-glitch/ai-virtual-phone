@@ -377,6 +377,7 @@ export type DebugPromptRequestOptions = {
 };
 
 type ChatPromptBuildOptions = {
+    requiredTask?: ChatMessage;
     generationIntent?: "regenerate";
     followUpCount?: number;
     followUpDelay?: number;
@@ -2021,6 +2022,7 @@ export async function buildChatPromptMessages(
         && !effectiveAppTags?.includes("video")
         ? buildVoiceExpressionPrompt(voiceConfig, effectiveAppTags?.includes("voice") ? "call" : "chat") : "";
     const llmMessages = assemblePromptPayload({
+        requiredTask: options?.requiredTask,
         character,
         history: promptHistory,
         preset,

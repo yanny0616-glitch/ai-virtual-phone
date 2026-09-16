@@ -78,6 +78,8 @@
           : (+c.at || 0) > (+mine.at || 0)) {
           if (!mine.done && c.done) await dropThreadSlots(cx, mine.id, "这件事你说了结了");
           Object.assign(mine, c); mine.done = !!c.done; mine.at = +c.at; mine.nudge = String(c.nudge || mine.nudge || ""); ch++;
+        } else if ((+c.at || 0) >= (+mine.at || 0) && c.matterId && c.matterId !== mine.matterId) {
+          Object.assign(mine, GuaNianMatters.matterFields(c)); ch++;
         }
       }
       if (ch) { await saveThreads(cx, list); await log(cx, "惦记账本：并入云端改动 " + ch + " 处"); }
@@ -104,7 +106,7 @@
       if (!t || t.done || Number(t.revision || 1) !== Number(ci.promiseRevision || 1)) continue;
       const mine = promiseItems.find(w => w.wakeId === ci.wakeId);
       if (!mine) { promiseItems.push({ ...ci, delivery: ci.wakeId ? "push" : "", hist: [] }); promiseMerged++; }
-      else if (JSON.stringify([mine.act,mine.fireAt,mine.promiseRevision]) !== JSON.stringify([ci.act,ci.fireAt,ci.promiseRevision])) {
+      else if (JSON.stringify([mine.act,mine.fireAt,mine.promiseRevision,mine.matterId,mine.matterSuppressed,mine.matterEvidenceId,mine.matterRelation]) !== JSON.stringify([ci.act,ci.fireAt,ci.promiseRevision,ci.matterId,ci.matterSuppressed,ci.matterEvidenceId,ci.matterRelation])) {
         Object.assign(mine, ci); promiseMerged++;
       }
     }
@@ -157,6 +159,7 @@
         w = {
           time: ci.time, fireAt: ci.fireAt, source: ci.source || "临时起念", act: false, kind: ci.kind || "extra",
           why: "", intent: "", delivery: "", reason: "", wakeId: "",
+          ...GuaNianMatters.matterFields(ci), matterSuppressed: !!ci.matterSuppressed,
           sem: ci.sem || "", topic: ci.topic || "", from: ci.from || "", promiseRevision: +ci.promiseRevision || 1, hist: [],
           score: calcScore(ci.fireAt, GuaNianPromises.ordinaryQuota(items), 0, 0),
         };
@@ -179,6 +182,9 @@
         w.wakeId = ni.wakeId || ""; w.delivery = ni.wakeId ? "push" : ""; w.reason = ni.reason || "";
         if (ni.until) w.until = ni.until;
         w.why = ni.why || w.why; w.intent = ni.intent || w.intent;
+      } else if (d.kind === "dedupe") {
+        if (w.wakeId) await AiPhone.push.cancelWake(w.wakeId);
+        w.act = false; w.matterSuppressed = true; w.delivery = ""; w.why = d.note || "同一事项重复";
       } else if (d.kind === "freshness" || d.kind === "factcheck") {
         markAdj = false;
       } else if (d.kind === "presend") {

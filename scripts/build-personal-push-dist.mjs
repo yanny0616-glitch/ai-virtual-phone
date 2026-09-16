@@ -26,7 +26,7 @@ writeFileSync(workerPath, readFileSync(workerPath, "utf8").replace(
 for (const name of ["push-recheck", "push-generate"]) {
   const path = resolve(root, `supabase/functions/${name}/index.ts`);
   let code = readFileSync(path, "utf8");
-  for (const [label, source] of [["GUANIAN CLOUD HISTORY", "lib/guanian-cloud-history.ts"], ["GUANIAN PROMISES", "custom-apps/gua-nian/src/domain/promises.mjs"]]) {
+  for (const [label, source] of [["GUANIAN CLOUD HISTORY", "lib/guanian-cloud-history.ts"], ["GUANIAN PROMISES", "custom-apps/gua-nian/src/domain/promises.mjs"], ["GUANIAN MATTERS", "custom-apps/gua-nian/src/domain/matters.mjs"]]) {
     const shared = readFileSync(resolve(root, source), "utf8").replace(/^export /gm, "").trim();
     const block = `// BEGIN ${label}\n${shared}\n// END ${label}`;
     const pattern = new RegExp(`// BEGIN ${label}[\\s\\S]*?// END ${label}`);

@@ -6,6 +6,9 @@ html=html.replace(/  init\(\);\s*\}\)\(\);\s*<\/script>/,` S.settings={...SET_DE
 await fsp.writeFile(previewFile,html);
 const profile = await fsp.mkdtemp('/tmp/shot-peimian-');
 const child = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--no-proxy-server', '--hide-scrollbars', '--allow-file-access-from-files', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+// 脚本中途抛错或被打断也要把子进程带走，不然孤儿 Chromium 会一直吃 CPU
+process.on('exit', () => { try { child.kill('SIGKILL'); } catch {} });
+if (!globalThis.__exitHooksInstalled) { globalThis.__exitHooksInstalled = true; process.on('uncaughtException', e => { console.error(e); process.exit(1); }); process.on('unhandledRejection', e => { console.error(e); process.exit(1); }); process.on('SIGINT', () => process.exit(130)); process.on('SIGTERM', () => process.exit(143)); }
 let port;
 for (let i = 0; i < 100; i++) { try { port = Number((await fsp.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
 const tabs = await (await fetch(`http://127.0.0.1:${port}/json`)).json();

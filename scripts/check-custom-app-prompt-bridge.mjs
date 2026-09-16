@@ -96,6 +96,9 @@ const html = path.join(dir, "test.html");
 await fs.writeFile(html, `<!doctype html><html><head><meta charset="utf-8"></head><body><script>${testScript.replace(/<\/script/gi, "<\\/script")}</script></body></html>`);
 const profile = path.join(dir, "profile");
 const child = spawn("chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-proxy-server", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+// 脚本中途抛错或被打断也要把子进程带走，不然孤儿 Chromium 会一直吃 CPU
+process.on('exit', () => { try { child.kill('SIGKILL'); } catch {} });
+if (!globalThis.__exitHooksInstalled) { globalThis.__exitHooksInstalled = true; process.on('uncaughtException', e => { console.error(e); process.exit(1); }); process.on('unhandledRejection', e => { console.error(e); process.exit(1); }); process.on('SIGINT', () => process.exit(130)); process.on('SIGTERM', () => process.exit(143)); }
 let socket;
 try {
   let port;

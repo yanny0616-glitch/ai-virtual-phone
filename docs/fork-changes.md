@@ -117,9 +117,10 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 | APP | 版本 | 做什么 | 说明文档 |
 | --- | --- | --- | --- |
-| 挂念 `gua-nian` | 0.9.40 | 生成角色一天（带到点揭晓的变数，照着固定作息排）→ 心动时刻 → 云端复核 → 定时主动消息；精力/情绪衰减模型；约定账本；可同时挂念多人；信息页按日程自动同步在线状态 | `custom-apps/gua-nian/ARCHITECTURE.md`、`docs/gua-nian-*.md`、`docs/archive/gua-nian/` |
+| 挂念 `gua-nian` | 0.9.42 | 生成角色一天（带到点揭晓的变数，照着固定作息排）→ 心动时刻 → 云端复核 → 定时主动消息（可整体交给 VPS 后端 `companion-server/`，本机只寄模板）；精力/情绪衰减模型；约定账本；可同时挂念多人；信息页按日程自动同步在线状态 | `custom-apps/gua-nian/ARCHITECTURE.md`、`docs/gua-nian-*.md`、`docs/archive/gua-nian/` |
 | 拾光 `shiguang` | 2.1.1 | 重要记忆：每 20 轮整理、关键词三档召回、当轮同步注入。宿主侧原管线已删，只留只读接口 | `custom-apps/shiguang/ARCHITECTURE.md` |
 | 用量 `usage-dashboard` | 2.8.1 | 按角色/来源看 token 与缓存、日志分页筛选、保留条数设置。来源名由宿主 `lib/usage-source-names.ts` 下发 | — |
+| 小剧场 `xiao-ju-chang` | 0.1.1 | 单角色小剧场生成：部件各自成库随意组合，整段 HTML/JS 在沙盒 iframe 里渲染，四套换布局的主题 | `custom-apps/xiao-ju-chang/ARCHITECTURE.md` |
 | `online-plaza` | 1.1.0 | 上游原有 | — |
 
 ## 8. 宿主功能与修补
@@ -158,6 +159,18 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 目前没有一条命令跑全部；CI 只跑 `check:push` / `check:apps-dist` / `check:sdk`。`check-fork-regressions.mjs` 里「网关保留用户睡眠设置」一项在 2026-09-10 已知失败（recheck-plan 返回 409，设备锁改动后测试没跟上），不是新问题。
 
+## 0.9.42：挂念交给 VPS 后端
+
+`companion-server/`（仓库内独立服务，Node 22 直接跑 TypeScript + SQLite + systemd，部署在 `/opt/float-companion/companion-server`，只监听 127.0.0.1:18070；不参与 Next 构建，根 `tsconfig.json` 排除）接管挂念的全部判断与发送：每分钟一轮，生活面生成 → 门禁由头分量 → 判断 → 约定 / 回音账 → 到点复核 → 写 `push_outbox` + Web Push。个人云只当信箱（聊天镜像、模板、outbox、订阅、用量），VPS 不对外开端口。规则与文案搬自 push-recheck / push-generate，`src/vendor/*.mjs` 与挂念 `src/domain/` 同源；事项去重之外另有字面相似度兜底（`src/similar.ts`）。模式 shadow / live 存在 SQLite，运维用 `node src/cli.ts status | import [--force] | mode | test-send`，说明见 `companion-server/README.md`。
+
+提示词靠宿主模板：挂念开「交给 VPS 后端」后冻 `capptpl:<挂念>:<角色>:judge|daily|chat` 三份；`chat` 走 `push.freeze({ chatSnapshot: true })`，是聊天 APP 原样提示词 + 完整聊天记录，定时唤醒指令里的意图（`__GUANIAN_INTENT__`）和分钟数（424242）留占位，后端到点填，并把冻结时的系统时间 / 角色本地时间换成发送时刻。宿主在 TA 回复后 30 秒、切到后台时重冻已登记模板，后端每轮按 `updated_at` 取新。开关打开时挂念本机不生成、不复核、不挂任何预约；此时应关掉云端复核和云端生成，否则会重复发送。
+
+## 0.9.41：挂念按事项去重
+
+临时念头、明确约定、近期实际成文共同参与复核，沿用稳定 matterId；同一事项不能重复预约，明确约定优先。发送过的事项须有更晚用户消息/线下摘要作为新进展证据才允许跟进，发送前及成文后再次检查当前计划。语义关联依赖现有模型复核，不按宽泛文本相似度删记录。缺失事项编号或发送记录读取失败时不冒险新增临时念头。共享规则位于 `custom-apps/gua-nian/src/domain/matters.mjs`，APP 与两个 worker 同源。
+
+需要升级挂念和个人云网关、push-recheck、push-generate；无需新 SQL。旧重复任务在后续复核中处理，手机端正文预览未改。专项：`scripts/check-gua-nian-matters.mjs`。
+
 ## 0.9.35：重新生成不再锁住挂念旧日程
 
 本地整天生成与云端生成原料使用 `fixedCalendarItems` 排除 ID 以 `guanian_` 开头的挂念写回条目，避免旧产物成为必须原样保留的约束或在模型漏写时被补回。其他来源的日历安排继续保留；聊天与惦记仍参与模型判断，因此重新生成不保证所有内容不同。日历同步继续读取完整旧列表，以清理并替换挂念自己的旧条目。
@@ -172,13 +185,46 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 合并上游至 `a4da07f`：照片重试支持选择角色参考图，未配置参考图时保留原标签；旧式自拍标签提供兜底，显式参考图选择优先；补充生成中断恢复及换图等待。预设重复修复沿用 fork 已有实现及本次页面填入修复；朋友圈继续使用微信专属头像。静态缓存版本升至 v37。
 
+### 小剧场（`custom-apps/xiao-ju-chang/`）
+
+给单个角色和它绑定的世界书生成一篇小剧场，文字型和前端型都有：AI 写的整段 HTML/JS 原样进沙盒 iframe 渲染（高度和 `data-action` 点击靠 postMessage 回传），不做正则替换。部件各自成库（前置要求 / 提示词 / 随机池 + 随机宏 / 输出方式），一个「小剧场」只是一次组合，另带记忆三选一、写回开关、我是谁、纯裸通道和随机权重。注入闸门用 `promptProfile.include` 白名单，只放人设、性格、关系、世界书和选中的记忆标记，用户自制预设里没打标签的聊天格式条目进不来；聊天记录默认一条不带，选「最近 N 轮」才经 `chat.readHistory` 读回传。宏（`{{随机词:}}`、`{{roll:}}`、`{{篇幅}}`）由 APP 自己展开，因为宿主宏引擎不处理 `instruction`。收藏存的是快照加组合副本，组合改了删了也还能「按这套再来一条」。四套主题（杂志 / 便签墙 / 终端 / 剧本）换的是布局不只是配色，正文字号统一压到 12～13px。构建 `npm run xjc:build`，校验 `npm run xjc:check`，预览和无头自测 `node tools/shoot-xiao-ju-chang.mjs`。
+
+小剧场审核修复：生成期间切换主演不再串写作品、计数或长期记忆；HTML 交互校验来源和可见性，按所在作品的原角色、组合及原文续写。新结果保存前置、提示词、随机池、宏和篇幅依赖，保留 AI 自选任务；收藏重放优先使用快照，不受当前库编辑或删除影响。旧记录缺失的历史正文无法恢复。专项回归：`node scripts/check-xiao-ju-chang-regressions.mjs`。
+
 ### 陪眠（`custom-apps/pei-mian/`）
 
 睡前陪伴 APP：角色分段哄睡（越说越轻，TTS 用宿主语音配置）、多层白噪音在 APP 内混音后交宿主播放、夜记 + 周汇总 + 月历、三套主题。19 段 Freesound CC0 录音不随包发，首次点到时从 Freesound 直连下载 128k 立体声预览存进媒体库（包只有 50KB，可过市场 5MB 门槛），APP 内商店可再搜。混音 44.1k 立体声，下载音质可选（省流 64k / 高 128k）。浅色主题是纸面 + 白卡片的独立视觉，首页天体按系统时间切太阳/月亮；组合可钉住收纳，声音和组合长按看小字详情表。构建 `npm run pei-mian:build`，校验 `npm run check:pei-mian-app`。为此宿主打包脚本改成递归打目录、`guessMime` 补了音频类型。
 
+### 小剧场 0.1.1：完整审核修复
+
+单角色 SDK 的生成任务通过 `requiredTask` 独立保留，关闭历史 marker 时仍送出 instruction，普通聊天的历史开关保持原行为。小剧场 recent 模式按当前角色分页读取并将 N×2 条有效正文放进任务，避免串用启动会话和 50 条历史截断；裸通道按角色选择 API、读取用户人设和选定记忆，宏用户名按角色刷新。
+
+文件导出改为真正下载 JSON 并提供复制备选；私有数据库 `db.list` 支持 offset，完整读取/清空超过 500 条的数据。导入包写入前校验，旧坏行隔离并保存在备份中；保存读改写串行执行，相同草稿和收藏的重复点击合并，收藏删除同步解绑。iframe 独立内容测高可稳定缩放，字号/行距实时更新且不销毁交互状态。
+
+舞台的三个按钮做成底部悬浮条（四个主题各自适配），结果卡紧跟本期卡；生成显示秒数并可取消（宿主调用不能中断，只丢结果）；HTML 组合可开「分两步出」：第一次只要带 `data-slot` 占位的骨架立刻渲染，第二次按编号填字并 postMessage 填进已显示的 iframe，两步共用同一次随机。
+
+小剧场接入宿主流式回调（设置「边写边显示」，默认开）：纯文字逐字写进 iframe（尾随节流 160ms，`<think>` 未闭合也先剥掉），HTML 只报字数，分两步出的第二步把 `[[n]]` 增量解析后就地填进格子；结束以整段响应为准，只刷标题字数不重挂卡片。老宿主忽略第二个参数，行为不变。
+
+导入分三档：本 APP 整包全量校验后合并、暗柜档案按固定字段转换、其余 JSON（酒馆预设、角色卡、别人的生成器导出）由 `data/scan.js` 递归扫出「名字 + 长文本」候选，抽屉里勾选后导成提示词 / 前置 / 随机，不再报「不认识这个 JSON 的格式」。
+
+验证：`npm run xjc:test`、`npm run xjc:check`、SDK/官方包一致性检查及受影响宿主文件 lint。聊天布局回归的“沉默输出规则”断言在修改前 HEAD 上同样失败，未扩大范围修复。需要同时发布宿主与 App 0.1.1；本地验证没有替代手机和真实模型实测。
+
 挂念 0.9.37 在配置基本页提供日程提示词编辑按钮，通过独立底部弹窗编辑和恢复默认，所有角色共用。默认强调角色独立生活、共同活动需要明确约定及不预写用户行动；本地与云端 genKit 共用同一文本，动态日期/聊天资料和 JSON 协议自动补齐。保存不重排今天，云端待生成原料刷新后生效。
 
 挂念 0.9.38 将设置/详情遮罩样式限定为原遮罩，提示词编辑遮罩只在编辑弹窗打开时显示，避免整个设置页被模糊和遮挡。
+
+### 自定义 APP SDK 流式回调
+
+`ai.generate` / `ai.chat` 可传第二个参数 `{ onChunk({delta, text}) }`，SDK 按 requestId 分流预览并在最终响应时清理。单角色、群聊和裸通道均仅在显式 stream 请求时接入流式回调；最后的 chunk 校准为最终 text，成功/失败后停止发送。普通调用的请求参数和响应结构不变，无新增权限。ai.chat 复用宿主 SSE/供应商解析器并保留停止原因、截断和用量信息；App 自行决定如何显示，不包含任何 APP 改动。
+
+### VPS 角色电脑服务（2026-09-13）
+
+独立部署 `https://computer.yanny.top`，兼容现有 `agent-computer` HTTP 协议，宿主无代码改动。
+源码位于仓库外 `../agent-computer-vps/`，运维说明见该目录 `README.md`；systemd 服务为
+`float-computer.service`。每个角色与工坊使用独立 Docker 容器及持久卷，支持真 Linux、
+HTTPS POST 和软件安装；限制资源并禁止访问 VPS 内网服务。手机在「设置 → 角色电脑」
+填写地址及独立连接密钥即可。已验证协议、公网 CORS、POST、pip 安装和重启持久化；
+没有代用户提交花园申请，未做用户手机端完整验证。
 
 ### 真实小红书链接读取（2026-09-13）
 

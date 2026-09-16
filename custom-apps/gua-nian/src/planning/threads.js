@@ -234,7 +234,7 @@
       let res;
       try { res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt, intent, source: "tool", cooldownRounds: 0 }); }
       catch (e) { await log(cx, "约定预约失败，下次复核重试：" + String(e && e.message || e)); continue; }
-      items.push({ kind: "promise", adj: "promise", time: fmtHM(fireAt), fireAt, origFireAt: +t.due,
+      items.push({ ...GuaNianMatters.matterFields(t), matterId: t.matterId || "thread:" + t.id, kind: "promise", adj: "promise", time: fmtHM(fireAt), fireAt, origFireAt: +t.due,
         from: t.id, promiseRevision: +t.revision || 1, source: "约定·" + t.text, sem: "约定", topic: t.text,
         act: true, intent, why: t.why || "按明确约定到点核对", wakeId: res.id,
         delivery: res.armed ? "push" : "local", hist: [{ at: nowMs, kind: "promise", note: "按约定时间预约" }] });

@@ -45,6 +45,8 @@ export type LLMMessage = {
 };
 
 export interface AssemblerInput {
+    /** The current SDK task must survive a preset that disables history. */
+    requiredTask?: ChatMessage;
     character: Character;
     history: ChatMessage[];
     preset: PresetConfig | null;
@@ -1073,6 +1075,11 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 });
             }
         });
+    }
+
+    if (!historyInjectionEnabled && input.requiredTask) {
+        blocks.push({ text: input.requiredTask.content, role: "user", depth: 0,
+            order: Number.MAX_SAFE_INTEGER, marker: "Custom APP task" });
     }
 
     // --- Sort: depth descending, then order ascending ---

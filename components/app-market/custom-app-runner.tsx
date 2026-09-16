@@ -127,6 +127,29 @@ type CustomAppRunnerProps = {
 
 type BridgeResult = unknown;
 
+function createCustomAppStreamBridge(action: string, payload: unknown, post: (chunk: { delta: string; text: string }) => void) {
+  if ((action !== "ai.generate" && action !== "ai.chat") || !payload || typeof payload !== "object"
+    || (payload as Record<string, unknown>).stream !== true) return undefined;
+  let open = true, text = "", emitted = false;
+  return {
+    onDelta(delta: string) {
+      if (!open || !delta) return;
+      text += delta; emitted = true; post({ delta, text });
+    },
+    finish(result: unknown) {
+      if (!open) return;
+      open = false;
+      const finalText = result && typeof result === "object" ? (result as Record<string, unknown>).text : undefined;
+      if (typeof finalText === "string" && (!emitted || finalText !== text)) {
+        // Postprocessing may replace, trim or suppress preview text. An empty delta signals reconciliation.
+        post({ delta: finalText.startsWith(text) ? finalText.slice(text.length) : "", text: finalText });
+      }
+    },
+    close() { open = false; },
+  };
+}
+
+
 const CUSTOM_APP_BACKGROUND_RUNNER_TIMEOUT_MS = 5 * 60_000;
 
 function normalizeAssetRef(value: string): string {
@@ -256,11 +279,12 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
   }
   setTimeout(checkBlank, 4000);
 
-  function request(action, payload){
+  function request(action, payload, onChunk){
     var requestId = frameId + '_' + (++seq);
     parent.postMessage({ source:'ai-phone-custom-app-frame', type:'request', frameId:frameId, appId:appId, requestId:requestId, action:action, payload:payload || {} }, '*');
     return new Promise(function(resolve, reject){
       pending[requestId] = { resolve: resolve, reject: reject };
+      if (onChunk) pending[requestId].onChunk = onChunk;
     });
   }
   window.addEventListener('message', function(event){
@@ -330,10 +354,22 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
     if (!data.requestId) return;
     var item = pending[data.requestId];
     if (!item) return;
+    if (data.type === 'stream.chunk') {
+      if (item.onChunk) {
+        try { Promise.resolve(item.onChunk({ delta: data.delta, text: data.text })).catch(function(err){ console.error('[AiPhone onChunk]', err); }); }
+        catch (err) { console.error('[AiPhone onChunk]', err); }
+      }
+      return;
+    }
+    if (data.type !== 'response') return;
     delete pending[data.requestId];
     if (data.ok) item.resolve(data.result);
     else item.reject(new Error(data.error || 'AiPhone request failed'));
   });
+  function requestGeneration(action, payload, handlers){
+    if (!handlers || typeof handlers.onChunk !== 'function') return request(action, payload || {});
+    return request(action, Object.assign({}, payload || {}, { stream: true }), handlers.onChunk);
+  }
   function onEvent(eventName, handler){
     var key = String(eventName || '').trim();
     if (!key) throw new Error('AiPhone.on 需要 eventName');
@@ -377,9 +413,9 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       delete: function(collection, id){ return request('db.delete', { collection: collection, id: id }); }
     },
     ai: {
-      generate: function(payload){ return request('ai.generate', payload || {}); },
+      generate: function(payload, handlers){ return requestGeneration('ai.generate', payload, handlers); },
       generateImage: function(payload){ return request('ai.generateImage', payload || {}); },
-      chat: function(payload){ return request('ai.chat', payload || {}); },
+      chat: function(payload, handlers){ return requestGeneration('ai.chat', payload, handlers); },
       embed: function(payload){ return request('ai.embed', payload || {}); },
       classify: function(payload){ return request('ai.classify', payload || {}); }
     },
@@ -1114,7 +1150,7 @@ export function CustomAppRunner({
     throw new Error(`应用未声明权限：${permissions.join(" 或 ")}`);
   }, [app]);
 
-  const handleBridgeRequest = useCallback(async (action: string, payload: unknown): Promise<BridgeResult> => {
+  const handleBridgeRequest = useCallback(async (action: string, payload: unknown, onDelta?: (delta: string) => void): Promise<BridgeResult> => {
     const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
     const launchRecord = launchContext && typeof launchContext === "object" ? launchContext : {};
     const backgroundRecord = launchRecord.origin === "custom_app_background" && !record.origin
@@ -1414,7 +1450,8 @@ export function CustomAppRunner({
       }
       if (action === "db.list") {
         const limit = Math.max(1, Math.min(500, Number((record.query as Record<string, unknown> | undefined)?.limit ?? 100) || 100));
-        return rows.slice(0, limit);
+        const offset = Math.max(0, Math.floor(Number((record.query as Record<string, unknown> | undefined)?.offset) || 0));
+        return rows.slice(offset, offset + limit);
       }
       if (action === "db.delete") {
         const id = recordId(record.id);
@@ -1894,8 +1931,8 @@ export function CustomAppRunner({
       requirePermission("ai.generate");
       // 分流只看 APP 显式传参，避免 launchContext 里的 sessionId 误触发群聊模式
       return isCustomAppGroupGenerateRecord(record)
-        ? generateCustomAppGroupText(app, { ...launchRecord, ...record })
-        : generateCustomAppText(app, { ...launchRecord, ...record });
+        ? generateCustomAppGroupText(app, { ...launchRecord, ...record }, record.stream === true ? onDelta : undefined)
+        : generateCustomAppText(app, { ...launchRecord, ...record }, record.stream === true ? onDelta : undefined);
     }
     if (action === "ai.generateImage") {
       requirePermission("ai.generateImage");
@@ -1903,7 +1940,7 @@ export function CustomAppRunner({
     }
     if (action === "ai.chat") {
       requirePermission("ai.chat");
-      return runCustomAppAiChat(app, { ...launchRecord, ...record });
+      return runCustomAppAiChat(app, { ...launchRecord, ...record }, record.stream === true ? onDelta : undefined);
     }
     if (action === "ai.embed") {
       requirePermission("ai.embed");
@@ -2194,9 +2231,20 @@ export function CustomAppRunner({
       const requestId = String(record.requestId ?? "");
       const action = String(record.action ?? "");
       if (!requestId || !action) return;
-      void Promise.resolve(handleBridgeRequest(action, record.payload))
-        .then(result => postResponse(requestId, true, result))
-        .catch(err => postResponse(requestId, false, undefined, err instanceof Error ? err.message : String(err)));
+      const stream = createCustomAppStreamBridge(action, record.payload, chunk => {
+        iframeRef.current?.contentWindow?.postMessage({
+          source: "ai-phone-custom-app-host", type: "stream.chunk", frameId, requestId, ...chunk,
+        }, "*");
+      });
+      void Promise.resolve(handleBridgeRequest(action, record.payload, stream?.onDelta))
+        .then(result => {
+          stream?.finish(result);
+          postResponse(requestId, true, result);
+        })
+        .catch(err => {
+          stream?.close();
+          postResponse(requestId, false, undefined, err instanceof Error ? err.message : String(err));
+        });
     };
     window.addEventListener("message", handleMessage);
     // 监听器先注册，再在微任务中挂载 iframe，避免 iframe 首次脚本早于宿主监听器执行。

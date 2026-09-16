@@ -1352,7 +1352,7 @@ export async function saveCustomAppMedia(record: Record<string, unknown>): Promi
   };
 }
 
-export async function runCustomAppAiChat(app: InstalledCustomApp, record: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function runCustomAppAiChat(app: InstalledCustomApp, record: Record<string, unknown>, onDelta?: (delta: string) => void): Promise<Record<string, unknown>> {
   const config = resolveCustomAppApiConfig(app, record);
   if (!config) throw new Error("未找到可用 API 配置。");
   const rawMessages = Array.isArray(record.messages) ? record.messages : [];
@@ -1375,6 +1375,7 @@ export async function runCustomAppAiChat(app: InstalledCustomApp, record: Record
       temperature: typeof record.temperature === "number" ? record.temperature : undefined,
       max_tokens: typeof record.maxTokens === "number" ? record.maxTokens : typeof record.max_tokens === "number" ? record.max_tokens : undefined,
       signal,
+      ...(record.stream === true && onDelta ? { onDelta } : {}),
     })
   ));
   if (result.error) throw new Error(result.error);
@@ -2008,7 +2009,7 @@ export async function requestCustomAppReply(app: InstalledCustomApp, record: Rec
   return { sessionId: session.id, messageIds: [], text: "", requested: true, handled: detail.handled };
 }
 
-export async function generateCustomAppText(app: InstalledCustomApp, record: Record<string, unknown>): Promise<{
+export async function generateCustomAppText(app: InstalledCustomApp, record: Record<string, unknown>, onDelta?: (delta: string) => void): Promise<{
   text: string;
   appendMessages: Record<string, unknown>[];
   messages: Record<string, unknown>[];
@@ -2057,7 +2058,8 @@ export async function generateCustomAppText(app: InstalledCustomApp, record: Rec
   const pushContextMessage = (patch: Partial<ChatMessage> & Pick<ChatMessage, "role">): void => {
     appendMessages.push(createCustomAppGeneratedContextMessage(session.id, appendMessages.length, patch));
   };
-  const completion = await generateChatCompletion(session, history, {
+  const completion = await generateChatCompletion(record.stream === true && onDelta ? { ...session, streamOnline: true } : session, history, {
+    requiredTask: taskMessage,
     appId: `custom_app:${app.id}`,
     appTags,
     promptProfile: profile ?? undefined,
@@ -2067,6 +2069,7 @@ export async function generateCustomAppText(app: InstalledCustomApp, record: Rec
     toolsAllowed,
     forceEnableTools: enableTools,
   }, {
+    ...(record.stream === true && onDelta ? { onStreamDelta: onDelta } : {}),
     onTextPart: (text, _senderInfo, options) => {
       const content = cleanUnboundedText(text);
       if (!content) return;
@@ -2136,7 +2139,7 @@ export function isCustomAppGroupGenerateRecord(record: Record<string, unknown>):
 // 角色的 <member> 人设块、用户身份、记忆等通用条目),内容条目只按 APP 自己的
 // appTags 命中(不塞 "text"/"offline" 等宿主内置场景 tag,APP 拿不到内置 APP
 // 的格式条目),单次补全返回原始文本,输出格式由 APP 的预设条目约定、APP 自行解析。
-export async function generateCustomAppGroupText(app: InstalledCustomApp, record: Record<string, unknown>): Promise<{
+export async function generateCustomAppGroupText(app: InstalledCustomApp, record: Record<string, unknown>, onDelta?: (delta: string) => void): Promise<{
   text: string;
   appendMessages: Record<string, unknown>[];
   messages: Record<string, unknown>[];
@@ -2197,6 +2200,7 @@ export async function generateCustomAppGroupText(app: InstalledCustomApp, record
   // 纯 APP tags(与单聊路径一致):资料包结构化组装照进,宿主内置条目不命中
   const appTags = buildCustomAppChatTags(app, record);
   const completion = await generateGroupRawCompletion(session, history, {
+    ...(record.stream === true && onDelta ? { onStreamDelta: onDelta } : {}),
     appTags,
     promptProfile: profile ?? undefined,
     apiConfigId: cleanText(record.apiConfigId ?? record.configId, 160) || undefined,

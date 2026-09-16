@@ -28,12 +28,12 @@
       const due = k.when ? parseWhen(k.when, nowMs) : existing ? (+existing.due || 0) : 0;
       if (existing) {
         if (kind !== "topic" && !due) continue;
-        Object.assign(existing, { text, due, at: nowMs, by }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
+        Object.assign(existing, { ...(k.matterId ? { matterId: k.matterId } : {}), text, due, at: nowMs, by }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
         notes.push("更新" + THREAD_KIND[kind] + "「" + text + "」");
         continue;
       }
       if (kind !== "topic" && !due) continue; // 约定和日子没时间就不算
-      list.push(newThread(kind, text, due, nowMs, by, (k && k.why) || ""));
+      list.push({ ...newThread(kind, text, due, nowMs, by, (k && k.why) || ""), ...(k.matterId ? { matterId: k.matterId } : {}) });
       notes.push("记下" + THREAD_KIND[kind] + "「" + text + "」");
     }
     const alive = list.filter((t) => threadAlive(t, nowMs, S.settings.threadDays)).slice(-30);
