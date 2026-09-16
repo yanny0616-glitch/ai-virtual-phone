@@ -166,6 +166,8 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
   - "message.side"：每条文本气泡旁边，贴着气泡垂直居中（对方消息在右、自己的在左），只放一个小图标之类；气泡本身有长按菜单，图标的 pointerdown 记得 stopPropagation
   - "settings.section"：插件管理页的自定义设置区
   - "chatInfo.section"：聊天信息页里本插件的一栏，宿主按分类折叠，标题用插件名（props: { sessionId, isGroup, characterId }）；放这个角色单独的设置，别放全局设置。在容器上写 \`el.dataset.summary = "一句话"\`，折叠时显示在标题下；什么都不画（比如群聊里 return 掉）这一栏就不出现
+  - "float.panel"：手机壳里的悬浮小窗，**聊天之外也在**（桌面、任意 APP 页面都跟着）。宿主给标题栏、拖动、收起和位置记忆，你只管窗体内容；没插件认领时整个窗不出现
+  - "app.panel"：任意 APP 页面底部的浮层（props: { appId }）。按 appId 判断当前在哪个 APP（"music" / "calendar" / "story" / 自定义 APP 的 id 等），不该出现时什么都别画
 - \`ctx.ui.messageAction({ id, label, filter?, onSelect })\` —— 消息长按菜单加一项；onSelect(msg, { updateMessage, toast })
 - \`ctx.ui.messageKind(kind, (el, msg) => {})\` —— 注册自定义消息类型；配合 \`ctx.data.messages.push({ ..., mediaType: "plugin:" + kind, mediaData: {...} })\` 发出由你渲染的卡片消息
 - \`ctx.ui.injectCSS(css)\` —— 注入全局样式（禁用自动移除）
@@ -179,6 +181,8 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 - \`ctx.system.fetch(url, init)\` —— 网络请求
 - \`ctx.system.settings.get(key)\` / \`.all()\` / \`.set(key, value)\` / \`.onChange(fn)\` —— 读写 manifest.settings 声明的用户设置（set 用于"拉取模型后自动填入"这类场景）
 - \`ctx.system.log(...)\` —— 日志（进管理页日志面板）
+
+插件在 App 一启动就全部加载（不是进聊天才活），所以 \`ctx.system.timers\` 的后台轮询、\`ctx.chat.scheduleWake\` 的定时唤醒在桌面和别的 APP 里照常跑；要在聊天之外露面，用 "float.panel" / "app.panel" 两个坑位。
 
 ## 规则与建议
 

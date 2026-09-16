@@ -51,7 +51,7 @@
 
 - 官方插件在 `chat-plugins/`，构建时复制到 `public/chat-plugins/` 并生成 `index.json`（`npm run plugins:build-dist`）；`lib/chat-plugin-official.ts` 是清单，已装的启动时静默升级。
 - 钩子（`lib/chat-plugin-types.ts`）：`app.ready` `plugins.changed` `session.opened` `user.beforeSend` `prompt.system` `llm.request` `llm.streamChunk` `llm.response` `message.beforePersist` `message.persisted` `message.beforeReveal` `message.updated` `message.deleted` `chat.read` `chat.write` `chat.replyGate` `moments.beforePost` `moments.schedule` `variables.changed`。
-- UI 坑位：`chat.header` `chat.presence` `chat.inputToolbar` `message.side` `message.footer` `message.panel` `list.avatar` `settings.section` `chatInfo.section`。
+- UI 坑位：`chat.header` `chat.presence` `chat.inputToolbar` `message.side` `message.footer` `message.panel` `list.avatar` `settings.section` `chatInfo.section`，聊天之外另有 `float.panel`（手机壳里的悬浮小窗，宿主给标题栏 / 拖动 / 收起 / 位置记忆，见 `components/chat-plugin-float.tsx`）和 `app.panel`（任意 APP 页面底部浮层，props 带 `appId`）。插件在 App 启动时就全部加载，后台定时器和定时唤醒本来就不限于聊天页。
 - 聊天信息页（`components/chat/chat-settings-panel.tsx`）除备注 / 查找 / TA 的电脑 / 群成员外按类折叠：聊天、生成、插件各一栏（`chatInfo.section`，插件在容器上写 `data-summary` 当摘要）、状态栏、外观、清理与删除；一次只展开一类，标题下一行是当前状态摘要。
 - **共享变量池**：插件 `ctx.data.variables` 与自定义 APP `AiPhone.variables.*` 读写同一个池。
 - **会话动作** `ctx.chat`：`requestReply` 让角色回一轮；`offline.get/set/turns` 切线下（聊天室听 `CHAT_OFFLINE_MODE_CHANGED_EVENT` 跟着切）、读线下记录；`scheduleWake/cancelWake` 复用宿主定时唤醒，App 关着走 timed_task 兜底。插件唤醒 id 以 `chat_plugin_` 开头，普通唤醒的「一会话一条」和 `clearTimedWakeSchedule` 都不动它们。`chat.header` 坑位带 `offlineMode`，切线下时重挂载。

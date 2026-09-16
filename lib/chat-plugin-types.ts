@@ -255,6 +255,8 @@ export type ChatPluginEventPayloadMap = {
  *   message.side       每条文本消息气泡旁边（对方消息在右侧、自己的在左侧），放小图标用
  *   settings.section   插件管理页内该插件的自定义设置区
  *   chatInfo.section   聊天信息页里本插件的一栏（折叠分类，标题用插件名；props 带 characterId）
+ *   float.panel        手机壳里的悬浮小窗，聊天之外也在；宿主给标题栏、拖动、收起和位置记忆
+ *   app.panel          任意 APP 页面底部的浮层（props 带 appId），按 appId 决定在哪个 APP 出现
  */
 export type ChatPluginSlotName =
     | "chat.header"
@@ -265,7 +267,9 @@ export type ChatPluginSlotName =
     | "message.side"
     | "message.panel"
     | "settings.section"
-    | "chatInfo.section";
+    | "chatInfo.section"
+    | "float.panel"
+    | "app.panel";
 
 export type ChatPluginSlotProps = {
     sessionId?: string;
@@ -276,6 +280,8 @@ export type ChatPluginSlotProps = {
     message?: ChatMessage;
     /** chat.header 坑位：会话当前是否在线下模式（切换时坑位重挂载） */
     offlineMode?: boolean;
+    /** app.panel 坑位携带当前打开的 APP id（desktop-shell 的 activeApp） */
+    appId?: string;
 };
 
 export type ChatPluginSlotMount = (

@@ -1,5 +1,12 @@
 # Fork 变更日志
 
+## 2026-09-16：插件坑位扩到聊天之外
+
+- 新增 `float.panel`：手机壳里的悬浮小窗，桌面和任意 APP 里都在。宿主管窗框（标题栏、拖动、收起、位置记忆存 localStorage 并按宿主尺寸夹回可视区），窗体内部仍是插件的裸 DOM。
+- 新增 `app.panel`：APP 页面底部浮层，`ChatPluginSlotProps` 增 `appId`（desktop-shell 的 `activeApp`），插件按 id 决定在哪个 APP 露面。
+- 后台不用新增机制：插件在 `app/layout.tsx` 的 bootstrap 里随 App 启动全量加载，`system.timers` 和 `chat.scheduleWake` 本来就不限于聊天页；这一点补进插件文档。
+- 验证：`tsc --noEmit` 通过；改动文件 eslint 错误数与改动前一致。
+
 ## 2026-09-16：桌面组件的「用户可填字段」
 
 - `DIYWidgetTemplate` 新增 `fields`：作者在代码沙盒编辑器里声明文字 / 数字 / 日期 / 时间 / 颜色 / 下拉六种字段（最多 20 个），key 限定成标识符。

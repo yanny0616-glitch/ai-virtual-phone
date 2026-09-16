@@ -134,6 +134,8 @@ import {
 import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
 import { WidgetFieldForm } from "@/components/widgets/widget-field-form";
+import { ChatPluginFloat } from "@/components/chat-plugin-float";
+import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
 import { DebugPromptPanel } from "@/components/debug-prompt-panel";
 import { QuickActionFloat } from "@/components/quick-action-float";
 import { getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
@@ -4885,6 +4887,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                   <>
                     <section className="phone-app-pane" style={activeApp === "dwelling" || activeApp === "xiaohongshu" || activeApp === "shopping" ? { display: "none" } : undefined}>
                       {renderAppBody()}
+                      {activeApp && <ChatPluginSlot name="app.panel" slotProps={{ appId: activeApp }} className="chat-plugin-app-panel" />}
                     </section>
                     {/* DwellingApp stays mounted while generating — auto-unmounts when idle */}
                     {dwellingMounted && (
@@ -5004,6 +5007,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               <DebugPromptPanel />
               <QuickActionFloat />
               <MascotFloat />
+              <ChatPluginFloat />
               {/* 预览弹窗宿主：独立于桌宠的展开/收起状态，否则桌宠收成小球时弹不出来 */}
               <MascotPreviewHost />
 

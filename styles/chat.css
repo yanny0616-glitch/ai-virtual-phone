@@ -7735,3 +7735,68 @@
   font-size: calc(12px*var(--app-text-scale,1));
   color: var(--c-icon);
 }
+
+/* ── 插件坑位：聊天之外 ── */
+.plugin-float-window {
+  position: absolute;
+  z-index: 60;
+  width: 216px;
+  max-width: calc(100% - 24px);
+  border-radius: 16px;
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.plugin-float-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: grab;
+  touch-action: none;
+  background: var(--c-card-2, rgba(127, 127, 127, 0.08));
+}
+
+.plugin-float-title {
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  font-weight: 600;
+  color: var(--c-text-sub);
+  letter-spacing: 0.04em;
+}
+
+.plugin-float-toggle {
+  border: none;
+  background: transparent;
+  color: var(--c-icon);
+  font-size: calc(12px*var(--app-text-scale,1));
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.plugin-float-body {
+  padding: 10px;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.plugin-float-window[data-minimized] .plugin-float-body {
+  display: none;
+}
+
+.chat-plugin-app-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.chat-plugin-app-panel > * {
+  pointer-events: auto;
+}
