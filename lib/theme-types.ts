@@ -165,6 +165,7 @@ export type ThemeProfile = {
    --notif-avatar-w / --notif-avatar-h / --notif-avatar-radius — 头像尺寸（撑成大图就设 100%）
    --notif-text-width   : auto
    --notif-action-order / --notif-action-align — 「查看」按钮的位置
+   --notif-duration     : 6s       — 横幅停留多久（1.2–30s，新消息横幅按它自动收起）
 
    ── 用户自定义变量钩子 ──
    --user-glass-tint     : transparent  — 混入毛玻璃背景色

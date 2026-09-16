@@ -20,9 +20,11 @@ import {
   Type,
   Upload,
   Wallpaper,
+  Bell,
 } from "lucide-react";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { GlassIcon } from "@/components/ui/glass-icon";
+import { NotifBannerPage } from "@/components/theme/notif-banner-page";
 import { normalizeThemeProfile, resolveActiveIconSkins, DEFAULT_THEME_PROFILE, type ThemeProfile } from "@/lib/theme-types";
 import type { DesktopIconId, IconId } from "@/lib/desktop-config";
 import { DOCK_DEFAULT, PAGE_1_DEFAULT, PAGE_2_DEFAULT, PAGE_3_DEFAULT, ICONS } from "@/lib/desktop-config";
@@ -93,6 +95,7 @@ import { SplashPreview, SplashVariant } from "@/components/splash-variants";
 
 type ThemeSection =
   | "menu"
+  | "notif"
   | "palette"
   | "wallpaper"
   | "icons"
@@ -153,6 +156,10 @@ function IconCase() {
   return <Smartphone size={22} strokeWidth={1.75} />;
 }
 
+function IconNotif() {
+  return <Bell size={22} strokeWidth={1.75} />;
+}
+
 function IconText() {
   return <Type size={22} strokeWidth={1.75} />;
 }
@@ -192,6 +199,7 @@ const MENU_ITEMS: Array<{
   { section: "icons", icon: IconGrid, label: "图标", desc: "应用图标", color: BINDING_ACCENTS.regex, glow: `color-mix(in srgb, ${BINDING_ACCENTS.regex} 35%, transparent)`, glass: "icons" },
   { section: "widgets", icon: IconWidgets, label: "桌面组件", desc: "小组件", color: BINDING_ACCENTS.voice, glow: `color-mix(in srgb, ${BINDING_ACCENTS.voice} 35%, transparent)`, glass: "widgets" },
   { section: "case", icon: IconCase, label: "状态栏", color: BINDING_ACCENTS.memory, glass: "status-bar" },
+  { section: "notif", icon: IconNotif, label: "通知横幅", desc: "新消息和来电的横幅样式", color: BINDING_ACCENTS.identity, glow: `color-mix(in srgb, ${BINDING_ACCENTS.identity} 35%, transparent)`, glass: "weixin" },
   { section: "text", icon: IconText, label: "文字", color: BINDING_ACCENTS.identity, glow: `color-mix(in srgb, ${BINDING_ACCENTS.identity} 35%, transparent)`, glass: "text" },
   { section: "css", icon: IconCode, label: "CSS 变量", desc: "自定义全局样式变量", color: BINDING_ACCENTS.embedding, glow: `color-mix(in srgb, ${BINDING_ACCENTS.embedding} 35%, transparent)`, glass: "css" },
   { section: "presets", icon: IconPresets, label: "外观预设", desc: "存多套外观，一键切换", color: BINDING_ACCENTS.preset, glow: `color-mix(in srgb, ${BINDING_ACCENTS.preset} 35%, transparent)`, glass: "presets" },
@@ -213,10 +221,11 @@ const SECTION_TITLES: Record<Exclude<ThemeSection, "menu">, string> = {
   text: "\u6587\u5B57",
   css: "CSS \u53D8\u91CF",
   presets: "外观预设",
+  notif: "通知横幅",
   splash: "开屏动画",
 };
 
-const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "presets", "splash"]);
+const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "presets", "splash", "notif"]);
 
 function isThemeSection(value: string): value is ThemeSection {
   return THEME_SECTIONS.has(value);
@@ -407,12 +416,12 @@ export function PhoneThemeApp({
                     </div>
                   );
                 })()}
-                {MENU_ITEMS.filter(item => ["text", "splash"].includes(item.section)).map((item) => (
+                {MENU_ITEMS.filter(item => ["notif", "text", "splash"].includes(item.section)).map((item) => (
                   <button
                     key={item.section}
                     className="menu-item"
                     type="button"
-                    onClick={() => (item.section === "splash" ? setSection("splash") : setShowTextAdjust(true))}
+                    onClick={() => (item.section === "text" ? setShowTextAdjust(true) : setSection(item.section === "notif" ? "notif" : "splash"))}
                   >
                     <span className="card-icon card-icon-glass">
                       <GlassIcon name={item.glass} />
@@ -511,6 +520,8 @@ export function PhoneThemeApp({
             onDraftChange={onDraftChange}
             onNotice={onNotice}
           />
+        ) : section === "notif" ? (
+          <NotifBannerPage draft={draft} onDraftChange={onDraftChange} onApply={onApply} onNotice={onNotice} />
         ) : section === "splash" ? (
           <SplashVariantPage onNotice={onNotice} />
         ) : (

@@ -616,6 +616,20 @@ function sanitizeDesktopFolders(
   return { folders: nextFolders, layout: trimEmptyTrailingPages(nextLayout, widgets), changed: true };
 }
 
+/** 横幅停多久：读 --notif-duration（外观 →「通知横幅」在调它），夹在 1.2–30s。 */
+function readNoticeDurationMs(el: HTMLElement | null): number {
+  const FALLBACK = 6000;
+  if (typeof window === "undefined") return FALLBACK;
+  const target = el ?? document.querySelector<HTMLElement>(".phone-shell");
+  if (!target) return FALLBACK;
+  const raw = window.getComputedStyle(target).getPropertyValue("--notif-duration").trim();
+  if (!raw) return FALLBACK;
+  const value = Number.parseFloat(raw);
+  if (!Number.isFinite(value)) return FALLBACK;
+  const ms = raw.endsWith("ms") ? value : value * 1000;
+  return Math.min(30000, Math.max(1200, ms));
+}
+
 function StatusClock() {
   const [label, setLabel] = useState("--:--");
 
@@ -2597,7 +2611,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     chatMessageNoticeTimerRef.current = window.setTimeout(() => {
       setChatMessageNotice(null);
       chatMessageNoticeTimerRef.current = null;
-    }, 6000);
+    }, readNoticeDurationMs(shellRef.current));
   }, []);
 
   const handleNoticePointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
@@ -2673,7 +2687,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       chatMessageNoticeTimerRef.current = window.setTimeout(() => {
         setChatMessageNotice(null);
         chatMessageNoticeTimerRef.current = null;
-      }, 6000);
+      }, readNoticeDurationMs(shellRef.current));
     };
 
     window.addEventListener(CHAT_MESSAGE_NOTICE_EVENT, handler);

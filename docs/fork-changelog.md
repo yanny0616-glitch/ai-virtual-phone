@@ -1,5 +1,15 @@
 # Fork 变更日志
 
+## 2026-09-16：通知横幅美化编辑器
+
+- 外观新增「通知横幅」一页（`components/theme/notif-banner-page.tsx`）：单聊 / 群聊 / 系统 / 长文本 / 来电五种场景预览，浅深色切换（给预览壳挂 `data-color-scheme`）、▶ 重播进场，改完立刻生效。
+- 预览用横幅真身的 class 和真实 CSS（`.chat-message-notice-bar` / `.incoming-call-bar`），所以用户自定义 CSS 写了什么预览就长什么样。
+- 逐项调 `--notif-*`（排法、文字对齐、「查看」按钮位置、位置尺寸、头像、停留时长），值存进主题档案的 `cssOverrides`，外观预设和主题包导出自动带上；另有拍立得 / 窄条 / 居中卡片三套预设，切预设只清 `--notif-*`，别的变量不动。
+- 新增 `--notif-duration`（1.2–30s）：横幅自动收起不再写死 6 秒，`readNoticeDurationMs` 从 `.phone-shell` 的计算样式读，读不到就回退 6 秒。
+- `.incoming-call-bar` 改用 `--notif-top/left/right/radius`，默认值保持原样。
+- 按用户要求不做按角色 / 按群分配，全局一份。
+- 验证：`tsc --noEmit` 通过；改动文件 eslint 错误数与改动前一致。
+
 ## 2026-09-16：小卷出主题（预览 / 应用 / 撤销 / 主题库 / 局部补丁）
 
 - 新增 `lib/mascot-css-plan.ts`：CSS 方案日志（最近 20 份，4MB 封顶）+ 主题库（50 份），六个 CSS 位置的读写收在 `readCssByTarget` / `writeCssByTarget`，按 sessionId 落点，不再依赖会话名解析。

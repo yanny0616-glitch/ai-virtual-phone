@@ -6411,15 +6411,15 @@
 
 .incoming-call-bar {
   position: absolute;
-  top: 54px;
-  left: 8px;
-  right: 8px;
+  top: var(--notif-top, 54px);
+  left: var(--notif-left, 8px);
+  right: var(--notif-right, 8px);
   z-index: 200;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 16px 16px;
-  border-radius: 16px;
+  border-radius: var(--notif-radius, 16px);
   background: rgba(40, 40, 40, 0.92);
   backdrop-filter: blur(var(--ui-blur));
   -webkit-backdrop-filter: blur(var(--ui-blur));
