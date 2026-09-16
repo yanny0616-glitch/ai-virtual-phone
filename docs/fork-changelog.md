@@ -1318,3 +1318,4 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 来电横幅之前只认 `--notif-top/left/right/radius`，在通知横幅编辑器里切到「来电」场景套预设纹丝不动。现在 `.incoming-call-bar` 和 `.chat-message-notice-bar` 消费同一套 `--notif-*`（排法、对齐、间距、内边距、最小高度、文字对齐、头像三项），fallback 保持来电原来的长相。
 - 顺手补上 `--notif-action-order` / `--notif-action-align`：契约文档里写了但两边样式都没接，之前把「查看」按钮换到左边是无效的。
 - 验证：`tsc --noEmit` 无报错；`notif-banner-page.tsx` eslint 干净。宿主页面没法本机构建，五个场景的实际表现待线上点一遍。
+- 补：线上看过之后撤掉「拍立得」预设（大头像 + 上图下字，实际长相不好看）。`--notif-layout: column` 和头像尺寸变量都还在，想要的自己调。

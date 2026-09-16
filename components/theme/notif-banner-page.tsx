@@ -86,21 +86,6 @@ const CONTROLS: { group: string; items: Control[] }[] = [
 const PRESETS: { name: string; vars: Record<string, string> }[] = [
   { name: "默认", vars: {} },
   {
-    name: "拍立得",
-    vars: {
-      "--notif-layout": "column",
-      "--notif-info-layout": "column",
-      "--notif-align": "stretch",
-      "--notif-avatar-w": "100%",
-      "--notif-avatar-h": "132px",
-      "--notif-avatar-radius": "14px",
-      "--notif-text-align": "center",
-      "--notif-min-height": "0px",
-      "--notif-gap": "10px",
-      "--notif-radius": "20px",
-    },
-  },
-  {
     name: "窄条",
     vars: {
       "--notif-min-height": "48px",

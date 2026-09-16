@@ -334,7 +334,7 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 - 预设补丁号升到 3，新增 `reply_style` `call_extras` `call_summary_prompt`。
 ### 语境属性 · 时辰主题 · 通知横幅版式（2026-09-15）
 
-- **通知横幅编辑器**（外观 →「通知横幅」，`components/theme/notif-banner-page.tsx`）：五种场景（单聊 / 群聊 / 系统 / 长文本 / 来电）用横幅真身的 class 实时预览，浅深色切换、重播进场；逐项调 `--notif-*` 存进 `cssOverrides`，带拍立得 / 窄条 / 居中卡片三套预设。新增 `--notif-duration` 控制停留 1.2–30 秒。全局一份，不按角色分配。来电横幅和新消息横幅认同一套变量（默认长相各自保留，只有调过的项才共用），所以五个场景都会跟着预设变。
+- **通知横幅编辑器**（外观 →「通知横幅」，`components/theme/notif-banner-page.tsx`）：五种场景（单聊 / 群聊 / 系统 / 长文本 / 来电）用横幅真身的 class 实时预览，浅深色切换、重播进场；逐项调 `--notif-*` 存进 `cssOverrides`，带窄条 / 居中卡片两套预设（拍立得预设试过，实际长相不好看，撤了；column 版式本身保留）。新增 `--notif-duration` 控制停留 1.2–30 秒。全局一份，不按角色分配。来电横幅和新消息横幅认同一套变量（默认长相各自保留，只有调过的项才共用），所以五个场景都会跟着预设变。
 - **语境属性**（`lib/ui-context-attrs.ts`）：组件把当下的状态挂成 DOM 属性，主题 CSS 用属性选择器直接写规则，不用改组件。完整清单在 `lib/theme-types.ts` 顶部的契约注释里，属性名发布后不再改名。
 - **时辰与深浅色**：`useAmbientContext()` 给手机屏幕根节点（`components/desktop-shell.tsx` 的 `[data-ui="phone-screen"]`）和聊天室外层 `.session-{id}` 挂 `data-time-of-day`（morning 5–10 / day 11–16 / evening 17–20 / night 21–4）、`data-hour`、`data-color-scheme`（跟随 `prefers-color-scheme`）。每分钟走 `bgSetInterval` 校一次（切后台普通定时器会被掐），另听深浅色变化和 `visibilitychange`。服务端渲染阶段不挂属性，避免注水前后对不上。
 - **聊天列表项**（`SessionItem`）：`data-unread`（0 / 1 / few / many）、`data-unread-count`、`data-pinned`、`data-muted`、`data-group`、`data-last-type`（mediaType 的连字符写法，纯文字为 text）、`data-last-role`、`data-length`（按预览字数分三档）、`data-hour` / `data-time-slot`（最后一条的时间）；变量 `--item-index`、`--item-unread`、`--item-avatar-url`。头像地址超过 512 字符（base64）不挂变量，免得把每一行的 style 撑大。
