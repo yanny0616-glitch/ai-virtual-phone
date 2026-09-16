@@ -129,6 +129,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 - **栖所批量探索**（`components/dwelling/dwelling-app.tsx`）：每个房间页签栏多一个「批量探索」，底部弹窗按家具分组勾选物品（默认未探索的），并发 2 生成并落盘，不打开详情；失败逐条显示原因，可中途停止。
 - **查手机**（`lib/checkphone-engine.ts`）：带时区时间戳按设备本地格式化；六个查询工具按 2000 字符预算报未展示条数；会话匹配原名/备注/微信号优先，多候选先返回列表；历史排除 `silentUpdate`；读库失败与空列表区分。
 - **组件可填字段**（`lib/widget-fields.ts`）：代码沙盒组件的作者声明 `fields`（文字 / 数字 / 日期 / 时间 / 颜色 / 下拉，最多 20 个，key 限标识符），用的人在桌面编辑模式点组件左上角 ✎ 填表，值进 `WidgetInstance.config`，代码里 `AiPhoneWidget.getConfig(key, 默认)` 照读。默认值垫底，删字段连带清实例里的旧值；主题包与小卷的模板补丁都认 `fields`。
+- **小卷出主题**（`lib/mascot-css-plan.ts`）：改 CSS 默认走「出主题」——出方案、弹卡片，用户自己点 预览 / 结束预览 / 应用 / 撤销 / 只存进主题库 / 看代码；小改动用局部补丁（`find` 必须恰好命中一次），`读取CSS` 附带按块编号的主题地图和已声明变量。主题库存 50 份，套用也走方案管线可撤销。`覆写CSS` 仍是立刻生效的老路径。
 - **小卷**（`docs/mascot-editing.md`）：统一读取 → 准备草稿 → 预览 → 应用 → 记录 → 撤销管线，版本冲突拒绝覆盖；桌面/DIY/角色/主题都走它；DIY 沙箱接音乐控制；工具循环 8 轮上限、原生与文本调用去重。
 - **冒险**（`docs/adventure-*.md`）：四时段游戏时钟由 `time_update` 推进；世界设定 AI 编辑预览后应用；可选自定义状态字段。
 - **网易云音乐**：`ncm-api` 容器挂在同域 `/ncm`，Caddy 侧 `strip_prefix`；默认地址由 `NEXT_PUBLIC_DEFAULT_NETEASE_API_BASE` 在 CI 里给。
