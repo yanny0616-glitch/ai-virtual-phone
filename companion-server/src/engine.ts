@@ -29,6 +29,7 @@ import type { Rest } from "./supabase.ts";
 import {
   applyThreads, liveThreads, settleByWords, shortThreadLines, threadDueMs, threadLines, threadNudge, type WordSettle,
 } from "./threads.ts";
+import { similarBlock, similarPromise } from "./similar.ts";
 import { fillChatTemplate } from "./templates.ts";
 import { STATE_KEYS, type Ctx, type GuanianDay, type PlanItem, type Thread } from "./types.ts";
 
@@ -640,6 +641,8 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
     if (duplicate) { decide(t, "dedupe", `${time} ${duplicate}`); continue; }
     const intent = String(one.intent || one.about || "").slice(0, 200);
     if (!intent) continue;
+    const same = similarBlock(intent, nextItems, matterThreads, history.messages);
+    if (same) { decide(t, "dedupe", `${time} ${same}`); continue; }
     const kind = o.g.selfReason ? o.g.selfKind : "extra";
     const untilHM = typeof one.until === "string" && /^\d{1,2}:\d{2}$/.test(one.until.trim()) ? one.until.trim().padStart(5, "0") : "";
     const untilMs = untilHM ? localMs(untilHM) : 0;
@@ -755,6 +758,8 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
   const duplicate = matterBlock(item, row.items, threads, history.outputs, history.messages);
   if (duplicate) { done(`${item.time} ${duplicate}`, "dedupe"); return; }
   if (item.from && threads.some(x => x.id === item.from && x.done === true) && !isPromise) { done("挂着的这件事已经了结"); return; }
+  const promised = isPromise ? null : similarPromise(item.intent || "", threads);
+  if (promised) { done(`${item.time} 和约定「${promised.text}」是同一件事，交给约定`, "dedupe"); return; }
   const over = usageExceeded(await usageBudget(deps.rest, deps.userId, nowMs));
   if (over) { done(`用量上限：${over}`); return; }
 

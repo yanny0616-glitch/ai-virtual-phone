@@ -126,3 +126,17 @@ test("空气泡不算一轮没回", async () => {
   assert.deepEqual(history.messages.map(m => m.id), ["u1", "a3"]);
   assert.equal(unansweredRounds(history, Date.parse("2026-09-16T20:19:00Z")), 1);
 });
+
+test("同一件事的字面兜底：0916 念头撞约定、0914 催睡撞约定会拦，不相关的放过", async () => {
+  const { similarBlock, textSimilarity } = await import("../src/similar.ts");
+  const promise = (text: string): Thread => ({ id: "p", kind: "promise", text, due: 1 });
+  assert.match(similarBlock("回她中午问的那句话，问她课上完没、晚上回不回来吃饭", [], [promise("晚上回去当面回她中午的话")], []), /交给约定/);
+  assert.match(similarBlock("再问一句她刚才在刷什么，顺便催她别熬到太晚，十一点半前睡", [], [promise("喝完奶茶十一点半前睡")], []), /交给约定/);
+  assert.equal(similarBlock("问她下午课怎么样", [], [promise("三点半回家看她，白粥备好")], []), "");
+  assert.ok(textSimilarity("三点半回家看她，白粥备好", "喝完奶茶十一点半前睡") < 0.3);
+  const sent = { time: "16:20", act: true, kind: "extra", intent: "问她起来没有、下去吃东西了没有，说一句自己在客厅", generatedAt: Date.parse("2026-09-12T08:20:00Z") } as never;
+  const again = "问她起来了没有，刘阿姨温着的东西下去吃，别再空着肚子";
+  assert.match(similarBlock(again, [sent], [], []), /发过的是同一件事/);
+  const replied = [{ id: "u", role: "user", content: "起了", message_at: "2026-09-12T09:00:00Z" }];
+  assert.equal(similarBlock(again, [sent], [], replied), "");
+});
