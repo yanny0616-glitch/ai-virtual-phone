@@ -8,6 +8,8 @@ export type Config = {
   userId: string;
   port: number;
   dataDir: string;
+  /** shadow 只记录不调模型不发；live 真发。启动后以 SQLite 里存的为准 */
+  mode: "shadow" | "live";
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -22,5 +24,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     userId: env.COMPANION_USER_ID || "",
     port: Number(env.COMPANION_PORT) || 18070,
     dataDir: env.COMPANION_DATA_DIR || "/var/lib/float-companion",
+    mode: env.COMPANION_MODE === "live" ? "live" : "shadow",
   };
 }

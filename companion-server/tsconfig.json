@@ -8,6 +8,8 @@
     "strict": true,
     "skipLibCheck": true,
     "erasableSyntaxOnly": true,
+    "allowJs": true,
+    "checkJs": false,
     "types": [
       "node"
     ]

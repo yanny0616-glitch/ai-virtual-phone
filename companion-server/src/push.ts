@@ -1,6 +1,6 @@
 // Web Push：用个人云里的同一对 VAPID 密钥和订阅，手机不需要重新订阅。
 // 404/410 的失效订阅顺手删掉（与 push-generate / lib/server/push-service 一致）。
-// shell: 开头的是安卓壳的合成订阅，走 Realtime，阶段 1 不处理。
+// shell: 开头的是安卓壳的合成订阅，走 Realtime，后端暂不处理。
 
 import webpush from "web-push";
 
@@ -12,18 +12,19 @@ export type PushResult = { sent: number; total: number; removed: number; skipped
 
 type Sender = (sub: webpush.PushSubscription, payload: string, options: webpush.RequestOptions) => Promise<{ statusCode: number }>;
 
-export async function sendPushToUser(
+/** 依次推送多条（一条回复按段拆成几条通知），段与段之间隔 gapMs */
+export async function sendPushMessages(
   rest: Rest,
   userId: string,
-  message: PushMessage,
+  messages: PushMessage[],
   send: Sender = webpush.sendNotification,
+  gapMs = 500,
 ): Promise<PushResult> {
   const [vapid] = await restJson<VapidRow[]>(rest, "push_server_config?id=eq.main&select=vapid_public_key,vapid_private_key,site_origin&limit=1");
   if (!vapid?.vapid_public_key || !vapid.vapid_private_key) throw new Error("个人云里没有 VAPID 密钥");
-  const subs = await restJson<SubscriptionRow[]>(rest, `push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&select=endpoint,user_id,p256dh,auth`);
+  const all = await restJson<SubscriptionRow[]>(rest, `push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&select=endpoint,user_id,p256dh,auth`);
 
-  const result: PushResult = { sent: 0, total: subs.length, removed: 0, skippedShell: 0, errors: [] };
-  const payload = JSON.stringify(message);
+  const result: PushResult = { sent: 0, total: all.length, removed: 0, skippedShell: 0, errors: [] };
   const options: webpush.RequestOptions = {
     TTL: 3600,
     vapidDetails: {
@@ -32,24 +33,37 @@ export async function sendPushToUser(
       privateKey: vapid.vapid_private_key,
     },
   };
+  let subs = all.filter(sub => !sub.endpoint.startsWith("shell:"));
+  result.skippedShell = all.length - subs.length;
 
-  for (const sub of subs) {
-    if (sub.endpoint.startsWith("shell:")) { result.skippedShell += 1; continue; }
-    try {
-      await send({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, options);
-      result.sent += 1;
-      await rest(`push_subscriptions?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
-        method: "PATCH", body: JSON.stringify({ last_ok_at: new Date().toISOString(), fail_count: 0 }),
-      }).catch(() => undefined);
-    } catch (err) {
-      const status = (err as { statusCode?: number }).statusCode;
-      if (status === 404 || status === 410) {
-        await rest(`push_subscriptions?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, { method: "DELETE" }).catch(() => undefined);
-        result.removed += 1;
-      } else {
-        result.errors.push(status ? `http ${status}` : (err instanceof Error ? err.message : String(err)).slice(0, 80));
+  for (let index = 0; index < messages.length; index += 1) {
+    if (index > 0 && gapMs > 0) await new Promise(resolve => setTimeout(resolve, gapMs));
+    const payload = JSON.stringify(messages[index]);
+    const alive: SubscriptionRow[] = [];
+    for (const sub of subs) {
+      try {
+        await send({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, options);
+        result.sent += 1;
+        alive.push(sub);
+        await rest(`push_subscriptions?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
+          method: "PATCH", body: JSON.stringify({ last_ok_at: new Date().toISOString(), fail_count: 0 }),
+        }).catch(() => undefined);
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410) {
+          await rest(`push_subscriptions?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, { method: "DELETE" }).catch(() => undefined);
+          result.removed += 1;
+        } else {
+          alive.push(sub);
+          result.errors.push(status ? `http ${status}` : (err instanceof Error ? err.message : String(err)).slice(0, 80));
+        }
       }
     }
+    subs = alive;
   }
   return result;
+}
+
+export function sendPushToUser(rest: Rest, userId: string, message: PushMessage, send: Sender = webpush.sendNotification): Promise<PushResult> {
+  return sendPushMessages(rest, userId, [message], send);
 }

@@ -1,4 +1,4 @@
-// 诊断：每个角色最近的聊天镜像 + 后端收到的快照时间。不输出任何密钥。
+// 诊断：每个角色最近的聊天镜像 + 后端存的快照时间。不输出任何密钥。
 
 import type { Store, SnapshotInfo } from "./store.ts";
 import { restJson, type MirrorRow, type Rest } from "./supabase.ts";
@@ -7,7 +7,7 @@ export type CharacterDiagnostics = {
   characterId: string;
   mirrorLatestAt: string | null;
   recent: { role: string; at: string; text: string }[];
-  snapshot: SnapshotInfo | null;
+  snapshots: SnapshotInfo[];
 };
 
 export async function collectDiagnostics(rest: Rest, store: Store, userId: string, recentLimit = 20): Promise<{
@@ -21,8 +21,8 @@ export async function collectDiagnostics(rest: Rest, store: Store, userId: strin
   const latestByCharacter = new Map<string, string>();
   for (const row of latest) if (row.character_id && !latestByCharacter.has(row.character_id)) latestByCharacter.set(row.character_id, row.message_at);
 
-  const snapshots = new Map(store.listSnapshots().map(s => [s.characterId, s]));
-  const ids = [...new Set([...latestByCharacter.keys(), ...snapshots.keys()])];
+  const snapshots = store.listSnapshots();
+  const ids = [...new Set([...latestByCharacter.keys(), ...snapshots.map(s => s.characterId)])];
 
   const characters = await Promise.all(ids.map(async characterId => {
     const rows = await restJson<MirrorRow[]>(
@@ -34,7 +34,7 @@ export async function collectDiagnostics(rest: Rest, store: Store, userId: strin
       characterId,
       mirrorLatestAt: latestByCharacter.get(characterId) ?? null,
       recent: rows.reverse().map(row => ({ role: row.role, at: row.message_at, text: row.content.slice(0, 80) })),
-      snapshot: snapshots.get(characterId) ?? null,
+      snapshots: snapshots.filter(s => s.characterId === characterId),
     };
   }));
   return { userId, characters, generatedAt: new Date().toISOString() };

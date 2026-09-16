@@ -1,9 +1,13 @@
-// 挂念后端入口。阶段 1：健康检查、诊断、快照接收、测试推送；还没有 tick。
+// 挂念后端入口：HTTP 接口 + 每分钟一轮的大脑。第一次启动时从个人云迁入设置、账本和提示词模板。
 
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { loadConfig } from "./config.ts";
+import type { EngineDeps } from "./engine.ts";
+import { importFromCloud } from "./importer.ts";
+import { sendPushMessages } from "./push.ts";
+import { Runner } from "./runner.ts";
 import { createApp } from "./server.ts";
 import { Store } from "./store.ts";
 import { createRest, resolveUserId } from "./supabase.ts";
@@ -19,14 +23,31 @@ chmodSync(dbPath, 0o600);
 
 const rest = createRest(config);
 const userId = await resolveUserId(rest, config.userId);
-const server = createApp({ rest, store, userId, apiToken: config.apiToken, startedAt: new Date() });
+
+if (!store.listCharacters().length) {
+  const report = await importFromCloud(rest, store, userId);
+  console.log("[companion] 从个人云迁入：" + report.characters.map(c => `${c.name || c.characterId}（${c.skipped || `日子 ${c.days.length}，快照 ${c.snapshots.join("/") || "无"}`}）`).join("；"));
+}
+
+const engine: EngineDeps = {
+  store, rest, userId,
+  fetchModel: (url, init) => fetch(url, init),
+  push: messages => sendPushMessages(rest, userId, messages),
+  now: () => Date.now(),
+  random: Math.random,
+  log: line => console.log(line),
+};
+const runner = new Runner(engine, config.mode);
+const server = createApp({ rest, store, userId, apiToken: config.apiToken, startedAt: new Date(), runner, engine });
 
 server.listen(config.port, "127.0.0.1", () => {
-  console.log(`[companion] 已启动 127.0.0.1:${config.port}`);
+  console.log(`[companion] 已启动 127.0.0.1:${config.port}，模式 ${runner.mode === "live" ? "真发" : "影子"}`);
+  runner.start();
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    runner.stop();
     server.close(() => { store.close(); process.exit(0); });
   });
 }
