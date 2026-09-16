@@ -1844,6 +1844,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     let cleanupWeixinCloudRealtimeSync: (() => void) | null = null;
     let cleanupGuanianPresence: (() => void) | null = null;
     let cleanupGuanianServer: (() => void) | null = null;
+    let cleanupWakeServer: (() => void) | null = null;
 
     void (async () => {
       try {
@@ -1900,6 +1901,10 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         if (cancelled) return;
         cleanupGuanianServer = m.startGuanianServerSync();
       }).catch(() => undefined);
+      void import("@/lib/wake-server-sync").then(m => {
+        if (cancelled) return;
+        cleanupWakeServer = m.startWakeServerSync();
+      }).catch(() => undefined);
       // 延后跑，别抢启动窗口的解码/IO。
       window.setTimeout(() => {
         void import("@/lib/notification-avatar-cache").then(m => m.syncNotificationAvatarCache()).catch(() => undefined);
@@ -1911,6 +1916,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       cleanupWeixinCloudRealtimeSync?.();
       cleanupGuanianPresence?.();
       cleanupGuanianServer?.();
+      cleanupWakeServer?.();
       if (servicesStarted) {
         stopFollowUpService();
         stopMomentsService();

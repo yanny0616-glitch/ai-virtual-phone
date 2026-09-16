@@ -39,10 +39,19 @@ try{
   await call({action:'start',serverId:'garden'});assert.equal(starts,1);await call({action:'stop',serverId:'garden'});assert.equal(starts,1);
   const pendingTwo=service.store.data.events.find(e=>e.sourceId==='two');
   await call({action:'stop',serverId:'two'});assert.equal((await call({action:'ack',ids:[pendingTwo.id]})).data.acceptedIds.length,0);assert.equal((await call({...event,sourceId:'two',eventId:'after-stop'},two)).status,409);
+  assert.equal((await call({action:'save',adapter:'webhook',serverId:'srv',serverUrl:'https://srv.example/mcp',characterId:'char-srv',mode:'server'})).status,200);
+  const srvToken=(await call({action:'credentials',serverId:'srv'})).data.ingressToken;await call({action:'start',serverId:'srv'});
+  assert.equal((await call({...event,sourceId:'srv',eventId:'srv-1'},srvToken)).status,200);
+  assert.ok(!(await call({action:'events'})).data.events.some(e=>e.sourceId==='srv'));
+  const srvEvents=(await call({action:'events',mode:'server'})).data.events;assert.equal(srvEvents.length,1);assert.equal(srvEvents[0].mode,'server');
+  assert.equal((await call({action:'status',serverId:'srv'})).data.sources.find(c=>c.serverId==='srv').status,'connected');
+  await call({action:'save',adapter:'webhook',serverId:'srv',serverUrl:'https://srv.example/mcp',characterId:'char-srv',mode:'auto'});
+  assert.equal((await call({action:'events',mode:'server'})).data.events.length,0);
+  await call({action:'clear',serverId:'srv'});
   const previous=service.store.data.events.length;const save=service.store.save;service.store.save=async()=>{throw Error('disk failure');};
   await assert.rejects(service.store.enqueue('two',{reason:'notify',message:'not committed',eventId:'failure'}));assert.equal(service.store.data.events.length,previous);service.store.save=save;
  }finally{await service.shutdown();}
- console.log('PASS legacy migration, separate source keys/targets, explicit start/stop, scoped deletion, durable eventId deduplication, ack winner, failed-write rollback, no Garden auto-connect');
+ console.log('PASS legacy migration, separate source keys/targets, explicit start/stop, scoped deletion, durable eventId deduplication, ack winner, failed-write rollback, no Garden auto-connect, server-mode sources routed only to the backend');
 }finally{await rm(dir,{recursive:true,force:true});}
 const {sendEvent}=await import('./send-event.mjs');
 let sends=0;

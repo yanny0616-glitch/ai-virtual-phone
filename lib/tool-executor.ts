@@ -3877,7 +3877,7 @@ function bearerAuthValue(accessToken: string): string {
     return `Bearer ${accessToken.replace(/^bearer\s+/i, "")}`;
 }
 
-function buildMcpAuthHeaders(server: McpServerConfig): Record<string, string> {
+export function buildMcpAuthHeaders(server: McpServerConfig): Record<string, string> {
     const headers: Record<string, string> = cleanHeaders(server.headers);
     if (server.accessToken) {
         headers["Authorization"] = bearerAuthValue(server.accessToken);

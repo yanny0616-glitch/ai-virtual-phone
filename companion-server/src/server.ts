@@ -12,7 +12,7 @@
 //   POST /import                            从个人云迁入 { force }
 //   GET  /diagnostics                       个人云聊天镜像最近几条
 //   POST /push/test                         测试推送
-//   /app/…                                  挂念直连，见 api.ts
+//   /app/…                                  挂念直连、唤醒后端，见 api.ts
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
@@ -27,10 +27,11 @@ import { characterStatus, overview } from "./status.ts";
 import { validateSnapshot, type Snapshot, type Store } from "./store.ts";
 import type { Rest } from "./supabase.ts";
 import type { FixedItem, Routine } from "./day.ts";
+import type { WakeService } from "./wake.ts";
 
 const MAX_BODY = 4 * 1024 * 1024;
 
-export type ServerDeps = { rest: Rest; store: Store; userId: string; auth: Auth; startedAt: Date; runner: Runner; engine: EngineDeps };
+export type ServerDeps = { rest: Rest; store: Store; userId: string; auth: Auth; startedAt: Date; runner: Runner; engine: EngineDeps; wake?: WakeService };
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -69,7 +70,7 @@ export function createApp(deps: ServerDeps): Server {
       }
       if (!await deps.auth.allow(req.headers.authorization)) return send(res, 401, { ok: false, error: "unauthorized" });
 
-      const appDeps = { store: deps.store, runner: deps.runner, engine: deps.engine };
+      const appDeps = { store: deps.store, runner: deps.runner, engine: deps.engine, wake: deps.wake };
       const app = await handleApp(appDeps, req.method || "GET", path, url.searchParams, () => readJson(req));
       if (app) return send(res, app.status, app.body);
 

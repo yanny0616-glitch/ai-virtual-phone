@@ -394,6 +394,8 @@ type ChatPromptBuildOptions = {
     activateAllWorldBooks?: boolean;
     toolsAllowed?: boolean;
     forceEnableTools?: boolean;
+    /** 只让模型看到这些工具（唤醒后端底稿只带绑定的那个 MCP） */
+    toolFilter?: (tool: EnabledTool) => boolean;
 };
 
 function matchesPromptProfileRef(prompt: { identifier: string; name?: string }, refs: Set<string>): boolean {
@@ -1939,7 +1941,7 @@ export async function buildChatPromptMessages(
     const callKind = options?.appTags?.includes("video") ? "video" as const : options?.appTags?.includes("voice") ? "voice" as const : null;
     const effectiveAppTags = mergeAppTags(options?.appTags, promptProfile?.appTags, resolvedAppId);
     const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode;
-    const enabledTools = toolsAllowed ? getEnabledTools(resolvedAppId) : [];
+    const enabledTools = toolsAllowed ? getEnabledTools(resolvedAppId).filter(options?.toolFilter ?? (() => true)) : [];
     const toolsEnabled = enabledTools.length > 0
         && (options?.forceEnableTools === true || presetIncludesToolsMacro(preset, resolvedAppId, effectiveAppTags));
     const usesNativeActions = Boolean(toolsEnabled && nativeToolProtocolForConfig(config));

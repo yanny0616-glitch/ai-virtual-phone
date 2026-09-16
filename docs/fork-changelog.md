@@ -1,5 +1,14 @@
 # Fork 变更日志
 
+## 2026-09-17：唤醒后端（事件唤醒交给 VPS）
+
+- 工具箱 MCP 的「事件唤醒」新增处理方式「交给 VPS 后端」：手机关着也处理，后端用这个 MCP 调工具、回复、推送。工具箱仍是原件，花园只是一个接入方，其他项目照旧用通用 Webhook 投递。
+- 事件网关（`tools/tool-events/service.mjs`）：来源 `mode: "server"`，`events` 按来源当前模式分流，手机领不到交给后端的事件；`sources` 带每个来源的连接状态。
+- 后端 `companion-server/src/wake.ts` + `src/mcp.ts`：每 15 秒领事件，没底稿留在网关，有底稿先 ack 再跑多轮模型 + MCP 工具（OpenAI 兼容 / Anthropic / Gemini 原生工具，或文字协议 [获取指令] / [执行动作]），写 `push_outbox` + Web Push；失败也把原文和原因寄回聊天；交给后端的来源断开时推送提醒。新接口 `/app/wake/*`，记录存 `wake_runs`。
+- 小手机 `lib/wake-server-sync.ts`：给交给后端的来源冻底稿（聊天提示词 + 完整记录 + 事件占位，只含绑定 MCP 的工具和凭据），聊天有新消息、切后台、定时检查后寄送，来源改回手机处理时删底稿。`buildChatPromptMessages` 新增 `toolFilter`。补收时 `push-outbox-client` 先落事件原文和 tool_call / tool_result / 灰条。唤醒设置里显示后端底稿和最近处理记录。
+- 花园断线不再自动重连（VPS 上运行中的网关有一段未提交的退避重连，违反花园官方的 fail-closed 规定，部署时以仓库版本替换）。
+- 验证：后端 37 项测试 + tsc；`tools/tool-events/check.mjs`；`scripts/check-wake-server.mjs`（真网关 + 真后端 HTTP + 本机 SSE 假 MCP，含补收落库、失败回寄、改回手机处理）；`scripts/check-tool-events.mjs`；根 `tsc --noEmit`。未做手机端实测。
+
 ## 2026-09-17：挂念直连 VPS 后端（挂念 0.10.0）
 
 - 后端 `companion-server` 新增 `/app/*` 接口（`src/api.ts`）：界面状态（生活面按此刻揭晓变数、念头带后端状态 / 押后 / 发送前复核 / 轨迹、账本、朋友圈记录、判断记录）、记录页、宿主取数；建档、设置、原料、改日程、账本、撤念头、朋友圈回执、重新生成、立刻判。改动排进 `Runner.exclusive` 锁，不会被正在跑的一轮盖掉。注入聊天的文字（`src/context.ts`）和固定作息折算（`src/routine.ts`）从挂念搬到后端，按角色时区算。

@@ -45,7 +45,9 @@ export async function startService({dir='/var/lib/float-garden-wake',port=18062,
  const manage=fn=>{const task=management.then(fn);management=task.catch(()=>{});return task;};
  const stop=async id=>{const c=connections.get(id);if(c){c.status='stopped';c.stop?.();await c.done?.catch(()=>{});connections.delete(id);}};
  const safeConfig=c=>c?{serverId:c.serverId,serverUrl:c.serverUrl,characterId:c.characterId,mode:c.mode,adapter:c.adapter,hasToken:Boolean(c.token)}:null;
- const view=id=>({ok:true,status:connections.get(id)?.status||'stopped',lastError:connections.get(id)?.error||'',pending:store.data.events.filter(e=>!id||e.sourceId===id).length,config:safeConfig(store.data.sources[id]),sources:Object.values(store.data.sources).map(safeConfig)});
+ const view=id=>({ok:true,status:connections.get(id)?.status||'stopped',lastError:connections.get(id)?.error||'',pending:store.data.events.filter(e=>!id||e.sourceId===id).length,config:safeConfig(store.data.sources[id]),sources:Object.values(store.data.sources).map(c=>({...safeConfig(c),status:connections.get(c.serverId)?.status||'stopped',lastError:connections.get(c.serverId)?.error||''}))});
+ // mode=server 的来源交给 VPS 唤醒后端处理：手机端收件不领取，后端带 mode:'server' 领取。按来源当前配置分流，改模式后旧事件跟着走。
+ const forServer=e=>store.data.sources[e.sourceId]?.mode==='server';
  async function handle(b,authorization){
   if(b.action==='ingest')return exclusive(async()=>{
    const c=store.data.sources[b.sourceId];
@@ -55,7 +57,7 @@ export async function startService({dir='/var/lib/float-garden-wake',port=18062,
    return {ok:true,...await store.enqueue(b.sourceId,b)};
   });
   if(!equal(authorization,`Bearer ${secret}`))throw fail('Unauthorized',401);
-  if(b.action==='events')return exclusive(()=>({...view(),events:store.data.events.filter(e=>connections.get(e.sourceId)?.status==='connected').slice(0,20)}));
+  if(b.action==='events')return exclusive(()=>({...view(),events:store.data.events.filter(e=>connections.get(e.sourceId)?.status==='connected'&&forServer(e)===(b.mode==='server')).map(e=>({...e,mode:store.data.sources[e.sourceId]?.mode||e.mode})).slice(0,20)}));
   if(b.action==='ack')return exclusive(async()=>{
    if(!Array.isArray(b.ids)||b.ids.length>20)throw fail('Invalid acknowledgement');
    const acceptedIds=await store.transaction(()=>{const ids=store.data.events.filter(e=>b.ids.includes(e.id)&&connections.get(e.sourceId)?.status==='connected').map(e=>e.id);store.data.events=store.data.events.filter(e=>!ids.includes(e.id));return ids;});
@@ -67,7 +69,7 @@ export async function startService({dir='/var/lib/float-garden-wake',port=18062,
    if(['save','clear','stop'].includes(b.action))await stop(id);
    if(b.action==='save')await exclusive(async()=>{
     const adapter=b.adapter||'garden',url=b.serverUrl||(adapter==='garden'?GARDEN_MCP_URL:'');
-    if(!validText(id,150)||! /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(id)||['constructor','prototype','__proto__'].includes(id)||!validText(b.characterId,150)||!validText(url,2000)||!['auto','receive'].includes(b.mode)||!['garden','webhook'].includes(adapter))throw fail('请选择来源、角色和处理方式');
+    if(!validText(id,150)||! /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(id)||['constructor','prototype','__proto__'].includes(id)||!validText(b.characterId,150)||!validText(url,2000)||!['auto','receive','server'].includes(b.mode)||!['garden','webhook'].includes(adapter))throw fail('请选择来源、角色和处理方式');
     if(adapter==='garden'&&url.replace(/\/$/,'')!==GARDEN_MCP_URL)throw fail('花园适配器只适用于花园 MCP');
     const old=store.data.sources[id];
     if(!old&&Object.keys(store.data.sources).length>=32)throw fail('最多配置32个来源');

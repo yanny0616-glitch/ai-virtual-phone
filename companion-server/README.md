@@ -1,4 +1,4 @@
-# companion-server（挂念后端）
+# companion-server（挂念后端 + 唤醒后端）
 
 挂念的"情绪 / 生活 / 何时发送"迁到 VPS 常驻运行的后端。设计见 `/root/vibe-coding/float/docs-draft/guanian-backend.md`。
 
@@ -67,6 +67,9 @@
 | `POST /app/characters/:id/items/cancel` | 撤掉一个还没发的念头 `{wakeId}` |
 | `POST /app/characters/:id/moments/ack` | 宿主发朋友圈的回执 `{id, status, postId, note}` |
 | `POST /app/characters/:id/regenerate` / `tick` | 同上，挂念按钮用 |
+| `PUT /app/wake/templates/:sourceId` | 唤醒后端：手机寄来的来源底稿（旧的不覆盖新的） |
+| `POST /app/wake/templates/:sourceId/delete` | 来源不再交给后端 |
+| `GET /app/wake/status?source=x&limit=n` | 底稿概况（不含密钥）、网关来源状态、最近处理记录 |
 
 CLI：`node src/cli.ts diagnose | push-test | status | import [--force] | mode shadow|live`
 
@@ -74,6 +77,19 @@ CLI：`node src/cli.ts diagnose | push-test | status | import [--force] | mode s
 
 `lib/guanian-server-sync.ts`：每分钟取 `/app/host`，写在线状态变量、回复闸门、注入聊天提示词、朋友圈节奏变量；后端起意的朋友圈在前台补成帖子并回执；后端生成的日程写回系统日程表；把好感、系统日程表、「忙碌回复」固定作息和例外寄到 `/app/characters/:id/inputs`。挂念 0.10.0 开着「交给 VPS 后端」时界面直接读写 `/app/*`。
 端到端自测：`node scripts/check-gua-nian-server-direct.mjs`（真后端 HTTP + Chromium 跑挂念 + vm 跑宿主同步）。
+
+### 唤醒后端（`src/wake.ts`、`src/mcp.ts`）
+
+外部事件叫醒角色，手机关着也处理。花园只是一个接入方：任何能发 Webhook 的项目按 `tools/tool-events/README.md` 投递即可，不能发的写个适配器翻译成标准格式。
+
+1. 收件：本机事件网关（`tools/tool-events/service.mjs`，127.0.0.1:18062）负责适配器、投递鉴权、去重、排队。工具箱 MCP 的「事件唤醒」选「交给 VPS 后端」= 来源 `mode: "server"`；网关只把这类事件交给带 `mode:"server"` 领取的后端，手机领不到。
+2. 底稿：小手机 `lib/wake-server-sync.ts` 给每个这样的来源冻一份——聊天提示词 + 完整聊天记录 + 末尾占位用户消息，只含绑定 MCP 的工具（原生协议给定义和名字对照，文字协议给指令说明），MCP 地址和请求头。聊天有新消息 30 秒后、切后台、每 5 分钟检查一次，没变化 30 分钟重寄。工具箱仍是原件。
+3. 处理：每 15 秒领一次。没底稿的事件留在网关；有底稿先 ack（工具有副作用，失败不重放）→ 占位换成事件原文、时间刷新 → 多轮调模型（最多取手机的工具轮数，上限 10），要工具就经 MCP（Streamable HTTP，JSON / SSE 回包，会话过期重握手）调 → 回复写 `push_outbox`（`trigger_key = wake:<事件>`，`meta.toolEvent` 带原文、动作、失败原因）→ Web Push。失败也写一条，事件不会悄悄消失。
+4. 补收：`lib/push-outbox-client.ts` 先落事件原文（用户消息）和每个动作的 tool_call / tool_result / 灰条，再按普通离线回复解析。
+5. 来源断开（花园断线按官方规定不自动重连）：推一条「唤醒来源断开了」，去工具箱手动启动。
+6. 记录：`wake_runs` 表（sent / silent / error / waiting / disconnected），工具箱唤醒设置里能看到。
+
+端到端自测：`node scripts/check-wake-server.mjs`（真网关 + 真后端 HTTP + 本机假 MCP）。
 
 ### 还没搬的
 
@@ -91,6 +107,9 @@ COMPANION_API_TOKEN=...                          # 接口令牌，openssl rand -
 COMPANION_USER_ID=...                            # 订阅表里只有一个账号时可省略
 COMPANION_PORT=18070
 COMPANION_DATA_DIR=/var/lib/float-companion
+COMPANION_WAKE=off                               # 关掉唤醒后端
+WAKE_GATEWAY_URL=http://127.0.0.1:18062
+WAKE_GATEWAY_TOKEN_FILE=/etc/float-garden-wake/backend-token
 ```
 
 数据：`/var/lib/float-companion/companion.db`（0600，快照里含模型密钥）。

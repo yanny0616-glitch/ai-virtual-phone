@@ -12,6 +12,10 @@ export type Config = {
   dataDir: string;
   /** shadow 只记录不调模型不发；live 真发。启动后以 SQLite 里存的为准 */
   mode: "shadow" | "live";
+  /** 唤醒后端：本机事件网关地址和管理令牌文件；COMPANION_WAKE=off 关掉 */
+  wakeEnabled: boolean;
+  wakeGatewayUrl: string;
+  wakeGatewayTokenFile: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -28,5 +32,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     bind: (env.COMPANION_BIND || "127.0.0.1").split(",").map(s => s.trim()).filter(Boolean),
     dataDir: env.COMPANION_DATA_DIR || "/var/lib/float-companion",
     mode: env.COMPANION_MODE === "live" ? "live" : "shadow",
+    wakeEnabled: env.COMPANION_WAKE !== "off",
+    wakeGatewayUrl: env.WAKE_GATEWAY_URL || "http://127.0.0.1:18062",
+    wakeGatewayTokenFile: env.WAKE_GATEWAY_TOKEN_FILE || "/etc/float-garden-wake/backend-token",
   };
 }

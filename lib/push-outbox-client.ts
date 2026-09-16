@@ -8,7 +8,7 @@ import type { RegexConfig } from "./settings-types";
 import { stripHallucinatedTimestamps } from "./llm-provider-adapter";
 import { MacroEngine } from "./macro-engine";
 import { getActiveAppTags } from "./content-tag-utils";
-import { loadChatMessages, loadChatSessions, hasPersistedResponseBatch, refreshChatSessionFromDisk } from "./chat-storage";
+import { loadChatMessages, loadChatSessions, hasPersistedResponseBatch, refreshChatSessionFromDisk, upsertImportedChatMessageAsync, type ChatMessage } from "./chat-storage";
 import { settleDeferredReplyDelivery } from "./deferred-reply-cloud";
 import { isPersonalPushCloudActive, loadPersonalPushCloudState, personalPushFetch } from "./personal-push-cloud";
 import { removeTimedWakeSchedule } from "./timed-wake-storage";
@@ -43,6 +43,39 @@ type OutboxEntry = {
     } | null;
     created_at: string;
 };
+
+/** 唤醒后端处理过的事件：事件原文、调过的工具、失败原因（见 companion-server/src/wake.ts） */
+type WakeToolEvent = {
+    id: string;
+    messageId: string;
+    message: string;
+    createdAt: string;
+    actions?: { name: string; ok: boolean; args?: Record<string, unknown>; text?: string }[];
+    error?: string;
+};
+
+/** 按小手机自己处理事件时的样子落库：事件原文是用户消息，每个动作一组 tool_call / tool_result（进上下文、气泡隐藏）+ tool_notice 灰条。
+ *  编号固定，回执失败重收也不会重复。 */
+async function importWakeToolEvent(sessionId: string, event: WakeToolEvent): Promise<void> {
+    const base = Number.isFinite(Date.parse(event.createdAt)) ? Date.parse(event.createdAt) : Date.now();
+    let seq = 0;
+    const put = (msg: Omit<ChatMessage, "sessionId" | "status" | "createdAt">) => upsertImportedChatMessageAsync(
+        { ...msg, sessionId, status: "sent", createdAt: new Date(base + seq++).toISOString() } as ChatMessage,
+        { insertByCreatedAt: true },
+    );
+    if (event.message) await put({ id: event.messageId, role: "user", content: event.message });
+    for (const [index, action] of (event.actions || []).entries()) {
+        const id = `${event.messageId}_act${index}`;
+        const text = String(action.text || "");
+        await put({ id: `${id}_call`, role: "assistant", content: `[执行动作:${action.name}(${JSON.stringify(action.args || {})})]`, mediaType: "tool_call" });
+        await put({
+            id: `${id}_result`, role: "tool", mediaType: "tool_result",
+            content: `以下是系统处理结果：\n${action.ok ? `<action_result name="${action.name}">${text}</action_result>` : `<action_result name="${action.name}" error="${text || "未知错误"}"></action_result>`}`,
+        });
+        await put({ id: `${id}_notice`, role: "system", mediaType: "tool_notice", content: action.ok ? `✓ ${action.name} 执行成功（VPS 后端）` : `✗ ${action.name}: ${text.slice(0, 120)}（VPS 后端）` });
+    }
+    if (event.error) await put({ id: `${event.messageId}_error`, role: "system", mediaType: "tool_notice", content: `⚠️ 唤醒后端处理失败：${event.error}` });
+}
 
 let consuming = false;
 let lastConsumeAt = 0;
@@ -215,6 +248,9 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         const { markIdleReconnectFired } = await import("./idle-reconnect-storage");
                         markIdleReconnectFired(idleMeta.ruleId, typeof idleMeta.firedAt === "number" ? idleMeta.firedAt : Date.now());
                     }
+
+                    const toolEvent = (meta as { toolEvent?: WakeToolEvent }).toolEvent;
+                    if (toolEvent?.messageId) await importWakeToolEvent(sessionId, toolEvent);
 
                     const followUpIndex = typeof meta.followUpIndex === "number" ? meta.followUpIndex : undefined;
                     const existingMessages = loadChatMessages(sessionId);

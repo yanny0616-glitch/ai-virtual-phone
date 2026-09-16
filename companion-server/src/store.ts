@@ -6,11 +6,13 @@
 //   sends      真发出去的消息（回音账的凭据）
 //   decisions  全量判断记录（诊断用）
 //   calendar   手机日程表上已定的安排和固定作息（生成一天时用）
+//   wake_templates / wake_runs  唤醒后端：每个来源一份底稿、处理记录（见 wake.ts）
 
 import { DatabaseSync } from "node:sqlite";
 
 import type { Ctx, GuanianDay, ModelRequest, PlanItem, ProviderKind } from "./types.ts";
 import type { FixedItem, Routine } from "./day.ts";
+import type { WakeRunRow, WakeTemplate } from "./wake.ts";
 
 export type SnapshotPurpose = "chat" | "judge" | "daily";
 
@@ -113,11 +115,53 @@ export class Store {
         kind text not null, note text not null, data text, mode text not null
       );
       create index if not exists decisions_char on decisions (character_id, at);
+      create table if not exists wake_templates (source_id text primary key, payload text not null, received_at text not null);
+      create table if not exists wake_runs (
+        id integer primary key autoincrement, source_id text not null, character_id text not null, event_id text not null default '',
+        at integer not null, status text not null, note text not null, data text
+      );
       create table if not exists calendar (
         character_id text not null, date text not null, items text not null default '[]', routine text not null default '{}',
         updated_at integer not null, primary key (character_id, date)
       );
     `);
+  }
+
+  // ── 唤醒后端
+  saveWakeTemplate(t: WakeTemplate, now = new Date()): void {
+    this.#db.prepare("insert into wake_templates (source_id, payload, received_at) values (?, ?, ?) on conflict(source_id) do update set payload = excluded.payload, received_at = excluded.received_at")
+      .run(t.sourceId, JSON.stringify(t), now.toISOString());
+  }
+
+  getWakeTemplate(sourceId: string): WakeTemplate | null {
+    const row = this.#db.prepare("select payload from wake_templates where source_id = ?").get(sourceId) as { payload: string } | undefined;
+    return row ? j<WakeTemplate | null>(row.payload, null) : null;
+  }
+
+  listWakeTemplates(): { template: WakeTemplate; receivedAt: string }[] {
+    return (this.#db.prepare("select payload, received_at from wake_templates order by source_id").all() as { payload: string; received_at: string }[])
+      .map(r => ({ template: j<WakeTemplate | null>(r.payload, null), receivedAt: r.received_at }))
+      .filter((r): r is { template: WakeTemplate; receivedAt: string } => Boolean(r.template));
+  }
+
+  deleteWakeTemplate(sourceId: string): boolean {
+    return Number(this.#db.prepare("delete from wake_templates where source_id = ?").run(sourceId).changes) > 0;
+  }
+
+  addWakeRun(r: Omit<WakeRunRow, "id">): void {
+    this.#db.prepare("insert into wake_runs (source_id, character_id, event_id, at, status, note, data) values (?, ?, ?, ?, ?, ?, ?)")
+      .run(r.sourceId, r.characterId, r.eventId, r.at, r.status, r.note, r.data ? JSON.stringify(r.data) : null);
+    this.#db.prepare("delete from wake_runs where id <= (select max(id) from wake_runs) - 500").run();
+  }
+
+  listWakeRuns(limit = 30, sourceId = ""): WakeRunRow[] {
+    const rows = (sourceId
+      ? this.#db.prepare("select * from wake_runs where source_id = ? order by id desc limit ?").all(sourceId, limit)
+      : this.#db.prepare("select * from wake_runs order by id desc limit ?").all(limit)) as Row[];
+    return rows.map(r => ({
+      id: Number(r.id), sourceId: String(r.source_id), characterId: String(r.character_id), eventId: String(r.event_id), at: Number(r.at),
+      status: String(r.status), note: String(r.note), data: j<Record<string, unknown> | null>(r.data as string | null, null),
+    }));
   }
 
   getMeta(key: string): string | null {

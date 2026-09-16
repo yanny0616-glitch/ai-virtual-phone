@@ -10,7 +10,10 @@
 //   POST /app/characters/:id/items/cancel    撤掉一个还没发的念头 { wakeId }
 //   POST /app/characters/:id/moments/ack     朋友圈发没发 { id, status, postId, note }
 //   POST /app/characters/:id/regenerate      重新生成今天
-//   POST /app/characters/:id/tick            立刻跑一轮
+//   POST /app/characters/:id/tick               立刻跑一轮
+//   PUT  /app/wake/templates/:sourceId          唤醒后端：手机寄来的来源底稿（见 wake.ts）
+//   POST /app/wake/templates/:sourceId/delete   来源不再交给后端
+//   GET  /app/wake/status?source=x              唤醒后端：底稿概况（不含密钥）、网关来源状态、最近处理记录
 // 改状态的都在 Runner 的锁里做：正在跑的一轮调模型时改了，会被那轮结束时的保存盖掉。
 
 import type { EngineDeps } from "./engine.ts";
@@ -21,9 +24,10 @@ import { fixedForDay } from "./routine.ts";
 import type { Runner } from "./runner.ts";
 import type { CharacterRow, DayRow, DecisionRow, Store, TimerRow } from "./store.ts";
 import { threadAlive } from "./threads.ts";
+import { validateWakeTemplate, type WakeService, type WakeTemplate } from "./wake.ts";
 import { SETTING_KEYS, type GuanianDay, type GuanianSched, type PlanItem, type Thread } from "./types.ts";
 
-export type AppDeps = { store: Store; runner: Runner; engine: EngineDeps };
+export type AppDeps = { store: Store; runner: Runner; engine: EngineDeps; wake?: WakeService };
 
 export class HttpError extends Error {
   status: number;
@@ -478,6 +482,7 @@ export async function handleApp(deps: AppDeps, method: string, path: string, que
   if (method === "GET" && parts[1] === "state") return ok(appState(deps, ids(query)));
   if (method === "GET" && parts[1] === "host") return ok(appHost(deps, ids(query)));
   if (method === "GET" && parts[1] === "archive") return ok(appArchive(deps, String(query.get("id") || ""), Number(query.get("limit")) || 30));
+  if (parts[1] === "wake") return appWake(deps, method, parts, query, readBody);
   if (parts[1] !== "characters" || !parts[2]) return { status: 404, body: { ok: false, error: "not_found" } };
   const id = parts[2];
   const body = async () => { const b = await readBody(); return (b && typeof b === "object" ? b : {}) as Record<string, unknown>; };
@@ -494,6 +499,42 @@ export async function handleApp(deps: AppDeps, method: string, path: string, que
     const traces = await deps.runner.tick(id);
     if (!traces.length) return { status: 409, body: { ok: false, error: "后端正在跑一轮，稍后再试" } };
     return ok({ trace: traces[0] });
+  }
+  return { status: 404, body: { ok: false, error: "not_found" } };
+}
+
+// ─── 唤醒后端
+
+async function appWake(deps: AppDeps, method: string, parts: string[], query: URLSearchParams, readBody: () => Promise<unknown>): Promise<{ status: number; body: unknown }> {
+  const sourceId = parts[3] || "";
+  if (method === "PUT" && parts[2] === "templates" && sourceId && parts.length === 4) {
+    const body = await readBody() as WakeTemplate;
+    if (body && typeof body === "object" && body.sourceId !== sourceId) return { status: 400, body: { ok: false, error: "sourceId 与地址不一致" } };
+    const error = validateWakeTemplate(body);
+    if (error) return { status: 400, body: { ok: false, error } };
+    const old = deps.store.getWakeTemplate(sourceId);
+    if (old && old.capturedAt > body.capturedAt) return { status: 200, body: { ok: true, kept: true } };
+    deps.store.saveWakeTemplate(body);
+    return { status: 200, body: { ok: true } };
+  }
+  if (method === "POST" && parts[2] === "templates" && sourceId && parts[4] === "delete") {
+    return { status: 200, body: { ok: true, deleted: deps.store.deleteWakeTemplate(sourceId) } };
+  }
+  if (method === "GET" && parts[2] === "status") {
+    const source = String(query.get("source") || "");
+    const templates = deps.store.listWakeTemplates().filter(r => !source || r.template.sourceId === source).map(({ template: t, receivedAt }) => ({
+      sourceId: t.sourceId, characterId: t.characterId, characterName: String(t.merge.characterName || ""), capturedAt: t.capturedAt, receivedAt,
+      protocol: t.protocol, mcpUrl: t.mcp?.url || "", tools: Object.values(t.toolNames).length || Object.keys(t.schemaText).length,
+    }));
+    const w = deps.wake;
+    return {
+      status: 200,
+      body: {
+        ok: true, templates,
+        gateway: w ? { lastPollAt: w.lastPollAt, error: w.lastError, sources: w.sources.filter(s => !source || s.serverId === source) } : null,
+        runs: deps.store.listWakeRuns(Math.min(100, Number(query.get("limit")) || 30), source),
+      },
+    };
   }
   return { status: 404, body: { ok: false, error: "not_found" } };
 }

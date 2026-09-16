@@ -1,4 +1,4 @@
-// 挂念后端入口：HTTP 接口 + 每分钟一轮的大脑。第一次启动时从个人云迁入设置、账本和提示词模板。
+// 挂念后端入口：HTTP 接口 + 每分钟一轮的大脑 + 唤醒后端（每 15 秒领一次事件）。第一次启动时从个人云迁入设置、账本和提示词模板。
 
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import { Runner } from "./runner.ts";
 import { createApp } from "./server.ts";
 import { Store } from "./store.ts";
 import { createRest, resolveUserId } from "./supabase.ts";
+import { localGateway, WakeService } from "./wake.ts";
 
 const config = loadConfig();
 
@@ -39,7 +40,12 @@ const engine: EngineDeps = {
 };
 const runner = new Runner(engine, config.mode);
 const auth = new Auth(config.apiToken, supabaseKeyCheck(config.personalUrl));
-const deps = { rest, store, userId, auth, startedAt: new Date(), runner, engine };
+// 唤醒后端：领本机事件网关里交给后端的事件（令牌文件缺失时每轮报错但不影响挂念）
+const wake = new WakeService(
+  { store, rest, userId, fetchModel: (url, init) => fetch(url, init), push: engine.push, now: () => Date.now(), log: line => console.log(line) },
+  localGateway(config.wakeGatewayUrl, config.wakeGatewayTokenFile),
+);
+const deps = { rest, store, userId, auth, startedAt: new Date(), runner, engine, wake };
 // 每个地址一个 server：127.0.0.1 给命令行，Docker 网桥地址给站点反代（/companion/…）
 const servers = config.bind.map(host => {
   const server = createApp(deps);
@@ -48,10 +54,12 @@ const servers = config.bind.map(host => {
 });
 console.log(`[companion] 已启动，模式 ${runner.mode === "live" ? "真发" : "影子"}`);
 runner.start();
+if (config.wakeEnabled) wake.start();
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     runner.stop();
+    wake.stop();
     let open = servers.length;
     for (const server of servers) server.close(() => { if (--open === 0) { store.close(); process.exit(0); } });
   });
