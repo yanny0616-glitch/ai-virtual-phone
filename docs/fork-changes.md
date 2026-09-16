@@ -345,4 +345,5 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 - **展示**（`components/chat/moment-post-card.tsx`）：两张以上按 `.feed-post-photo-grid` 铺（2 张和 4 张两列，其余三列方格，`object-fit: cover`），每格仍是 `MediaImageWithPreview`，点开能放大保存。单图和 AI 生图那条路完全不动，重新生图 / 改提示词的按钮只在单图时出现。帖子被清理过图之后 `photoUrls` 为空，靠 `multiPhotoCount` 兜住，不会渲染残留的旧解析结果。
 - **提示词**（`lib/moments-engine.ts`）：多图时写「配图：见附图（共 N 张，附的是第 1 张）」——视觉附件仍只发第一张，不让模型以为全看到了。
 - **存储**（`lib/storage-space.ts`、`lib/media-maintenance.ts`）：占用统计和按天清理都按整组算，清理时 `photoUrl` 和 `photoUrls` 一起置空。压缩仍只处理第一张：多图从发帖起就是 `asset://` 引用，已经压过一轮。
+- **多图进提示词**（`lib/moments-engine.ts`）：`resolveMomentPhotosForVision` 返回整组（上限 9 张，与发帖上限一致），快照消息按「文字 + 朋友圈配图 N： + 图」逐张拼，模型看得到全部配图；正文里写「配图：见附图（共 N 张）」。关了图像识别时和以前一样只有文字。
 - **聊天发图**（`components/chat/rich-input-modals.tsx` + `chat-room.tsx` 调用处）：`PhotoInputModal` 改成多选，`onSend(description, imageDataUrls)`，缩略图可逐张移除；发送时按选择顺序连发 N 条图片消息，描述只跟第一张，中途遇到「等对方回复」就停下。

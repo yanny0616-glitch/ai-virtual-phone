@@ -42,7 +42,7 @@ import { loadMemoryConfig, incrementEventCounter } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 import { maybeRunSummarization } from "./memory-summarizer";
-import { assemblePromptPayload, type LLMMessage, type AssemblerInput } from "./llm-prompt-assembler";
+import { assemblePromptPayload, type LLMMessage, type AssemblerInput, type LLMContentPart } from "./llm-prompt-assembler";
 import type { RegexConfig } from "./settings-types";
 import { prepareShortTermContext } from "./short-term-assembler";
 import { parseActionTags, dispatchActions } from "./action-parser";
@@ -1364,7 +1364,7 @@ function buildMomentUiSnapshot(
     parts.push(`正文：${post.content}`);
     if (post.location) parts.push(`地点：${post.location}`);
     const photoCount = post.photoUrls?.length || (post.photoUrl ? 1 : 0);
-    if (photoCount > 1) parts.push(`配图：见附图（共 ${photoCount} 张，附的是第 1 张）`);
+    if (photoCount > 1) parts.push(`配图：见附图（共 ${photoCount} 张）`);
     else if (post.photoUrl) parts.push("配图：见附图");
     else if (post.photoDescription) parts.push(`配图：${post.photoDescription}`);
     const likes = characterId
@@ -1409,16 +1409,24 @@ function buildMomentUiSnapshot(
     return parts.join("\n");
 }
 
-async function resolveMomentPhotoForVision(post: MomentPost): Promise<string | null> {
-    const photoUrl = post.photoUrl?.trim();
-    if (!photoUrl) return null;
-    if (!photoUrl.startsWith("asset://")) return photoUrl;
+/** 多图帖子把整组都带给模型；发帖最多 9 张，这里按同一上限兜底。 */
+const MOMENT_VISION_MAX = 9;
 
-    try {
-        return await getChatImageFromIndexedDB(photoUrl.slice(8));
-    } catch {
-        return null;
-    }
+async function resolveMomentPhotosForVision(post: MomentPost): Promise<string[]> {
+    const refs = (post.photoUrls?.length ? post.photoUrls : (post.photoUrl ? [post.photoUrl] : []))
+        .map(url => url?.trim())
+        .filter((url): url is string => !!url)
+        .slice(0, MOMENT_VISION_MAX);
+
+    const resolved = await Promise.all(refs.map(async url => {
+        if (!url.startsWith("asset://")) return url;
+        try {
+            return await getChatImageFromIndexedDB(url.slice(8));
+        } catch {
+            return null;
+        }
+    }));
+    return resolved.filter((url): url is string => !!url);
 }
 
 async function buildMomentSnapshotMessage(
@@ -1436,11 +1444,11 @@ async function buildMomentSnapshotMessage(
     const text = options?.prefixLines?.length
         ? [...options.prefixLines, snapshot].join("\n")
         : snapshot;
-    const imageUrl = apiConfig?.enableImageRecognition
-        ? await resolveMomentPhotoForVision(post)
-        : null;
+    const imageUrls = apiConfig?.enableImageRecognition
+        ? await resolveMomentPhotosForVision(post)
+        : [];
 
-    if (!imageUrl) {
+    if (!imageUrls.length) {
         return {
             role: "user",
             content: text,
@@ -1448,12 +1456,16 @@ async function buildMomentSnapshotMessage(
         };
     }
 
+    // 多图按顺序编号，模型才对得上正文里说的第几张
+    const parts: LLMContentPart[] = [{ type: "text", text }];
+    imageUrls.forEach((url, index) => {
+        if (imageUrls.length > 1) parts.push({ type: "text", text: `朋友圈配图 ${index + 1}：` });
+        parts.push({ type: "image_url", image_url: { url, detail: "low" } });
+    });
+
     return {
         role: "user",
-        content: [
-            { type: "text", text },
-            { type: "image_url", image_url: { url: imageUrl, detail: "low" } },
-        ],
+        content: parts,
         _debugMeta: { marker },
     };
 }
