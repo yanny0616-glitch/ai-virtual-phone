@@ -1,5 +1,12 @@
 # Fork 变更日志
 
+## 2026-09-16：只认流式的中转不再静默失败
+
+- `simpleLLMCall` 非流式拿到 200 空正文时，自动改用流式重试一次；截断（`length`）不重试，重试也一样截断。
+- 新增 `readSimpleLLMStream`：复用 `llm-provider-adapter` 的三家增量解析和 `sse-json`，usage 与 finishReason 照常写进 API 日志。
+- `options.onDelta` 同时是公开的流式开关——OpenAI 兼容加 `stream: true`，Gemini 原生换 `:streamGenerateContent?alt=sse&`。
+- 验证：`tsc --noEmit` 通过；`lib/api-helpers.ts` eslint 错误数与改动前一致。
+
 ## 2026-09-16：朋友圈多图、聊天多选发图
 
 - 发朋友圈最多选 9 张：两张四张排两列，其余九宫格，点开放大保存；图片压缩落库期间发表按钮锁住。

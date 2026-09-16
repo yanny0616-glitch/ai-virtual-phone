@@ -35,6 +35,7 @@
 - **挂念云端思考解析**：预约冻结线上思考开关和标签；发送前剥离思考块，再判断作罢。旧预约兼容标准 thinking / think / thought 标签。作罢记为任务完成但未发送，不写 outbox；标签不完整或仅有思考时失败结束，不交付分析。
 
 - **提示缓存**（`lib/llm-provider-adapter.ts`）：Anthropic 打 `cache_control` 在 tools → system → 最后一个 message；OpenAI 用 `prompt_cache_key`；Gemini 原生带。开关在 API 配置逐条和工坊两处。已知问题：某些严格中转不认 `cache_control` 报 500，撞上就关那条配置的缓存。
+- **只认流式的中转**：`simpleLLMCall` 非流式拿到 200 空正文时自动用流式重试一次（`readSimpleLLMStream`，复用 provider adapter 的增量解析），截断不重试；后台调用（总结、朋友圈、小剧场等 24 处）不再静默失败。
 - **`system` 只挂一个缓存断点**：任何逐轮变动的文本必须排在 `shortTermMemory` 之后，否则整段人设/世界书每轮重新计费。`{{customAppContext}}` 条目默认在 `prompt_order` 最末就是这个原因。
 - **用量统计**：`LlmUsage` 拉平三家字段，缓存命中与写入分开记；按 `characterId` 分桶，后台功能退化为 `name:<功能名>`；自定义 APP 调用来源记 `custom_app:<appId>`。加新 `*-engine.ts` 时 `callLLM` 别漏传 `characterId`。四条请求路径失败时都补一条 failed 日志。日志保留条数可调（50–500），总预算封在 8MB。
 - **沉默协议**：首行 `[本轮不回复]`，其余状态/内心/更新照常输出，保存为 `silentUpdate` 隐藏记录，不生成气泡、不通知、不追问。前台、后台、流式、原生工具、个人云全通。
