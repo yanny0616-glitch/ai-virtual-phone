@@ -10,7 +10,7 @@ const at = (local: string) => Date.parse(local + ":00+08:00");
 
 type Call = { path: string; method: string; body?: unknown };
 
-function setup(mode: Mode, startLocal: string) {
+function setup(mode: Mode, startLocal: string, template = false) {
   const store = new Store(":memory:");
   let now = at(startLocal);
   const calls: Call[] = [];
@@ -52,6 +52,10 @@ function setup(mode: Mode, startLocal: string) {
     characterId: CID, sessionId: "sess1", capturedAt: now, notify: { title: "赵兖", url: "/chat" }, merge: { characterName: "赵兖", appId: "chat" },
     request: { url: "https://model.example/v1/messages", headers: { "x-api-key": "k" }, providerKind: "anthropic" as const, body: { model: "m", messages: [{ role: "user", content: "hi" }] } },
   };
+  if (template) {
+    Object.assign(snapshot.merge, { intentPlaceholder: "__GUANIAN_INTENT__", elapsedMark: 424242, template: true });
+    snapshot.request.body.messages[0].content = "（约 424242 分钟前你这么决定的）你当时想着：“__GUANIAN_INTENT__”";
+  }
   store.saveSnapshot({ ...snapshot, purpose: "chat" });
   const deps: EngineDeps = {
     store, rest, userId: "u1", fetchModel,
@@ -112,5 +116,22 @@ test("真发模式：判断起念 → 挂定时器 → 到点写 outbox、推送
   assert.equal(env.store.getTimer(item.wakeId)!.status, "done");
   assert.equal(env.store.pendingFeedback(CID).length, 1);
   assert.ok(env.store.getDay(CID, "2026-09-16")!.items[0].generatedAt);
+  env.store.close();
+});
+
+test("新式聊天模板：意图填进模板，不再追加意图备忘，冻结后没新聊天就不补", async () => {
+  const env = setup("live", "2026-09-16T15:00", true);
+  await env.tick();
+  env.setNow("2026-09-16T16:01");
+  await env.tick();
+  const chatRequest = env.modelCalls.find(b => !b.includes("后台判断任务"))!;
+  assert.match(chatRequest, /约 61 分钟前你这么决定的）你当时想着：“问问下午忙不忙”/);
+  assert.doesNotMatch(chatRequest, /想主动跟对方说的是/);
+  // 快照在 15:00 冻结，之后没有新聊天：不补聊天事实
+  assert.doesNotMatch(chatRequest, /模板冻结之后的新聊天|最新云端聊天事实/);
+  const outbox = env.calls.find(c => c.method === "POST" && c.path === "push_outbox")!;
+  const [written] = outbox.body as { meta: Record<string, unknown> }[];
+  assert.equal(written.meta.intentPlaceholder, undefined);
+  assert.equal(written.meta.template, undefined);
   env.store.close();
 });

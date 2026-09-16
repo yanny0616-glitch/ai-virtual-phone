@@ -222,7 +222,7 @@
   // 把复核回来的 keep / settle 并进账本
 
   async function syncPromiseTasks(cx, items, nowMs) {
-    if (!S.settings.threadsOn) return;
+    if (!S.settings.threadsOn || serverBrainOn()) return;
     // With cloud recheck enabled, only the cloud owns promise scheduling. Ordinary
     // impulses still use their existing local/bailout paths.
     if (cloudRecheckOn()) return;

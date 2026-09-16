@@ -622,6 +622,54 @@ export async function armTemplateBailout(input: {
     }
 }
 
+/** 挂念后端的聊天模板：意图和「多久前决定的」留占位，后端到点替换成真实值。 */
+export const COMPANION_INTENT_PLACEHOLDER = "__GUANIAN_INTENT__";
+export const COMPANION_ELAPSED_MARK = 424242;
+
+/**
+ * 聊天模板：和定时唤醒同款（聊天 APP、带完整聊天记录），但不到点发送，只给 VPS 上的挂念后端当发消息的底稿。
+ * 同一 triggerKey 重复冻结即覆盖。
+ */
+export async function armCompanionChatTemplate(input: { triggerKey: string; session: ChatSession }): Promise<BailoutArmResult> {
+    if (!bailoutEnabled()) return { ok: false, reason: "当前环境不支持服务端离线预约" };
+    try {
+        if (!(await hasAccountPushSubscription())) return { ok: false, reason: "当前账号没有可用的离线推送订阅" };
+        const history = loadChatMessages(input.session.id);
+        const appTags = ["chat", "text", "timed_wake"];
+        const { llmMessages, character, config, preset, regexes, userIdentity } = await buildChatPromptMessages(
+            input.session,
+            history,
+            { appTags, timedWakeElapsedMinutes: COMPANION_ELAPSED_MARK, timedWakeIntent: COMPANION_INTENT_PLACEHOLDER },
+        );
+        const request = buildProviderRequest(config, preset, toLlmRequestMessages(llmMessages));
+        const posted = await postBailoutJob({
+            triggerKey: input.triggerKey,
+            kind: "template",
+            executeAtMs: Date.now() + TEMPLATE_BAILOUT_TTL_MS,
+            request,
+            notifyTitle: character.name,
+            notifyCharacterId: character.id,
+            merge: {
+                sessionId: input.session.id,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
+                regexes,
+                characterName: character.name,
+                userName: userIdentity?.name ?? "用户",
+                appId: "chat",
+                appTags,
+                tzOffsetMin: -new Date().getTimezoneOffset(),
+                template: true,
+                intentPlaceholder: COMPANION_INTENT_PLACEHOLDER,
+                elapsedMark: COMPANION_ELAPSED_MARK,
+            },
+        });
+        return posted ? { ok: true } : { ok: false, reason: "服务端预约接口没有确认成功" };
+    } catch (err) {
+        console.warn("[PushBailout] companion chat template arm failed:", err);
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+}
+
 /** 经期关怀兜底：未来 7 天内最近的关怀日和前一晚提醒，为选中的角色各挂一单（每周期幂等）。 */
 export async function armPeriodCareBailouts(): Promise<void> {
     if (!bailoutEnabled()) return;

@@ -14,7 +14,7 @@
     } finally { cx._judgeFinishing = false; }
   }
   async function recheck(cx, trigger) {
-    if (cx.busy || cx._planLock || !owns(cx)) return;
+    if (cx.busy || cx._planLock || !owns(cx) || serverBrainOn()) return;
     if (!S.settings || !(S.settings.recheckMin > 0)) return;
     if (!cx.character || !cx.day || !cx.plan || !Array.isArray(cx.plan.items)) return;
     const over = usageOver();

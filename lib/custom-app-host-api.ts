@@ -95,7 +95,7 @@ import {
   sanitizeBridgeDataKey,
 } from "./reality-bridge/storage";
 import { isGuanianTemplateWake, loadTimedWakeSchedules, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
-import { armTemplateBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "./push-bailout-client";
+import { armCompanionChatTemplate, armTemplateBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "./push-bailout-client";
 
 const CUSTOM_APP_NOTIFICATIONS_KEY = "ai_phone_custom_app_notifications_v1";
 const CUSTOM_APP_BADGES_KEY = "ai_phone_custom_app_badges_v1";
@@ -2516,6 +2516,13 @@ export async function freezeCustomAppTemplate(
   if (!key) throw new Error("push.freeze 缺少 key（模板名，字母数字）。");
   if (!loadCharacters().some(item => item.id === characterId)) throw new Error("找不到对应角色。");
   const session = ensureCharacterSession(characterId);
+  const triggerKey = `capptpl:${app.id}:${characterId}:${key}`;
+  if (record.chatSnapshot === true) {
+    // 聊天模板：聊天 APP 原样的提示词 + 完整聊天记录，意图留占位（挂念 VPS 后端到点发消息用）
+    rememberCustomAppTemplate(app.id, characterId, key, record);
+    const armResult = await armCompanionChatTemplate({ triggerKey, session });
+    return { id: triggerKey, placeholder: CUSTOM_APP_TEMPLATE_PLACEHOLDER, armed: armResult.ok, reason: armResult.ok ? undefined : armResult.reason };
+  }
   const profile = resolvePromptProfile(app, record);
   const instruction = cleanUnboundedText(record.instruction ?? record.context) || CUSTOM_APP_TEMPLATE_PLACEHOLDER;
   const taskMessage: ChatMessage = {
@@ -2532,7 +2539,6 @@ export async function freezeCustomAppTemplate(
   const activateAllWorldBooks = record.activateAllWorldBooks === true
     || record.activateWorldBooks === true
     || activeWorlds.some(item => item.activateAll);
-  const triggerKey = `capptpl:${app.id}:${characterId}:${key}`;
   rememberCustomAppTemplate(app.id, characterId, key, record);
   const armResult = await armTemplateBailout({
     triggerKey,
@@ -2556,7 +2562,8 @@ export async function freezeCustomAppTemplate(
 // 模板登记簿：APP 冻过哪些模板。角色聊完天记忆会变，模板里烤着旧记忆，
 // 所以宿主在角色每次回复之后自动按登记簿重冻一遍，不用等 APP 再被打开。
 const CUSTOM_APP_TEMPLATE_REGISTRY_KEY = "custom_app_templates_v1";
-const CUSTOM_APP_TEMPLATE_REFRESH_DEBOUNCE_MS = 3 * 60_000;
+// 后端靠这些模板发消息，得尽快跟上：回复停下 30 秒就重冻
+const CUSTOM_APP_TEMPLATE_REFRESH_DEBOUNCE_MS = 30_000;
 type CustomAppTemplateRecord = { appId: string; characterId: string; key: string; record: Record<string, unknown>; at: number };
 
 function loadCustomAppTemplateRegistry(): CustomAppTemplateRecord[] {
@@ -2619,7 +2626,8 @@ export async function refreshCustomAppTemplatesForCharacter(characterId: string)
 }
 
 let templateRefresherInstalled = false;
-/** 角色每次回复后（记忆可能已更新）延迟几分钟重冻该角色的全部模板；连续聊天只在停下来后冻一次。 */
+/** 角色每次回复后（记忆可能已更新）稍等片刻重冻该角色的全部模板；连续聊天只在停下来后冻一次。
+ *  切到后台时也全部重冻一遍：改了预设、人设、世界书，离开小手机就同步。 */
 export function installCustomAppTemplateRefresher(): void {
   if (templateRefresherInstalled || typeof window === "undefined") return;
   templateRefresherInstalled = true;
@@ -2637,6 +2645,13 @@ export function installCustomAppTemplateRefresher(): void {
       timers.delete(characterId);
       void refreshCustomAppTemplatesForCharacter(characterId);
     }, CUSTOM_APP_TEMPLATE_REFRESH_DEBOUNCE_MS));
+  });
+  let hiddenRefreshAt = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden || Date.now() - hiddenRefreshAt < 30_000) return;
+    hiddenRefreshAt = Date.now();
+    const ids = [...new Set(loadCustomAppTemplateRegistry().map(item => item.characterId))];
+    void (async () => { for (const id of ids) await refreshCustomAppTemplatesForCharacter(id); })();
   });
 }
 

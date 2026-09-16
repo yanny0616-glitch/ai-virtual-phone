@@ -64,7 +64,7 @@
   }
   // 忍不住：过一会儿主动来说，走心动时刻的预约，照样占额度、守免打扰和睡眠；约不上就退成聊到才说
   async function forkBurst(cx, f, nowMs) {
-    if (!owns(cx)) return;
+    if (!owns(cx) || serverBrainOn()) return;
     const settle = async (patch, note) => {
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
         { forks: (cx.day.forks || []).map((x) => x.id === f.id ? { ...x, ...patch } : x) });

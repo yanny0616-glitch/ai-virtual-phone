@@ -29,6 +29,7 @@ import type { Rest } from "./supabase.ts";
 import {
   applyThreads, liveThreads, settleByWords, shortThreadLines, threadDueMs, threadLines, threadNudge, type WordSettle,
 } from "./threads.ts";
+import { fillChatTemplate } from "./templates.ts";
 import { STATE_KEYS, type Ctx, type GuanianDay, type PlanItem, type Thread } from "./types.ts";
 
 export type Mode = "shadow" | "live";
@@ -762,18 +763,27 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
   const snap = snapshotFor(t, "chat");
   if (!snap) { done("没有聊天快照，发不了（打开一次 Float 聊天让手机寄一份）"); return; }
 
-  const facts = `[最新云端聊天事实，非用户消息；统一时区 UTC${t.tz >= 0 ? "+" : ""}${t.tz / 60}，当前当地时间 ${new Date(nowMs + t.tz * 60000).toISOString().slice(0, 16)}。以下时间是生成时间，不代表用户已读；与旧快照冲突时以这里为准。]\n`
+  // 新式聊天模板（宿主随聊天自动重冻）：聊天记录已在模板里，只补冻结之后的新消息；意图和时间到点填空
+  const fresh = !!snap.merge.intentPlaceholder;
+  const since = history.messages.filter(m => Date.parse(m.message_at) > snap.capturedAt);
+  const decidedAt = parseInt(/^srv_([0-9a-z]+)_/.exec(timer.id)?.[1] || "", 36);
+  const elapsedMin = decidedAt > nowMs - 7 * 86_400_000 && decidedAt <= nowMs ? (nowMs - decidedAt) / 60_000 : 30;
+  const localNow = new Date(nowMs + t.tz * 60000).toISOString().slice(0, 16);
+  const facts = fresh
+    ? since.length ? `[模板冻结之后的新聊天，非用户消息；当前当地时间 ${localNow}。以下时间是生成时间，不代表用户已读。]\n` + historyText({ ...history, messages: since, uncertainLegacy: [] }, t.tz, 80) : ""
+    : `[最新云端聊天事实，非用户消息；统一时区 UTC${t.tz >= 0 ? "+" : ""}${t.tz / 60}，当前当地时间 ${new Date(nowMs + t.tz * 60000).toISOString().slice(0, 16)}。以下时间是生成时间，不代表用户已读；与旧快照冲突时以这里为准。]\n`
     + historyText(history, t.tz, 80, ctx);
-  const intentNote = isPromise
+  const intentNote = fresh && !isPromise ? "" : isPromise
     ? `[系统约定任务，非用户消息] ${item.intent}`
     : `[系统备忘：这不是对方发来的消息。到点了，你现在想主动跟对方说的是——${item.intent}。顺着你们刚才聊的往下说，别重复已经说过的话，也别提起这条备忘。]`;
-  const factCheck = `[挂念发送前的事实核对，不是用户消息]\n当前当地时间：${new Date(nowMs + t.tz * 60000).toISOString().slice(0, 16)}\n原念头：${item.intent || "按上文意图"}\n最新聊天见上方唯一一份「最新云端聊天事实」，不可编造。\n`
+  const factCheck = `[挂念发送前的事实核对，不是用户消息]\n当前当地时间：${new Date(nowMs + t.tz * 60000).toISOString().slice(0, 16)}\n原念头：${item.intent || "按上文意图"}\n${fresh ? "最新聊天以上方聊天记录为准" + (since.length ? "，模板之后的新消息见「模板冻结之后的新聊天」" : "") : "最新聊天见上方唯一一份「最新云端聊天事实」"}，不可编造。\n`
     + "事项编号：" + matterKey(item, threads) + "。必须逐项核对本次意图与已发送正文：问过而未获回复不构成新进展，不可换说法再问；已经完整交代的内容不再补发。早前只约定稍后回答而尚未回答，不等于回答已经完成。\n"
     + "用户已拒绝或取消的事情，不因角色坚持而继续提醒、劝说或跟进；角色替用户安排不等于用户同意。最新聊天中没有用户重新明确答应，就按事情已发生变化作罢。\n"
     + "先核对这个念头是否仍有必要：如果你已经在聊天里问过、说过这件事，用户已经回答或事情已经解决，就不要再发，也不要换个话题凑消息。仅仅出现相关词不等于已经说过，按实际问答与语义判断。具体约定或事件是否过时也按事实判断，不因单纯经过多少分钟而认定失效。\n"
     + "无需再发时，只输出 [挂念作罢：聊天已提过] 或 [挂念作罢：事情已解决或发生变化]，不要输出台词、独白或其他标签；仍有未说过且符合当前事实的内容时，按原格式自然成文。双方最新事实优先于旧预约意图。角色说过到了就是已交代的事实，后续不能无故退回尚未到家；再次外出必须有明确依据。约定到点并不证明已完成；不能替用户宣布完成。";
   deps.store.updateTimer(timer.id, { status: "running", note: "生成中" });
-  const request = buildChatRequest(snap.request, [facts, ...notes, intentNote, factCheck]);
+  const base = fresh ? fillChatTemplate(snap.request, snap.merge, { intent: item.intent, elapsedMin, nowMs }) : snap.request;
+  const request = buildChatRequest(base, [facts, ...notes, intentNote, factCheck]);
   let result;
   try { result = await callModel(request, deps.fetchModel, 300_000); }
   catch (e) { deps.store.updateTimer(timer.id, { status: "pending" }); throw e; }
@@ -792,7 +802,7 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
 
   const createdAt = new Date(deps.now()).toISOString();
   const outboxId = `out_${randomUUID()}`;
-  const { snapshotAt: _s, armAt: _a, prevCount: _p, template: _tpl, ...merge } = snap.merge;
+  const { snapshotAt: _s, armAt: _a, prevCount: _p, template: _tpl, intentPlaceholder: _ip, elapsedMark: _em, ...merge } = snap.merge;
   const meta: Record<string, unknown> = {
     ...merge,
     sessionId: c.sessionId,

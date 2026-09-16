@@ -28,6 +28,7 @@
     forkBurst: true,     // 变数落到「忍不住」时主动来说（占主动额度，守免打扰）
     routineOn: true,     // 生成TA的一天时照着「忙碌回复」插件里的固定作息和今天的例外
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
+    serverBrain: false,  // 交给 VPS 后端：本机不生成、不判断、不排消息，只把提示词模板寄到个人云给后端用
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
     characterIds: [],    // 挂念的人（可以多位）

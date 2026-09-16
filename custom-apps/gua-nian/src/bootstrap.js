@@ -38,6 +38,14 @@
         const rows = await AiPhone.db.list("logs", { limit: 5 });
         S.logs = (rows && rows[0]) || null;
       } catch (e) { /* 无日志可读 */ }
+      if (serverBrainOn()) {
+        // 交给后端：只寄模板，本机不跑任何判断和预约
+        for (const cx of allCx()) await loadDayAndPlan(cx);
+        render();
+        for (const cx of allCx()) await freezeServerTemplates(cx).catch(() => { /* 已在函数内记日志 */ });
+        render();
+        return;
+      }
       for (const cx of allCx()) { await loadDayAndPlan(cx); await settleFired(cx).catch(() => { /* 已在函数内记日志 */ }); }
       render();
       for (const cx of allCx()) {

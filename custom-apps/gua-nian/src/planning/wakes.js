@@ -153,6 +153,7 @@
   }
 
   async function orchestrate(cx) {
+    if (serverBrainOn()) { toast("挂念已交给 VPS 后端，本机不排消息"); return; }
     if (cx._planLock && !cx.busy && cx.day) { await log(cx, "编排跳过：复核或合并云端裁决正在进行，稍后再点「重新编排」"); return; }
     if (cx.busy || cx._planLock || !cx.day) return;
     if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要改用这台就去诊断页「今天谁在管」"); render(); return; }

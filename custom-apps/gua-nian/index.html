@@ -1789,6 +1789,7 @@ return Object.freeze(exports);
     forkBurst: true,     // 变数落到「忍不住」时主动来说（占主动额度，守免打扰）
     routineOn: true,     // 生成TA的一天时照着「忙碌回复」插件里的固定作息和今天的例外
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
+    serverBrain: false,  // 交给 VPS 后端：本机不生成、不判断、不排消息，只把提示词模板寄到个人云给后端用
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
     characterIds: [],    // 挂念的人（可以多位）
@@ -2342,6 +2343,26 @@ return Object.freeze(exports);
     } finally { cx._genStopping = false; renderCloudSync(); }
   }
 
+  /* ---- VPS 后端接管：本机只寄模板（判断 / 生成一天 / 聊天），其余全由后端做 ---- */
+  function serverBrainOn() { return !!(S.settings && S.settings.serverBrain); }
+  // 登记到宿主后，TA每次回复、小手机切到后台都会自动重冻，不用等挂念被打开
+  async function freezeServerTemplates(cx) {
+    if (!AiPhone.push || !AiPhone.push.freeze || !cx.character) return;
+    const specs = [
+      { key: "judge", appTags: ["companion", "impulse"] },
+      { key: "daily", appTags: ["companion", "daily"] },
+      { key: "chat", chatSnapshot: true },
+    ];
+    const failed = [];
+    for (const spec of specs) {
+      try {
+        const r = await AiPhone.push.freeze(Object.assign({ characterId: cx.character.id }, spec));
+        if (!r || !r.armed) failed.push(spec.key + "（" + ((r && r.reason) || "服务端未确认") + "）");
+      } catch (e) { failed.push(spec.key + "（" + (e && e.message || e) + "）"); }
+    }
+    await log(cx, failed.length ? "后端模板没寄全：" + failed.join("、") : "后端模板已寄到个人云（判断 / 生成一天 / 聊天）");
+  }
+
   /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
   function cloudGenOn() {
     return !!(cloudCfg() && S.settings && S.settings.autoGen && S.settings.cloudGen);
@@ -2808,7 +2829,7 @@ return Object.freeze(exports);
   /* ================= 核心：生成今天 ================= */
   // 到点自动生成。一天只试一次：失败了留给用户手动按，别每分钟烧一次模型调用。
   async function maybeAutoGen(cx) {
-    if (!S.settings || !S.settings.autoGen || !cx.character || cx.day || cx.busy || !owns(cx)) return;
+    if (!S.settings || serverBrainOn() || !S.settings.autoGen || !cx.character || cx.day || cx.busy || !owns(cx)) return;
     const at = S.settings.autoGenAt || SET_DEF.autoGenAt;
     if (fmtHM(Date.now()) < at) return;
     if (cx._autoGenDay === todayStr()) return;
@@ -3113,7 +3134,7 @@ return Object.freeze(exports);
   // 把复核回来的 keep / settle 并进账本
 
   async function syncPromiseTasks(cx, items, nowMs) {
-    if (!S.settings.threadsOn) return;
+    if (!S.settings.threadsOn || serverBrainOn()) return;
     // With cloud recheck enabled, only the cloud owns promise scheduling. Ordinary
     // impulses still use their existing local/bailout paths.
     if (cloudRecheckOn()) return;
@@ -3608,6 +3629,7 @@ return Object.freeze(exports);
   }
 
   async function orchestrate(cx) {
+    if (serverBrainOn()) { toast("挂念已交给 VPS 后端，本机不排消息"); return; }
     if (cx._planLock && !cx.busy && cx.day) { await log(cx, "编排跳过：复核或合并云端裁决正在进行，稍后再点「重新编排」"); return; }
     if (cx.busy || cx._planLock || !cx.day) return;
     if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要改用这台就去诊断页「今天谁在管」"); render(); return; }
@@ -3732,7 +3754,7 @@ return Object.freeze(exports);
     } finally { cx._judgeFinishing = false; }
   }
   async function recheck(cx, trigger) {
-    if (cx.busy || cx._planLock || !owns(cx)) return;
+    if (cx.busy || cx._planLock || !owns(cx) || serverBrainOn()) return;
     if (!S.settings || !(S.settings.recheckMin > 0)) return;
     if (!cx.character || !cx.day || !cx.plan || !Array.isArray(cx.plan.items)) return;
     const over = usageOver();
@@ -4056,7 +4078,7 @@ return Object.freeze(exports);
   }
   // 忍不住：过一会儿主动来说，走心动时刻的预约，照样占额度、守免打扰和睡眠；约不上就退成聊到才说
   async function forkBurst(cx, f, nowMs) {
-    if (!owns(cx)) return;
+    if (!owns(cx) || serverBrainOn()) return;
     const settle = async (patch, note) => {
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
         { forks: (cx.day.forks || []).map((x) => x.id === f.id ? { ...x, ...patch } : x) });
@@ -5794,8 +5816,8 @@ return Object.freeze(exports);
         { type: "text", key: "cloudUrl", placeholder: "https://xxxx.supabase.co" },
         { type: "text", key: "cloudKey", password: true, placeholder: "sb_secret_… 或 service_role key" },
         { type: "cloudTest" },
-        { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }] },
-      ], hint: "填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
+        { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }, { key: "serverBrain", label: "交给 VPS 后端" }] },
+      ], hint: "开了「交给 VPS 后端」：本机不再生成、复核、排消息，只把判断 / 生成一天 / 聊天三份提示词模板寄到个人云；TA每次回复、小手机切到后台都会自动重寄。这时要关掉上面的云端复核和云端生成，否则会重复发。<br>填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
       { title: "复核门禁", adv: true, sub: "拦下来的不花钱、不占额度", fields: [
         { type: "stepper", key: "gateDailyCap", min: 1, max: 24, step: 1, label: "每天最多判", unit: "次" },
         { type: "stepper", key: "gateGapMin", min: 5, max: 240, step: 5, label: "两次判至少隔", unit: "分钟" },
@@ -6090,7 +6112,8 @@ return Object.freeze(exports);
     renderSettingsEffects();
     closeSheet();
     // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
-    if (cloudGenWas && !S.settings.cloudGen) for (const cx of allCx()) await unfreezeGenTemplates(cx);
+    if (cloudGenWas && !S.settings.cloudGen && !serverBrainOn()) for (const cx of allCx()) await unfreezeGenTemplates(cx);
+    if (serverBrainOn()) for (const cx of allCx()) await freezeServerTemplates(cx);
     if (cloudCfg() && !(S.settings.autoGen && S.settings.cloudGen)) {
       for (const cx of allCx()) {
         const pendingStop = generationStopState(cx);
@@ -6165,6 +6188,14 @@ return Object.freeze(exports);
         const rows = await AiPhone.db.list("logs", { limit: 5 });
         S.logs = (rows && rows[0]) || null;
       } catch (e) { /* 无日志可读 */ }
+      if (serverBrainOn()) {
+        // 交给后端：只寄模板，本机不跑任何判断和预约
+        for (const cx of allCx()) await loadDayAndPlan(cx);
+        render();
+        for (const cx of allCx()) await freezeServerTemplates(cx).catch(() => { /* 已在函数内记日志 */ });
+        render();
+        return;
+      }
       for (const cx of allCx()) { await loadDayAndPlan(cx); await settleFired(cx).catch(() => { /* 已在函数内记日志 */ }); }
       render();
       for (const cx of allCx()) {

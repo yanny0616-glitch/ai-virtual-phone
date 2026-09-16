@@ -72,8 +72,8 @@
         { type: "text", key: "cloudUrl", placeholder: "https://xxxx.supabase.co" },
         { type: "text", key: "cloudKey", password: true, placeholder: "sb_secret_… 或 service_role key" },
         { type: "cloudTest" },
-        { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }] },
-      ], hint: "填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
+        { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }, { key: "serverBrain", label: "交给 VPS 后端" }] },
+      ], hint: "开了「交给 VPS 后端」：本机不再生成、复核、排消息，只把判断 / 生成一天 / 聊天三份提示词模板寄到个人云；TA每次回复、小手机切到后台都会自动重寄。这时要关掉上面的云端复核和云端生成，否则会重复发。<br>填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
       { title: "复核门禁", adv: true, sub: "拦下来的不花钱、不占额度", fields: [
         { type: "stepper", key: "gateDailyCap", min: 1, max: 24, step: 1, label: "每天最多判", unit: "次" },
         { type: "stepper", key: "gateGapMin", min: 5, max: 240, step: 5, label: "两次判至少隔", unit: "分钟" },
@@ -368,7 +368,8 @@
     renderSettingsEffects();
     closeSheet();
     // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
-    if (cloudGenWas && !S.settings.cloudGen) for (const cx of allCx()) await unfreezeGenTemplates(cx);
+    if (cloudGenWas && !S.settings.cloudGen && !serverBrainOn()) for (const cx of allCx()) await unfreezeGenTemplates(cx);
+    if (serverBrainOn()) for (const cx of allCx()) await freezeServerTemplates(cx);
     if (cloudCfg() && !(S.settings.autoGen && S.settings.cloudGen)) {
       for (const cx of allCx()) {
         const pendingStop = generationStopState(cx);

@@ -21,6 +21,26 @@
     } finally { cx._genStopping = false; renderCloudSync(); }
   }
 
+  /* ---- VPS 后端接管：本机只寄模板（判断 / 生成一天 / 聊天），其余全由后端做 ---- */
+  function serverBrainOn() { return !!(S.settings && S.settings.serverBrain); }
+  // 登记到宿主后，TA每次回复、小手机切到后台都会自动重冻，不用等挂念被打开
+  async function freezeServerTemplates(cx) {
+    if (!AiPhone.push || !AiPhone.push.freeze || !cx.character) return;
+    const specs = [
+      { key: "judge", appTags: ["companion", "impulse"] },
+      { key: "daily", appTags: ["companion", "daily"] },
+      { key: "chat", chatSnapshot: true },
+    ];
+    const failed = [];
+    for (const spec of specs) {
+      try {
+        const r = await AiPhone.push.freeze(Object.assign({ characterId: cx.character.id }, spec));
+        if (!r || !r.armed) failed.push(spec.key + "（" + ((r && r.reason) || "服务端未确认") + "）");
+      } catch (e) { failed.push(spec.key + "（" + (e && e.message || e) + "）"); }
+    }
+    await log(cx, failed.length ? "后端模板没寄全：" + failed.join("、") : "后端模板已寄到个人云（判断 / 生成一天 / 聊天）");
+  }
+
   /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
   function cloudGenOn() {
     return !!(cloudCfg() && S.settings && S.settings.autoGen && S.settings.cloudGen);
