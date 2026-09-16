@@ -222,6 +222,9 @@ test("HTTP：CORS 预检、401、带密钥可读 state", async () => {
   await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
+    for (const path of ["/%ZZ", "/%FF", "/app/characters/%"]) {
+      assert.equal((await fetch(base + path)).status, 400);
+    }
     const pre = await fetch(`${base}/app/state`, { method: "OPTIONS" });
     assert.equal(pre.status, 204);
     assert.equal(pre.headers.get("access-control-allow-origin"), "*");
@@ -238,4 +241,61 @@ test("HTTP：CORS 预检、401、带密钥可读 state", async () => {
   } finally {
     server.close();
   }
+});
+
+test("交接失败保持 VPS 停用，确认旧云端后也须由 App 明确启用", async () => {
+  const env=setup(); await withCharacter(env);
+  env.engine.rest=async()=>new Response("unavailable",{status:503});
+  await assert.rejects(env.call("POST",`/app/characters/${CID}/handoff`,{owner:"device"}));
+  assert.equal(env.store.getCharacter(CID)!.enabled,false);
+  assert.equal(env.store.getMeta("handoff:"+CID),"pending");
+  env.engine.rest=async path=>Response.json(path.startsWith("rpc/")?0:[]);
+  const r=await env.call("POST",`/app/characters/${CID}/handoff`,{owner:"device"});
+  assert.equal(r.body.stopped,true);assert.equal(env.store.getCharacter(CID)!.enabled,false);
+  const st=await env.call("GET",`/app/state?ids=${CID}`);assert.equal(st.body.characters[0].legacyStopped,true);
+  await env.call("POST",`/app/characters/${CID}`,{enabled:true,settings:{chatEditsDay:false}});
+  assert.equal(env.store.getCharacter(CID)!.enabled,true);assert.equal(env.store.getCharacter(CID)!.settings.chatEditsDay,false);
+  env.store.close();
+});
+
+test("Runner：撤销排队时立刻挂标记，落地后撤掉", async () => {
+  const env = setup();
+  await withCharacter(env);
+  let release!: () => void;
+  const gate = new Promise<void>(r => { release = r; });
+  const busy = env.runner.exclusive(async () => { await gate; });
+  const cancel = env.call("POST", `/app/characters/${CID}/items/cancel`, { wakeId: "w1" });
+  await new Promise(r => setImmediate(r)); // 读完请求体就挂上，不等锁
+  assert.equal(env.engine.halted!(CID, "w1"), true);
+  assert.equal(env.engine.halted!(CID, "w2"), false);
+  const stop = env.call("PUT", `/app/characters/${CID}/settings`, { enabled: false });
+  await new Promise(r => setImmediate(r));
+  assert.equal(env.engine.halted!(CID, ""), true);
+  release();
+  await busy; await cancel; await stop;
+  await new Promise(r => setImmediate(r));
+  assert.equal(env.engine.halted!(CID, "w1"), false);
+  assert.equal(env.store.getTimer("w1")!.status, "cancelled");
+});
+
+test("新角色建空账本；固定作息原件存下，第三天后端自己展开；重启恢复生成中的任务", async () => {
+  const env = setup();
+  await withCharacter(env);
+  assert.deepEqual(env.store.getCharacter(CID)!.state.threads, []);
+  await env.call("PUT", `/app/characters/${CID}/inputs`, {
+    days: [{ date: "2026-09-16", calendar: [], routine: [{ id: "r1", kind: "sleep", from: "23:00", to: "08:00" }], exceptions: [] }],
+  });
+  assert.equal(env.store.getCalendar(CID, "2026-09-19"), null);
+  const { generateDayNow } = await import("../src/engine.ts");
+  const snap = { characterId: CID, purpose: "daily" as const, sessionId: "sess1", capturedAt: 0, notify: {}, merge: {},
+    request: { url: "https://m.example/v1/messages", headers: {}, providerKind: "anthropic" as const, body: { model: "m", messages: [{ role: "user", content: "x" }] } } };
+  env.store.saveSnapshot(snap);
+  let prompt = "";
+  env.engine.fetchModel = async (_u, init) => { prompt = String(init.body); return Response.json({ content: [{ type: "text", text: "不是 JSON" }] }); };
+  await generateDayNow(env.engine, CID, "2026-09-19");
+  assert.match(prompt, /08:00 起床，23:00 上床/);
+
+  env.store.addTimer({ id: "wr", characterId: CID, date: "2026-09-16", fireAt: 0, kind: "quiet", status: "running", note: "生成中" });
+  assert.equal(env.store.recoverRunningTimers(), 1);
+  assert.equal(env.store.getTimer("wr")!.status, "pending");
 });

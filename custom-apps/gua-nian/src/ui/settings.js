@@ -75,7 +75,7 @@
         { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }, { key: "serverBrain", label: "交给 VPS 后端" }] },
         { type: "text", key: "serverUrl", placeholder: "后端地址，留空用 " + SERVER_URL_DEF },
         { type: "serverTest" },
-      ], hint: "开了「交给 VPS 后端」：TA的一天、念头、账本和判断都在后端，挂念直接读写后端显示；本机不再生成、复核、排消息。三份提示词模板（判断 / 生成一天 / 聊天）照旧寄到个人云给后端用，TA每次回复、小手机切到后台都会自动重寄。注入聊天、在线状态、朋友圈和写回日程由小手机每分钟从后端取。这时要关掉上面的云端复核和云端生成，否则会重复发。后端用上面这把 Secret key 认你。<br>填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
+      ], hint: "开了「交给 VPS 后端」：TA的一天、念头、账本和判断都在后端，挂念直接读写后端显示；本机不再生成、复核、排消息。三份提示词模板（判断 / 生成一天 / 聊天）照旧寄到个人云给后端用，TA每次回复、小手机切到后台都会自动重寄。注入聊天、在线状态、朋友圈和写回日程由小手机每分钟从后端取。保存时先确认停用旧云端复核、生成及待发预约，再由 VPS 接管。后端用上面这把 Secret key 认你。<br>填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
       { title: "复核门禁", adv: true, sub: "拦下来的不花钱、不占额度", fields: [
         { type: "stepper", key: "gateDailyCap", min: 1, max: 24, step: 1, label: "每天最多判", unit: "次" },
         { type: "stepper", key: "gateGapMin", min: 5, max: 240, step: 5, label: "两次判至少隔", unit: "分钟" },
@@ -383,6 +383,22 @@
     const added = ids.filter((id) => !prevIds.includes(id));
     const sheet = readSheet();
     validateUserSleepSettings(sheet);
+    if (sheet.serverBrain) {
+      try {
+        for (const id of ids) {
+          const cx = S.byId[id] || ctxOf(S.characters.find(c => c.id === id));
+          if (!S.settings.serverBrain || !cx.server?.legacyStopped) await serverHandoff(cx, Object.assign({}, S.settings, sheet));
+        }
+      } catch (e) { toast("设置未保存：" + (e && e.message || e)); return; }
+      sheet.cloudRecheck = false; sheet.cloudGen = false;
+    }
+    // 用保存前的地址和密钥停用旧后端，确认完成才切换本机调度。
+    if (S.settings.serverBrain) {
+      const stopIds = sheet.serverBrain ? removed : prevIds;
+      try {
+        for (const id of stopIds) { const cx = S.byId[id]; if (cx && cx.character) await serverForget(cx); }
+      } catch (e) { toast("设置未保存：" + (e && e.message || e)); return; }
+    }
     if (!ids.includes(S.cur)) S.cur = ids[0] || "";
     const before = Object.assign({}, S.settings);
     const cloudGenWas = !!S.settings.cloudGen;
@@ -395,7 +411,6 @@
     // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
     if (cloudGenWas && !S.settings.cloudGen && !serverBrainOn()) for (const cx of allCx()) await unfreezeGenTemplates(cx);
     if (serverBrainOn()) for (const cx of allCx()) await freezeServerTemplates(cx);
-    if (serverBrainOn()) for (const id of removed) { const cx = S.byId[id]; if (cx && cx.character) await serverForget(cx); }
     if (cloudCfg() && !(S.settings.autoGen && S.settings.cloudGen)) {
       for (const cx of allCx()) {
         const pendingStop = generationStopState(cx);

@@ -37,6 +37,12 @@ export function threadWhen(t: Thread, nowMs: number, tz: number): string {
   return (d.getUTCMonth() + 1) + "/" + d.getUTCDate() + hm + " · " + Math.round(diff / 86_400_000) + " 天后";
 }
 
+/** 账本开关：App 寄来的 threadsOn 说了算；没寄过的旧角色按「有没有账本数组」（迁入时关着的角色没有数组） */
+export function threadsEnabled(ctx: Partial<Ctx>): boolean {
+  if (ctx.threadsOn != null) return ctx.threadsOn !== 0 && ctx.threadsOn !== false;
+  return Array.isArray(ctx.threads);
+}
+
 export function liveThreads(ctx: Ctx, nowMs: number): Thread[] {
   const days = Number(ctx.threadDays) || 3;
   return (Array.isArray(ctx.threads) ? ctx.threads : []).filter(t => t && !t.done && threadAlive(t, nowMs, days));

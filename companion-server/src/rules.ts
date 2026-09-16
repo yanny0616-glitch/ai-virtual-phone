@@ -2,7 +2,7 @@
 
 import { matterPrompt } from "./vendor/matters.mjs";
 import { forkDay, guanianNow } from "./life.ts";
-import { THREAD_TASK } from "./threads.ts";
+import { THREAD_TASK, threadsEnabled } from "./threads.ts";
 import type { Ctx, Decision, Extra, FbBook, Keep, Outbox, PlanItem } from "./types.ts";
 import type { CloudOutput } from "./history.ts";
 
@@ -174,7 +174,7 @@ export type PromptInput = {
 
 export function buildJudgePrompt(p: PromptInput): string {
   const { ctx } = p;
-  const threadsOn = Array.isArray(ctx.threads);
+  const threadsOn = threadsEnabled(ctx);
   const day = ctx.day ? forkDay(ctx.day, p.nowMs, ctx.affection) : null;
   const now = day ? guanianNow(day, p.nowMs, ctx.quietStart, ctx.quietEnd) : null;
   const stateLine = now
@@ -222,9 +222,15 @@ export function buildJudgePrompt(p: PromptInput): string {
     + (threadsOn && !selfReason
       ? ',"keep":[{"matterId":"已有编号或new:1","id":"已有事件的id，新事件留空","subject":"user|character|both","status":"pending|completed|cancelled","sourceMessageId":"证据消息编号","kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"]'
       : "")
+    + (!selfReason && !p.ledgerOnly && day ? ',"feel":{"mood":"聊天带来的此刻情绪，8字内","cause":"依据，12字内","energy":0,"intensity":50,"hours":3},"sched":[{"op":"add或move或drop","time":"原时刻HH:MM","newTime":"目标HH:MM","title":"新增标题","note":"细节","mood":"做完情绪","cost":0,"why":"聊天依据"}]' : "")
     + (p.canPost ? ',"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null' : "")
     + "}",
     threadsOn && !selfReason ? THREAD_TASK : "",
+    !selfReason && !p.ledgerOnly && day ? "feel 只描述聊天带来的变化，不改今天的底色；平淡聊天降低 intensity，没有变化给 null。energy 为 -20 到 20，intensity 为 0 到 100，hours 为 1 到 12。" : "",
+    !selfReason && !p.ledgerOnly && day ? (ctx.chatEditsDay !== false
+      ? "sched 只按最新聊天里已明确说定或取消的安排改今天未来的日程，最多2条；过去或正在进行的不改。共同安排须用户明确同意，不把角色单方面要求当约定。没有依据给空数组。未来日程：" + JSON.stringify((day.schedule || []).filter(s => String(s.time) > p.hm))
+      : "用户关闭了聊天改日程，sched 必须为空数组；feel 仍可更新。") : "",
+
     p.judge ? "decisions 只写你要改的时刻（其余的保持原样就不用写）。" : "decisions 一律写 []。",
     p.judge ? `改约：act 写 false 时，如果只是这个时刻不合适（刚聊完太密、这话晚点说更合适、这会儿说了会打断对方），而话本身还想说，就在 defer 里填今天更晚的 HH:MM，整个念头挪过去、不占新额度；真的不想说了才把 defer 留空。到点正忙或在睡觉不用你操心，系统会自动顺延，别为这个改约。没有固定时间截止；等待会让发送概率逐渐降低。是否已说过或已失去意义，按最新聊天和事实判断。` : "",
     p.canImpulse ? "extra 最多 1 条，没有就写 []。" : "今日额度已满，extra 一律写 []。",
@@ -237,10 +243,10 @@ export function buildJudgePrompt(p: PromptInput): string {
   ].filter(Boolean).join("\n");
 }
 
-export type Judged = { links: Record<string, unknown>[]; decisions: Decision[]; extra: Extra[]; keep: Keep[]; settle: string[]; post: string };
+export type Judged = { links: Record<string, unknown>[]; decisions: Decision[]; extra: Extra[]; keep: Keep[]; settle: string[]; post: string; feel: unknown; sched: unknown[] };
 
 export function parseJudgeJson(text: string): Judged {
-  const empty: Judged = { links: [], decisions: [], extra: [], keep: [], settle: [], post: "" };
+  const empty: Judged = { links: [], decisions: [], extra: [], keep: [], settle: [], post: "", feel: null, sched: [] };
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return empty;
@@ -248,6 +254,7 @@ export function parseJudgeJson(text: string): Judged {
     const parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
     const post = parsed.post && typeof parsed.post === "object" ? (parsed.post as { hint?: unknown }).hint : null;
     return {
+      feel: parsed.feel ?? null, sched: Array.isArray(parsed.sched) ? parsed.sched.slice(0, 2) : [],
       links: Array.isArray(parsed.links) ? parsed.links.slice(0, 40) : [],
       decisions: Array.isArray(parsed.decisions) ? parsed.decisions.slice(0, 12) : [],
       extra: Array.isArray(parsed.extra) ? parsed.extra.slice(0, 1) : [],

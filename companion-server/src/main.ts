@@ -22,6 +22,9 @@ const dbPath = join(config.dataDir, "companion.db");
 const store = new Store(dbPath);
 chmodSync(dbPath, 0o600);
 
+const recovered = store.recoverRunningTimers();
+if (recovered) console.log(`[companion] 上次退出时有 ${recovered} 条正在生成，已放回待发（重发前先核对投递凭据）`);
+
 const rest = createRest(config);
 const userId = await resolveUserId(rest, config.userId);
 

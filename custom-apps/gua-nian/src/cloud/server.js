@@ -3,14 +3,15 @@
      每分钟读一次 /app/state 填进 cx.day / cx.plan / cx.threads，界面照旧渲染；手动操作直接发给后端。
      注入聊天、回复闸门、在线状态、朋友圈和写回系统日程由小手机宿主每分钟从后端取，挂念关着也照常。
      鉴权用设置里本来就存着的个人云 Secret key，后端拿它去个人云核对，不多存一把钥匙。 */
-  function serverCfg() {
-    const c = cloudCfg();
-    const url = String((S.settings && S.settings.serverUrl) || SERVER_URL_DEF).trim().replace(/\/+$/, "");
+  function serverCfg(settings) {
+    const st = settings || S.settings || {};
+    const c = /^https:\/\//.test(String(st.cloudUrl || "")) && String(st.cloudKey || "").trim() ? { key: String(st.cloudKey).trim() } : null;
+    const url = String(st.serverUrl || SERVER_URL_DEF).trim().replace(/\/+$/, "");
     // 本机回环地址放行 http，给自测起的后端用
     return c && (/^https:\/\//.test(url) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) ? { url: url, key: c.key } : null;
   }
-  async function serverFetch(path, init, timeoutMs) {
-    const c = serverCfg();
+  async function serverFetch(path, init, timeoutMs, settings) {
+    const c = serverCfg(settings);
     if (!c) throw new Error("先在设置「云端」里填好个人云地址和 Secret key");
     const ms = timeoutMs || 25000;
     const controller = new AbortController();
@@ -48,9 +49,9 @@
       presendMax: st.presendMax, presendTalkingMin: st.presendTalkingMin, presendGapMin: st.presendGapMin,
       busyHold: st.busyHold ? 1 : 0, busyBufferMin: st.busyBufferMin, busyMaxHoldMin: st.busyMaxHoldMin,
       sleepMode: st.sleepMode, sleepWakeProb: st.sleepWakeProb,
-      threadDays: st.threadDays,
+      threadsOn: st.threadsOn ? 1 : 0, threadDays: st.threadDays, chatEditsDay: st.chatEditsDay !== false,
       momentsOn: momentsReady() ? 1 : 0, momentsWeekly: st.momentsWeekly, momentsGapH: st.momentsGapH,
-      autoGenAt: st.autoGenAt || SET_DEF.autoGenAt,
+      genEnabled: st.autoGen ? 1 : 0, autoGenAt: st.autoGenAt || SET_DEF.autoGenAt,
       forkLevel: GuaNianForks.forkLevel(st.forkLevel), forkBurst: st.forkBurst ? 1 : 0, moodGate: st.moodGate ? 1 : 0,
       dayPrompt: st.dayPrompt || DEFAULT_DAY_PROMPT,
     });
@@ -82,6 +83,7 @@
   // 后端没有这个人就建上；名字、会话、设置有变化才写
   async function serverEnsure(cx) {
     const st = cx.server || {};
+    if (!st.legacyStopped && !cx._legacyStopped) await serverHandoff(cx);
     const settings = serverSettings();
     let sessionId = "";
     try { sessionId = await cloudSessionId(cx); } catch (e) { if (!st.exists) throw e; }
@@ -94,9 +96,18 @@
     await log(cx, st.exists ? "设置已同步到后端" : "后端开始挂念TA");
     return true;
   }
+  async function serverHandoff(cx, settings) {
+    if (cx.busy || cx._planLock) throw new Error("本机还在处理计划，请结束后再交接");
+    const r = await serverFetch(serverPath(cx, "/handoff"), { method: "POST", body: JSON.stringify({ owner: myDev() }) }, 25000, settings);
+    if (r.queued || r.stopped !== true) throw new Error("旧云端停用尚未确认，请稍后再保存；VPS 尚未接管");
+    cx._legacyStopped = true;
+    // 后端暂时停用，下一次 ensure 必须重新确认启用。
+    if (cx.server) { cx.server.enabled = false; cx.server.legacyStopped = true; }
+  }
   async function serverForget(cx) {
-    try { await serverFetch(serverPath(cx), { method: "POST", body: JSON.stringify({ enabled: false }) }); }
-    catch (e) { await log(cx, "后端没关掉对TA的挂念：" + (e && e.message || e)); }
+    const r = await serverFetch(serverPath(cx), { method: "POST", body: JSON.stringify({ enabled: false }) });
+    if (r.queued) throw new Error("后端停用已排队，等这一轮结束后再保存；本机尚未接管");
+    if (!r.character || r.character.enabled !== false) throw new Error("后端尚未确认停用，本机尚未接管");
   }
   // 手动操作：按钮转圈，做完读回最新状态
   async function serverOp(cx, fn) {
@@ -168,7 +179,7 @@
   const SERVER_KIND = {
     judge: "判断", gate: "门禁", gen: "生成", send: "发送", presend: "发送前复核", hold: "押后", defer: "押后", lit: "点亮",
     extra: "临时起念", dedupe: "去重", recheck: "作罢", freshness: "等待", ledger: "账本", settle: "了结", promise: "约定",
-    post: "朋友圈", schedule: "改日程", setup: "开始挂念", error: "出错",
+    post: "朋友圈", mood: "情绪", schedule: "改日程", setup: "开始挂念", error: "出错",
   };
   function renderServerDiag() {
     const cx = cur(), st = cx.server || {}, sv = S._server || {};

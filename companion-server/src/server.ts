@@ -60,10 +60,15 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 export function createApp(deps: ServerDeps): Server {
   return createServer(async (req, res) => {
-    const url = new URL(req.url || "/", "http://localhost");
-    const path = url.pathname.replace(/\/+$/, "") || "/";
-    const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+    let path = "/";
     try {
+      let url: URL;
+      let parts: string[];
+      try {
+        url = new URL(req.url || "/", "http://localhost");
+        path = url.pathname.replace(/\/+$/, "") || "/";
+        parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+      } catch { return send(res, 400, { ok: false, error: "请求路径编码无效" }); }
       if (req.method === "OPTIONS") { res.writeHead(204, CORS); res.end(); return; }
       if (req.method === "GET" && path === "/health") {
         return send(res, 200, { ok: true, startedAt: deps.startedAt.toISOString(), mode: deps.runner.mode, lastTickAt: deps.runner.lastTickAt });

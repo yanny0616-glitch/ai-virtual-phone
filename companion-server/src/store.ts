@@ -6,6 +6,7 @@
 //   sends      真发出去的消息（回音账的凭据）
 //   decisions  全量判断记录（诊断用）
 //   calendar   手机日程表上已定的安排和固定作息（生成一天时用）
+//   routines   固定作息原件和例外：宿主只寄今明两天，更远的日子后端自己展开
 //   wake_templates / wake_runs  唤醒后端：每个来源一份底稿、处理记录（见 wake.ts）
 
 import { DatabaseSync } from "node:sqlite";
@@ -61,6 +62,8 @@ export type DayRow = {
   characterId: string; date: string; day: GuanianDay | null; items: PlanItem[];
   selfUsed: number; recheckCount: number; judgedAt: number; judgedChatAt: number;
   genTries: number; genError: string; genLog: string[]; source: string; updatedAt: number;
+  /** 上次尝试生成的时刻：失败退避用它，不用每轮都会刷新的 updatedAt */
+  genAt?: number;
 };
 
 export type TimerRow = { id: string; characterId: string; date: string; fireAt: number; kind: string; status: string; note: string; updatedAt: number };
@@ -124,7 +127,13 @@ export class Store {
         character_id text not null, date text not null, items text not null default '[]', routine text not null default '{}',
         updated_at integer not null, primary key (character_id, date)
       );
+      create table if not exists routines (
+        character_id text primary key, routine text not null default '[]', exceptions text not null default '[]',
+        routine_on integer not null default 1, updated_at integer not null
+      );
     `);
+    const dayCols = this.#db.prepare("pragma table_info(days)").all() as { name: string }[];
+    if (!dayCols.some(c => c.name === "gen_at")) this.#db.exec("alter table days add column gen_at integer not null default 0");
   }
 
   // ── 唤醒后端
@@ -234,19 +243,19 @@ export class Store {
     return {
       characterId: String(r.character_id), date: String(r.date), day: j(r.day as string | null, null), items: j(String(r.items), []),
       selfUsed: Number(r.self_used), recheckCount: Number(r.recheck_count), judgedAt: Number(r.judged_at), judgedChatAt: Number(r.judged_chat_at),
-      genTries: Number(r.gen_tries), genError: String(r.gen_error), genLog: j(String(r.gen_log), []), source: String(r.source), updatedAt: Number(r.updated_at),
+      genTries: Number(r.gen_tries), genError: String(r.gen_error), genLog: j(String(r.gen_log), []), source: String(r.source), updatedAt: Number(r.updated_at), genAt: Number(r.gen_at) || 0,
     };
   }
 
   saveDay(d: DayRow): void {
     this.#db.prepare(`
-      insert into days (character_id, date, day, items, self_used, recheck_count, judged_at, judged_chat_at, gen_tries, gen_error, gen_log, source, updated_at)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      insert into days (character_id, date, day, items, self_used, recheck_count, judged_at, judged_chat_at, gen_tries, gen_error, gen_log, source, gen_at, updated_at)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict(character_id, date) do update set day = excluded.day, items = excluded.items, self_used = excluded.self_used,
         recheck_count = excluded.recheck_count, judged_at = excluded.judged_at, judged_chat_at = excluded.judged_chat_at,
-        gen_tries = excluded.gen_tries, gen_error = excluded.gen_error, gen_log = excluded.gen_log, source = excluded.source, updated_at = excluded.updated_at
+        gen_tries = excluded.gen_tries, gen_error = excluded.gen_error, gen_log = excluded.gen_log, source = excluded.source, gen_at = excluded.gen_at, updated_at = excluded.updated_at
     `).run(d.characterId, d.date, d.day ? JSON.stringify(d.day) : null, JSON.stringify(d.items), d.selfUsed, d.recheckCount, d.judgedAt, d.judgedChatAt,
-      d.genTries, d.genError, JSON.stringify(d.genLog.slice(-40)), d.source, Date.now());
+      d.genTries, d.genError, JSON.stringify(d.genLog.slice(-40)), d.source, d.genAt || 0, Date.now());
   }
 
   // ── 定时器
@@ -262,6 +271,16 @@ export class Store {
     if (!cur) return;
     this.#db.prepare("update timers set fire_at = ?, status = ?, note = ?, updated_at = ? where id = ?")
       .run(patch.fireAt ?? cur.fireAt, patch.status ?? cur.status, (patch.note ?? cur.note).slice(0, 300), Date.now(), id);
+  }
+
+  /** 开始生成：只有仍是 pending 的才抢得到，撤销过的不会被改回 running */
+  claimTimer(id: string): boolean {
+    return Number(this.#db.prepare("update timers set status = 'running', note = '生成中', updated_at = ? where id = ? and status = 'pending'").run(Date.now(), id).changes) > 0;
+  }
+
+  /** 启动时：上个进程生成到一半就退出的，放回 pending。重发前 fireTimer 会先按 trigger_key 查投递凭据，已投递的不会再发 */
+  recoverRunningTimers(): number {
+    return Number(this.#db.prepare("update timers set status = 'pending', note = '进程重启，恢复待发（先核对投递凭据）', updated_at = ? where status = 'running'").run(Date.now()).changes);
   }
 
   getTimer(id: string): TimerRow | null {
@@ -341,6 +360,18 @@ export class Store {
   getCalendar(characterId: string, date: string): { items: FixedItem[]; routine: Routine } | null {
     const r = this.#db.prepare("select items, routine from calendar where character_id = ? and date = ?").get(characterId, date) as { items: string; routine: string } | undefined;
     return r ? { items: j(r.items, []), routine: j(r.routine, {}) } : null;
+  }
+
+  saveRoutine(characterId: string, routine: unknown[], exceptions: unknown[], routineOn: boolean): void {
+    this.#db.prepare(`
+      insert into routines (character_id, routine, exceptions, routine_on, updated_at) values (?, ?, ?, ?, ?)
+      on conflict(character_id) do update set routine = excluded.routine, exceptions = excluded.exceptions, routine_on = excluded.routine_on, updated_at = excluded.updated_at
+    `).run(characterId, JSON.stringify(routine), JSON.stringify(exceptions), routineOn ? 1 : 0, Date.now());
+  }
+
+  getRoutine(characterId: string): { routine: unknown[]; exceptions: unknown[]; routineOn: boolean } | null {
+    const r = this.#db.prepare("select routine, exceptions, routine_on from routines where character_id = ?").get(characterId) as { routine: string; exceptions: string; routine_on: number } | undefined;
+    return r ? { routine: j(r.routine, []), exceptions: j(r.exceptions, []), routineOn: Number(r.routine_on) === 1 } : null;
   }
 
   close(): void { this.#db.close(); }

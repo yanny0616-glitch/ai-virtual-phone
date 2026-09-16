@@ -23,10 +23,11 @@ function timezoneOf(ctx: Record<string, any>): number | null {
   return null;
 }
 
-export async function importFromCloud(rest: Rest, store: Store, userId: string, opts: { force?: boolean; now?: number } = {}): Promise<ImportReport> {
+export async function importFromCloud(rest: Rest, store: Store, userId: string, opts: { force?: boolean; now?: number; characterId?: string } = {}): Promise<ImportReport> {
   const nowMs = opts.now ?? Date.now();
   const report: ImportReport = { characters: [] };
   const rows = await restJson<PlanRow[]>(rest, `push_recheck_plans?user_id=eq.${encodeURIComponent(userId)}`
+    + (opts.characterId ? `&character_id=eq.${encodeURIComponent(opts.characterId)}` : "")
     + "&select=character_id,plan_date,session_id,context,items,recheck_count,judged_at,judged_chat_at,last_recheck_at&order=plan_date.desc&limit=60");
   const [cfg] = await restJson<{ payload_key: string | null }[]>(rest, "push_server_config?id=eq.main&select=payload_key&limit=1");
   const byCharacter = new Map<string, PlanRow[]>();

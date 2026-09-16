@@ -6,6 +6,7 @@ export type ModelRequest = { url: string; headers: Record<string, string>; body:
 
 export type GuanianSched = {
   time?: string; end?: string; title?: string; place?: string; note?: string; cost?: number; mood?: string; busy?: boolean;
+  from?: string; why?: string;
   steps?: { time?: string; what?: string }[]; fork?: string; moved?: boolean;
 };
 export type GuanianCond = { startAt?: number; halfLifeMin?: number; intensity?: number; energyDelta?: number; mood?: string; cause?: string };
@@ -67,7 +68,7 @@ export type Ctx = {
   presendMax?: number; presendTalkingMin?: number; presendGapMin?: number;
   momentsOn?: number; momentsWeekly?: number; momentsGapH?: number;
   threadDays?: number; recheckEnabled?: number; genEnabled?: number;
-  autoGenAt?: string; forkLevel?: number; forkBurst?: number; dayPrompt?: string; moodGate?: number;
+  chatEditsDay?: boolean; threadsOn?: number | boolean; autoGenAt?: string; forkLevel?: number; forkBurst?: number; dayPrompt?: string; moodGate?: number;
   affection?: { score?: number; tier?: string; relation?: string } | null;
   // 跨天状态
   threads?: Thread[]; fb?: FbBook; fbSeen?: string[]; missKey?: number; echoKey?: number;
@@ -84,7 +85,7 @@ export const SETTING_KEYS = [
   "gateDailyCap", "gateGapMin", "gateHorizonMin", "gateFreshMin", "gateMinMsgs", "selfImpulseCap", "selfSilenceMin",
   "missDays", "echoOn", "busyHold", "busyBufferMin", "busyMaxHoldMin", "sleepMode", "sleepWakeProb",
   "presendMax", "presendTalkingMin", "presendGapMin", "momentsOn", "momentsWeekly", "momentsGapH", "threadDays",
-  "recheckEnabled", "genEnabled", "autoGenAt", "forkLevel", "forkBurst", "dayPrompt", "moodGate", "affection", "tzOffsetMin",
+  "chatEditsDay", "threadsOn", "recheckEnabled", "genEnabled", "autoGenAt", "forkLevel", "forkBurst", "dayPrompt", "moodGate", "affection", "tzOffsetMin",
 ] as const;
 
 export const STATE_KEYS = [

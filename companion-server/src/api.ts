@@ -2,6 +2,7 @@
 //   GET  /app/state?ids=a,b                  挂念界面：生活面、念头（带状态和轨迹）、账本、判断记录
 //   GET  /app/archive?id=a&limit=30          记录页：最近几天
 //   GET  /app/host?ids=a,b                   宿主：在线状态用的日子、注入聊天的文字、待发的朋友圈
+//   POST /app/characters/:id/handoff         停旧云调度、确认待发任务已撤销，暂不启用 VPS
 //   POST /app/characters/:id                 新挂念一个角色 / 更新名字和会话 { name, sessionId, settings, enabled }
 //   PUT  /app/characters/:id/settings        设置（只收设置键）
 //   PUT  /app/characters/:id/inputs          { affection, days: [{ date, calendar, routine, exceptions }], routineOn }
@@ -16,6 +17,8 @@
 //   GET  /app/wake/status?source=x              唤醒后端：底稿概况（不含密钥）、网关来源状态、最近处理记录
 // 改状态的都在 Runner 的锁里做：正在跑的一轮调模型时改了，会被那轮结束时的保存盖掉。
 
+import { importFromCloud } from "./importer.ts";
+import { stopLegacyScheduler } from "./handoff.ts";
 import type { EngineDeps } from "./engine.ts";
 import { characterTz, generateDayNow } from "./engine.ts";
 import { chatContextText } from "./context.ts";
@@ -23,7 +26,7 @@ import { forkDay, hhmm, localDate, localHMOn, normHM } from "./life.ts";
 import { fixedForDay } from "./routine.ts";
 import type { Runner } from "./runner.ts";
 import type { CharacterRow, DayRow, DecisionRow, Store, TimerRow } from "./store.ts";
-import { threadAlive } from "./threads.ts";
+import { threadAlive, threadsEnabled } from "./threads.ts";
 import { validateWakeTemplate, type WakeService, type WakeTemplate } from "./wake.ts";
 import { SETTING_KEYS, type GuanianDay, type GuanianSched, type PlanItem, type Thread } from "./types.ts";
 
@@ -156,7 +159,7 @@ function contextFor(store: Store, c: CharacterRow, tz: number, nowMs: number): s
   const date = localDate(nowMs, tz);
   const row = store.getDay(c.characterId, date);
   const prev = store.getDay(c.characterId, prevDate(date));
-  return chatContextText({ day: row?.day || null, prev: prev?.day ? { ...prev.day, tz } : null, settings: c.settings, threads: c.state.threads, nowMs, tz });
+  return chatContextText({ day: row?.day || null, prev: prev?.day ? { ...prev.day, tz } : null, settings: c.settings, threads: c.state.threads, nowMs, tz, threadsOn: threadsEnabled({ ...c.settings, ...c.state }) });
 }
 
 export function appState(deps: AppDeps, characterIds: string[], nowMs = deps.engine.now()) {
@@ -174,7 +177,7 @@ export function appState(deps: AppDeps, characterIds: string[], nowMs = deps.eng
       const snapshots = store.listSnapshots().filter(s => s.characterId === id).map(s => ({ purpose: s.purpose, capturedAt: s.capturedAt, receivedAt: s.receivedAt }));
       const decisions = store.listDecisions(id, 120).map(d => ({ at: d.at, kind: d.kind, note: d.note, mode: d.mode, wakeId: d.data && typeof d.data.wakeId === "string" ? d.data.wakeId : "" }));
       return {
-        characterId: id, exists: true, name: c.name, enabled: c.enabled, sessionId: c.sessionId, tz, date,
+        characterId: id, exists: true, legacyStopped: store.getMeta("handoff:" + id) === "done", name: c.name, enabled: c.enabled, sessionId: c.sessionId, tz, date,
         settings: c.settings,
         day: dayView(row, tz, nowMs, c.settings.affection),
         prev: dayView(store.getDay(id, prevDate(date)), tz, nowMs, c.settings.affection),
@@ -238,6 +241,15 @@ export function appHost(deps: AppDeps, characterIds: string[], nowMs = deps.engi
 
 // ─── 改状态
 
+/** 这次改动会停掉角色：排队期间就让引擎看到，不在锁外先发 */
+const stopKeys = (id: string, body: Record<string, unknown>, settings: Record<string, unknown>): string[] =>
+  body.enabled === false || ("recheckEnabled" in settings && Number(settings.recheckEnabled) === 0) ? ["char:" + id] : [];
+
+/** 账本里这件事挂着的、还没发的念头 */
+function threadWakeKeys(store: Store, characterId: string, threadId: string): string[] {
+  return store.listDays(characterId, 40).flatMap(r => r.items).filter(i => i.from === threadId && i.wakeId && !i.generatedAt).map(i => "wake:" + i.wakeId);
+}
+
 function pickSettings(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const key of SETTING_KEYS) if (key in body) out[key] = body[key];
@@ -245,6 +257,7 @@ function pickSettings(body: Record<string, unknown>): Record<string, unknown> {
 }
 
 export async function upsertCharacter(deps: AppDeps, id: string, body: Record<string, unknown>) {
+  const rawSettings = body.settings && typeof body.settings === "object" ? body.settings as Record<string, unknown> : {};
   return deps.runner.exclusive(() => {
     const { store } = deps;
     const nowMs = deps.engine.now();
@@ -256,7 +269,7 @@ export async function upsertCharacter(deps: AppDeps, id: string, body: Record<st
       const tz = Number(settings.tzOffsetMin);
       if (!sessionId) throw new HttpError(400, "新角色要带 sessionId（打开一次和TA的聊天）");
       if (!Number.isInteger(tz) || tz < -840 || tz > 840) throw new HttpError(400, "新角色要带时区 tzOffsetMin");
-      const c: CharacterRow = { characterId: id, sessionId, name, enabled: body.enabled !== false, settings, state: {}, importedAt: nowMs, updatedAt: nowMs };
+      const c: CharacterRow = { characterId: id, sessionId, name, enabled: body.enabled !== false, settings, state: { threads: [] }, importedAt: nowMs, updatedAt: nowMs };
       store.saveCharacter(c);
       store.addDecision(id, "setup", `开始挂念${name ? "「" + name + "」" : ""}`, deps.runner.mode, null, nowMs);
       return { created: true, character: c };
@@ -267,7 +280,7 @@ export async function upsertCharacter(deps: AppDeps, id: string, body: Record<st
     if ("enabled" in body) existing.enabled = body.enabled !== false;
     store.saveCharacter(existing);
     return { created: false, character: existing };
-  });
+  }, stopKeys(id, body, rawSettings));
 }
 
 export async function saveSettings(deps: AppDeps, id: string, body: Record<string, unknown>) {
@@ -277,7 +290,7 @@ export async function saveSettings(deps: AppDeps, id: string, body: Record<strin
     if ("enabled" in body) c.enabled = body.enabled !== false;
     deps.store.saveCharacter(c);
     return { settings: c.settings, enabled: c.enabled };
-  });
+  }, stopKeys(id, body, body));
 }
 
 export async function saveInputs(deps: AppDeps, id: string, body: Record<string, unknown>) {
@@ -287,6 +300,12 @@ export async function saveInputs(deps: AppDeps, id: string, body: Record<string,
     const tz = tzOf(c);
     const nowMs = deps.engine.now();
     const saved: string[] = [];
+    // 固定作息原件存一份：宿主只寄今明两天，手机一直不开时后端按原件往后展开
+    const firstDay = Array.isArray(body.days) ? body.days[0] as Record<string, unknown> | undefined : undefined;
+    if (firstDay && typeof firstDay === "object") {
+      const list = (v: unknown) => (Array.isArray(v) ? v : []).filter(x => x && typeof x === "object").slice(0, 60);
+      store.saveRoutine(id, list(firstDay.routine), list(firstDay.exceptions), body.routineOn !== false);
+    }
     if ("affection" in body) {
       const a = body.affection as Record<string, unknown> | null;
       const next = a && typeof a === "object" && (a.tier || a.relation) ? { score: Number(a.score) || 0, tier: String(a.tier || "").slice(0, 20), relation: String(a.relation || "").slice(0, 20) } : null;
@@ -362,6 +381,7 @@ function dropThreadItems(deps: AppDeps, c: CharacterRow, threadId: string, why: 
 }
 
 export async function editThreads(deps: AppDeps, id: string, body: Record<string, unknown>) {
+  const halts = ["done", "drop"].includes(String(body.op)) ? threadWakeKeys(deps.store, id, String(body.id || "")) : [];
   return deps.runner.exclusive(() => {
     const { store } = deps;
     const c = mustCharacter(store, id);
@@ -409,7 +429,7 @@ export async function editThreads(deps: AppDeps, id: string, body: Record<string
     store.addDecision(id, "ledger", "你在挂念里" + note + (dropped ? `，撤掉 ${dropped} 个念头` : ""), deps.runner.mode, null, nowMs);
     void tz;
     return { threads: list, note, dropped };
-  });
+  }, halts);
 }
 
 export async function cancelItem(deps: AppDeps, id: string, body: Record<string, unknown>) {
@@ -432,7 +452,7 @@ export async function cancelItem(deps: AppDeps, id: string, body: Record<string,
       return { cancelled: true };
     }
     throw new HttpError(404, "找不到这个念头");
-  });
+  }, body.wakeId ? ["wake:" + String(body.wakeId)] : []);
 }
 
 export async function ackMoment(deps: AppDeps, id: string, body: Record<string, unknown>) {
@@ -486,6 +506,22 @@ export async function handleApp(deps: AppDeps, method: string, path: string, que
   if (parts[1] !== "characters" || !parts[2]) return { status: 404, body: { ok: false, error: "not_found" } };
   const id = parts[2];
   const body = async () => { const b = await readBody(); return (b && typeof b === "object" ? b : {}) as Record<string, unknown>; };
+  if (method === "POST" && parts[3] === "handoff") {
+    const input = await body();
+    return change(deps.runner.exclusive(async () => {
+      const c = deps.store.getCharacter(id);
+      if (c) { c.enabled = false; deps.store.saveCharacter(c); }
+      deps.store.setMeta("handoff:" + id, "pending");
+      await stopLegacyScheduler(deps.engine.rest, deps.engine.userId, id, String(input.owner || ""));
+      if (!c) {
+        await importFromCloud(deps.engine.rest, deps.store, deps.engine.userId, { characterId: id });
+        const imported = deps.store.getCharacter(id);
+        if (imported) { imported.enabled = false; deps.store.saveCharacter(imported); }
+      }
+      deps.store.setMeta("handoff:" + id, "done");
+      return { stopped: true };
+    }, ["char:" + id]));
+  }
   if (method === "POST" && parts.length === 3) return change(upsertCharacter(deps, id, await body()));
   if (method === "PUT" && parts[3] === "settings") return change(saveSettings(deps, id, await body()));
   if (method === "PUT" && parts[3] === "inputs") return change(saveInputs(deps, id, await body()));

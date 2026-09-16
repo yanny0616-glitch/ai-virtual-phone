@@ -28,10 +28,11 @@
 
 ### 切到真发
 
-1. `node src/cli.ts import --force`：按云端最新计划覆盖后端状态，云端已点亮未发的念头改由后端定时器接手
-2. `node src/cli.ts mode live`
-3. App 挂念设置里关掉云端复核 / 云端生成，撤掉云端还挂着的 `timedwake:` 预约（否则两边都会发）
-4. `node src/cli.ts status` 看判断和定时器
+1. App 开启「交给 VPS 后端」保存时，先调 `/app/characters/:id/handoff`：停旧云端复核与生成、分页核对并条件撤销尚未成文的预约。执行中、成文待投递、设备归属冲突或读取失败时不确认交接，VPS 角色保持停用。
+2. 交接确认后保存设置（云端复核/生成置为关闭）并启用后端角色。已在用后端但尚无交接记录的角色，打开挂念时也补做一次。新的角色如有旧云端计划，只迁入该角色的状态，不覆盖已有后端状态。
+3. `node src/cli.ts mode live` 切到真发；影子模式不发消息。`status` 查看判断和定时器。
+
+交接复用 schema 12 已有 RPC；不删除 `push_jobs` / outbox 凭据，也不重建个人云。旧云端判断租约有效或生成尚可能在执行时，需要等它结束后重试保存。
 
 ### 直连
 
@@ -59,6 +60,7 @@
 | `GET /app/state?ids=a,b` | 挂念界面：生活面（按此刻揭晓变数）、念头（带后端状态、押后、发送前复核、轨迹）、账本、朋友圈记录、判断记录、快照时间、注入聊天的文字 |
 | `GET /app/archive?id=a&limit=30` | 记录页：最近几天的生活面和念头 |
 | `GET /app/host?ids=a,b` | 小手机宿主：在线状态用的日子、注入聊天的文字、待发朋友圈、发圈节奏 |
+| `POST /app/characters/:id/handoff` | 停旧云端并验证交接 `{owner}`，成功回 `{stopped:true}`，VPS 角色暂保持停用 |
 | `POST /app/characters/:id` | 建档 / 更新名字、会话、设置、开关 `{name, sessionId, settings, enabled}` |
 | `PUT /app/characters/:id/settings` | 设置（只收设置键） |
 | `PUT /app/characters/:id/inputs` | 宿主寄原料 `{affection, days:[{date, calendar, routine, exceptions}], routineOn}`，后端按角色时区折成已定安排和起床 / 上床 |
@@ -132,3 +134,5 @@ cd companion-server
 npm install
 npm test
 ```
+
+聊天复核现在处理 `feel` 与 `sched`：情绪只写可衰减 conds；日程只改当天未来条目，最多两条，改期保留时长并清理旧细排。`chatEditsDay=false` 只禁止日程修改，不禁用情绪；自发起念、仅核对承诺及模型跨日返回不写聊天状态。纯变换见 `src/chat-state.ts`。

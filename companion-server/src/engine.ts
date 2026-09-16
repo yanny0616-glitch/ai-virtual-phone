@@ -6,12 +6,14 @@
 //   5. 到点的定时器：发送前复核 → 生成 → 写 push_outbox → Web Push
 // 规则与文案逐段搬自 push-recheck / push-generate，删掉了模板借用、预约、乐观锁、租约这些云函数专属的东西。
 
+import { applyChatState } from "./chat-state.ts";
 import { randomUUID } from "node:crypto";
 
 import { matterBlock, matterFields, matterKey, matterPrompt, prepareMatters } from "./vendor/matters.mjs";
 import { ordinaryQuota, promiseIntent, promiseNeedsTask, recheckEvidence } from "./vendor/promises.mjs";
-import { buildDayInstruction, parseDayResult, recentDaysBrief } from "./day.ts";
-import { historyText, lastProactiveAt, readHistory, unansweredRounds, type CloudHistory } from "./history.ts";
+import { buildDayInstruction, parseDayResult, recentDaysBrief, type FixedItem, type Routine } from "./day.ts";
+import { routineFor } from "./routine.ts";
+import { historyText, lastProactiveAt, readHistory, unansweredRounds, type CloudHistory, type CloudOutput } from "./history.ts";
 import {
   busyUntil, forkDay, guanianAsleep, guanianNow, hhmm, hmMins, inWindow, localDate, nextLocalHM, roll, stateNote, waitingChance,
 } from "./life.ts";
@@ -27,7 +29,7 @@ import {
 import type { CharacterRow, DayRow, Snapshot, Store, TimerRow } from "./store.ts";
 import type { Rest } from "./supabase.ts";
 import {
-  applyThreads, liveThreads, settleByWords, shortThreadLines, threadDueMs, threadLines, threadNudge, type WordSettle,
+  applyThreads, liveThreads, settleByWords, shortThreadLines, threadDueMs, threadLines, threadNudge, threadsEnabled, type WordSettle,
 } from "./threads.ts";
 import { similarBlock, similarPromise } from "./similar.ts";
 import { fillChatTemplate } from "./templates.ts";
@@ -44,6 +46,8 @@ export type EngineDeps = {
   now: () => number;
   random: () => number;
   log: (line: string) => void;
+  /** 手机发来的撤销 / 停用还在锁外排队：到发送边界先看一眼（Runner 提供） */
+  halted?: (characterId: string, wakeId: string) => boolean;
 };
 
 export type Trace = { characterId: string; at: number; mode: Mode; steps: string[]; error?: string };
@@ -68,7 +72,10 @@ export function characterTz(c: CharacterRow): number | null {
 }
 
 function buildCtx(c: CharacterRow, row: DayRow, tz: number): Ctx {
-  return { ...c.settings, ...c.state, tzOffsetMin: tz, day: row.day ? { ...row.day, tz } : null, selfUsed: row.selfUsed };
+  const ctx: Ctx = { ...c.settings, ...c.state, tzOffsetMin: tz, day: row.day ? { ...row.day, tz } : null, selfUsed: row.selfUsed };
+  // 账本开着但还没有数组（新建角色、关过又打开）：从空账本开始记
+  if (threadsEnabled(ctx) && !Array.isArray(ctx.threads)) ctx.threads = [];
+  return ctx;
 }
 
 function saveTurn(t: Turn): void {
@@ -109,6 +116,7 @@ export async function tickCharacter(deps: EngineDeps, mode: Mode, characterId: s
   const c = deps.store.getCharacter(characterId);
   if (!c) { trace.error = "没有这个角色"; return trace; }
   if (!c.enabled || Number(c.settings.recheckEnabled) === 0) { trace.steps.push("挂念对这个角色关着"); return trace; }
+  if (deps.halted?.(characterId, "")) { trace.steps.push("停用正在排队，这轮不跑"); return trace; }
   const tz = characterTz(c);
   if (tz === null) { trace.error = "时区缺失"; return trace; }
   const date = localDate(nowMs, tz);
@@ -132,7 +140,7 @@ export async function tickCharacter(deps: EngineDeps, mode: Mode, characterId: s
         const tries = (Number(/tries:(\d+)/.exec(timer.note)?.[1]) || 0) + 1;
         const note = `tries:${tries} ${errText(e)}`;
         if (tries >= 3) deps.store.updateTimer(timer.id, { status: "failed", note });
-        else deps.store.updateTimer(timer.id, { fireAt: deps.now() + 5 * 60_000, note });
+        else deps.store.updateTimer(timer.id, { status: "pending", fireAt: deps.now() + 5 * 60_000, note });
         decide(t, "error", `到点发送失败（第 ${tries} 次）：${errText(e)}`, { wakeId: timer.id });
       }
       saveTurn(t);
@@ -176,7 +184,7 @@ async function ensureDay(t: Turn): Promise<void> {
   const at = String(c.settings.autoGenAt || "07:30");
   if (hhmm(t.nowMs, t.tz) < at) return;
   if (row.genTries >= 3) return;
-  if (row.genError && t.nowMs - row.updatedAt < 10 * 60_000) return;
+  if (row.genError && t.nowMs - (row.genAt || 0) < 10 * 60_000) return;
   const over = usageExceeded(await usageBudget(deps.rest, deps.userId, t.nowMs));
   if (over) { t.steps.push("生成一天：" + over); return; }
   await generateDay(t);
@@ -186,6 +194,7 @@ export async function generateDay(t: Turn): Promise<void> {
   const { deps, c, row } = t;
   const log = (line: string) => { row.genLog.push(line); };
   row.genTries += 1;
+  row.genAt = deps.now();
   row.genLog = [];
   const snap = snapshotFor(t, "daily");
   if (!snap) {
@@ -195,14 +204,18 @@ export async function generateDay(t: Turn): Promise<void> {
     return;
   }
   try {
-    const cal = deps.store.getCalendar(c.characterId, t.date) || { items: [], routine: {} };
+    const cal = fixedFor(t, t.date);
+    // 生成模板里只有一条任务占位，没有聊天：补上最新聊天，说定的安排、刚取消的事才进得了日程
+    const history = await readHistory(deps.rest, deps.userId, c.sessionId, t.ctx);
+    const chat = historyText(history, t.tz, 60);
     const past = recentDaysBrief(deps.store.listDays(c.characterId, 10).filter(r => r.day).map(r => ({ date: r.date, day: r.day!, characterId: c.characterId })), t.date);
     const instruction = buildDayInstruction({
       date: t.date, nowHM: hhmm(t.nowMs, t.tz), dayPrompt: c.settings.dayPrompt, forkLevel: c.settings.forkLevel,
-      past, existing: cal.items, threads: Array.isArray(t.ctx.threads) ? threadLines(t.ctx, t.nowMs, t.tz) : [], routine: cal.routine,
+      past, existing: cal.items, threads: threadsEnabled(t.ctx) ? threadLines(t.ctx, t.nowMs, t.tz) : [], routine: cal.routine,
     });
     const budget = await usageBudget(deps.rest, deps.userId, t.nowMs);
-    const raw = await generateJson(snap.request, instruction, deps.fetchModel,
+    const facts = chat ? `\n[最新云端聊天事实，非用户消息；当前当地时间 ${new Date(t.nowMs + t.tz * 60_000).toISOString().slice(0, 16)}。说定的安排、取消的事以这里为准]\n${chat}` : "";
+    const raw = await generateJson(snap.request, instruction + facts, deps.fetchModel,
       (kind, data) => usageAdd(deps.rest, deps.userId, budget.tz, "cloud-gen", kind, data), log);
     const full = parseDayResult(raw, cal.items, c.settings, t.nowMs);
     if (cal.routine.wake) full.wake = cal.routine.wake;
@@ -218,6 +231,28 @@ export async function generateDay(t: Turn): Promise<void> {
     decide(t, "gen", `生成失败（第 ${row.genTries} 次）：${row.genError}`);
   }
   deps.store.saveDay(row);
+}
+
+/** 那天的已定安排：宿主寄来的（今明两天）优先；更远的日子用存下的固定作息原件自己展开 */
+function fixedFor(t: Turn, date: string): { items: FixedItem[]; routine: Routine } {
+  const cal = t.deps.store.getCalendar(t.c.characterId, date);
+  if (cal) return cal;
+  const raw = t.deps.store.getRoutine(t.c.characterId);
+  if (!raw?.routineOn) return { items: [], routine: {} };
+  const r = routineFor(raw.routine, raw.exceptions, date, t.tz, t.nowMs);
+  return { items: r.items, routine: { ...(r.wake ? { wake: r.wake } : {}), ...(r.bed ? { bed: r.bed } : {}) } };
+}
+
+/** 今天还没生成（零点到自动生成之间）：按昨天的作息判断睡没睡、忙不忙，和 App 的 nightBridge 一个意思 */
+function bridgeDay(t: Turn): GuanianDay {
+  const [y, m, d] = t.date.split("-").map(Number);
+  const prev = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  const yesterday = t.deps.store.getDay(t.c.characterId, prev)?.day;
+  const fixed = fixedFor(t, prev).routine;
+  return {
+    tz: t.tz, schedule: [], conds: yesterday?.conds || [], mood: yesterday?.mood || "",
+    wake: yesterday?.wake || fixed.wake || "", bed: yesterday?.bed || fixed.bed || "",
+  } as GuanianDay;
 }
 
 // 发出去的消息回写念头和账本（话头了结、约定标提过了）
@@ -293,6 +328,7 @@ function reconcilePromises(t: Turn): void {
     }
     if (dirty && r !== t.row) deps.store.saveDay(r);
   }
+  if (!threadsEnabled(t.ctx)) return; // 账本关着：已挂的照旧核对，不再挂新约定
   const allItems = rows.flatMap(r => r.items);
   const end = t.nowMs + 31 * 86_400_000;
   for (const th of threads.filter(x => promiseNeedsTask(x, allItems, t.nowMs, end))) {
@@ -336,7 +372,7 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
   }
   // 没新消息就没有新信息；用户一句「好了 / 算了」直接了结账本
   const freshRows = evidence.updates as { role: string; content?: string; message_at: string }[];
-  if (Array.isArray(ctx.threads) && freshRows.length) {
+  if (threadsEnabled(ctx) && Array.isArray(ctx.threads) && freshRows.length) {
     r.wordSettled = settleByWords(ctx.threads, freshRows.filter(m => m.role === "user").map(m => String(m.content || "")), nowMs);
   }
   if (!promiseUpdate && freshRows.length < Math.max(1, gate(ctx, "gateMinMsgs"))) {
@@ -450,7 +486,7 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
 
 async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
   const { deps, ctx, row, nowMs, c } = t;
-  const threads = Array.isArray(ctx.threads) ? ctx.threads : [];
+  const threads = threadsEnabled(ctx) && Array.isArray(ctx.threads) ? ctx.threads : [];
   const evidence = recheckEvidence(history.messages, threads, row.judgedChatAt || nowMs - 6 * HOUR);
   const ledgerOnly = evidence.ledgerOnly as boolean;
   const items = row.items;
@@ -492,7 +528,7 @@ async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
   const judge = canJudge && !g.selfReason;
   const moBudget = momentsBudget(ctx, nowMs, t.tz);
   const canPost = !ledgerOnly && moBudget.ok;
-  const threadsOn = Array.isArray(ctx.threads);
+  const threadsOn = threadsEnabled(ctx);
   const chatLines = historyText(history, t.tz, Number(ctx.judgeLines) >= 1 && Number(ctx.judgeLines) <= 60 ? Number(ctx.judgeLines) : 24, ctx);
   const snap = snapshotFor(t, "judge");
   const characterName = String(snap?.notify.title || c.name || "TA");
@@ -521,7 +557,7 @@ async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
   await usageAdd(deps.rest, deps.userId, budget.tz, "cloud-recheck", snap.request.providerKind, result.data);
   parseModelJson(result.text); // 无效 JSON 直接抛错，这轮算没判成
   row.judgedChatAt = Math.max(row.judgedChatAt, chatAt);
-  applyJudgment(t, history, parseJudgeJson(result.text), { judge, canImpulse, canPost, g, litCount, moBudget, what });
+  applyJudgment(t, history, parseJudgeJson(result.text), { judge, canImpulse, canPost, g, ledgerOnly, litCount, moBudget, what });
 }
 
 function cancelTimer(t: Turn, wakeId: string, note: string): void {
@@ -536,16 +572,25 @@ function addWake(t: Turn, fireAt: number, kind: string): string {
 }
 
 function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof parseJudgeJson>, o: {
-  judge: boolean; canImpulse: boolean; canPost: boolean; g: GateResult; litCount: number; moBudget: ReturnType<typeof momentsBudget>; what: string;
+  judge: boolean; canImpulse: boolean; canPost: boolean; g: GateResult; ledgerOnly: boolean; litCount: number; moBudget: ReturnType<typeof momentsBudget>; what: string;
 }): void {
   const { ctx, row, nowMs, tz } = t;
+  if (row.day && !o.g.selfReason && !o.ledgerOnly) {
+    const at = t.deps.now();
+    const applied = applyChatState(forkDay(row.day, at, ctx.affection), judged.feel, judged.sched,
+      { nowMs: at, tz, date: t.date, chatEditsDay: ctx.chatEditsDay !== false });
+    if (applied.notes.length) {
+      row.day = applied.day; ctx.day = { ...applied.day, tz };
+      for (const note of applied.notes) decide(t, note.kind, note.note);
+    }
+  }
   const threads = Array.isArray(ctx.threads) ? ctx.threads : [];
   const matters = prepareMatters(row.items, threads, history.outputs, judged, nowMs);
   judged.keep = matters.keep;
   judged.extra = matters.extra;
   const decisions = o.judge ? judged.decisions : [];
   const extra = o.canImpulse ? judged.extra : [];
-  const threadsOn = Array.isArray(ctx.threads);
+  const threadsOn = threadsEnabled(ctx);
   let threadsNext: Thread[] | null = threadsOn && !o.g.selfReason
     ? applyThreads({ ...ctx, threads: matters.threads }, judged.keep, judged.settle, nowMs, tz, s => decide(t, "ledger", s), history.messages)
     : null;
@@ -663,6 +708,15 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
   decide(t, "judge", `${o.what}——${lit > o.litCount ? "起了一个念头" : decisions.length ? "改了念头" : "想了想，没找你"}`);
 }
 
+// 同轮后续任务也必须看到刚交付的正文、事项编号和主动发送时间。
+function rememberOutput(history: CloudHistory, output: CloudOutput): void {
+  if (!history.outputs.some(o => o.id === output.id)) history.outputs.push(output);
+  const id = `push-outbox:${output.id}`;
+  if (!history.messages.some(m => m.id === id)) history.messages.push({ id, role: "assistant", content: output.raw_text, message_at: output.created_at });
+  history.messages.sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at));
+  history.lastGeneratedAt = Math.max(history.lastGeneratedAt, Date.parse(output.created_at));
+}
+
 // ─── 5. 到点：发送前复核 → 生成 → 写 outbox → 推送
 async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promise<void> {
   const { deps, ctx, c } = t;
@@ -674,7 +728,27 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
   };
   if (!found) { done("找不到这条念头，作废"); return; }
   const { item, row } = found;
+  // 上次 POST 可能已经提交但响应丢失。按完整任务键查凭据，再决定是否重新生成。
+  if (t.mode === "live") {
+    const response = await deps.rest(`push_outbox?user_id=eq.${encodeURIComponent(deps.userId)}&session_id=eq.${encodeURIComponent(c.sessionId)}&trigger_key=eq.${encodeURIComponent("timedwake:" + timer.id)}&select=id,trigger_key,raw_text,created_at,meta&limit=1`);
+    if (!response.ok) throw new Error(`发送凭据读取失败 HTTP ${response.status}`);
+    const outputs = await response.json() as CloudOutput[];
+    if (!Array.isArray(outputs)) throw new Error("发送凭据格式错误");
+    const output = outputs[0];
+    if (output) {
+      const sentAt = Date.parse(output.created_at);
+      if (!Number.isFinite(sentAt) || !output.id || typeof output.raw_text !== "string") throw new Error("发送凭据不完整");
+      rememberOutput(history, output);
+      markGenerated(t, history);
+      item.generatedAt = sentAt;
+      deps.store.saveDay(row);
+      deps.store.addSend({ wakeId: timer.id, characterId: c.characterId, date: row.date, kind: item.kind || "plan", fromId: item.from || "", sentAt, outboxId: output.id });
+      done("已发送", "send");
+      return;
+    }
+  }
   if (!item.act) { done(`${item.time} 这条念头已经作罢`); return; }
+  if (deps.halted?.(c.characterId, timer.id)) { t.steps.push(`${item.time} 撤销正在排队，不发`); return; }
   const threads = Array.isArray(ctx.threads) ? ctx.threads : [];
   const isPromise = item.kind === "promise";
   if (isPromise) {
@@ -714,9 +788,10 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
   }
 
   const notes: string[] = [];
-  const dayRaw = ctx.day;
-  if (dayRaw) {
-    const day = forkDay(dayRaw, nowMs, ctx.affection);
+  const bridged = !ctx.day;
+  const dayRaw = ctx.day || bridgeDay(t);
+  {
+    const day = bridged ? dayRaw : forkDay(dayRaw, nowMs, ctx.affection);
     const qs = ctx.quietStart, qe = ctx.quietEnd;
     const localHM = hhmm(nowMs, t.tz);
     const bufferMs = cnum(ctx, "busyBufferMin", 10) * 60_000 * (0.6 + roll(timer.id + ":buffer") / 100 * 0.8);
@@ -751,7 +826,9 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
       decide(t, "freshness", `等待 ${Math.max(0, Math.round((nowMs - orig) / 60000))} 分钟，保留发送概率 ${Math.round(chance * 100)}%${cooled ? "，这次念头淡去了" : "，继续核对事实"}`, { wakeId: timer.id });
       if (cooled) { deps.store.updateTimer(timer.id, { status: t.mode === "shadow" ? "shadow" : "done", note: "念头淡去了" }); return; }
     }
-    let note = stateNote(day, nowMs, qs, qe, ctx.affection, shortThreadLines(threads, nowMs, t.tz));
+    let note = bridged
+      ? `[系统备忘：这不是对方发来的消息。这是你此刻（本地时间 ${localHM}）的状态：今天的日程还没排，先按昨天的作息过${day.mood ? "，昨天最后的心情「" + day.mood + "」" : ""}。自然带出来就行，别提这段文字。]`
+      : stateNote(day, nowMs, qs, qe, ctx.affection, shortThreadLines(threads, nowMs, t.tz));
     if (sleepy) note += "\n（TA本来睡着了，半夜迷迷糊糊醒了一下想起你：只说一两句、带着困意、说完就要接着睡。）";
     notes.push(note);
   }
@@ -789,7 +866,7 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
     + "用户已拒绝或取消的事情，不因角色坚持而继续提醒、劝说或跟进；角色替用户安排不等于用户同意。最新聊天中没有用户重新明确答应，就按事情已发生变化作罢。\n"
     + "先核对这个念头是否仍有必要：如果你已经在聊天里问过、说过这件事，用户已经回答或事情已经解决，就不要再发，也不要换个话题凑消息。仅仅出现相关词不等于已经说过，按实际问答与语义判断。具体约定或事件是否过时也按事实判断，不因单纯经过多少分钟而认定失效。\n"
     + "无需再发时，只输出 [挂念作罢：聊天已提过] 或 [挂念作罢：事情已解决或发生变化]，不要输出台词、独白或其他标签；仍有未说过且符合当前事实的内容时，按原格式自然成文。双方最新事实优先于旧预约意图。角色说过到了就是已交代的事实，后续不能无故退回尚未到家；再次外出必须有明确依据。约定到点并不证明已完成；不能替用户宣布完成。";
-  deps.store.updateTimer(timer.id, { status: "running", note: "生成中" });
+  if (!deps.store.claimTimer(timer.id)) { t.steps.push(`${item.time} 已被撤销或不在待发，不生成`); return; }
   // 旧哨兵快照里烤着「挂念后台复核模板…」这句假意图和冻结时的时间，也一并换掉
   const base = fillChatTemplate(snap.request, fresh ? snap.merge : { tzOffsetMin: snap.merge.tzOffsetMin, intentPlaceholder: SENTINEL_INTENT },
     { intent: item.intent, elapsedMin, nowMs });
@@ -809,6 +886,8 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
   // 成文期间可能被撤销
   const latest = findItem(t, timer.id);
   if (!latest || !latest.item.act) { done("成文期间这条念头被撤销了"); return; }
+  // 成文期间手机点了撤销 / 停用：放回待发，让排队的撤销落地，不发
+  if (deps.halted?.(c.characterId, timer.id)) { deps.store.updateTimer(timer.id, { status: "pending", note: "成文期间收到撤销" }); t.steps.push(`${item.time} 成文期间收到撤销，不发`); return; }
 
   const createdAt = new Date(deps.now()).toISOString();
   const outboxId = `out_${randomUUID()}`;
@@ -830,6 +909,7 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
     body: JSON.stringify([{ id: outboxId, user_id: deps.userId, job_id: null, session_id: c.sessionId, trigger_key: `timedwake:${timer.id}`, raw_text: rawText, created_at: createdAt, meta }]),
   });
   if (!saved.ok) throw new Error(`outbox 写入失败 HTTP ${saved.status}: ${(await saved.text().catch(() => "")).slice(0, 160)}`);
+  rememberOutput(history, { id: outboxId, trigger_key: `timedwake:${timer.id}`, raw_text: rawText, created_at: createdAt, meta });
   const sentAt = Date.parse(createdAt);
   latest.item.generatedAt = sentAt;
   deps.store.saveDay(latest.row === t.row ? t.row : latest.row);

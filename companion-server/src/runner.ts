@@ -9,11 +9,14 @@ export class Runner {
   #timer: ReturnType<typeof setInterval> | null = null;
   #running = false;
   #ops: (() => Promise<() => void>)[] = [];
+  /** 排队中的撤销 / 停用（char:角色、wake:念头）：锁外可见，引擎在发送边界查 */
+  #halts = new Map<string, number>();
   lastTraces = new Map<string, Trace>();
   lastTickAt = 0;
 
   constructor(deps: EngineDeps, defaultMode: Mode) {
     this.#deps = deps;
+    deps.halted = (characterId, wakeId) => this.#halts.has("char:" + characterId) || (!!wakeId && this.#halts.has("wake:" + wakeId));
     if (!deps.store.getMeta("mode")) deps.store.setMeta("mode", defaultMode);
   }
 
@@ -29,8 +32,16 @@ export class Runner {
   get running(): boolean { return this.#running; }
 
   /** 在锁里改状态：空闲就马上做，正在跑一轮就排到这轮结束后。返回的 Promise 在真正做完、锁放开后兑现 */
-  exclusive<T>(fn: () => T | Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
+  exclusive<T>(fn: () => T | Promise<T>, halts: string[] = []): Promise<T> {
+    // 撤销类改动：排队的同时立刻挂出标记，正在跑的一轮到发送前就能看到，不会先发出去
+    for (const key of halts) this.#halts.set(key, (this.#halts.get(key) || 0) + 1);
+    const release = () => {
+      for (const key of halts) {
+        const n = (this.#halts.get(key) || 0) - 1;
+        if (n > 0) this.#halts.set(key, n); else this.#halts.delete(key);
+      }
+    };
+    const result = new Promise<T>((resolve, reject) => {
       const op = async () => {
         try { const value = await fn(); return () => resolve(value); }
         catch (e) { return () => reject(e); }
@@ -40,6 +51,8 @@ export class Runner {
       this.#running = true;
       void this.#drain();
     });
+    if (halts.length) result.then(release, release);
+    return result;
   }
 
   async #drain(): Promise<void> {

@@ -28,7 +28,7 @@ const today = localDate(now, TZ);
 const hm = ms => hhmm(ms, TZ);
 const engine = {
   store, userId: "u1",
-  rest: async () => new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }),
+  rest: async path => new Response(path.startsWith("rpc/push_recheck_") ? "0" : "[]", { status: 200, headers: { "Content-Type": "application/json" } }),
   fetchModel: async () => { throw new Error("测试里不该调模型"); },
   push: async () => ({ total: 0, sent: 0, removed: 0, skippedShell: 0, errors: [] }),
   now: () => Date.now(), random: () => 0.5, log: () => undefined,

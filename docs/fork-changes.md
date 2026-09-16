@@ -402,3 +402,9 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 - **存储**（`lib/storage-space.ts`、`lib/media-maintenance.ts`）：占用统计和按天清理都按整组算，清理时 `photoUrl` 和 `photoUrls` 一起置空。压缩仍只处理第一张：多图从发帖起就是 `asset://` 引用，已经压过一轮。
 - **多图进提示词**（`lib/moments-engine.ts`）：`resolveMomentPhotosForVision` 返回整组（上限 9 张，与发帖上限一致），快照消息按「文字 + 朋友圈配图 N： + 图」逐张拼，模型看得到全部配图；正文里写「配图：见附图（共 N 张）」。关了图像识别时和以前一样只有文字。
 - **聊天发图**（`components/chat/rich-input-modals.tsx` + `chat-room.tsx` 调用处）：`PhotoInputModal` 改成多选，`onSend(description, imageDataUrls)`，缩略图可逐张移除；发送时按选择顺序连发 N 条图片消息，描述只跟第一张，中途遇到「等对方回复」就停下。
+
+### 挂念后端发送与切换保护
+
+后端异常 URL 返回 400；到点发送失败恢复待重试，发送前按用户、会话、完整任务键核对 outbox，响应丢失时恢复发送凭据而不重复生成。每次投递后立即更新本轮历史，积压任务也遵守主动消息间隔。挂念 0.10.0 关闭 VPS 模式或移除角色时先用原连接停用后端，排队、失败或未确认时保留原设置，不恢复本机调度。
+
+VPS 交接通过 `/app/characters/:id/handoff` 复用个人云现有停用 RPC，验证并分页撤销该角色旧挂念未成文预约，遇到运行中/暂存成文不接管；设置确认后才启用 VPS。本地旧挂念预约在 VPS 模式退出发送。后端 `chat-state.ts` 接回聊天复核 `feel/sched`，保留情绪衰减、未来日程限制和 `chatEditsDay` 开关；不改版本号。
