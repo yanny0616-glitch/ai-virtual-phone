@@ -112,3 +112,17 @@ test("生成一天：归一字段、补回日程表已定安排、日历现实",
   assert.throws(() => parseDayResult({}, [], {}, 1), /日程缺失/);
   assert.match(calendarReality("2026-10-03").label, /周六（周末、国庆假期）/);
 });
+
+test("空气泡不算一轮没回", async () => {
+  const { readHistory, unansweredRounds } = await import("../src/history.ts");
+  const rows = [
+    { id: "u1", role: "user", content: "哦", message_at: "2026-09-16T06:39:49Z" },
+    { id: "a1", role: "assistant", content: "", message_at: "2026-09-16T06:42:39Z" },
+    { id: "a2", role: "assistant", content: "  ", message_at: "2026-09-16T06:48:23Z" },
+    { id: "a3", role: "assistant", content: "晚上回来吃吗", message_at: "2026-09-16T11:31:39Z" },
+  ];
+  const rest = async (path: string) => new Response(JSON.stringify(path.startsWith("push_chat_mirror?") && !path.includes("media_type=eq.") ? rows : []));
+  const history = await readHistory(rest, "u", "s");
+  assert.deepEqual(history.messages.map(m => m.id), ["u1", "a3"]);
+  assert.equal(unansweredRounds(history, Date.parse("2026-09-16T20:19:00Z")), 1);
+});

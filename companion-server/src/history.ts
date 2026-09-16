@@ -150,6 +150,8 @@ export async function readHistory(rest: Rest, userId: string, sessionId: string,
     if (snapshot && !snapshot.length) continue;
     records.set(id, { id, role: "assistant", content: snapshot ? snapshot.map(m => m.content).join("\n") : String(o.raw_text || ""), message_at: o.created_at });
   }
+  // 空气泡（没生成出字的回复、放弃的沉默任务）不算说过话，也不算一轮没回
+  for (const [key, m] of records) if (!String(m.content || "").trim()) records.delete(key);
   return {
     messages: [...records.values()].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id)),
     outputs, lastGeneratedAt, uncertainLegacy,
