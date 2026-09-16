@@ -334,6 +334,7 @@ user 图片块，兼容 Anthropic 等不接受 assistant 图片输入的提供�
 - 预设补丁号升到 3，新增 `reply_style` `call_extras` `call_summary_prompt`。
 ### 语境属性 · 时辰主题 · 通知横幅版式（2026-09-15）
 
+- **小卷出主题的入口**：主题方案和主题库都能自己找到——桌宠菜单、AI助手聊天室菜单里各有一个「主题库」，小卷出的 CSS 方案按时间混进「小卷修改记录」列表（`MascotEditHistory` 接 `cssRows` + `onSelectCssPlan`，方案由宿主 `MascotPreviewHost` 读好传入，避免这个文件依赖出主题管线）。预览中关掉方案卡片会自动写回原样，不再把预览效果留在页面上。
 - **通知横幅编辑器**（外观 →「通知横幅」，`components/theme/notif-banner-page.tsx`）：五种场景（单聊 / 群聊 / 系统 / 长文本 / 来电）用横幅真身的 class 实时预览，浅深色切换、重播进场；逐项调 `--notif-*` 存进 `cssOverrides`，带窄条 / 居中卡片两套预设（拍立得预设试过，实际长相不好看，撤了；column 版式本身保留）。新增 `--notif-duration` 控制停留 1.2–30 秒。全局一份，不按角色分配。来电横幅和新消息横幅认同一套变量（默认长相各自保留，只有调过的项才共用），所以五个场景都会跟着预设变。
 - **语境属性**（`lib/ui-context-attrs.ts`）：组件把当下的状态挂成 DOM 属性，主题 CSS 用属性选择器直接写规则，不用改组件。完整清单在 `lib/theme-types.ts` 顶部的契约注释里，属性名发布后不再改名。
 - **时辰与深浅色**：`useAmbientContext()` 给手机屏幕根节点（`components/desktop-shell.tsx` 的 `[data-ui="phone-screen"]`）和聊天室外层 `.session-{id}` 挂 `data-time-of-day`（morning 5–10 / day 11–16 / evening 17–20 / night 21–4）、`data-hour`、`data-color-scheme`（跟随 `prefers-color-scheme`）。每分钟走 `bgSetInterval` 校一次（切后台普通定时器会被掐），另听深浅色变化和 `visibilitychange`。服务端渲染阶段不挂属性，避免注水前后对不上。

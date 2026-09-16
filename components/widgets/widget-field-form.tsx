@@ -29,16 +29,21 @@ function initialValue(field: DIYTemplateField, saved: unknown): string {
 }
 
 export function WidgetFieldForm({ title, fields, values, onSave, onClose }: WidgetFieldFormProps) {
-  const [draft, setDraft] = useState<Record<string, string>>(() => {
+  // 打开表单时每个框里显示什么，记一份。没动过的框不写回实例，
+  // 否则用户只是点开看一眼再保存，作者的默认值就被固化成这个实例自己的值了。
+  const [baseline] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {};
     for (const field of fields) out[field.key] = initialValue(field, values[field.key]);
     return out;
   });
+  const [draft, setDraft] = useState<Record<string, string>>(() => ({ ...baseline }));
 
   function commit() {
     const next: Record<string, unknown> = {};
     for (const field of fields) {
       const raw = draft[field.key] ?? "";
+      // 从来没填过、这次也没动过 → 不写这个键，组件继续读模板默认值，作者改默认值时跟着变。
+      if (values[field.key] === undefined && raw === baseline[field.key]) continue;
       if (field.type === "number") {
         const num = Number(raw);
         // 空着就不写这个键，组件读到的是作者给的默认值，而不是 NaN。

@@ -1319,3 +1319,12 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 顺手补上 `--notif-action-order` / `--notif-action-align`：契约文档里写了但两边样式都没接，之前把「查看」按钮换到左边是无效的。
 - 验证：`tsc --noEmit` 无报错；`notif-banner-page.tsx` eslint 干净。宿主页面没法本机构建，五个场景的实际表现待线上点一遍。
 - 补：线上看过之后撤掉「拍立得」预设（大头像 + 上图下字，实际长相不好看）。`--notif-layout: column` 和头像尺寸变量都还在，想要的自己调。
+
+### 审阅修掉的四个 bug + 修好一个校验脚本（2026-09-15）
+
+- 主题库存进去打不开：`openCssLibrary()` 全仓没有调用者。桌宠菜单和 AI助手聊天室菜单各加一个「主题库」，并把 CSS 方案并进「小卷修改记录」列表，`mascot-tools` 里那句「去修改记录里找这份主题方案」的兜底文案这才成真。
+- 主题预览中关掉卡片，预览 CSS 会永久留在页面上且状态卡在 previewing。现在关闭（含遮罩、Esc）先 `endCssPreview` 写回原样。
+- 组件 ✎ 填写框：打开时回填的默认值会被一并写回实例，用户只是点开看一眼保存，作者的默认值就固化了（颜色字段还会写入从没设过的 `#888888`）。改成记一份打开时的基线，没填过又没动过的字段不写。
+- DIY 组件新增字段按 `field${个数+1}` 取名，删过中间字段后会撞已有 key，保存时被去重静默丢弃。改成跳过已占用的编号。
+- `scripts/check-mascot-preview.mjs` 从本会话 T10 起就跑不起来：断言要求 `<MascotFloat />` 和 `<MascotPreviewHost />` 紧挨着，而插件悬浮窗插在了中间。断言放宽成「仍是平级且紧随其后」，另补上 `mascot-css-plan-card` / `mascot-css-plan` / `widget-fields` 三个模块映射和 `storage-health` 空桩（后两个分别是 T9 和更早的改动留下的解析失败）。
+- 验证：`node scripts/check-mascot-preview.mjs` PASS；`tsc --noEmit` 无报错；七个改动文件 eslint 错误数与基线持平（0/0/0/0/3/5/8）。宿主页面没法本机构建，菜单入口未在手机上实测。

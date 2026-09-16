@@ -98,7 +98,10 @@ export function DIYWidgetEditor({ template, onSave, onClose }: DIYWidgetEditorPr
 
   function addField() {
     if (fields.length >= MAX_DIY_FIELDS) return;
-    const n = fields.length + 1;
+    // 删过中间的字段之后，按个数取名会撞上已有的 key，保存时被去重悄悄丢掉。
+    const used = new Set(fields.map(f => f.key));
+    let n = fields.length + 1;
+    while (used.has(`field${n}`)) n++;
     setFields([...fields, { key: `field${n}`, label: `字段 ${n}`, type: "text" }]);
   }
 

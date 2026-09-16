@@ -61,11 +61,21 @@ export function MascotCssPlanReview({ planId, onClose }: { planId: string; onClo
     }
   };
 
+  // 预览中直接关掉卡片，页面上留着的就是预览效果，用户以为自己没应用。关之前先换回原样。
+  const closeSafely = () => {
+    if (plan.status === 'previewing') {
+      setBusy('end');
+      void endCssPreview(plan.id).catch(() => {}).finally(onClose);
+      return;
+    }
+    onClose();
+  };
+
   const diff = lineDiff(plan.before, plan.after);
   const where = `${CSS_LOCATION_LABEL[plan.location] || plan.location}${plan.displayName ? ` · ${plan.displayName}` : ''}`;
 
   const footer = <>
-    <button type="button" className="ui-btn ui-btn-ghost mascot-review-btn" onClick={onClose}>关闭</button>
+    <button type="button" className="ui-btn ui-btn-ghost mascot-review-btn" disabled={!!busy} onClick={closeSafely}>关闭</button>
     {(plan.status === 'draft' || plan.status === 'undone') && (
       <button type="button" className="ui-btn ui-btn-outline mascot-review-btn" disabled={!!busy} onClick={() => void run('preview', () => previewCssPlan(plan.id))}>
         {busy === 'preview' ? '预览中…' : '预览'}
@@ -93,12 +103,12 @@ export function MascotCssPlanReview({ planId, onClose }: { planId: string; onClo
     status={STATUS_TEXT[plan.status]}
     statusTone={plan.status === 'previewing' ? 'draft' : plan.status}
     footer={footer}
-    onClose={onClose}
+    onClose={closeSafely}
   >
     <p className="mascot-review-summary">
       改的是 <strong>{where}</strong> 的 CSS：新增 {diff.added} 行、去掉 {diff.removed} 行，共 {plan.after.length} 字符。
       {plan.status === 'draft' && ' 还没动你的页面。'}
-      {plan.status === 'previewing' && ' 现在页面上是预览效果，结束预览会换回原样。'}
+      {plan.status === 'previewing' && ' 现在页面上是预览效果，结束预览或者关掉卡片都会换回原样。'}
     </p>
 
     <div className="mascot-review-footer" style={{ padding: 0, marginBottom: 10, gap: 8, justifyContent: 'flex-start' }}>

@@ -16,6 +16,7 @@ import type { EditPlan } from "@/lib/mascot-edit-domain";
 import type { WidgetSize } from "@/lib/widget-types";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { MascotCssPlanReview, MascotCssLibrary } from "./mascot-css-plan-card";
+import { readCssPlans, CSS_LOCATION_LABEL } from "@/lib/mascot-css-plan";
 import {
   MASCOT_CSS_PLAN_EVENT,
   MASCOT_CSS_LIBRARY_EVENT,
@@ -70,6 +71,8 @@ function StatusBarPreviewDialog({ request, onClose }: { request: StatusBarPrevie
     </div>
   );
 }
+
+const CSS_PLAN_STATUS_TEXT: Record<string, string> = { draft: "草稿", previewing: "预览中", applied: "已应用", undone: "已撤销" };
 
 export function MascotPreviewHost() {
   const [editPreview, setEditPreview] = useState<EditPlan | null>(null);
@@ -133,7 +136,19 @@ export function MascotPreviewHost() {
   if (cssPlanId) return <MascotCssPlanReview key={cssPlanId} planId={cssPlanId} onClose={() => setCssPlanId(null)} />;
   if (cssLibraryOpen) return <MascotCssLibrary onClose={() => setCssLibraryOpen(false)} onOpenPlan={planId => { setCssLibraryOpen(false); setCssPlanId(planId); }} />;
   if (editPreview) return <MascotEditReview key={editPreview.id} initialPlan={editPreview} onClose={() => setEditPreview(null)} />;
-  if (historyOpen) return <MascotEditHistory onClose={() => setHistoryOpen(false)} onSelect={plan => { setHistoryOpen(false); setEditPreview(plan); }} />;
+  if (historyOpen) return <MascotEditHistory
+    onClose={() => setHistoryOpen(false)}
+    onSelect={plan => { setHistoryOpen(false); setEditPreview(plan); }}
+    cssRows={readCssPlans().map(plan => ({
+      id: plan.id,
+      title: plan.title,
+      createdAt: plan.createdAt,
+      tone: plan.status === 'applied' ? 'applied' as const : plan.status === 'undone' ? 'undone' as const : 'draft' as const,
+      statusText: CSS_PLAN_STATUS_TEXT[plan.status] || plan.status,
+      subtitle: `主题 · ${CSS_LOCATION_LABEL[plan.location] || plan.location}${plan.displayName ? ` · ${plan.displayName}` : ""}`,
+    }))}
+    onSelectCssPlan={planId => { setHistoryOpen(false); setCssPlanId(planId); }}
+  />;
   if (diyWidgetPreview) return <DiyWidgetPreviewDialog request={diyWidgetPreview} onClose={() => setDiyWidgetPreview(null)} />;
   if (!statusBarPreview) return null;
   return <StatusBarPreviewDialog request={statusBarPreview} onClose={() => setStatusBarPreview(null)} />;
