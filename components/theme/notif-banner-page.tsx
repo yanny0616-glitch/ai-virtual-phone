@@ -175,7 +175,7 @@ export function NotifBannerPage({ draft, onDraftChange, onApply, onNotice }: Not
   return (
     <div className="theme-section-page" data-bottom-reserve style={{ gap: 14 }}>
       <p className="ts-13 text-[var(--c-text)] leading-relaxed">
-        改的是全局的通知横幅（新消息和来电共用位置、圆角这几项）。改完立刻生效，预览用的是横幅真身的样式；想写更细的规则去「CSS 变量」页，选择器是 <code>[data-notif-kind=&quot;message&quot;]</code>。
+        改的是全局的通知横幅，新消息和来电两种都跟着变（各自的默认长相不同，改过的项才共用）。改完立刻生效，预览用的是横幅真身的样式；想写更细的规则去「CSS 变量」页，选择器是 <code>[data-notif-kind=&quot;message&quot;]</code> 和 <code>[data-notif-kind=&quot;call&quot;]</code>。
       </p>
 
       {/* 预览台 */}

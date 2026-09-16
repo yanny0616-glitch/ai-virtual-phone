@@ -6414,12 +6414,18 @@
   top: var(--notif-top, 54px);
   left: var(--notif-left, 8px);
   right: var(--notif-right, 8px);
+  width: var(--notif-width, auto);
+  margin: var(--notif-margin, 0);
   z-index: 200;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 16px;
+  flex-direction: var(--notif-layout, row);
+  align-items: var(--notif-align, center);
+  justify-content: var(--notif-justify, space-between);
+  gap: var(--notif-gap, 10px);
+  min-height: var(--notif-min-height, 0px);
+  padding: var(--notif-padding, 16px);
   border-radius: var(--notif-radius, 16px);
+  text-align: var(--notif-text-align, left);
   background: rgba(40, 40, 40, 0.92);
   backdrop-filter: blur(var(--ui-blur));
   -webkit-backdrop-filter: blur(var(--ui-blur));
@@ -6430,16 +6436,17 @@
 
 .incoming-call-bar-info {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: var(--notif-info-layout, row);
+  align-items: var(--notif-info-align, center);
+  gap: var(--notif-info-gap, 10px);
   min-width: 0;
   flex: 1;
 }
 
 .incoming-call-bar-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  width: var(--notif-avatar-w, 44px);
+  height: var(--notif-avatar-h, var(--notif-avatar-w, 44px));
+  border-radius: var(--notif-avatar-radius, 50%);
   flex-shrink: 0;
   object-fit: cover;
 }
@@ -6473,6 +6480,8 @@
   display: flex;
   gap: 10px;
   flex-shrink: 0;
+  order: var(--notif-action-order, 0);
+  align-self: var(--notif-action-align, auto);
 }
 
 .incoming-call-bar-btn {
@@ -6589,6 +6598,8 @@
 
 .chat-message-notice-action {
   flex-shrink: 0;
+  order: var(--notif-action-order, 0);
+  align-self: var(--notif-action-align, auto);
   border-radius: 999px;
   background: color-mix(in srgb, var(--c-primary) 14%, transparent);
   color: var(--c-primary);

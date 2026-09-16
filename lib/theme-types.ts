@@ -152,6 +152,7 @@ export type ThemeProfile = {
    [data-notif-kind="call"]    — 来电横幅，另有 data-call-type（voice/video）、data-group
 
    ── 通知横幅版式变量（换布局，不只是换色；styles/chat.css） ──
+   新消息横幅和来电横幅都认这一套（两者默认值不同，只有写了的项才共用）。
    --notif-layout       : row      — row / row-reverse / column（column + 大头像 = 拍立得）
    --notif-align        : center   — 交叉轴对齐
    --notif-justify      : space-between

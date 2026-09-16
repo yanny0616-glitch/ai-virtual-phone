@@ -1312,3 +1312,9 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 更新日志：`public/changelog.json`，更新后弹一次、关于页能翻、自托管更新卡片列出还没更新到的；备份中不触发更新。
 - 设置加「排错清单」，7 类 21 项现查。
 - 验证：`tsc --noEmit` 无报错；改动行 eslint 只有 phone-settings-app 第 4 行三个原来就没用的图标；推理深度和地址纠错用 node 跑了 40 多条样例；写入监测用 fake-indexeddb 跑了克隆失败、配额失败后重试成功、主键冲突不计、普通读写 / modify / 事务不受影响；`check:qa` 通过；`check-fork-regressions` 补上 `reasoningRequestFor` 桩后和干净 HEAD 停在同一处（第 480 行 409≠200），`check-persistence-and-proxy` 在干净 HEAD 上同样失败，与本次无关。宿主页面没法本机构建，界面没截图实测。
+
+### 来电横幅接上横幅版式变量（2026-09-15）
+
+- 来电横幅之前只认 `--notif-top/left/right/radius`，在通知横幅编辑器里切到「来电」场景套预设纹丝不动。现在 `.incoming-call-bar` 和 `.chat-message-notice-bar` 消费同一套 `--notif-*`（排法、对齐、间距、内边距、最小高度、文字对齐、头像三项），fallback 保持来电原来的长相。
+- 顺手补上 `--notif-action-order` / `--notif-action-align`：契约文档里写了但两边样式都没接，之前把「查看」按钮换到左边是无效的。
+- 验证：`tsc --noEmit` 无报错；`notif-banner-page.tsx` eslint 干净。宿主页面没法本机构建，五个场景的实际表现待线上点一遍。
