@@ -36,6 +36,7 @@
 | `src/cloud/plans.js` | 裁决上下文、串行计划上传、同步状态持久化和重试 | 本地计划寄存云端 |
 | `src/cloud/receipts.js` | 按预约键精确读取回执、60 秒会话缓存 | 发送状态证据 |
 | `src/cloud/day.js` | 模板冻结、明日生成原料、接管云端生成结果 | 关闭浏览器后的生成 |
+| `src/cloud/server.js` | 「交给 VPS 后端」时直连 `companion-server`：读 `/app/state` 填 day / plan / threads，按钮、账本、改日程、设置、记录页、诊断页走 `/app/*` | 后端模式下的全部界面数据 |
 | `src/cloud/decisions.js` | 合并云端裁决、回执、同步账本 | 云端与本地计划对齐 |
 | `src/planning/calendar.js` | 系统日历读写、自动生成入口、节假日信息 | 日历同步 |
 | `src/planning/threads.js` | 惦记存活、日期、发送结算、撤预约、存账本 | 惦记与发送结果 |

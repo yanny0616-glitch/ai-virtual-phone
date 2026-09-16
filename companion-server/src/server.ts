@@ -1,8 +1,10 @@
-// HTTP 接口。只监听 127.0.0.1，由反代决定是否对外；除 /health 外都要 Bearer 令牌。
+// HTTP 接口。监听 127.0.0.1（和 Docker 网桥，给站点反代用）；除 /health 外都要令牌：
+// 运维令牌 COMPANION_API_TOKEN，或手机挂念里存的个人云 Secret key（见 auth.ts）。
+// 挂念 App 跑在沙箱 iframe 里（null origin），所以放开 CORS；鉴权只靠 Authorization 头，不用 cookie。
 //   GET  /status                            总览：模式、每个角色此刻、今天念头、最近判断
 //   GET  /characters/:id                    单个角色全部状态
-//   PUT  /characters/:id/settings           App 同步设置（只收设置键）
-//   PUT  /characters/:id/calendar/:date     App 同步日程表已定安排 { items, routine }
+//   PUT  /characters/:id/settings           同步设置（只收设置键）
+//   PUT  /characters/:id/calendar/:date     同步日程表已定安排 { items, routine }
 //   POST /characters/:id/regenerate         重新生成今天（真发模式才调模型）
 //   POST /characters/:id/tick               立刻跑一轮
 //   PUT  /snapshots                         手机寄来的提示词快照
@@ -10,36 +12,36 @@
 //   POST /import                            从个人云迁入 { force }
 //   GET  /diagnostics                       个人云聊天镜像最近几条
 //   POST /push/test                         测试推送
+//   /app/…                                  挂念直连，见 api.ts
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
 
+import { handleApp, regenerate, saveSettings } from "./api.ts";
+import type { Auth } from "./auth.ts";
 import { collectDiagnostics } from "./diagnostics.ts";
-import { characterTz, generateDayNow, type EngineDeps } from "./engine.ts";
+import type { EngineDeps } from "./engine.ts";
 import { importFromCloud } from "./importer.ts";
-import { localDate } from "./life.ts";
 import { sendPushToUser } from "./push.ts";
 import type { Runner } from "./runner.ts";
 import { characterStatus, overview } from "./status.ts";
 import { validateSnapshot, type Snapshot, type Store } from "./store.ts";
 import type { Rest } from "./supabase.ts";
-import { SETTING_KEYS } from "./types.ts";
 import type { FixedItem, Routine } from "./day.ts";
 
 const MAX_BODY = 4 * 1024 * 1024;
 
-export type ServerDeps = { rest: Rest; store: Store; userId: string; apiToken: string; startedAt: Date; runner: Runner; engine: EngineDeps };
+export type ServerDeps = { rest: Rest; store: Store; userId: string; auth: Auth; startedAt: Date; runner: Runner; engine: EngineDeps };
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  "Access-Control-Max-Age": "600",
+};
 
 function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.writeHead(status, { ...CORS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(JSON.stringify(body));
-}
-
-function authorized(req: IncomingMessage, token: string): boolean {
-  if (!token) return false;
-  const given = Buffer.from((req.headers.authorization || "").replace(/^Bearer\s+/i, ""));
-  const expected = Buffer.from(token);
-  return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -57,13 +59,19 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 export function createApp(deps: ServerDeps): Server {
   return createServer(async (req, res) => {
-    const path = new URL(req.url || "/", "http://localhost").pathname;
+    const url = new URL(req.url || "/", "http://localhost");
+    const path = url.pathname.replace(/\/+$/, "") || "/";
     const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
     try {
+      if (req.method === "OPTIONS") { res.writeHead(204, CORS); res.end(); return; }
       if (req.method === "GET" && path === "/health") {
         return send(res, 200, { ok: true, startedAt: deps.startedAt.toISOString(), mode: deps.runner.mode, lastTickAt: deps.runner.lastTickAt });
       }
-      if (!authorized(req, deps.apiToken)) return send(res, 401, { ok: false, error: "unauthorized" });
+      if (!await deps.auth.allow(req.headers.authorization)) return send(res, 401, { ok: false, error: "unauthorized" });
+
+      const appDeps = { store: deps.store, runner: deps.runner, engine: deps.engine };
+      const app = await handleApp(appDeps, req.method || "GET", path, url.searchParams, () => readJson(req));
+      if (app) return send(res, app.status, app.body);
 
       if (req.method === "GET" && path === "/status") return send(res, 200, { ok: true, ...overview(deps.store, deps.runner) });
       if (req.method === "GET" && path === "/diagnostics") {
@@ -77,7 +85,7 @@ export function createApp(deps: ServerDeps): Server {
       }
       if (req.method === "POST" && path === "/import") {
         const { force } = await readJson(req) as { force?: boolean };
-        return send(res, 200, { ok: true, ...await importFromCloud(deps.rest, deps.store, deps.userId, { force: force === true }) });
+        return send(res, 200, { ok: true, ...await deps.runner.exclusive(() => importFromCloud(deps.rest, deps.store, deps.userId, { force: force === true })) });
       }
       if (req.method === "PUT" && path === "/snapshots") {
         const body = await readJson(req);
@@ -99,27 +107,17 @@ export function createApp(deps: ServerDeps): Server {
         if (!c) return send(res, 404, { ok: false, error: "没有这个角色" });
         if (req.method === "GET" && parts.length === 2) return send(res, 200, { ok: true, ...characterStatus(deps.store, deps.runner, id) });
         if (req.method === "PUT" && parts[2] === "settings") {
-          const body = await readJson(req) as Record<string, unknown>;
-          for (const key of SETTING_KEYS) if (key in body) (c.settings as Record<string, unknown>)[key] = body[key];
-          if ("enabled" in body) c.enabled = body.enabled !== false;
-          deps.store.saveCharacter(c);
-          return send(res, 200, { ok: true, settings: c.settings, enabled: c.enabled });
+          return send(res, 200, { ok: true, ...await saveSettings(appDeps, id, await readJson(req) as Record<string, unknown>) });
         }
         if (req.method === "PUT" && parts[2] === "calendar" && /^\d{4}-\d{2}-\d{2}$/.test(parts[3] || "")) {
           const body = await readJson(req) as { items?: unknown; routine?: unknown };
           const items = (Array.isArray(body.items) ? body.items : [])
             .filter(it => it && typeof it === "object" && typeof (it as FixedItem).startTime === "string" && typeof (it as FixedItem).title === "string") as FixedItem[];
           const routine = (body.routine && typeof body.routine === "object" ? body.routine : {}) as Routine;
-          deps.store.saveCalendar(id, parts[3], items, routine);
+          await deps.runner.exclusive(() => deps.store.saveCalendar(id, parts[3], items, routine));
           return send(res, 200, { ok: true, items: items.length });
         }
-        if (req.method === "POST" && parts[2] === "regenerate") {
-          if (deps.runner.mode !== "live") return send(res, 409, { ok: false, error: "影子模式不调模型，切到 live 才能生成" });
-          const tz = characterTz(c);
-          if (tz === null) return send(res, 409, { ok: false, error: "时区缺失" });
-          const note = await generateDayNow(deps.engine, id, localDate(Date.now(), tz));
-          return send(res, 200, { ok: true, note });
-        }
+        if (req.method === "POST" && parts[2] === "regenerate") return send(res, 200, { ok: true, ...await regenerate(appDeps, id) });
         if (req.method === "POST" && parts[2] === "tick") {
           const traces = await deps.runner.tick(id);
           if (!traces.length) return send(res, 409, { ok: false, error: "上一轮还在跑" });
@@ -131,7 +129,7 @@ export function createApp(deps: ServerDeps): Server {
       const status = (err as { status?: number }).status || 500;
       const message = err instanceof Error ? err.message : String(err);
       if (status >= 500) console.error(`[companion] ${req.method} ${path} 失败：${message}`);
-      return send(res, status, { ok: false, error: message });
+      if (!res.headersSent) send(res, status, { ok: false, error: message });
     }
   });
 }

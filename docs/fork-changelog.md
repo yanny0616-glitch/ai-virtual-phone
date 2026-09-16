@@ -1,5 +1,14 @@
 # Fork 变更日志
 
+## 2026-09-17：挂念直连 VPS 后端（挂念 0.10.0）
+
+- 后端 `companion-server` 新增 `/app/*` 接口（`src/api.ts`）：界面状态（生活面按此刻揭晓变数、念头带后端状态 / 押后 / 发送前复核 / 轨迹、账本、朋友圈记录、判断记录）、记录页、宿主取数；建档、设置、原料、改日程、账本、撤念头、朋友圈回执、重新生成、立刻判。改动排进 `Runner.exclusive` 锁，不会被正在跑的一轮盖掉。注入聊天的文字（`src/context.ts`）和固定作息折算（`src/routine.ts`）从挂念搬到后端，按角色时区算。
+- 鉴权（`src/auth.ts`）：运维令牌或挂念里本来就存的个人云 Secret key（后端去个人云核对，只缓存哈希、限速）。监听地址改为 `COMPANION_BIND`，线上加 Docker 网桥；Caddy 在 float.yanny.top 下加 `/companion/*` 反代。
+- 宿主 `lib/guanian-server-sync.ts`（desktop-shell 懒加载启动）：后端模式的角色由它每分钟从后端取状态写在线状态 / 回复闸门 / 注入聊天 / 朋友圈节奏变量，补发后端起意的朋友圈并回执，写回系统日程，寄好感、日程表和固定作息；`guanian-presence-sync` 跳过这些角色。挂念 App 关着也照常。
+- 挂念 0.10.0：开着「交给 VPS 后端」时今天 / 心动 / 记录 / 后台四页都直接读后端；重新生成、立刻判一次、账本记 / 了结 / 恢复 / 删掉、改日程（细化仍用本机模型）、设置保存、移除角色都直接写后端；诊断页换成后端连接、模板、注入文字和判断记录。设置里可改后端地址并测试连接。切换模式后自动重新载入。
+- 修复阶段 2～3 的回归：交给后端后挂念界面看不到今天的生活面 / 念头 / 判断，注入聊天、在线状态、回复闸门停在旧值，后端起意的朋友圈没人发，日程不写回，好感和作息不再寄给后端。
+- 验证：后端 31 项测试 + tsc；`scripts/check-gua-nian-server-direct.mjs`（真后端 HTTP + Chromium 16 项 + 宿主同步 vm）；线上库副本跑 `/app/*` 无错；公网 `https://float.yanny.top/companion` 用真实个人云密钥通过、错钥匙 401、预检 204；挂念原有检查与改动前一致（delivery / p1 / p2 / reply-gate / scheduler / scheduler-app 在改动前已失败）；`check:apps-dist`、`check:push`；改动文件 eslint 与改动前一致。
+
 ## 2026-09-17：挂念交给 VPS 后端（挂念 0.9.42）
 
 - 新增仓库内独立服务 `companion-server/`（Node 22 + SQLite + systemd，不参与 Next 构建，根 `tsconfig.json` 已排除）：挂念的生活面生成、门禁由头、判断、约定、回音账、到点复核与发送整套搬到 VPS，每分钟一轮；写 `push_outbox` + Web Push，个人云只当信箱。规则与文案逐段搬自 push-recheck / push-generate，事项去重与本机 0.9.41 同源；另加字面相似度兜底（撞没兑现的约定、撞没发的、撞发过且之后用户没说话的都拦，阈值用 09-09～09-18 真实念头标定）。

@@ -73,7 +73,9 @@
         { type: "text", key: "cloudKey", password: true, placeholder: "sb_secret_… 或 service_role key" },
         { type: "cloudTest" },
         { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }, { key: "serverBrain", label: "交给 VPS 后端" }] },
-      ], hint: "开了「交给 VPS 后端」：本机不再生成、复核、排消息，只把判断 / 生成一天 / 聊天三份提示词模板寄到个人云；TA每次回复、小手机切到后台都会自动重寄。这时要关掉上面的云端复核和云端生成，否则会重复发。<br>填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
+        { type: "text", key: "serverUrl", placeholder: "后端地址，留空用 " + SERVER_URL_DEF },
+        { type: "serverTest" },
+      ], hint: "开了「交给 VPS 后端」：TA的一天、念头、账本和判断都在后端，挂念直接读写后端显示；本机不再生成、复核、排消息。三份提示词模板（判断 / 生成一天 / 聊天）照旧寄到个人云给后端用，TA每次回复、小手机切到后台都会自动重寄。注入聊天、在线状态、朋友圈和写回日程由小手机每分钟从后端取。这时要关掉上面的云端复核和云端生成，否则会重复发。后端用上面这把 Secret key 认你。<br>填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
       { title: "复核门禁", adv: true, sub: "拦下来的不花钱、不占额度", fields: [
         { type: "stepper", key: "gateDailyCap", min: 1, max: 24, step: 1, label: "每天最多判", unit: "次" },
         { type: "stepper", key: "gateGapMin", min: 5, max: 240, step: 5, label: "两次判至少隔", unit: "分钟" },
@@ -140,6 +142,9 @@
     if (f.type === "text") {
       return '<input type="' + (f.password ? "password" : "text") + '" class="txt-in" id="set-' + f.key +
         '" placeholder="' + esc(f.placeholder || "") + '" spellcheck="false" autocomplete="off">';
+    }
+    if (f.type === "serverTest") {
+      return '<div class="cloud-row"><button class="tgl" id="btn-server-test">测试后端</button><span id="server-test-r"></span></div>';
     }
     if (f.type === "cloudTest") {
       return '<div class="cloud-row"><button class="tgl" id="btn-cloud-test">测试连接</button><span id="cloud-test-r"></span></div>';
@@ -271,6 +276,7 @@
       if (b.id === "set-userSleepOn") syncUserSleepFields();
     }; });
     syncUserSleepFields();
+    bindServerTest();
     const test = $("#btn-cloud-test");
     if (test) test.onclick = async () => {
       const r = $("#cloud-test-r");
@@ -289,6 +295,25 @@
     };
   }
 
+  function bindServerTest() {
+    const btn = $("#btn-server-test");
+    if (!btn) return;
+    btn.onclick = async () => {
+      const r = $("#server-test-r");
+      const u = (($("#set-serverUrl").value || "").trim() || SERVER_URL_DEF).replace(/\/+$/, "");
+      const k = ($("#set-cloudKey").value || "").trim();
+      if (!/^https:\/\//.test(u) || !k) { r.textContent = "先填完整个人云密钥和后端地址"; return; }
+      r.textContent = "测试中…";
+      try {
+        const res = await fetch(u + "/app/state?ids=" + encodeURIComponent(S.order.join(",")), { cache: "no-store", headers: { Authorization: "Bearer " + k } });
+        const data = await res.json().catch(() => null);
+        if (res.status === 401) throw new Error("后端不认这把密钥");
+        if (!res.ok || !data || data.ok !== true) throw new Error((data && data.error) || ("HTTP " + res.status));
+        const known = (data.characters || []).filter((c) => c.exists).length;
+        r.textContent = "✓ 已连通 · " + (data.mode === "live" ? "真发" : "影子") + " · 后端有 " + known + "/" + (data.characters || []).length + " 位";
+      } catch (e) { r.textContent = "✗ " + (e && e.message || e); }
+    };
+  }
   function syncUserSleepFields() {
     const toggle = $("#set-userSleepOn");
     const enabled = !!(toggle && toggle.classList.contains("on"));
@@ -370,6 +395,7 @@
     // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
     if (cloudGenWas && !S.settings.cloudGen && !serverBrainOn()) for (const cx of allCx()) await unfreezeGenTemplates(cx);
     if (serverBrainOn()) for (const cx of allCx()) await freezeServerTemplates(cx);
+    if (serverBrainOn()) for (const id of removed) { const cx = S.byId[id]; if (cx && cx.character) await serverForget(cx); }
     if (cloudCfg() && !(S.settings.autoGen && S.settings.cloudGen)) {
       for (const cx of allCx()) {
         const pendingStop = generationStopState(cx);
@@ -390,6 +416,19 @@
     }
     S.order = ids;
     const syncResults = [];
+    if (serverBrainOn()) {
+      const failed = [];
+      for (const cx of allCx()) {
+        try { await serverEnsure(cx); } catch (e) { failed.push(cx.character.name + "：" + (e && e.message || e)); }
+      }
+      await serverPull().catch(() => { /* 下一分钟再读 */ });
+      syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
+      render();
+      toast(failed.length ? "本地已保存，后端没同步上：" + failed.join("；") : "已保存，后端已同步");
+      // 刚切到后端：本机那套每分钟的编排循环还在跑，重新载入换成后端模式
+      if (!before.serverBrain) setTimeout(() => location.reload(), 1200);
+      return;
+    }
     for (const cx of allCx()) {
       cx._ctx = null; // 开关可能变了，强制重写一次（包括关掉时写空串撤销）
       await syncChatContext(cx, true);
@@ -397,6 +436,7 @@
     }
     syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
     render();
+    if (before.serverBrain) { toast("已改回本机管，重新载入…"); setTimeout(() => location.reload(), 1200); return; }
     const incomplete = [...syncResults, ...generationResults].some((r) => ["failed", "partial", "syncing"].includes(r.status));
     toast(incomplete ? "本地已保存，云端同步未完成；请查看页面提示"
       : !S.settings.cloudRecheck && syncResults.some((r) => r.status === "synced") ? "本地已保存，云端已确认关闭复核"

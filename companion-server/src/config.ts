@@ -7,6 +7,8 @@ export type Config = {
   apiToken: string;
   userId: string;
   port: number;
+  /** 监听地址，逗号分隔，默认只 127.0.0.1 */
+  bind: string[];
   dataDir: string;
   /** shadow 只记录不调模型不发；live 真发。启动后以 SQLite 里存的为准 */
   mode: "shadow" | "live";
@@ -23,6 +25,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     apiToken: env.COMPANION_API_TOKEN || "",
     userId: env.COMPANION_USER_ID || "",
     port: Number(env.COMPANION_PORT) || 18070,
+    bind: (env.COMPANION_BIND || "127.0.0.1").split(",").map(s => s.trim()).filter(Boolean),
     dataDir: env.COMPANION_DATA_DIR || "/var/lib/float-companion",
     mode: env.COMPANION_MODE === "live" ? "live" : "shadow",
   };

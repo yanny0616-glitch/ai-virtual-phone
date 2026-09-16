@@ -1843,6 +1843,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     let servicesStarted = false;
     let cleanupWeixinCloudRealtimeSync: (() => void) | null = null;
     let cleanupGuanianPresence: (() => void) | null = null;
+    let cleanupGuanianServer: (() => void) | null = null;
 
     void (async () => {
       try {
@@ -1894,6 +1895,11 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       void import("@/lib/chat-mirror-client").then(m => m.installChatMirror()).catch(() => undefined);
       // 自定义 APP 冻在服务端的提示词模板：角色回复后记忆会变，自动重冻
       void import("@/lib/custom-app-host-api").then(m => m.installCustomAppTemplateRefresher()).catch(() => undefined);
+      // 挂念交给 VPS 后端时：从后端取状态注入聊天、写回日程、补发朋友圈，并把好感和作息寄过去
+      void import("@/lib/guanian-server-sync").then(m => {
+        if (cancelled) return;
+        cleanupGuanianServer = m.startGuanianServerSync();
+      }).catch(() => undefined);
       // 延后跑，别抢启动窗口的解码/IO。
       window.setTimeout(() => {
         void import("@/lib/notification-avatar-cache").then(m => m.syncNotificationAvatarCache()).catch(() => undefined);
@@ -1904,6 +1910,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       cancelled = true;
       cleanupWeixinCloudRealtimeSync?.();
       cleanupGuanianPresence?.();
+      cleanupGuanianServer?.();
       if (servicesStarted) {
         stopFollowUpService();
         stopMomentsService();

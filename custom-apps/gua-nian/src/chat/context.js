@@ -165,6 +165,7 @@
     } catch (e) { /* 变量池不可用就算了 */ }
   }
   async function syncChatContext(cx, force) {
+    if (serverBrainOn()) return; // 后端模式由小手机宿主从后端取状态注入，两边都写会来回覆盖
     await syncReplyGate(cx);
     await refreshAffection(cx);
     await publishPresence(cx);

@@ -152,6 +152,7 @@
   }
 
   async function renderDiag() {
+    if (serverBrainOn()) return renderServerDiag();
     const cx = cur();
     const v = $("#subview") || $("#view");
     const req = (S._diagReq = (S._diagReq || 0) + 1);
@@ -455,8 +456,9 @@
   }
 
   function bindCommon() {
-    const gen = $("#btn-gen"); if (gen) gen.onclick = () => generateDay(cur());
-    const rg = $("#btn-regen"); if (rg) rg.onclick = () => generateDay(cur());
-    const rp = $("#btn-replan"); if (rp) rp.onclick = () => orchestrate(cur());
+    const srv = serverBrainOn();
+    const gen = $("#btn-gen"); if (gen) gen.onclick = () => srv ? serverRegenerate(cur()) : generateDay(cur());
+    const rg = $("#btn-regen"); if (rg) rg.onclick = () => srv ? serverRegenerate(cur()) : generateDay(cur());
+    const rp = $("#btn-replan"); if (rp) rp.onclick = () => srv ? serverTick(cur()) : orchestrate(cur());
     const pv = $("#btn-preview"); if (pv) pv.onclick = () => preview(cur());
   }

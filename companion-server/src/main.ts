@@ -3,6 +3,7 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { Auth, supabaseKeyCheck } from "./auth.ts";
 import { loadConfig } from "./config.ts";
 import type { EngineDeps } from "./engine.ts";
 import { importFromCloud } from "./importer.ts";
@@ -13,7 +14,6 @@ import { Store } from "./store.ts";
 import { createRest, resolveUserId } from "./supabase.ts";
 
 const config = loadConfig();
-if (!config.apiToken) throw new Error("COMPANION_API_TOKEN 未配置");
 
 if (!existsSync(config.dataDir)) mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
 chmodSync(config.dataDir, 0o700);
@@ -38,16 +38,21 @@ const engine: EngineDeps = {
   log: line => console.log(line),
 };
 const runner = new Runner(engine, config.mode);
-const server = createApp({ rest, store, userId, apiToken: config.apiToken, startedAt: new Date(), runner, engine });
-
-server.listen(config.port, "127.0.0.1", () => {
-  console.log(`[companion] 已启动 127.0.0.1:${config.port}，模式 ${runner.mode === "live" ? "真发" : "影子"}`);
-  runner.start();
+const auth = new Auth(config.apiToken, supabaseKeyCheck(config.personalUrl));
+const deps = { rest, store, userId, auth, startedAt: new Date(), runner, engine };
+// 每个地址一个 server：127.0.0.1 给命令行，Docker 网桥地址给站点反代（/companion/…）
+const servers = config.bind.map(host => {
+  const server = createApp(deps);
+  server.listen(config.port, host, () => console.log(`[companion] 监听 ${host}:${config.port}`));
+  return server;
 });
+console.log(`[companion] 已启动，模式 ${runner.mode === "live" ? "真发" : "影子"}`);
+runner.start();
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     runner.stop();
-    server.close(() => { store.close(); process.exit(0); });
+    let open = servers.length;
+    for (const server of servers) server.close(() => { if (--open === 0) { store.close(); process.exit(0); } });
   });
 }

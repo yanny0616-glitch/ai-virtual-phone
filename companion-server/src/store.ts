@@ -272,6 +272,11 @@ export class Store {
     return (this.#db.prepare("select * from decisions where character_id = ? order by id desc limit ?").all(characterId, limit) as Row[]).map(r => this.#decision(r));
   }
 
+  /** 某时刻之后的全部判断（给念头详情拼轨迹），按时间正序 */
+  listDecisionsSince(characterId: string, sinceMs: number, limit = 3000): DecisionRow[] {
+    return (this.#db.prepare("select * from decisions where character_id = ? and at >= ? order by id asc limit ?").all(characterId, sinceMs, limit) as Row[]).map(r => this.#decision(r));
+  }
+
   lastDecision(characterId: string, kind: string): DecisionRow | null {
     const r = this.#db.prepare("select * from decisions where character_id = ? and kind = ? order by id desc limit 1").get(characterId, kind) as Row | undefined;
     return r ? this.#decision(r) : null;

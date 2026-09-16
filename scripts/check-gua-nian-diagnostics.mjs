@@ -29,7 +29,7 @@ const calls = [];
 const sample = [job(templateId, fields), job('foreign', { ...gateway.fields('timedwake:foreign', { notify: { characterId: 'other' } }) })];
 const context = vm.createContext({ console, Date, Map, Set, S: { tab: 'back', sub: 'diag', settings: { sentinels: { c: { wakeId: templateId, previousWakeIds: ['old-template'] } } }, characters: [cx.character] },
   cur: () => cx, $: el, esc: s => String(s ?? '').replaceAll('<', '&lt;').replaceAll('>', '&gt;'), cloudCfg: () => ({ url: 'https://test.invalid' }), owns: () => true,
-  todayStr: () => '2026-09-11', fmtHM: () => '08:00', timeToMs: () => 0, cloudRecheckOn: () => true, replanLabel: () => '重置今天', readOwner: async () => {},
+  todayStr: () => '2026-09-11', fmtHM: () => '08:00', timeToMs: () => 0, cloudRecheckOn: () => true, serverBrainOn: () => false, replanLabel: () => '重置今天', readOwner: async () => {},
   AiPhone: { push: { listWakes: async () => [] } },
   cloudSyncIssues: () => ({ rows: [], genRows: [], unfinished: false }), renderCloudSync() {}, renderCloudHistory() {},
   cloudFetch: async (action, _init, params) => {

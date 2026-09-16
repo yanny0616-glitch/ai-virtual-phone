@@ -15,6 +15,7 @@
     "已发生的互动可以作为背景影响角色状态，但不能自动延续成之后一整天的共同剧情。未来备注只写角色自己的准备和计划，不把尚未发生的细节写成事实。",
   ].join("\n");
 
+  const SERVER_URL_DEF = "https://float.yanny.top/companion";
   // 所有可调参数的默认值；旧版本存的 settings 缺哪个补哪个
   const SET_DEF = {
     dayPrompt: DEFAULT_DAY_PROMPT,
@@ -28,7 +29,8 @@
     forkBurst: true,     // 变数落到「忍不住」时主动来说（占主动额度，守免打扰）
     routineOn: true,     // 生成TA的一天时照着「忙碌回复」插件里的固定作息和今天的例外
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
-    serverBrain: false,  // 交给 VPS 后端：本机不生成、不判断、不排消息，只把提示词模板寄到个人云给后端用
+    serverBrain: false,  // 交给 VPS 后端：本机不生成、不判断、不排消息，界面直接读写后端
+    serverUrl: "",       // 后端地址，留空用 https://float.yanny.top/companion
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
     characterIds: [],    // 挂念的人（可以多位）

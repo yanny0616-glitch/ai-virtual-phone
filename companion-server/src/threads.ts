@@ -24,7 +24,7 @@ export function threadDueMs(t: Thread, nowMs: number, tz: number): number {
   return d.getTime() - tz * 60_000;
 }
 
-function threadWhen(t: Thread, nowMs: number, tz: number): string {
+export function threadWhen(t: Thread, nowMs: number, tz: number): string {
   const due = threadDueMs(t, nowMs, tz);
   if (!due) return "";
   const diff = due - nowMs, d = new Date(due + tz * 60_000), n = new Date(nowMs + tz * 60_000);

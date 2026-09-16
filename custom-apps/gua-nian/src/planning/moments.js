@@ -22,6 +22,7 @@
     } catch (e) { /* 变量池不可用就算了 */ }
   }
   function momentRecords(cx) {
+    if (serverBrainOn()) return ((cx.server && cx.server.moments && cx.server.moments.history) || []).slice();
     return ((S.settings.momentHistory || {})[cx.character.id] || []).slice();
   }
   async function saveMomentRecord(cx, record) {

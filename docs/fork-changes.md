@@ -117,7 +117,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 | APP | 版本 | 做什么 | 说明文档 |
 | --- | --- | --- | --- |
-| 挂念 `gua-nian` | 0.9.42 | 生成角色一天（带到点揭晓的变数，照着固定作息排）→ 心动时刻 → 云端复核 → 定时主动消息（可整体交给 VPS 后端 `companion-server/`，本机只寄模板）；精力/情绪衰减模型；约定账本；可同时挂念多人；信息页按日程自动同步在线状态 | `custom-apps/gua-nian/ARCHITECTURE.md`、`docs/gua-nian-*.md`、`docs/archive/gua-nian/` |
+| 挂念 `gua-nian` | 0.10.0 | 生成角色一天（带到点揭晓的变数，照着固定作息排）→ 心动时刻 → 云端复核 → 定时主动消息（可整体交给 VPS 后端 `companion-server/`：界面直连后端，注入聊天 / 在线状态 / 朋友圈 / 写回日程由宿主 `lib/guanian-server-sync.ts` 从后端取）；精力/情绪衰减模型；约定账本；可同时挂念多人；信息页按日程自动同步在线状态 | `custom-apps/gua-nian/ARCHITECTURE.md`、`docs/gua-nian-*.md`、`docs/archive/gua-nian/` |
 | 拾光 `shiguang` | 2.1.1 | 重要记忆：每 20 轮整理、关键词三档召回、当轮同步注入。宿主侧原管线已删，只留只读接口 | `custom-apps/shiguang/ARCHITECTURE.md` |
 | 用量 `usage-dashboard` | 2.8.1 | 按角色/来源看 token 与缓存、日志分页筛选、保留条数设置。来源名由宿主 `lib/usage-source-names.ts` 下发 | — |
 | 小剧场 `xiao-ju-chang` | 0.1.1 | 单角色小剧场生成：部件各自成库随意组合，整段 HTML/JS 在沙盒 iframe 里渲染，四套换布局的主题 | `custom-apps/xiao-ju-chang/ARCHITECTURE.md` |
@@ -161,7 +161,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 
 ## 0.9.42：挂念交给 VPS 后端
 
-`companion-server/`（仓库内独立服务，Node 22 直接跑 TypeScript + SQLite + systemd，部署在 `/opt/float-companion/companion-server`，只监听 127.0.0.1:18070；不参与 Next 构建，根 `tsconfig.json` 排除）接管挂念的全部判断与发送：每分钟一轮，生活面生成 → 门禁由头分量 → 判断 → 约定 / 回音账 → 到点复核 → 写 `push_outbox` + Web Push。个人云只当信箱（聊天镜像、模板、outbox、订阅、用量），VPS 不对外开端口。规则与文案搬自 push-recheck / push-generate，`src/vendor/*.mjs` 与挂念 `src/domain/` 同源；事项去重之外另有字面相似度兜底（`src/similar.ts`）。模式 shadow / live 存在 SQLite，运维用 `node src/cli.ts status | import [--force] | mode | test-send`，说明见 `companion-server/README.md`。
+`companion-server/`（仓库内独立服务，Node 22 直接跑 TypeScript + SQLite + systemd，部署在 `/opt/float-companion/companion-server`，监听 127.0.0.1 与 Docker 网桥的 18070，经 Caddy 暴露为 `https://float.yanny.top/companion`（鉴权：运维令牌或个人云 Secret key）；不参与 Next 构建，根 `tsconfig.json` 排除）接管挂念的全部判断与发送：每分钟一轮，生活面生成 → 门禁由头分量 → 判断 → 约定 / 回音账 → 到点复核 → 写 `push_outbox` + Web Push。个人云只当信箱（聊天镜像、模板、outbox、订阅、用量）；挂念和小手机宿主经 `/app/*` 直连后端。规则与文案搬自 push-recheck / push-generate，`src/vendor/*.mjs` 与挂念 `src/domain/` 同源；事项去重之外另有字面相似度兜底（`src/similar.ts`）。模式 shadow / live 存在 SQLite，运维用 `node src/cli.ts status | import [--force] | mode | test-send`，说明见 `companion-server/README.md`。
 
 提示词靠宿主模板：挂念开「交给 VPS 后端」后冻 `capptpl:<挂念>:<角色>:judge|daily|chat` 三份；`chat` 走 `push.freeze({ chatSnapshot: true })`，是聊天 APP 原样提示词 + 完整聊天记录，定时唤醒指令里的意图（`__GUANIAN_INTENT__`）和分钟数（424242）留占位，后端到点填，并把冻结时的系统时间 / 角色本地时间换成发送时刻。宿主在 TA 回复后 30 秒、切到后台时重冻已登记模板，后端每轮按 `updated_at` 取新。开关打开时挂念本机不生成、不复核、不挂任何预约；此时应关掉云端复核和云端生成，否则会重复发送。
 

@@ -4,7 +4,7 @@
 
 独立于 Next.js：不参与 `npm run build`，Node 22 直接运行 TypeScript（类型擦除），只依赖 `web-push`。
 
-## 当前阶段：2（大脑完整搬到后端）
+## 当前阶段：4（挂念 / 小手机直连后端）
 
 每 60 秒给每个角色跑一轮（`src/engine.ts`）：
 
@@ -33,7 +33,14 @@
 3. App 挂念设置里关掉云端复核 / 云端生成，撤掉云端还挂着的 `timedwake:` 预约（否则两边都会发）
 4. `node src/cli.ts status` 看判断和定时器
 
-### 接口（除 /health 外都要 `Authorization: Bearer $COMPANION_API_TOKEN`）
+### 直连
+
+- 监听 `COMPANION_BIND`（逗号分隔，默认 `127.0.0.1`）；线上是 `127.0.0.1,172.17.0.1`，Caddy 容器经 `host.docker.internal:18070` 反代到 `https://float.yanny.top/companion/…`（Caddyfile 的 float.yanny.top 块，`uri strip_prefix /companion`）。
+- 鉴权：运维令牌 `COMPANION_API_TOKEN`，或挂念设置里存的个人云 Secret key——后端拿它读一行 `push_server_config`（只有 service 级密钥读得到）确认，只缓存 SHA-256（通过 30 分钟、失败 1 分钟），每分钟最多核对 20 次。
+- CORS 放开 `*`：挂念跑在沙箱 iframe（null origin），不用 cookie。
+- 手机发来的改动在 `Runner.exclusive` 锁里做：正在跑一轮时排到这轮之后，最多等 20 秒，没做完回 202 `{queued:true}`。
+
+### 接口（除 /health 外都要 `Authorization: Bearer <运维令牌或个人云 Secret key>`）
 
 | 接口 | 作用 |
 |---|---|
@@ -49,14 +56,28 @@
 | `PUT /characters/:id/calendar/:date` | App 同步日程表已定安排与作息 |
 | `POST /characters/:id/regenerate` | 重新生成今天（仅 live） |
 | `POST /characters/:id/tick` | 立刻跑一轮 |
+| `GET /app/state?ids=a,b` | 挂念界面：生活面（按此刻揭晓变数）、念头（带后端状态、押后、发送前复核、轨迹）、账本、朋友圈记录、判断记录、快照时间、注入聊天的文字 |
+| `GET /app/archive?id=a&limit=30` | 记录页：最近几天的生活面和念头 |
+| `GET /app/host?ids=a,b` | 小手机宿主：在线状态用的日子、注入聊天的文字、待发朋友圈、发圈节奏 |
+| `POST /app/characters/:id` | 建档 / 更新名字、会话、设置、开关 `{name, sessionId, settings, enabled}` |
+| `PUT /app/characters/:id/settings` | 设置（只收设置键） |
+| `PUT /app/characters/:id/inputs` | 宿主寄原料 `{affection, days:[{date, calendar, routine, exceptions}], routineOn}`，后端按角色时区折成已定安排和起床 / 上床 |
+| `PUT /app/characters/:id/day` | 改今天的日程 `{date, schedule, forks, conds}` |
+| `POST /app/characters/:id/threads` | 账本 `{op: add\|done\|undone\|drop}`，了结 / 删掉会撤掉挂在上面还没发的念头 |
+| `POST /app/characters/:id/items/cancel` | 撤掉一个还没发的念头 `{wakeId}` |
+| `POST /app/characters/:id/moments/ack` | 宿主发朋友圈的回执 `{id, status, postId, note}` |
+| `POST /app/characters/:id/regenerate` / `tick` | 同上，挂念按钮用 |
 
 CLI：`node src/cli.ts diagnose | push-test | status | import [--force] | mode shadow|live`
 
+### 手机那头（小手机开着就跑，挂念不用开）
+
+`lib/guanian-server-sync.ts`：每分钟取 `/app/host`，写在线状态变量、回复闸门、注入聊天提示词、朋友圈节奏变量；后端起意的朋友圈在前台补成帖子并回执；后端生成的日程写回系统日程表；把好感、系统日程表、「忙碌回复」固定作息和例外寄到 `/app/characters/:id/inputs`。挂念 0.10.0 开着「交给 VPS 后端」时界面直接读写 `/app/*`。
+端到端自测：`node scripts/check-gua-nian-server-direct.mjs`（真后端 HTTP + Chromium 跑挂念 + vm 跑宿主同步）。
+
 ### 还没搬的
 
-- 朋友圈：判断出的发圈意图记在后端 `state.outbox`，手机端还不会取来发
 - 线下通话、快捷指令、微信渠道
-- 手机端寄快照 / 同步设置和日程表（阶段 4）；在那之前 chat 快照是云端冻结的旧快照，靠「最新聊天事实」补上下文
 
 ## 配置
 

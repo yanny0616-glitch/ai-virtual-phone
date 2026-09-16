@@ -3,6 +3,14 @@
     const cx = cur();
     if (cx.archive && Date.now() - cx.archive.at < 60000) return cx.archive;
     const cid = cx.character.id;
+    if (serverBrainOn()) {
+      const r = await serverFetch("/app/archive?id=" + encodeURIComponent(cid) + "&limit=30");
+      const byDate = {};
+      for (const d of r.days || []) byDate[d.date] = { day: d.day, plan: d.plan };
+      if (cx.server) cx.server.moments = Object.assign({}, cx.server.moments, { history: r.moments || [] });
+      cx.archive = { at: Date.now(), dates: Object.keys(byDate).sort().reverse(), byDate };
+      return cx.archive;
+    }
     const [days, plans] = await Promise.all([
       AiPhone.db.list("days", { limit: 100 }),
       AiPhone.db.list("plans", { limit: 100 }),
@@ -24,6 +32,16 @@
       status, cls: w.act ? "on" : "no", heart: w.act ? "♥" : "♡", explanation, sentAt: sentAt || 0,
       badge: '<span class="badge ' + tone + '">' + label + '</span>',
     });
+    if (w.serverStatus) {
+      const s = w.serverStatus, at = s.at ? "（" + fmtHM(s.at) + "）" : "";
+      if (s.status === "sent") return state("sent", "已发出", "sent", "后端已生成并推送" + at + "；不代表你已读。", s.at);
+      if (s.status === "pending") return state("pending", w.held ? "押后" : "待发送", "wait", (s.note ? s.note + "。" : "") + "到点后端先做发送前复核，再决定发不发。");
+      if (s.status === "running") return state("running", "生成中", "wait", "后端正在生成这一条。");
+      if (s.status === "cancelled") return state("cancelled", "已取消", "off", s.note || "这一条已取消。");
+      if (s.status === "failed") return state("failed", "发送失败", "warn", s.note || "后端发送失败。");
+      if (s.status === "skipped") return state("skipped", w.act ? "未发送" : "作罢", "off", s.note || "没有起念，不会发送。");
+      return state("unknown", "待确认", "done", s.note || "后端没有这一条的执行记录。");
+    }
     if (w.sendConfirmed && w.generatedAt) return state("sent", "已发出", "sent", "撤销前已核实对应预约生成完成，保留发送记录；不代表你已读。", w.generatedAt);
     if (j) {
       if (j.status === "done" && /^(generated|sent)(?:\b|,)/.test(String(j.resultNote || ""))) {
@@ -45,7 +63,7 @@
   }
 
   /* ================= 时刻详情弹层 ================= */
-  const HIST_KIND = { dedupe: "事项去重", promise: "约定预约", plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对", fork: "变数" };
+  const HIST_KIND = { dedupe: "事项去重", promise: "约定预约", plan: "首次编排 · 有念头", skip: "首次编排 · 作罢", recheck: "复核作罢", lit: "复核点亮", cooled: "未回应降速", defer: "复核改约", extra: "临时念头", presend: "发送前复核", freshness: "等待后判断", factcheck: "事实核对", fork: "变数", hold: "押后", send: "发送", gate: "门禁", ledger: "账本", error: "出错", schedule: "改日程", thread: "惦记", settle: "了结" };
 
   function detailHtml(w, plan) {
     const cx = cur();
@@ -114,7 +132,7 @@
         const d = new Date(e.at);
         const ds = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
         return '<div class="hist-it"><b>' + (ds === today ? "" : ds.slice(5).replace("-", "/") + " ") + fmtHM(e.at) + "</b> " +
-          (e.by === "cloud" ? "云端 · " : "") + (HIST_KIND[e.kind] || e.kind) + (e.note ? " · " + esc(e.note) : "") + "</div>";
+          (e.by === "cloud" ? "云端 · " : e.by === "server" ? "后端 · " : "") + (HIST_KIND[e.kind] || e.kind) + (e.note ? " · " + esc(e.note) : "") + "</div>";
       }).join("");
     } else {
       h += '<div class="archive-note" style="text-align:left;padding:0">旧版本记录，没有留判断轨迹。</div>';
@@ -128,7 +146,7 @@
     if (st.sentAt) h += '<div class="d-why">回执完成时间：' + esc(fmtHM(st.sentAt)) + '</div>';
     const receipt = receiptFor(w);
     if (receipt && receipt.error && receipt.job) h += '<div class="d-why">本次刷新失败，以上为上次回执：' + esc(receipt.error) + '</div>';
-    if (w.wakeId && cloudCfg()) h += '<button class="tgl" id="btn-refresh-receipt">刷新回执</button>';
+    if (w.wakeId && cloudCfg() && !serverBrainOn()) h += '<button class="tgl" id="btn-refresh-receipt">刷新回执</button>';
     h += "</div>";
 
     const si = plan && plan.date === todayStr() ? ((cx.day && cx.day.schedule) || []).findIndex((x) => x.time === w.time) : -1;

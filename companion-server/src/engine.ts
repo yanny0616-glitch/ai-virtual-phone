@@ -476,7 +476,7 @@ async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
       if (!it.from || !ids.has(it.from) || !it.act || it.fireAt <= nowMs + LEAD_MS) continue;
       it.act = false; it.why = "这件事你说了结了";
       cancelTimer(t, it.wakeId, it.why);
-      decide(t, "recheck", `取消 ${it.time}——${it.why}`);
+      decide(t, "recheck", `取消 ${it.time}——${it.why}`, { wakeId: it.wakeId });
     }
     for (const w of g.wordSettled) decide(t, "settle", `你说「${w.said}」，${w.how}了「${w.text}」`);
   }
@@ -573,7 +573,7 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
     if (!reason) continue;
     item.act = false; item.matterSuppressed = true; item.why = reason;
     cancelTimer(t, item.wakeId, reason);
-    decide(t, "dedupe", `${item.time} ${reason}`);
+    decide(t, "dedupe", `${item.time} ${reason}`, { wakeId: item.wakeId });
   }
   let lit = ordinaryQuota(nextItems) as number;
   const quota = Number(ctx.quota ?? 3);
@@ -602,13 +602,13 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
         item.origFireAt = Number(item.origFireAt) || item.fireAt;
         item.time = deferHM; item.fireAt = deferAt; item.why = why || "这个点不合适";
         t.deps.store.updateTimer(item.wakeId, { fireAt: deferAt, note: `改约 ${from}→${deferHM}` });
-        decide(t, "defer", `${from} 改约到 ${deferHM}——${item.why}`);
+        decide(t, "defer", `${from} 改约到 ${deferHM}——${item.why}`, { wakeId: item.wakeId });
         continue;
       }
       item.act = false; item.why = why || "聊过之后TA改了主意";
       cancelTimer(t, item.wakeId, item.why);
       lit -= 1;
-      decide(t, "recheck", `取消 ${time}——${item.why}`);
+      decide(t, "recheck", `取消 ${time}——${item.why}`, { wakeId: item.wakeId });
       continue;
     }
     if (d.act === true && !item.act) {
@@ -621,7 +621,7 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
       item.topic = String(d.topic || item.topic).slice(0, 200);
       item.wakeId = addWake(t, item.fireAt, item.kind || "plan");
       lit += 1;
-      decide(t, "lit", `点亮 ${time}——${item.intent}`);
+      decide(t, "lit", `点亮 ${time}——${item.intent}`, { wakeId: item.wakeId });
     }
   }
 
@@ -647,15 +647,16 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
     const untilHM = typeof one.until === "string" && /^\d{1,2}:\d{2}$/.test(one.until.trim()) ? one.until.trim().padStart(5, "0") : "";
     const untilMs = untilHM ? localMs(untilHM) : 0;
     const fromId = String(one.from || "").replace(/[\[\]\s]/g, "");
+    const wakeId = addWake(t, fireAt, kind);
     nextItems.push({
       ...matterFields(one), time, fireAt, until: untilMs > fireAt ? Math.min(untilMs, fireAt + 6 * HOUR) : 0,
       source: `${o.g.selfReason ? "自发" : "临时"}·${String(one.about || (o.g.selfReason ? (SELF_KIND[o.g.selfKind] || "想起你") : "未完话题")).slice(0, 10)}`,
       act: true, kind, intent, why: String(one.why || "").slice(0, 200), sem: "", topic: "",
-      wakeId: addWake(t, fireAt, kind),
+      wakeId,
       from: o.g.threadNudged ? o.g.threadNudged.id : fromId && threads.some(x => x.id === fromId) ? fromId : "",
     });
     lit += 1;
-    decide(t, "extra", `起念 ${time}——${intent}`);
+    decide(t, "extra", `起念 ${time}——${intent}`, { wakeId });
   }
   nextItems.sort((a, b) => a.fireAt - b.fireAt);
   row.items = nextItems;
