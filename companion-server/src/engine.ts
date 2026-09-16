@@ -144,6 +144,8 @@ export async function tickCharacter(deps: EngineDeps, mode: Mode, characterId: s
   return trace;
 }
 
+const SENTINEL_INTENT = "挂念后台复核模板，仅供后台调用，不生成聊天消息";
+
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
 // ─── 1. 生活面
@@ -782,7 +784,9 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
     + "先核对这个念头是否仍有必要：如果你已经在聊天里问过、说过这件事，用户已经回答或事情已经解决，就不要再发，也不要换个话题凑消息。仅仅出现相关词不等于已经说过，按实际问答与语义判断。具体约定或事件是否过时也按事实判断，不因单纯经过多少分钟而认定失效。\n"
     + "无需再发时，只输出 [挂念作罢：聊天已提过] 或 [挂念作罢：事情已解决或发生变化]，不要输出台词、独白或其他标签；仍有未说过且符合当前事实的内容时，按原格式自然成文。双方最新事实优先于旧预约意图。角色说过到了就是已交代的事实，后续不能无故退回尚未到家；再次外出必须有明确依据。约定到点并不证明已完成；不能替用户宣布完成。";
   deps.store.updateTimer(timer.id, { status: "running", note: "生成中" });
-  const base = fresh ? fillChatTemplate(snap.request, snap.merge, { intent: item.intent, elapsedMin, nowMs }) : snap.request;
+  // 旧哨兵快照里烤着「挂念后台复核模板…」这句假意图和冻结时的时间，也一并换掉
+  const base = fillChatTemplate(snap.request, fresh ? snap.merge : { tzOffsetMin: snap.merge.tzOffsetMin, intentPlaceholder: SENTINEL_INTENT },
+    { intent: item.intent, elapsedMin, nowMs });
   const request = buildChatRequest(base, [facts, ...notes, intentNote, factCheck]);
   let result;
   try { result = await callModel(request, deps.fetchModel, 300_000); }

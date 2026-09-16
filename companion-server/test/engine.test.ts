@@ -50,7 +50,7 @@ function setup(mode: Mode, startLocal: string, template = false) {
   });
   const snapshot = {
     characterId: CID, sessionId: "sess1", capturedAt: now, notify: { title: "赵兖", url: "/chat" }, merge: { characterName: "赵兖", appId: "chat" },
-    request: { url: "https://model.example/v1/messages", headers: { "x-api-key": "k" }, providerKind: "anthropic" as const, body: { model: "m", messages: [{ role: "user", content: "hi" }] } },
+    request: { url: "https://model.example/v1/messages", headers: { "x-api-key": "k" }, providerKind: "anthropic" as const, body: { model: "m", messages: [{ role: "user", content: "当前系统时间：2026年9月14日08:21，星期一\n你当时想着：“挂念后台复核模板，仅供后台调用，不生成聊天消息”" }] } },
   };
   if (template) {
     Object.assign(snapshot.merge, { intentPlaceholder: "__GUANIAN_INTENT__", elapsedMark: 424242, template: true });
@@ -112,6 +112,7 @@ test("真发模式：判断起念 → 挂定时器 → 到点写 outbox、推送
   const chatRequest = env.modelCalls.find(b => !b.includes("后台判断任务"))!;
   assert.match(chatRequest, /问问下午忙不忙/);
   assert.match(chatRequest, /最新云端聊天事实/);
+  assert.match(chatRequest, /当前系统时间：2026年9月16日16:01，星期三\\n你当时想着：“问问下午忙不忙”/);
   assert.deepEqual(env.pushes[0].map(m => m.body), ["下午忙不忙呀", "我刚开完会"]);
   assert.equal(env.store.getTimer(item.wakeId)!.status, "done");
   assert.equal(env.store.pendingFeedback(CID).length, 1);
