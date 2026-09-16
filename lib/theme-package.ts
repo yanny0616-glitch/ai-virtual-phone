@@ -24,6 +24,7 @@ import {
   type ThemeAssetRecord
 } from "@/lib/theme-storage";
 import { GRID_COLS, GRID_ROWS, WIDGET_SIZE_CELLS, type DIYTemplateSlot, type DIYWidgetTemplate, type WidgetInstance, type WidgetSize } from "@/lib/widget-types";
+import { normalizeDIYFields } from "./widget-fields";
 import { createDefaultWidgets, loadDIYTemplates, saveDIYTemplates, saveWidgets } from "@/lib/widget-storage";
 import { isThemeAssetReferencedByPresets } from "@/lib/appearance-presets";
 
@@ -266,6 +267,11 @@ function normalizeDIYTemplates(raw: unknown): DIYWidgetTemplate[] {
       template.slots = normalizeSlots(candidate.slots);
     } else if (typeof candidate.htmlString === "string") {
       template.htmlString = candidate.htmlString;
+    }
+
+    const fields = normalizeDIYFields(candidate.fields);
+    if (fields.length) {
+      template.fields = fields;
     }
 
     return [template];

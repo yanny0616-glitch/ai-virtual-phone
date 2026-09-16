@@ -133,6 +133,7 @@ import {
 } from "@/lib/desktop-layout-storage";
 import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
+import { WidgetFieldForm } from "@/components/widgets/widget-field-form";
 import { DebugPromptPanel } from "@/components/debug-prompt-panel";
 import { QuickActionFloat } from "@/components/quick-action-float";
 import { getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
@@ -1192,11 +1193,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [showWidgetPicker, setShowWidgetPicker] = useState(false);
   const [diyTemplates, setDiyTemplates] = useState<DIYWidgetTemplate[]>([]);
 
+  // 编辑模式也要有模板：可填字段的 ✎ 按钮得知道这个 DIY 组件声明了哪些字段。
   useEffect(() => {
-    if (showWidgetPicker) {
+    if (showWidgetPicker || editMode) {
       setDiyTemplates(loadDIYTemplates());
     }
-  }, [showWidgetPicker]);
+  }, [showWidgetPicker, editMode]);
+
+  const [fieldFormWidgetId, setFieldFormWidgetId] = useState<string | null>(null);
 
   const mergedCatalog = useMemo(() => {
     const diyEntries = diyTemplates.map(t => ({
@@ -4718,6 +4722,21 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                                       ×
                                     </button>
                                   )}
+                                  {editMode && !wDragging && (diyTemplates.find((t) => t.id === widget.type)?.fields?.length ?? 0) > 0 && (
+                                    <button
+                                      type="button"
+                                      className="widget-config-btn"
+                                      style={{ gridRow: widget.row, gridColumn: `${widget.col}` }}
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setFieldFormWidgetId(widget.id);
+                                      }}
+                                      aria-label="填写组件内容"
+                                    >
+                                      ✎
+                                    </button>
+                                  )}
                                 </div>
                               );
                             })}
@@ -4987,6 +5006,24 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               <MascotFloat />
               {/* 预览弹窗宿主：独立于桌宠的展开/收起状态，否则桌宠收成小球时弹不出来 */}
               <MascotPreviewHost />
+
+              {fieldFormWidgetId && (() => {
+                const target = widgets.find((w) => w.id === fieldFormWidgetId);
+                const template = target ? diyTemplates.find((t) => t.id === target.type) : undefined;
+                if (!target || !template?.fields?.length) return null;
+                return (
+                  <WidgetFieldForm
+                    title={template.name || "组件内容"}
+                    fields={template.fields}
+                    values={target.config || {}}
+                    onClose={() => setFieldFormWidgetId(null)}
+                    onSave={(values) => {
+                      handleWidgetConfigChange(target.id, values);
+                      setFieldFormWidgetId(null);
+                    }}
+                  />
+                );
+              })()}
 
               {/* Widget Picker Bottom Sheet */}
               {showWidgetPicker && (

@@ -58,6 +58,7 @@ import {
 import { BINDING_ACCENTS } from "@/lib/ui-accent-colors";
 import { ConfirmDialog, ContentDialog } from "@/components/ui/modal";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
+import { dropRemovedFieldValues, removedFieldKeys } from "@/lib/widget-fields";
 import { DIYWidgetEditor } from "@/components/widgets/diy-widget-editor";
 import {
   createThemePackageBlob,
@@ -2198,6 +2199,9 @@ function WidgetManagerPage({
                       const updated = diyTemplates.map(t => t.id === newTemplate.id ? newTemplate : t);
                       saveDIYTemplates(updated);
                       setDiyTemplates(updated);
+                      // 删掉的字段连带清掉桌面实例里存的值，否则是看不见也删不掉的残值。
+                      const dropped = removedFieldKeys(editingTemplate?.fields, newTemplate.fields);
+                      if (dropped.length) onWidgetsChange(dropRemovedFieldValues(widgets, newTemplate.id, dropped));
                       setShowStudio(false);
                       setEditingTemplate(undefined);
                     }}

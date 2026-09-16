@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useId } from "react";
 import type { WidgetInstance, DIYWidgetTemplate } from "@/lib/widget-types";
+import { resolveWidgetConfig } from "@/lib/widget-fields";
 import { attachWidgetMusicBridge, widgetMusicClientScript } from "@/lib/widget-music-bridge";
 import { getThemeAssetMap } from "@/lib/theme-storage";
 
@@ -455,8 +456,11 @@ export function DIYWidgetRenderer({ widget, preview, template, onConfigChange }:
 
 export function DIYCodeWidgetFrame({ widget, template, onConfigChange, readOnly = false, inert = false }: Omit<Props, "preview">) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // 字段默认值垫在用户填的值下面，作者改默认值后没填过的实例跟着变。
+  const resolvedConfig = resolveWidgetConfig(template, widget);
+  const configSignature = JSON.stringify(resolvedConfig);
   const [srcDoc, setSrcDoc] = useState(() =>
-    injectCodeWidgetBridge(template.htmlString || "", widget.id, widget.config)
+    injectCodeWidgetBridge(template.htmlString || "", widget.id, resolvedConfig)
   );
 
   useEffect(() => {
@@ -465,8 +469,8 @@ export function DIYCodeWidgetFrame({ widget, template, onConfigChange, readOnly 
   }, [widget.id, readOnly, template.htmlString]);
 
   useEffect(() => {
-    setSrcDoc(injectCodeWidgetBridge(template.htmlString || "", widget.id, widget.config));
-  }, [template.htmlString, widget.id]);
+    setSrcDoc(injectCodeWidgetBridge(template.htmlString || "", widget.id, JSON.parse(configSignature)));
+  }, [template.htmlString, widget.id, configSignature]);
 
   useEffect(() => {
     const iframeWindow = iframeRef.current?.contentWindow;
@@ -475,9 +479,9 @@ export function DIYCodeWidgetFrame({ widget, template, onConfigChange, readOnly 
       source: `${CODE_WIDGET_BRIDGE_SOURCE}-host`,
       type: "config",
       widgetId: widget.id,
-      config: widget.config || {},
+      config: JSON.parse(configSignature),
     }, "*");
-  }, [widget.id, widget.config]);
+  }, [widget.id, configSignature]);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {

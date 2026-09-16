@@ -1,5 +1,14 @@
 # Fork 变更日志
 
+## 2026-09-16：桌面组件的「用户可填字段」
+
+- `DIYWidgetTemplate` 新增 `fields`：作者在代码沙盒编辑器里声明文字 / 数字 / 日期 / 时间 / 颜色 / 下拉六种字段（最多 20 个），key 限定成标识符。
+- 用的人在桌面编辑模式点组件左上角 ✎ 填表，值写进 `WidgetInstance.config`，代码里照旧 `AiPhoneWidget.getConfig(key, 默认)` 读。
+- 字段默认值垫在实例值下面（`resolveWidgetConfig`）；作者删字段时 `dropRemovedFieldValues` 把实例里的旧值一起清掉。
+- 主题包 `normalizeDIYTemplates` 带上 `fields`；模板导出只带声明，值留在实例里。
+- 小卷的模板补丁也认 `fields`（`mascot-edit-domain` 校验 key 合法性、重复、下拉选项非空）。
+- 验证：`tsc --noEmit` 通过；改动文件 eslint 错误数与改动前一致。
+
 ## 2026-09-16：只认流式的中转不再静默失败
 
 - `simpleLLMCall` 非流式拿到 200 空正文时，自动改用流式重试一次；截断（`length`）不重试，重试也一样截断。
