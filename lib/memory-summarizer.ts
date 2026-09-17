@@ -24,6 +24,37 @@ import { splitSummaryBatches } from "./memory-layering";
 /** Per-character lock to prevent concurrent summarization. */
 const summarizingSet = new Set<string>();
 
+/** 桌面壳根部的总结进度条（components/memory-summary-toast.tsx）监听这个事件 */
+export const MEMORY_SUMMARY_TOAST_EVENT = "ai-phone:memory-summary-toast";
+export type MemorySummaryToast = {
+    characterId: string;
+    text: string;
+    /** 进行中：常驻、可停止；结果：到点消失 */
+    running: boolean;
+    stopping?: boolean;
+    duration?: number;
+} | { characterId: string; text: null };
+
+const stopRequested = new Set<string>();
+
+function emitSummaryToast(detail: MemorySummaryToast): void {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent(MEMORY_SUMMARY_TOAST_EVENT, { detail }));
+}
+
+const runningText = new Map<string, string>();
+
+/** 当前这批写完再停：这批不白跑，水位线也不会停在「已入库未推进」的中间态 */
+export function requestStopSummarization(characterId: string): void {
+    if (!summarizingSet.has(characterId) || stopRequested.has(characterId)) return;
+    stopRequested.add(characterId);
+    emitSummaryToast({ characterId, running: true, stopping: true, text: `${runningText.get(characterId) ?? "正在整理记忆"}，这批写完就停` });
+}
+
+export function isSummarizing(characterId: string): boolean {
+    return summarizingSet.has(characterId);
+}
+
 /**
  * Check if summarization should run based on event counter, then execute.
  * Trigger: counter >= summarizationEventInterval.
@@ -61,7 +92,7 @@ export async function runSummarizationPipeline(
         /** 每开始一批回调一次 */
         onProgress?: (progress: SummaryProgress) => void;
     }
-): Promise<{ success: boolean; error?: string; batches?: number }> {
+): Promise<{ success: boolean; error?: string; batches?: number; stopped?: boolean }> {
     if (summarizingSet.has(characterId)) return { success: false, error: "该角色正在整理记忆，请等待完成" };
     summarizingSet.add(characterId);
     try {
@@ -73,14 +104,18 @@ export async function runSummarizationPipeline(
         return await summarizeUnlocked(characterId, characterName, options);
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : "记忆整理失败" };
-    } finally { summarizingSet.delete(characterId); }
+    } finally {
+        summarizingSet.delete(characterId);
+        stopRequested.delete(characterId);
+        runningText.delete(characterId);
+    }
 }
 
 async function summarizeUnlocked(
     characterId: string,
     characterName: string,
     options?: { force?: boolean; sinceTimestamp?: string; onProgress?: (progress: SummaryProgress) => void },
-): Promise<{ success: boolean; error?: string; batches?: number }> {
+): Promise<{ success: boolean; error?: string; batches?: number; stopped?: boolean }> {
     const config = loadMemoryConfig();
     const counterAtStart = getEventCounter(characterId);
 
@@ -109,17 +144,30 @@ async function summarizeUnlocked(
 
     // 删光总结后水位线清空、或积压很久时，一次喂全部历史会写成横跨几周的一大条，还容易被截断：按自动总结的间隔分批
     const batches = splitSummaryBatches(allEntries, config.summarizationEventInterval);
+    const total = batches.length;
+    const who = characterName || "角色";
     let done = 0;
     for (const batch of batches) {
-        options?.onProgress?.({ batch: done + 1, total: batches.length });
+        if (stopRequested.has(characterId)) {
+            consumeEventCounter(characterId, counterAtStart);
+            emitSummaryToast({ characterId, running: false, duration: 3500, text: `已停止整理${who}的记忆：完成 ${done}/${total} 批，下次接着总结` });
+            return { success: false, stopped: true, batches: done, error: `已停止，完成 ${done}/${total} 批` };
+        }
+        options?.onProgress?.({ batch: done + 1, total });
+        const text = total > 1 ? `正在整理${who}的记忆：第 ${done + 1}/${total} 批` : `正在整理${who}的记忆`;
+        runningText.set(characterId, text);
+        emitSummaryToast({ characterId, running: true, text });
         const result = await summarizeBatch(characterId, characterName, batch, config, apiConfig);
         if (!result.success) {
             if (done > 0) consumeEventCounter(characterId, counterAtStart);
-            return { success: false, batches: done, error: done > 0 ? `前 ${done} 批已保存，第 ${done + 1} 批失败：${result.error}` : result.error };
+            const error = done > 0 ? `前 ${done} 批已保存，第 ${done + 1} 批失败：${result.error}` : result.error;
+            emitSummaryToast({ characterId, running: false, duration: 5000, text: `${who}的记忆整理失败：${error}` });
+            return { success: false, batches: done, error };
         }
         done++;
     }
     consumeEventCounter(characterId, counterAtStart);
+    emitSummaryToast({ characterId, running: false, duration: 2500, text: total > 1 ? `${who}的记忆整理完成，共 ${total} 批` : `${who}的记忆整理完成` });
     return { success: true, batches: done };
 }
 

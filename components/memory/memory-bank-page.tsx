@@ -27,7 +27,7 @@ import {
 } from "@/lib/memory-storage";
 import { hydrateChatStorage } from "@/lib/chat-storage";
 import { loadNativeTimeline, type NativeTimelineEntry } from "@/lib/short-term-assembler";
-import { runSummarizationPipeline, type SummaryProgress } from "@/lib/memory-summarizer";
+import { requestStopSummarization, runSummarizationPipeline, type SummaryProgress } from "@/lib/memory-summarizer";
 import { runCoreMemoryPipeline } from "@/lib/core-memory-builder";
 import { resolveAuxiliaryApiConfig, resolveUserIdentity } from "@/lib/settings-storage";
 import { generateEmbedding, resolveEmbeddingModel } from "@/lib/memory-embedding";
@@ -383,12 +383,12 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                     },
                 },
             );
+            // 完成 / 失败 / 停止的提示由全局总结进度条给，这里只刷新列表
             if (result.success) {
-                showNotice(result.batches && result.batches > 1 ? `总结完成，共 ${result.batches} 批` : "总结完成");
                 loadDetailData(selectedCharId);
                 loadCharacterList();
             } else {
-                showNotice(result.error || "总结失败");
+                if (result.batches === undefined && !result.stopped) showNotice(result.error || "总结失败");
                 if (result.batches) loadDetailData(charId);
             }
         } catch (err) {
@@ -871,17 +871,19 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                     <span className="menu-desc">
                                         {summaryProgress && summaryProgress.total > 1
                                             ? `正在总结第 ${summaryProgress.batch} 批，共 ${summaryProgress.total} 批（每批约 ${config.summarizationEventInterval} 条）`
-                                            : "将新产生的事件整理为长期记忆，记录多时按批总结"}
+                                            : `将新产生的事件整理为长期记忆，每 ${config.summarizationEventInterval} 条一批`}
                                     </span>
                                 </div>
                                 <div className="menu-right">
                                     <button
                                         className="ui-btn ui-btn-outline py-1 px-3 ts-12"
-                                        onClick={() => setSummarizeRangeOpen(true)}
-                                        disabled={summarizing}
+                                        onClick={() => {
+                                            if (!summarizing) setSummarizeRangeOpen(true);
+                                            else if (selectedCharId) requestStopSummarization(selectedCharId);
+                                        }}
                                     >
                                         <Zap size={12} className="mr-1" />
-                                        {summarizing ? (summaryProgress && summaryProgress.total > 1 ? `${summaryProgress.batch}/${summaryProgress.total} 批` : "处理中...") : "总结"}
+                                        {summarizing ? "停止" : "总结"}
                                     </button>
                                 </div>
                             </div>
