@@ -1,5 +1,10 @@
 # Fork 变更日志
 
+## 2026-09-17：记忆系统方案文档
+
+- 新增 `docs/memory-refactor-plan.md`：clewdr 日志实测（重复带入、挂念判断私聊文本、分词偏差）、代码现状与已确认问题、参考项目（WrenWen、Paramecium、ai-memory-gateway、kiwi-mem、Memory Constellations、Aelios、糯叽机等）调研结论与取舍，分四阶段：修复（提示词、迁移、token 按模型校准、记忆页占用提示）→ 近期优化（带开关）→ 后期重构（分层记忆、拾光并入原生记忆页）→ 缓存优化。
+- 仅文档，无代码改动。
+
 ## 2026-09-17：忙碌回复、微信自动回复跟随离线执行开关
 
 - 忙碌回复：后端新接口 `POST /app/jobs/deferred`（get / put / cancel，回执格式同个人云 `deferred-reply`），存进 `offline_jobs`；到点按 `src/reply-timing.ts`（照抄前端 `lib/deferred-reply-timing.ts`）判断忙碌时段、偷看手机、睡眠，不回就改期；回的时候带时机说明、补最新聊天、回复接在最新一条用户消息后面，做完留回执。小手机 `deferred-reply-cloud.ts` 新的一轮按开关建在后端或云端（记在 `cloud.line`），建好后查、改、撤都去同一边，切开关不搬家、不重复回。
