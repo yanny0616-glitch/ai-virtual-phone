@@ -14,7 +14,16 @@
 - 改成先生成后落盘：存储保持原样，成功时用新增的 `createChatOfflineTurn`（`lib/chat-offline-storage.ts`，只构造不落盘）拼出「基底 + 新一轮」整份一次 `saveChatOfflineTurns`，而不是按当前存储追加。
 - 失败、中断、按停止都 `setOfflineTurns(loadChatOfflineTurns(...))` 从存储读回界面；`clearOfflineGeneration` 同样补了这一句。
 - 新增 `isOfflineGenerationRunSuperseded`：已被更晚一次重试接管时跳过回滚，避免覆盖新一轮的显示。注意它与 `isOfflineGenerationRunActive` 不同，用户按停止后登记被整条删除，那不算接管，仍然要回滚。
-- 线上的 `handleRetry` 还是先 `deleteChatMessagesFrom` 再生成，同一类问题，这次没动。
+- 线上 `handleRetry` 同一类问题，一并改掉（见下条）。
+
+## 2026-09-17 线上「重试」中断同样不再丢消息
+
+- 与线下同源：`handleRetry` 原本一进来就 `deleteChatMessagesFrom(msgId)` 把这条回复及之后的全部删掉，再去生成。中断、断网、报错都只留下一条系统错误气泡，被删的消息回不来。
+- `runManagedGeneration` 只在拿到完整结果后写一次盘（`processGroupParts` / `splitAndSaveAIMessages`），流式阶段只喂预览，所以可以安全地把删除推迟到落盘之后。
+- 新增可选回调 `onSaved`：两个分支各自比对写入前后的 `loadChatMessages(session.id).length`，条数真的变多才触发。沉默（`cr.silenced`）、空正文、群聊全员不发言都不会触发，也就不会删。
+- `handleRetry` 在重试当下按存储算出要替换的 `doomedIds`，`onSaved` 里用 `deleteChatMessagesByIds` 按 id 删。用 id 而不是「从这条往后删」，新生成的回复和重试期间到达的推送、离线回复都不会被一起删掉。
+- 没产出新回复时 `syncMessagesFromStorage()` 把界面读回来，旧消息原样回到原位。
+- 验证：`tsc --noEmit` 干净；`eslint` 对改动文件的结果与改动前逐条一致（68 项，全部既有）；`check:push` / `check:apps-dist` / `check:sdk` / `check:cloud-messages` / `check:reply-delivery` / `check:regex-history-role` 通过。`check:chat-silence` 失败，但改动前就失败（断言 `lib/builtin-preset.ts` 的提示词含「争执中」），与本次无关。真机中断场景未复现验证。
 - 验证：`tsc --noEmit` 干净；`eslint` 对两个改动文件的结果与改动前逐条一致（68 项，全部既有）；`check:push` / `check:apps-dist` / `check:sdk` 均通过。真机中断场景未复现验证。
 
 ## 2026-09-12 陪眠 0.3.0：浅色重做、组合收纳、音质可选

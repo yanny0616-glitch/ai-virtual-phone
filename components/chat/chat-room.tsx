@@ -316,6 +316,12 @@ type ManagedGenerationOptions = {
     generationIntent?: "regenerate";
     errorPrefix?: string;
     onDecline?: () => void | Promise<void>;
+    /**
+     * 本轮确实往存储里写进了新消息之后调用一次。中断、报错、沉默、以及回了空内容
+     * 都不会调用。重试用它把「删掉旧回复」推迟到确认有新回复之后，生成没成功就
+     * 什么都不动。
+     */
+    onSaved?: () => void;
 };
 
 const activeGenerationRuns = new Map<string, ActiveGenerationRun>();
@@ -3286,6 +3292,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         generationIntent,
         errorPrefix = "发送失败",
         onDecline,
+        onSaved,
     }: ManagedGenerationOptions) => {
         if (isGeneratingRef.current) {
             if (activeGenerationRuns.has(session.id)) return;
@@ -3348,7 +3355,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     },
                 );
                 if (!isCurrentGeneration()) return;
+                const savedCountBefore = loadChatMessages(session.id).length;
                 await processGroupParts(results, setMessages, generationGuard, roundReasoning, { instantReveal: isSessionStreamingEnabled(session, true) });
+                if (loadChatMessages(session.id).length > savedCountBefore) onSaved?.();
             } else {
                 let capturedReasoning: string | undefined;
                 const cr = await generateChatCompletion(
@@ -3384,7 +3393,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 );
                 if (!isCurrentGeneration()) return;
                 if (cr.silenced) { cancelFollowUp(session.id); setStreamPreview(null); return; }
+                const savedCountBefore = loadChatMessages(session.id).length;
                 const result = await splitAndSaveAIMessages(flattenCompletionResult(cr), { ...generationGuard, reasoningText: capturedReasoning, instantReveal: isSessionStreamingEnabled(session, true) });
+                if (loadChatMessages(session.id).length > savedCountBefore) onSaved?.();
                 if (!isCurrentGeneration()) return;
                 scheduleFollowUp(session.id, 0, result.stateValues);
                 handleCallTrigger(result.triggerCall);
@@ -4554,8 +4565,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
         const contextMessages = messages.slice(0, msgIndex);
 
-        // Delete this message and everything after it
-        deleteChatMessagesFrom(msgId);
+        // 要被替换掉的是这条及其之后的全部消息。先按存储把 id 定下来，等新回复确实
+        // 落盘之后才真删：中途退出、断网、报错、沉默或空回复都不会把旧回复弄丢。
+        // 按 id 删而不是「从这条往后删」，新回复和重试期间到达的推送都不会被卷走。
+        const storedMessages = loadChatMessages(session.id);
+        const storedIndex = storedMessages.findIndex(m => m.id === msgId);
+        const doomedIds = storedIndex === -1 ? [msgId] : storedMessages.slice(storedIndex).map(m => m.id);
+        let removedOldMessages = false;
+
         setMessages(prev => prev.slice(0, msgIndex));
         setActiveMessageId(null);
 
@@ -4566,8 +4583,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             history: contextMessages,
             generationIntent: "regenerate",
             errorPrefix: "重试失败",
+            onSaved: () => {
+                deleteChatMessagesByIds(session.id, doomedIds);
+                removedOldMessages = true;
+            },
             onDecline: triggerReply,
         });
+
+        // 没产出新回复：旧的还在存储里，把界面读回来，别停在「已消失」的样子。
+        if (!removedOldMessages) syncMessagesFromStorage();
     };
 
     const handleRetractMessage = (msgId: string) => {

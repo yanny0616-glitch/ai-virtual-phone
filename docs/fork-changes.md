@@ -123,7 +123,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 - **网易云音乐**：`ncm-api` 容器挂在同域 `/ncm`，Caddy 侧 `strip_prefix`；默认地址由 `NEXT_PUBLIC_DEFAULT_NETEASE_API_BASE` 在 CI 里给。
 - **安全**：`lib/server/safe-outbound-fetch.ts` 所有出站请求校验目标 IP 防 SSRF，Undici 统一；`story-html-renderer.tsx` 渲染前清洗。
 - **聊天头像**（聊天设置 → 聊天头像）：单聊可单独设一张「微信里的头像」：聊天页、会话列表、通讯录、朋友圈、通话页、通知都用它（走 `loadWeixinCharacters()`），角色 APP 仍显示角色卡原图。选图后先在圆形取景框里拖动/捏合裁剪（`components/ui/avatar-crop-dialog.tsx`，可复用），存 `session.chatAvatar`（320px webp data URL），可一键恢复。
-- **线下「重试以下」不先删**（`components/chat/chat-room.tsx` 的 `handleOfflineRetryFrom`）：被重试的那一轮留在存储里直到新的一轮生成成功，成功时把「基底轮次 + 新一轮」整份一次写入。生成期间界面按基底轮次显示，失败、断网、切后台被掐断或用户按停止都从存储读回来。**以后写这类「替换掉某一轮」的流程，一律先生成后落盘**，不要先把旧数据删掉占位。
+- **重试不先删**（`components/chat/chat-room.tsx`）：线上 `handleRetry` 与线下 `handleOfflineRetryFrom` 都改成先生成后落盘，旧内容留在存储里直到新回复确实写进去。线下成功时把「基底轮次 + 新一轮」整份一次写入；线上在重试当下按存储把要替换的 id 定下来（`doomedIds`），`runManagedGeneration` 的 `onSaved` 回调确认存储条数真的变多了才 `deleteChatMessagesByIds` 删掉它们，所以沉默、空回复、报错、中断都不会删，重试期间到达的推送也不会被卷走。两条路径在没产出时都从存储把界面读回来。**以后写这类「替换掉某一轮」的流程，一律先生成后落盘**，不要先把旧数据删掉占位。
 - 绑定管理有「App Defaults」入口；记忆库删长期记忆后总结进度回退；会话列表未读角标；桌面拖拽翻页优化；朋友圈动态回写照片标签按真实模式。
 - **自用放开的入口**：便签墙（日记内，`NOTE_WALL_UI_ENABLED`）；黑市可搜「黑市」/「black market」或点购物首页底部灰字进入。这些联网功能的表用 `docs/supabase-all-in-one.sql` 一次建齐。
 - 日历「暖桃」主题已移除，`LEGACY_THEME_MAP` 有 `peach → cream`。**以后删主题往这张表补一条**。
