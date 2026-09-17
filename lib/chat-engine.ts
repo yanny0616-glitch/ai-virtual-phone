@@ -2143,7 +2143,8 @@ export async function buildChatPromptMessages(
                 `本轮允许自主选择沉默。决定不回复时，第一行单独输出 ${CHAT_SILENCE_TOKEN}，后面换行，状态数值、[状态栏]、[内心]、签名及必要的状态更新仍按已有规则正常输出或执行。沉默只表示不向用户发送聊天消息，不停止内部更新；不输出聊天正文、语音条或表情，不用旁白或工具消息代替回复。本轮内心与状态会保存，但不显示新的爱心或聊天卡片。不要为沉默额外编造签名或状态。决定回复时按正常格式输出，不带此标记。此规则仅覆盖必须发送聊天正文的要求，其他已配置规则保持有效。`,
         });
     }
-    if (!promptProfile && !session.isGroup && !effectiveAppTags?.includes("timed_wake")) {
+    // 只记和角色私聊的请求：自定义 APP（如挂念判断模板）也走这里装配，历史只有一条任务消息，会把私聊的记录覆盖掉
+    if (resolvedAppId === "chat" && !promptProfile && !session.isGroup && !effectiveAppTags?.includes("timed_wake")) {
         recordChatMemoryUsage({
             characterId: character.id, model: config.defaultModel, appId: resolvedAppId, preset,
             history: promptHistory, unifiedRecentItems, recentBlocks,
