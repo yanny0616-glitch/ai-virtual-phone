@@ -19,6 +19,7 @@ import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { PhotoInputModal, TextPhotoModal, VoiceRecordModal, RedPacketModal, LocationInputModal, SystemInstructionModal } from "./rich-input-modals";
 import { RerollDialog, ReplyVersionPicker, type RerollRequest } from "./reroll-dialogs";
 import { buildRerollInstruction, describeReplyVersions, getLiveReplyVersions, planReplyVersionSwitch, recordReplyVersionBeforeRetry, type ReplyVersionView } from "@/lib/chat-reroll";
+import { describeOfflineReplyVersions, getLiveOfflineReplyVersions, recordOfflineReplyVersionBeforeRetry, switchOfflineReplyVersion } from "@/lib/chat-offline-reroll";
 import { EmojiPanel, StickerPanel } from "./emoji-panel";
 import { StickerSearchSuggest } from "./sticker-search-suggest";
 import { StateValuesPanel } from "./state-values-panel";
@@ -1400,6 +1401,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [reasoningSheetText, setReasoningSheetText] = useState<string | null>(null);
     const [rerollTargetId, setRerollTargetId] = useState<string | null>(null);
     const [versionPicker, setVersionPicker] = useState<ReplyVersionView[] | null>(null);
+    const [offlineRerollTargetId, setOfflineRerollTargetId] = useState<string | null>(null);
+    const [offlineVersionPicker, setOfflineVersionPicker] = useState<ReplyVersionView[] | null>(null);
     // 思维链翻译（弹窗内点击翻译按钮生成，切换弹窗内容时重置）
     const [reasoningTranslation, setReasoningTranslation] = useState<string | null>(null);
     const [reasoningTranslating, setReasoningTranslating] = useState(false);
@@ -4653,7 +4656,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setActiveOfflineTarget(null);
     };
 
-    const handleOfflineRetryFrom = async (turnId: string) => {
+    const handleOfflineRetryFrom = async (turnId: string, request?: RerollRequest) => {
         if (isOfflineGenerating) {
             showChatToast("线下回复生成中");
             return;
@@ -4662,11 +4665,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (idx < 0) return;
         const targetTurn = offlineTurns[idx];
         const baseTurns = offlineTurns.slice(0, idx);
+        const removedTurns = offlineTurns.slice(idx);
         const retryInput = targetTurn.userContent.trim();
         if (!retryInput) {
             showChatToast("这一轮没有可重试的用户输入");
             return;
         }
+        const replyVersion = recordOfflineReplyVersionBeforeRetry(session.id, offlineTurns, idx);
+        const instruction = request
+            ? buildRerollInstruction({
+                tags: request.tags,
+                note: request.note,
+                previousReply: request.attachPrevious ? [{
+                    id: `${targetTurn.id}_assistant`, sessionId: session.id, role: "assistant",
+                    content: targetTurn.assistantContent, status: "sent", createdAt: targetTurn.createdAt,
+                }] : undefined,
+            })
+            : null;
 
         cancelFollowUp(session.id);
         setActiveOfflineTarget(null);
@@ -4687,6 +4702,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
         try {
             const history = buildOfflinePromptHistory(baseTurns, retryInput);
+            // 重写要求只跟这一次请求走，不落库
+            if (instruction) history.push({
+                id: `reroll-note-${Date.now()}`, sessionId: session.id, role: "system", content: instruction,
+                status: "sent", createdAt: new Date().toISOString(), mediaType: "system_instruction",
+            });
             const onOfflineDelta = (delta: string) => {
                 if (!isCurrentOfflineRun()) return;
                 offlineStreamAccumRef.current += delta;
@@ -4727,11 +4747,18 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 thinkingText: result.thinking,
                 thinkingTag: result.thinkingTag,
             });
+            replyVersion.finish(saved);
             setOfflineTurns([...baseTurns, saved]);
         } catch (error: any) {
+            // 没生成出来就把原来那一截放回去，不丢回复；期间有别的改动就不动存储
+            const stored = loadChatOfflineTurns(session.id);
+            if (stored.length === baseTurns.length && stored.every((turn, i) => turn.id === baseTurns[i].id)) {
+                saveChatOfflineTurns(session.id, [...baseTurns, ...removedTurns]);
+                replyVersion.rollback();
+                if (isCurrentOfflineRun()) setOfflineTurns([...baseTurns, ...removedTurns]);
+            }
             if (!isCurrentOfflineRun() || isAbortLikeError(error)) return;
-            offlineTextInputRef.current?.setText(retryInput);
-            showChatToast(`线下重试失败: ${error?.message || String(error)}`, 3000);
+            showChatToast(`线下重试失败，已放回原回复: ${error?.message || String(error)}`, 3000);
         } finally {
             if (!finishOfflineGenerationRun(session.id, offlineRunId)) return;
             setPendingOfflineUserText("");
@@ -4740,6 +4767,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             offlineStreamAccumRef.current = "";
             setOfflineStreamPreview(null);
         }
+    };
+
+    const handleSwitchOfflineReplyVersion = (target: number) => {
+        setOfflineVersionPicker(null);
+        if (isOfflineGenerating) {
+            showChatToast("线下回复生成中");
+            return;
+        }
+        const next = switchOfflineReplyVersion(session.id, loadChatOfflineTurns(session.id), target);
+        if (!next) return;
+        cancelFollowUp(session.id);
+        saveChatOfflineTurns(session.id, next);
+        setOfflineTurns(loadChatOfflineTurns(session.id));
     };
 
     const handleRetry = async (msgId: string, request?: RerollRequest) => {
@@ -5280,7 +5320,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 <div className="flex">
                     <button onClick={() => { copyTextToClipboard(getOfflineCopyText(turn, role)); setActiveOfflineTarget(null); }} className="ctx-menu-btn">复制</button>
                     <button onClick={() => handleOfflineEditStart(turn, role)} className="ctx-menu-btn">编辑</button>
-                    <button onClick={() => void handleOfflineRetryFrom(turn.id)} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
+                    {(() => {
+                        const live = getLiveOfflineReplyVersions(session.id, loadChatOfflineTurns(session.id));
+                        if (!live || !live.tail.some(item => item.id === turn.id)) return null;
+                        return (
+                            <button onClick={() => { setActiveOfflineTarget(null); setOfflineVersionPicker(describeOfflineReplyVersions(live)); }} className="ctx-menu-btn">
+                                换一版 {live.set.active + 1}/{live.set.versions.length}
+                            </button>
+                        );
+                    })()}
+                    <button onClick={() => { setActiveOfflineTarget(null); setOfflineRerollTargetId(turn.id); }} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
                 </div>
                 <div className="flex">
                     <button onClick={() => handleOfflineDeleteTurn(turn.id)} className="ctx-menu-btn ctx-menu-btn-danger">删除</button>
@@ -6998,6 +7047,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         setRerollTargetId(null);
                         void handleRetry(targetId, request);
                     }}
+                />
+            )}
+            {offlineRerollTargetId && (
+                <RerollDialog
+                    onCancel={() => setOfflineRerollTargetId(null)}
+                    onConfirm={(request) => {
+                        const targetId = offlineRerollTargetId;
+                        setOfflineRerollTargetId(null);
+                        void handleOfflineRetryFrom(targetId, request);
+                    }}
+                />
+            )}
+            {offlineVersionPicker && (
+                <ReplyVersionPicker
+                    versions={offlineVersionPicker}
+                    onPick={(index) => handleSwitchOfflineReplyVersion(index)}
+                    onClose={() => setOfflineVersionPicker(null)}
                 />
             )}
             {versionPicker && (
