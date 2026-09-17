@@ -54,7 +54,7 @@ import { ConfirmDialog } from "@/components/ui/modal";
 import { deleteWeixinCloudMessagesFromCloud, emitWeixinSyncToast, syncAllWeixinBotRuntimesToCloud } from "@/lib/weixin-cloud-sync";
 import { loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
 import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseGroupChatResponse, buildEditableGroupRoundText } from "@/lib/group-chat-engine";
-import { appendChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
+import { appendChatOfflineTurn, createChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
 import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating, isBackgroundMessagePending } from "@/lib/follow-up-service";
 import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismiss-auto-send";
@@ -334,6 +334,11 @@ type ManagedGenerationOptions = {
     generationIntent?: "regenerate";
     errorPrefix?: string;
     onDecline?: () => void | Promise<void>;
+    /**
+     * 本轮确实往存储里写进了新消息之后调用一次。中断、报错、沉默、回了空内容都不会
+     * 调用。重试用它把「删掉旧回复」推迟到确认有新回复之后。
+     */
+    onSaved?: () => void;
 };
 
 const activeGenerationRuns = new Map<string, ActiveGenerationRun>();
@@ -456,6 +461,15 @@ function finishOfflineGenerationRun(sessionId: string, runId: string): boolean {
     if (!run || run.runId !== runId) return false;
     activeOfflineGenerationRuns.delete(sessionId);
     return true;
+}
+
+/**
+ * 本次线下运行是否已被更晚的一次接管。接管时版本记录和界面都归那一次管，回滚必须跳过。
+ * 与 isOfflineGenerationRunActive 不同：用户按「停止」后登记被整条删除，那不算接管，仍要回滚。
+ */
+function isOfflineGenerationRunSuperseded(sessionId: string, runId: string): boolean {
+    const run = activeOfflineGenerationRuns.get(sessionId);
+    return Boolean(run && run.runId !== runId);
 }
 
 function cancelOfflineGenerationRun(sessionId: string): boolean {
@@ -3414,6 +3428,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         generationIntent,
         errorPrefix = "发送失败",
         onDecline,
+        onSaved,
     }: ManagedGenerationOptions) => {
         if (isGeneratingRef.current) {
             if (activeGenerationRuns.has(session.id)) return;
@@ -3476,7 +3491,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     },
                 );
                 if (!isCurrentGeneration()) return;
+                const savedCountBefore = loadChatMessages(session.id).length;
                 await processGroupParts(results, setMessages, generationGuard, roundReasoning, { instantReveal: isSessionStreamingEnabled(session, true) });
+                if (loadChatMessages(session.id).length > savedCountBefore) onSaved?.();
             } else {
                 let capturedReasoning: string | undefined;
                 const cr = await generateChatCompletion(
@@ -3512,7 +3529,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 );
                 if (!isCurrentGeneration()) return;
                 if (cr.silenced) { cancelFollowUp(session.id); setStreamPreview(null); return; }
+                const savedCountBefore = loadChatMessages(session.id).length;
                 const result = await splitAndSaveAIMessages(flattenCompletionResult(cr), { ...generationGuard, reasoningText: capturedReasoning, instantReveal: isSessionStreamingEnabled(session, true) });
+                if (loadChatMessages(session.id).length > savedCountBefore) onSaved?.();
                 if (!isCurrentGeneration()) return;
                 scheduleFollowUp(session.id, 0, result.stateValues);
                 handleCallTrigger(result.triggerCall);
@@ -4665,7 +4684,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (idx < 0) return;
         const targetTurn = offlineTurns[idx];
         const baseTurns = offlineTurns.slice(0, idx);
-        const removedTurns = offlineTurns.slice(idx);
         const retryInput = targetTurn.userContent.trim();
         if (!retryInput) {
             showChatToast("这一轮没有可重试的用户输入");
@@ -4689,7 +4707,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setShowEmojiPanel(false);
         setShowStickerPanel(false);
         setRichModal(null);
-        saveChatOfflineTurns(session.id, baseTurns);
+        // 存储保持原样直到新的一轮真的生成出来。中途退出、断网、或者 iOS 把页面整个
+        // 回收掉（那时 catch 根本不会执行）都不会让这一楼从时间线上消失。版本记录仍在
+        // 上面先写好，换版本的能力不受影响。
         setOfflineTurns(baseTurns);
         setPendingOfflineUserText(retryInput);
         offlineGenerationInputRef.current = retryInput;
@@ -4736,7 +4756,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const assistantContent = result.content.trim() || result.rawText.trim();
             if (!assistantContent) throw new Error("AI 没有返回线下正文");
             if (!result.summary.trim()) showChatToast(`未提取到 <${result.summaryTag}> 摘要`);
-            const saved = appendChatOfflineTurn({
+            const saved = createChatOfflineTurn({
                 sessionId: session.id,
                 userContent: retryInput,
                 assistantContent,
@@ -4747,18 +4767,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 thinkingText: result.thinking,
                 thinkingTag: result.thinkingTag,
             });
+            // 被重试的那一截到这里才换掉：基底 + 新一轮整份一次写入。
+            const nextTurns = [...baseTurns, saved];
+            saveChatOfflineTurns(session.id, nextTurns);
             replyVersion.finish(saved);
-            setOfflineTurns([...baseTurns, saved]);
+            setOfflineTurns(nextTurns);
         } catch (error: any) {
-            // 没生成出来就把原来那一截放回去，不丢回复；期间有别的改动就不动存储
-            const stored = loadChatOfflineTurns(session.id);
-            if (stored.length === baseTurns.length && stored.every((turn, i) => turn.id === baseTurns[i].id)) {
-                saveChatOfflineTurns(session.id, [...baseTurns, ...removedTurns]);
-                replyVersion.rollback();
-                if (isCurrentOfflineRun()) setOfflineTurns([...baseTurns, ...removedTurns]);
-            }
-            if (!isCurrentOfflineRun() || isAbortLikeError(error)) return;
-            showChatToast(`线下重试失败，已放回原回复: ${error?.message || String(error)}`, 3000);
+            // 已被更晚的一次重试接管：版本记录和界面都归那一次管，这里什么都不要动。
+            if (isOfflineGenerationRunSuperseded(session.id, offlineRunId)) return;
+            // 存储没被动过，原来那一截还在原位，界面读回来即可。
+            replyVersion.rollback();
+            setOfflineTurns(loadChatOfflineTurns(session.id));
+            if (isAbortLikeError(error)) return;
+            showChatToast(`线下重试失败，原回复留在原位: ${error?.message || String(error)}`, 3000);
         } finally {
             if (!finishOfflineGenerationRun(session.id, offlineRunId)) return;
             setPendingOfflineUserText("");
@@ -4794,13 +4815,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const storedMessages = loadChatMessages(session.id);
         const storedIndex = storedMessages.findIndex(m => m.id === msgId);
         const removedTail = storedIndex >= 0 ? storedMessages.slice(storedIndex) : messages.slice(msgIndex);
-        if (storedIndex >= 0) recordReplyVersionBeforeRetry(session.id, storedMessages, storedIndex);
+        const replyVersion = storedIndex >= 0 ? recordReplyVersionBeforeRetry(session.id, storedMessages, storedIndex) : null;
+        const doomedIds = removedTail.map(m => m.id);
+        let removedOldMessages = false;
         const instruction = request
             ? buildRerollInstruction({ tags: request.tags, note: request.note, previousReply: request.attachPrevious ? removedTail : undefined })
             : null;
 
-        // Delete this message and everything after it
-        deleteChatMessagesFrom(msgId);
+        // 旧回复等新回复确实落盘之后才删（见 onSaved）。中途退出、断网、报错、沉默、
+        // 空回复，甚至 iOS 把页面整个回收，旧回复都留在原位。按 id 删而不是「从这条
+        // 往后删」，新生成的内容和重试期间到达的推送都不会被一起卷走。
         setMessages(prev => prev.slice(0, msgIndex));
         setActiveMessageId(null);
 
@@ -4822,8 +4846,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             history: rerollNote ? [...contextMessages, rerollNote] : contextMessages,
             generationIntent: "regenerate",
             errorPrefix: "重试失败",
+            onSaved: () => {
+                deleteChatMessagesByIds(session.id, doomedIds);
+                removedOldMessages = true;
+            },
             onDecline: triggerReply,
         });
+
+        // 没产出新回复：旧的还在存储里，版本记录退回重试前，界面读回来。
+        // 此刻若已有别的生成在跑，说明被接管了，版本记录和界面都归那一次管。
+        if (!removedOldMessages && !activeGenerationRuns.has(session.id)) {
+            replyVersion?.rollback();
+            syncMessagesFromStorage();
+        }
     };
 
     const handleSwitchReplyVersion = async (target: number) => {

@@ -115,7 +115,7 @@ function emitSummaryChanges(sessionId: string, previous: ChatOfflineSummaryEntry
     }));
 }
 
-export function appendChatOfflineTurn(input: {
+export type ChatOfflineTurnInput = {
     sessionId: string;
     userContent: string;
     assistantContent: string;
@@ -125,8 +125,14 @@ export function appendChatOfflineTurn(input: {
     reasoningText?: string;
     thinkingText?: string;
     thinkingTag?: string;
-}): ChatOfflineTurn {
-    const turn: ChatOfflineTurn = {
+};
+
+/**
+ * 只构造一条线下轮次，不落盘。给需要「整份列表一次写入」的调用方用（重试就是：
+ * 基底轮次 + 新生成的这一轮），这样不必先把旧的删掉腾位置。
+ */
+export function createChatOfflineTurn(input: ChatOfflineTurnInput): ChatOfflineTurn {
+    return {
         id: createTurnId(),
         sessionId: input.sessionId,
         userContent: input.userContent,
@@ -139,6 +145,10 @@ export function appendChatOfflineTurn(input: {
         thinkingTag: input.thinkingTag,
         createdAt: new Date().toISOString(),
     };
+}
+
+export function appendChatOfflineTurn(input: ChatOfflineTurnInput): ChatOfflineTurn {
+    const turn = createChatOfflineTurn(input);
     saveChatOfflineTurns(input.sessionId, [...loadChatOfflineTurns(input.sessionId), turn]);
     return turn;
 }

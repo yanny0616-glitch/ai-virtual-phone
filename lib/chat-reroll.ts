@@ -102,11 +102,14 @@ export function getLiveReplyVersions(sessionId: string, messages: ChatMessage[])
 }
 
 /** 重试删除前调用：被删的尾巴存成一版，并给这次生成占住「正在用」的位置。 */
-export function recordReplyVersionBeforeRetry(sessionId: string, messages: ChatMessage[], targetIndex: number): void {
+/** 返回 rollback：这一次重试没产出时把版本记录恢复成重试前的样子，免得选择器里多一版空的。 */
+export function recordReplyVersionBeforeRetry(sessionId: string, messages: ChatMessage[], targetIndex: number): { rollback: () => void } {
+    const before = loadStore()[sessionId] ?? null;
+    const rollback = () => writeSet(sessionId, before);
     const removed = messages.slice(targetIndex);
     if (removed.length === 0 || removed.some(isUserTurn)) {
         writeSet(sessionId, null);
-        return;
+        return { rollback };
     }
     const anchorId = targetIndex > 0 ? messages[targetIndex - 1].id : null;
     const now = new Date().toISOString();
@@ -124,6 +127,7 @@ export function recordReplyVersionBeforeRetry(sessionId: string, messages: ChatM
         set.active -= 1;
     }
     writeSet(sessionId, set);
+    return { rollback };
 }
 
 export type ReplyVersionView = { index: number; createdAt: string; lines: string[]; active: boolean };
