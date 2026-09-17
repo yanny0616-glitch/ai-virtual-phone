@@ -99,7 +99,7 @@ export async function runCoreMemoryPipeline(
     if (!summary) {
         return { success: false, error: "核心记忆总结结果为空" };
     }
-    // 提示词允许「这批没有值得长久记住的」：推进进度，不存一条「无」
+    // 旧版提示词（阶段一）允许输出「无」；用户可能还在用改过的版本，照旧不存这一条
     if (/^[「“"]?无[」”"]?[。.]?$/.test(summary)) {
         setLastCoreSummarizedTimestamp(characterId, latest);
         if (!options?.force) resetCoreMemoryCounter(characterId);

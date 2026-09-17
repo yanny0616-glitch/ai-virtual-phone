@@ -26,6 +26,7 @@ export type MemoryConfig = {
     autoSummarizeEnabled: boolean;          // whether auto-summarization runs after N events
     autoBuildCoreEnabled: boolean;          // whether core memories rebuild after long-term summarization
     vectorRecallEnabled: boolean;           // whether vector embedding recall is used for memory retrieval
+    /** 已不再使用：长期记忆不按条数删除（2026-09-17），字段留着兼容旧配置 */
     maxLongTermEntries: number;
     summarizationEventInterval: number;     // trigger summarization every N events
     coreSummarizationInterval: number;      // trigger core-memory rebuild every N new long-term memories
@@ -83,9 +84,39 @@ export const DEFAULT_SUMMARIZATION_PROMPT = `你是{{char}}的记忆整理助手
 
 /**
  * 默认核心记忆提示词。占位：{{char}} {{earliest}} {{latest}} {{events}}
- * 以 docs/shiguang-core-memory-prompt.txt 为底，把「保留」和「略去」分开写。
+ * 核心是长期记忆的再精炼，也是长期记忆太多、旧条目带不进提示词时的兜底，所以普通细节压短保留，不能略掉。
  */
-export const DEFAULT_CORE_MEMORY_PROMPT = `你是{{char}}的核心记忆整理助手。下面是 {{earliest}} 至 {{latest}} 的长期记忆，请提炼出值得长久记住、会影响以后相处的重要事实。
+export const DEFAULT_CORE_MEMORY_PROMPT = `你是{{char}}的核心记忆整理助手。下面是 {{earliest}} 至 {{latest}} 的长期记忆，请把它们再精炼成核心记忆。长期记忆多了以后，旧的长期记忆可能带不进对话，那时这段时间只剩核心记忆可以回忆，所以要尽量不丢信息。
+
+长期记忆：
+{{events}}
+
+重点写清（每项都保留具体内容）：
+- 关系身份及其变化，如确认关系、分开、复合、订婚、结婚
+- 共同经历里的重要转折和里程碑，如第一次见面、同居、见家长、一起养宠物
+- 重要日期（纪念日、生日、约定的日子）和关键人物
+- 承诺和约定：内容、时间、条件，目前是否已兑现
+- 明确说过的边界、禁忌和相处需求，保留原因和具体说法
+- 偏好、习惯和个人情况，如职业、住处、家人
+
+普通细节也要保留，压短写：
+- 常聊的话题、日常习惯、近况、反复出现的小事、有代表性的原话和称呼，各用一句话写清
+- 一时的情绪和小矛盾，写清起因和结果，一句话即可
+
+只有这些可以省：重复的寒暄和表白、没有依据的推测。
+
+写法：
+1. 按时间先后写，每件事带上日期或时间范围。
+2. 区分已经发生的事、还没兑现的约定和一方的想法，不要把计划写成已发生。
+3. 同一件事合并写，有新进展以最新为准，保留理解变化需要的背景；不同的事不要因为相似合在一起。
+4. 保留人名、地点、物品和关键原话，不要概括成「彼此关心」「感情稳定」这类空话。
+5. 用第三人称、简洁的中文。长短跟着内容走，信息多就多写，不凑字数，也不为压缩字数丢掉事情。
+6. 只输出核心记忆正文，不要标题、解释或 JSON。
+
+核心记忆：`;
+
+/** 2026-09-17 阶段一上线的核心提示词（略去普通细节），存进配置的同样换成新默认。 */
+export const PHASE1_CORE_MEMORY_PROMPT = `你是{{char}}的核心记忆整理助手。下面是 {{earliest}} 至 {{latest}} 的长期记忆，请提炼出值得长久记住、会影响以后相处的重要事实。
 
 长期记忆：
 {{events}}
@@ -165,7 +196,7 @@ export function migrateMemoryPrompts(config: MemoryConfig): MemoryConfig {
     return {
         ...config,
         ...(same(config.summarizationPrompt, LEGACY_SUMMARIZATION_PROMPT) ? { summarizationPrompt: DEFAULT_SUMMARIZATION_PROMPT } : {}),
-        ...(same(config.coreMemoryPrompt, LEGACY_CORE_MEMORY_PROMPT) ? { coreMemoryPrompt: DEFAULT_CORE_MEMORY_PROMPT } : {}),
+        ...(same(config.coreMemoryPrompt, LEGACY_CORE_MEMORY_PROMPT) || same(config.coreMemoryPrompt, PHASE1_CORE_MEMORY_PROMPT) ? { coreMemoryPrompt: DEFAULT_CORE_MEMORY_PROMPT } : {}),
     };
 }
 

@@ -6,9 +6,7 @@ import type { MemoryEntry } from "./memory-types";
 import { DEFAULT_SUMMARIZATION_PROMPT } from "./memory-types";
 import {
     loadMemoryConfig,
-    loadMemoryEntries,
     saveMemoryBatch,
-    deleteMemoryEntries,
     getEventCounter,
     resetEventCounter,
     consumeEventCounter,
@@ -185,12 +183,8 @@ async function summarizeUnlocked(characterId: string, characterName: string, opt
     setLastSummarizedTimestamp(characterId, previousWatermark && previousWatermark > latest ? previousWatermark : latest);
     consumeEventCounter(characterId, counterAtStart);
 
-    // Enforce long-term limit
-    const allLongTerm = (await loadMemoryEntries(characterId)).filter(entry => entry.type === "long_term");
-    if (allLongTerm.length > config.maxLongTermEntries) {
-        const excess = allLongTerm.slice(0, allLongTerm.length - config.maxLongTermEntries);
-        await deleteMemoryEntries(excess.map(e => e.id));
-    }
+    // 长期记忆不再按条数删最旧的（原来超过 maxLongTermEntries=500 会直接删）：
+    // 带不进提示词只影响注入，删了就真的忘了。
 
     incrementCoreMemoryCounter(characterId);
     try { await maybeRunCoreMemoryPipeline(characterId, characterName); }
