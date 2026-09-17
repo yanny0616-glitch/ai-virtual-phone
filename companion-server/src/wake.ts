@@ -7,10 +7,12 @@
 //         多轮调模型，模型要调工具就经 MCP 调 → 最终回复写 push_outbox（meta.toolEvent 带事件原文和动作记录）→ Web Push。
 //   手机补收时先落「事件原文」这条用户消息和动作灰条，再按普通离线回复解析。
 
+import { acquireGenerationLease, GenerationBusy, type GenerationLease } from "./generation-lease.ts";
+import { readHistory, historyText, type CloudHistory } from "./history.ts";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-import { callModel, splitPreview, usageAdd, usageBudget, usageExceeded, type ModelFetch } from "./llm.ts";
+import { appendUserNote, callModel, splitPreview, usageAdd, usageBudget, usageExceeded, type ModelFetch } from "./llm.ts";
 import { McpClient, type McpFetch, type McpResult } from "./mcp.ts";
 import type { PushMessage, PushResult } from "./push.ts";
 import type { Store } from "./store.ts";
@@ -213,12 +215,26 @@ export type WakeDeps = {
 
 export type WakeOutcome = { status: "sent" | "silent"; note: string; text: string; actions: WakeAction[]; outboxId?: string };
 
-export async function runWake(deps: WakeDeps, tpl: WakeTemplate, event: WakeEvent): Promise<WakeOutcome> {
+export async function runWake(deps: WakeDeps, tpl: WakeTemplate, event: WakeEvent, beforeRun?: () => Promise<void>): Promise<WakeOutcome> {
+  const lease = await acquireGenerationLease(deps.rest, deps.userId, tpl.sessionId, "wake:" + event.id);
+  try {
+    const history = await readHistory(deps.rest, deps.userId, tpl.sessionId);
+    await lease.check();
+    // 在拿到会话锁且读到最新事实后才 ack；等待锁不能把事件提前消费掉。
+    await beforeRun?.();
+    return await runWakeLocked(deps, tpl, event, history, lease);
+  } finally { await lease.release(); }
+}
+
+async function runWakeLocked(deps: WakeDeps, tpl: WakeTemplate, event: WakeEvent, history: CloudHistory, lease: GenerationLease): Promise<WakeOutcome> {
   const nowMs = deps.now();
   const kind = tpl.request.providerKind;
   const tz = Number(tpl.merge.tzOffsetMin);
   const filled = fillChatTemplate(tpl.request, { intentPlaceholder: tpl.placeholder, ...(Number.isFinite(tz) ? { tzOffsetMin: tz } : {}) }, { intent: event.message, elapsedMin: 0, nowMs });
   const body: any = filled.body;
+  const newer = history.messages.filter(m => Date.parse(m.message_at) > tpl.capturedAt);
+  if (newer.length) appendUserNote(body, kind, "[模板冻结之后的最新聊天事实，非用户新消息；与旧底稿冲突时以此为准，不代表已读]\n"
+    + historyText({ ...history, messages: newer, uncertainLegacy: [] }, Number.isFinite(tz) ? tz : 0, 80));
   if (kind === "gemini") body.generationConfig = { maxOutputTokens: 4096, ...(body.generationConfig || {}) };
   else { body.stream = false; delete body.stream_options; if (!body.max_tokens && !body.max_completion_tokens) body.max_tokens = 4096; }
   if (tpl.protocol !== "native") { delete body.tools; delete body.tool_choice; delete body.toolConfig; }
@@ -235,12 +251,14 @@ export async function runWake(deps: WakeDeps, tpl: WakeTemplate, event: WakeEven
   const mcp = tpl.mcp ? new McpClient(tpl.mcp.url, tpl.mcp.headers, deps.fetchMcp) : null;
   const call = async (name: string, args: Record<string, unknown>): Promise<McpResult> => {
     if (!mcp) return { ok: false, text: "这个唤醒来源没有绑定可用的 MCP" };
+    await lease.check();
     return mcp.callTool(name, args);
   };
   const parts: string[] = [];
   const actions: WakeAction[] = [];
   const maxRounds = Math.min(10, Math.max(1, Math.floor(tpl.maxRounds) || 5));
   for (let round = 0; round < maxRounds; round++) {
+    await lease.check();
     const result = await callModel({ ...filled, body }, deps.fetchModel);
     await usageAdd(deps.rest, deps.userId, budget.tz, "wake", kind, result.data);
     if (tpl.protocol === "native") {
@@ -281,6 +299,7 @@ export async function runWake(deps: WakeDeps, tpl: WakeTemplate, event: WakeEven
   const rawText = parts.join("\n\n").trim();
   const createdAt = new Date(deps.now()).toISOString();
   const outboxId = `out_${randomUUID()}`;
+  await lease.check();
   await writeOutbox(deps, tpl, event, { outboxId, rawText, createdAt, actions });
   if (!rawText) return { status: "silent", note: actions.length ? `调了 ${actions.length} 次工具，没说话` : "角色没说话", text: "", actions, outboxId };
   const title = String(tpl.notify.title || tpl.merge.characterName || "小手机");
@@ -405,15 +424,26 @@ export class WakeService {
       }
       return false;
     }
-    const ack = await this.#gateway({ action: "ack", ids: [event.id] });
-    if (!Array.isArray(ack.acceptedIds) || !ack.acceptedIds.includes(event.id)) return false;
-    this.#waiting.delete(event.id);
+    let accepted = false;
     const base = { sourceId: event.sourceId, characterId: event.characterId, eventId: event.id };
     try {
-      const out = await runWake(this.#deps, tpl!, event);
+      const out = await runWake(this.#deps, tpl!, event, async () => {
+        const ack = await this.#gateway({ action: "ack", ids: [event.id] });
+        if (!Array.isArray(ack.acceptedIds) || !ack.acceptedIds.includes(event.id)) throw new GenerationBusy();
+        accepted = true;
+        this.#waiting.delete(event.id);
+      });
       store.addWakeRun({ ...base, status: out.status, note: out.note, at: this.#deps.now(), data: { reason: event.reason, message: event.message.slice(0, 500), text: out.text.slice(0, 500), actions: out.actions.map(a => ({ name: a.name, ok: a.ok, text: a.text.slice(0, 300) })), outboxId: out.outboxId } });
       this.#deps.log(`[wake] ${event.sourceId} → ${tpl!.merge.characterName || event.characterId}：${out.note}`);
     } catch (e) {
+      if (!accepted) {
+        if (!(e instanceof GenerationBusy)) throw e; // 网络/租约不可用：事件留在网关，下轮重试
+        if (!this.#waiting.has(event.id)) {
+          this.#waiting.add(event.id);
+          store.addWakeRun({ ...base, status: "waiting", note: e.message, data: null, at: this.#deps.now() });
+        }
+        return false;
+      }
       const msg = e instanceof Error ? e.message : String(e);
       store.addWakeRun({ ...base, status: "error", note: msg.slice(0, 300), at: this.#deps.now(), data: { reason: event.reason, message: event.message.slice(0, 500) } });
       this.#deps.log(`[wake] ${event.sourceId} 处理失败：${msg}`);

@@ -1,12 +1,12 @@
 // Web Push：用个人云里的同一对 VAPID 密钥和订阅，手机不需要重新订阅。
 // 404/410 的失效订阅顺手删掉（与 push-generate / lib/server/push-service 一致）。
-// shell: 开头的是安卓壳的合成订阅，走 Realtime，后端暂不处理。
+// shell: 开头的是安卓壳的合成订阅：不走 Web Push，改发 Realtime 广播 shellpush:<userId>，壳内长连接收（与 push-generate 一致）。
 
 import webpush from "web-push";
 
-import { restJson, type Rest, type SubscriptionRow, type VapidRow } from "./supabase.ts";
+import { restJson, type Cloud, type Rest, type SubscriptionRow, type VapidRow } from "./supabase.ts";
 
-export type PushMessage = { title: string; body: string; tag?: string; url?: string; type?: string; characterId?: string };
+export type PushMessage = { title: string; body: string; tag?: string; url?: string; type?: string; characterId?: string; sessionId?: string; callTs?: number };
 
 export type PushResult = { sent: number; total: number; removed: number; skippedShell: number; errors: string[] };
 
@@ -19,6 +19,7 @@ export async function sendPushMessages(
   messages: PushMessage[],
   send: Sender = webpush.sendNotification,
   gapMs = 500,
+  cloud?: Cloud,
 ): Promise<PushResult> {
   const [vapid] = await restJson<VapidRow[]>(rest, "push_server_config?id=eq.main&select=vapid_public_key,vapid_private_key,site_origin&limit=1");
   if (!vapid?.vapid_public_key || !vapid.vapid_private_key) throw new Error("个人云里没有 VAPID 密钥");
@@ -34,7 +35,8 @@ export async function sendPushMessages(
     },
   };
   let subs = all.filter(sub => !sub.endpoint.startsWith("shell:"));
-  result.skippedShell = all.length - subs.length;
+  const hasShell = subs.length < all.length;
+  if (!cloud) result.skippedShell = all.length - subs.length;
 
   for (let index = 0; index < messages.length; index += 1) {
     if (index > 0 && gapMs > 0) await new Promise(resolve => setTimeout(resolve, gapMs));
@@ -60,6 +62,25 @@ export async function sendPushMessages(
       }
     }
     subs = alive;
+    if (hasShell && cloud) {
+      const m = messages[index];
+      const call = m.type === "incoming_call";
+      try {
+        const response = await cloud("realtime/v1/api/broadcast", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: [{ topic: `shellpush:${userId}`, event: "notify", payload: {
+            title: m.title, body: m.body, url: m.url || "/",
+            // 老壳不认识这些字段就照常弹普通通知
+            ...(call ? { kind: "call", characterName: m.title.replace(/^📞\s*/, ""), sessionId: m.sessionId, callTs: m.callTs } : {}),
+          } }] }),
+        });
+        await response.text().catch(() => undefined);
+        if (response.ok) result.sent += 1;
+        else result.errors.push(`shell http ${response.status}`);
+      } catch (err) {
+        result.errors.push(`shell ${(err instanceof Error ? err.message : String(err)).slice(0, 60)}`);
+      }
+    }
   }
   return result;
 }

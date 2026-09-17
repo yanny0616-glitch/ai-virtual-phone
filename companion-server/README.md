@@ -86,16 +86,27 @@ CLI：`node src/cli.ts diagnose | push-test | status | import [--force] | mode s
 
 1. 收件：本机事件网关（`tools/tool-events/service.mjs`，127.0.0.1:18062）负责适配器、投递鉴权、去重、排队。工具箱 MCP 的「事件唤醒」选「交给 VPS 后端」= 来源 `mode: "server"`；网关只把这类事件交给带 `mode:"server"` 领取的后端，手机领不到。
 2. 底稿：小手机 `lib/wake-server-sync.ts` 给每个这样的来源冻一份——聊天提示词 + 完整聊天记录 + 末尾占位用户消息，只含绑定 MCP 的工具（原生协议给定义和名字对照，文字协议给指令说明），MCP 地址和请求头。聊天有新消息 30 秒后、切后台、每 5 分钟检查一次，没变化 30 分钟重寄。工具箱仍是原件。
-3. 处理：每 15 秒领一次。没底稿的事件留在网关；有底稿先 ack（工具有副作用，失败不重放）→ 占位换成事件原文、时间刷新 → 多轮调模型（最多取手机的工具轮数，上限 10），要工具就经 MCP（Streamable HTTP，JSON / SSE 回包，会话过期重握手）调 → 回复写 `push_outbox`（`trigger_key = wake:<事件>`，`meta.toolEvent` 带原文、动作、失败原因）→ Web Push。失败也写一条，事件不会悄悄消失。
+3. 处理：每 15 秒领一次。没底稿或会话被占用的事件留在网关；有底稿先取得共享会话租约、读取最新聊天，再 ack（工具有副作用，失败不重放）→ 占位换成事件原文、时间刷新 → 多轮调模型（最多取手机的工具轮数，上限 10），要工具就经 MCP（Streamable HTTP，JSON / SSE 回包，会话过期重握手）调 → 回复写 `push_outbox`（`trigger_key = wake:<事件>`，`meta.toolEvent` 带原文、动作、失败原因）→ Web Push。失败也写一条，事件不会悄悄消失。
 4. 补收：`lib/push-outbox-client.ts` 先落事件原文（用户消息）和每个动作的 tool_call / tool_result / 灰条，再按普通离线回复解析。
 5. 来源断开（花园断线按官方规定不自动重连）：推一条「唤醒来源断开了」，去工具箱手动启动。
 6. 记录：`wake_runs` 表（sent / silent / error / waiting / disconnected），工具箱唤醒设置里能看到。
 
 端到端自测：`node scripts/check-wake-server.mjs`（真网关 + 真后端 HTTP + 本机假 MCP）。
 
-### 还没搬的
+### 发送分流（`src/delivery.ts`、`src/shortcut-resume.ts`）
 
-- 线下通话、快捷指令、微信渠道
+挂念到点成文后按正文里的控制标记送，规则搬自 push-generate，标记一律从正文剥掉：
+
+- **来电**：聊天模板里有 `__GUANIAN_CALL_INVITE__` 占位，后端到点按同一角色 20 小时一次换成「可以打电话」说明，否则换成「照常发消息」。回复开头是 `[我向…发起了语音通话]` / `【拨打电话】` 等标签时，推单条 `incoming_call` 通知（点开 `/?ring=<会话>` 直达振铃），正文照常进 outbox。
+- **发到微信**：模板带角色绑定的 bot（`payload.weixin.botId`）。回复开头 `【发到微信】` 就经微信云助手 `send-text` 发到真实微信，送成了不进聊天 outbox；送不成照常发到聊天。
+- **快捷动作**：`【快捷动作：名称({参数})】` → 读 `push_bridge_config.shortcut_actions` 目录 → 调个人云 `ai-phone-push?action=shortcut-create` 建命令。outbox 的 `meta.shortcutMarker` 带标记原文和位置，补收时原位落 tool_call。角色先说话、推送完，再投递「运行快捷指令」（推送模式调 `shortcut-deliver`，邮件模式请站点代发）。送达失败落一条 `meta.kind = shortcut_delivery_error` 诊断行。建命令前草稿先记 `shortcutTried`，重启后看到没结果就不重复执行。
+- **结果续跑**：会回传结果的动作，把刚说的话代入模板里的续跑底稿（`shortcutContinuation`），存 `shortcut_resumes` 表。Runner 每轮查 `push_shortcut_commands`：没执行完往后排，过期按超时交给角色；结果和截图代入后生成第二轮，写 `trigger_key = shortcut:<命令>` 的 outbox 并推送。第二轮再出动作标记只剥不执行。不再挂 `shortcut_resume` 云任务。
+- **安卓壳通知**：`push.ts` 对 `shell:` 订阅改发 Realtime 广播 `shellpush:<userId>`，来电带 `kind: "call"`。唤醒后端的推送也走这里。
+
+### 还在个人云执行的
+
+- 快捷命令网关本身（建命令、推运行通知、收结果回传：`ai-phone-push`、`push-shortcut-result`）和微信云助手，后端只当调用方
+- 回复兜底、自动追问、经期关怀、非挂念的定时唤醒（`push-generate`）
 
 ## 配置
 
@@ -136,3 +147,20 @@ npm test
 ```
 
 聊天复核现在处理 `feel` 与 `sched`：情绪只写可衰减 conds；日程只改当天未来条目，最多两条，改期保留时长并清理旧细排。`chatEditsDay=false` 只禁止日程修改，不禁用情绪；自发起念、仅核对承诺及模型跨日返回不写聊天状态。纯变换见 `src/chat-state.ts`。
+
+### 交接补迁与旧预约刷新
+
+`/handoff` 停用旧调度后，对已建档角色也按 wakeId 补迁缺失任务；只接受标记为本次交接撤销且无 outbox 凭据的预约。已有任务终态、日程、计数、设置和账本内容保留；缺失的关联约定随任务补入，重试不重复。成功同时记录 `handoff-tasks:<角色>`；旧版只有停用记录的角色，下次打开挂念补做完整交接。
+
+宿主通过 `lib/guanian-wake-ownership.ts` 统一判断 VPS 所属预约，发送与刷新入口都让位；快照组装前后均检查，退出本地登记时不删除云端凭据。生成日程的聊天资料使用与复核相同的独立线上/线下回看窗口，保留线下摘要。
+
+
+### 挂念迁移收尾：正文、回音账、会话互斥
+
+到点生成成功后，`generated_drafts` 在本机 SQLite 保存可见正文、原生成时间、固定 outbox ID、合并元数据与通知配置。投递失败或进程重启后优先核对 outbox 凭据，未投递则复用草稿；重试不再调用模型，不因生成预算或念头淡去丢弃正文。停用、取消、约定版本检查仍生效，账号/会话变更时保留草稿并报错。成功结算后清除草稿。原生成时间保持不变，另记 `meta.companionDeliveredAt`，回音窗口和主动消息间隔按成功投递时间计算。影子模式不消费草稿。SQLite 表由启动自动创建，旧数据不重建。
+
+交接时补迁旧云端当天及前一天未结算的发送记录；已经交接的角色也在后端下一轮自动补查，补丁晚到时参考最早后端发送日期。发送凭据来自 outbox 或旧任务的成功回执，`fbSeen` 排除已结算记录，原发送时间保留，累计 `fb` 不覆盖；查询失败不写完成标记。`sends.wake_id` 去重且保留 `fb_done`，回音计数与结算标记在同一 SQLite 事务提交。沿用三小时有效回应窗口和用户睡眠暂停。
+
+挂念定时发送与事件唤醒通过 `generation-lease.ts` 复用个人云 schema 12 的 `push_generation_lease`，与旧云端其他后台消息共享同一把会话锁。锁被占用时挂念延期一分钟（不计失败重试），事件唤醒不 ack；拿到锁后刷新聊天事实。模型/工具执行期间每分钟续租，在模型、工具、outbox 边界校验，失去租约停止后续副作用，最终释放。无需更新云函数或挂念安装包版本。
+
+专项验证：`node --no-warnings --test test/engine.test.ts test/wake.test.ts test/feedback-import.test.ts test/generation-lease.test.ts`；网关/MCP/补收集成验证从仓库根目录运行 `node scripts/check-wake-server.mjs`。

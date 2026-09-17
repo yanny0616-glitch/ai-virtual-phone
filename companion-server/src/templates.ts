@@ -5,6 +5,7 @@
 //   capptpl:<挂念 appId>:<角色>:chat    聊天（聊天 APP 原样提示词 + 完整聊天记录，意图和时间留占位）
 
 import { decryptPayload, type EncryptedPayload } from "./crypto.ts";
+import type { ShortcutContinuation } from "./delivery.ts";
 import type { ModelRequest } from "./types.ts";
 import type { Snapshot, SnapshotPurpose, Store } from "./store.ts";
 import { restJson, type Rest } from "./supabase.ts";
@@ -29,7 +30,7 @@ export async function syncTemplates(rest: Rest, store: Store, userId: string): P
     const [job] = await restJson<{ payload: EncryptedPayload; updated_at: string }[]>(rest,
       `push_jobs?user_id=eq.${encodeURIComponent(userId)}&trigger_key=eq.${encodeURIComponent(row.trigger_key)}&select=payload,updated_at&limit=1`);
     if (!job) continue;
-    let payload: { request?: ModelRequest; notify?: { title?: string; url?: string }; merge?: Record<string, unknown> };
+    let payload: { request?: ModelRequest; notify?: { title?: string; url?: string }; merge?: Record<string, unknown>; weixin?: { botId?: unknown }; shortcutContinuation?: ShortcutContinuation };
     try { payload = JSON.parse(await decryptPayload(job.payload, cfg.payload_key)); }
     catch { continue; }
     store.setMeta("tpl:" + row.trigger_key, row.updated_at);
@@ -43,6 +44,9 @@ export async function syncTemplates(rest: Rest, store: Store, userId: string): P
     const snap: Snapshot = {
       characterId, purpose, sessionId: String(merge.sessionId || c.sessionId), capturedAt,
       request: payload.request, notify: { title: payload.notify?.title, url: payload.notify?.url }, merge,
+      ...(typeof payload.weixin?.botId === "string" && payload.weixin.botId ? { weixin: { botId: payload.weixin.botId } } : {}),
+      ...(payload.shortcutContinuation?.request?.url && payload.shortcutContinuation.replyMarker && payload.shortcutContinuation.resultMarker
+        ? { shortcutContinuation: payload.shortcutContinuation } : {}),
     };
     store.saveSnapshot(snap);
     if (merge.sessionId && merge.sessionId !== c.sessionId) { c.sessionId = String(merge.sessionId); store.saveCharacter(c); }

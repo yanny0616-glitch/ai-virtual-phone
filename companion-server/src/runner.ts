@@ -3,6 +3,7 @@
 
 import { tickAll, tickCharacter, type EngineDeps, type Mode, type Trace } from "./engine.ts";
 import { syncTemplates } from "./templates.ts";
+import { runShortcutResumes } from "./shortcut-resume.ts";
 
 export class Runner {
   #deps: EngineDeps;
@@ -86,6 +87,11 @@ export class Runner {
         if (updated.length) this.#deps.log(`[companion] 收到新模板：${updated.join("、")}`);
       } catch (e) { this.#deps.log(`[companion] 取模板失败：${e instanceof Error ? e.message : String(e)}`); }
       const traces = characterId ? [await tickCharacter(this.#deps, this.mode, characterId)] : await tickAll(this.#deps, this.mode);
+      // 快捷动作结果回来了就接着说（影子模式不会建命令，也就没有续跑）
+      if (!characterId && this.mode === "live") {
+        try { await runShortcutResumes(this.#deps); }
+        catch (e) { this.#deps.log(`[companion] 快捷动作续跑失败：${e instanceof Error ? e.message : String(e)}`); }
+      }
       for (const trace of traces) {
         this.lastTraces.set(trace.characterId, trace);
         if (trace.error) this.#deps.log(`[companion] ${trace.characterId}：${trace.error}`);

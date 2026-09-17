@@ -6,14 +6,22 @@
 //   5. 到点的定时器：发送前复核 → 生成 → 写 push_outbox → Web Push
 // 规则与文案逐段搬自 push-recheck / push-generate，删掉了模板借用、预约、乐观锁、租约这些云函数专属的东西。
 
+import { acquireGenerationLease, GenerationBusy, type GenerationLease } from "./generation-lease.ts";
+import type { GeneratedDraft } from "./store.ts";
+import { importPendingCloudFeedback } from "./importer.ts";
 import { applyChatState } from "./chat-state.ts";
+import {
+  CALL_INVITE_WINDOW_MS, createShortcutCommand, deliverShortcutCommand, extractCall, extractShortcut, extractWeixin, fillCallInvite,
+  replaceMarker, sendWeixin, SHORTCUT_VISION_OFF_NOTE, writeShortcutDiagnostic, type CloudCtx,
+} from "./delivery.ts";
+import type { Cloud } from "./supabase.ts";
 import { randomUUID } from "node:crypto";
 
 import { matterBlock, matterFields, matterKey, matterPrompt, prepareMatters } from "./vendor/matters.mjs";
 import { ordinaryQuota, promiseIntent, promiseNeedsTask, recheckEvidence } from "./vendor/promises.mjs";
 import { buildDayInstruction, parseDayResult, recentDaysBrief, type FixedItem, type Routine } from "./day.ts";
 import { routineFor } from "./routine.ts";
-import { historyText, lastProactiveAt, readHistory, unansweredRounds, type CloudHistory, type CloudOutput } from "./history.ts";
+import { historyText, lastProactiveAt, outputSentAt, readHistory, unansweredRounds, type CloudHistory, type CloudOutput } from "./history.ts";
 import {
   busyUntil, forkDay, guanianAsleep, guanianNow, hhmm, hmMins, inWindow, localDate, nextLocalHM, roll, stateNote, waitingChance,
 } from "./life.ts";
@@ -48,6 +56,9 @@ export type EngineDeps = {
   log: (line: string) => void;
   /** 手机发来的撤销 / 停用还在锁外排队：到发送边界先看一眼（Runner 提供） */
   halted?: (characterId: string, wakeId: string) => boolean;
+  /** 个人云 functions / storage / realtime（快捷动作、微信、安卓壳通知）与管理员密钥；测试可不给 */
+  cloud?: Cloud;
+  cloudKey?: string;
 };
 
 export type Trace = { characterId: string; at: number; mode: Mode; steps: string[]; error?: string };
@@ -123,6 +134,11 @@ export async function tickCharacter(deps: EngineDeps, mode: Mode, characterId: s
   const row = deps.store.getDay(characterId, date) || emptyDay(characterId, date);
   const t: Turn = { deps, mode, c, ctx: buildCtx(c, row, tz), tz, nowMs, date, row, steps: trace.steps };
   try {
+    if (mode === "live" && deps.store.getMeta("handoff:" + characterId) === "done") {
+      // 补迁旧回音账失败只少学一次，不能拖停这一轮的判断和发送；没标完成，下轮再试
+      try { await importPendingCloudFeedback(deps.rest, deps.store, deps.userId, characterId, nowMs); }
+      catch (e) { trace.steps.push("回音账补迁失败，下轮再试：" + errText(e)); }
+    }
     await ensureDay(t);
     t.ctx.day = t.row.day ? { ...t.row.day, tz } : null;
     let history: CloudHistory;
@@ -207,7 +223,7 @@ export async function generateDay(t: Turn): Promise<void> {
     const cal = fixedFor(t, t.date);
     // 生成模板里只有一条任务占位，没有聊天：补上最新聊天，说定的安排、刚取消的事才进得了日程
     const history = await readHistory(deps.rest, deps.userId, c.sessionId, t.ctx);
-    const chat = historyText(history, t.tz, 60);
+    const chat = historyText(history, t.tz, 60, t.ctx);
     const past = recentDaysBrief(deps.store.listDays(c.characterId, 10).filter(r => r.day).map(r => ({ date: r.date, day: r.day!, characterId: c.characterId })), t.date);
     const instruction = buildDayInstruction({
       date: t.date, nowHM: hhmm(t.nowMs, t.tz), dayPrompt: c.settings.dayPrompt, forkLevel: c.settings.forkLevel,
@@ -301,7 +317,7 @@ async function feedback(t: Turn): Promise<void> {
     const rec = fb[send.kind] || [0, 0];
     fb[send.kind] = [rec[0] + 1, rec[1] + (replied ? 1 : 0)];
     changed = true;
-    if (t.mode === "live") deps.store.markFeedbackDone(send.wakeId);
+    if (t.mode === "live") Object.assign(fb, deps.store.settleFeedback(send.wakeId, c.characterId, send.kind, replied));
     t.steps.push(`回音账：${send.kind} ${replied ? "接话了" : "没接话"}`);
   }
   if (changed && t.mode === "live") t.ctx.fb = fb;
@@ -719,6 +735,24 @@ function rememberOutput(history: CloudHistory, output: CloudOutput): void {
 
 // ─── 5. 到点：发送前复核 → 生成 → 写 outbox → 推送
 async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promise<void> {
+  if (t.mode === "shadow") return fireTimerLocked(t, timer, history, null);
+  let lease: GenerationLease;
+  try { lease = await acquireGenerationLease(t.deps.rest, t.deps.userId, t.c.sessionId, timer.id); }
+  catch (err) {
+    if (!(err instanceof GenerationBusy)) throw err;
+    // 保留原重试次数；会话繁忙不算生成失败。
+    t.deps.store.updateTimer(timer.id, { fireAt: t.deps.now() + 60_000 });
+    decide(t, "hold", err.message, { wakeId: timer.id });
+    return;
+  }
+  try {
+    // 等待期间其他执行器可能刚发过回复，门禁和模型都必须看到最新事实。
+    Object.assign(history, await readHistory(t.deps.rest, t.deps.userId, t.c.sessionId, t.ctx));
+    await fireTimerLocked(t, timer, history, lease);
+  } finally { await lease.release(); }
+}
+
+async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, lease: GenerationLease | null): Promise<void> {
   const { deps, ctx, c } = t;
   const nowMs = deps.now();
   const found = findItem(t, timer.id);
@@ -736,14 +770,15 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
     if (!Array.isArray(outputs)) throw new Error("发送凭据格式错误");
     const output = outputs[0];
     if (output) {
-      const sentAt = Date.parse(output.created_at);
+      const sentAt = outputSentAt(output);
       if (!Number.isFinite(sentAt) || !output.id || typeof output.raw_text !== "string") throw new Error("发送凭据不完整");
       rememberOutput(history, output);
       markGenerated(t, history);
-      item.generatedAt = sentAt;
+      item.generatedAt = Date.parse(output.created_at);
       deps.store.saveDay(row);
       deps.store.addSend({ wakeId: timer.id, characterId: c.characterId, date: row.date, kind: item.kind || "plan", fromId: item.from || "", sentAt, outboxId: output.id });
       done("已发送", "send");
+      deps.store.deleteDraft(timer.id);
       return;
     }
   }
@@ -760,7 +795,14 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
         return event?.eventId === item.from && Number(event?.revision || 1) === Number(item.promiseRevision || 1);
       });
     if (!current) { done("约定已改期、完成或取消"); return; }
-  } else {
+  }
+  const draft = t.mode === "live" ? deps.store.getDraft(timer.id) : null;
+  if (draft) {
+    // 成文后只重试交付，不再受生成预算/念头淡去等门禁影响；取消和约定版本仍须有效。
+    await deliverDraft(t, timer, history, draft, lease!);
+    return;
+  }
+  if (!isPromise) {
     const nextAt = lastProactiveAt(history) + Math.max(0, Number(ctx.minGapMin) || 0) * 60_000;
     if (nowMs < nextAt) {
       deps.store.updateTimer(timer.id, { fireAt: nextAt, note: "等主动消息间隔" });
@@ -832,13 +874,13 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
     if (sleepy) note += "\n（TA本来睡着了，半夜迷迷糊糊醒了一下想起你：只说一两句、带着困意、说完就要接着睡。）";
     notes.push(note);
   }
-  const allItems = recentRows(t).flatMap(r => r.items);
   const duplicate = matterBlock(item, row.items, threads, history.outputs, history.messages);
   if (duplicate) { done(`${item.time} ${duplicate}`, "dedupe"); return; }
   if (item.from && threads.some(x => x.id === item.from && x.done === true) && !isPromise) { done("挂着的这件事已经了结"); return; }
   const promised = isPromise ? null : similarPromise(item.intent || "", threads);
   if (promised) { done(`${item.time} 和约定「${promised.text}」是同一件事，交给约定`, "dedupe"); return; }
-  const over = usageExceeded(await usageBudget(deps.rest, deps.userId, nowMs));
+  const sendBudget = await usageBudget(deps.rest, deps.userId, nowMs);
+  const over = usageExceeded(sendBudget);
   if (over) { done(`用量上限：${over}`); return; }
 
   if (t.mode === "shadow") {
@@ -870,39 +912,164 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
   // 旧哨兵快照里烤着「挂念后台复核模板…」这句假意图和冻结时的时间，也一并换掉
   const base = fillChatTemplate(snap.request, fresh ? snap.merge : { tzOffsetMin: snap.merge.tzOffsetMin, intentPlaceholder: SENTINEL_INTENT },
     { intent: item.intent, elapsedMin, nowMs });
-  const request = buildChatRequest(base, [facts, ...notes, intentNote, factCheck]);
+  // 来电能力：模板里留了占位，同一角色 20 小时内只放一次说明（与原离线预约的频控一致）
+  const invite = fillCallInvite(base, nowMs - (Number(ctx.callInviteAt) || 0) >= CALL_INVITE_WINDOW_MS);
+  if (invite.present && nowMs - (Number(ctx.callInviteAt) || 0) >= CALL_INVITE_WINDOW_MS) ctx.callInviteAt = nowMs;
+  const request = buildChatRequest(invite.request, [facts, ...notes, intentNote, factCheck]);
+  await lease!.check();
   let result;
   try { result = await callModel(request, deps.fetchModel, 300_000); }
   catch (e) { deps.store.updateTimer(timer.id, { status: "pending" }); throw e; }
-  const budget = await usageBudget(deps.rest, deps.userId, nowMs);
-  await usageAdd(deps.rest, deps.userId, budget.tz, "cloud-wake", snap.request.providerKind, result.data);
-  let rawText = result.text.trim();
-  let reasoning: string | undefined;
-  try { const parsed = visibleResponse(rawText, snap.merge.onlineThinking); rawText = parsed.text; reasoning = parsed.reasoningText; }
-  catch { done("回复里的思考块不完整，没发", "error"); return; }
-  if (!rawText) { done("回复是空的，没发", "error"); return; }
-  const abandoned = /^\[挂念作罢[：:]([^\]\r\n]{1,120})\]$/.exec(rawText);
-  if (abandoned) { done(`核对后作罢：${abandoned[1]}`, "factcheck"); return; }
-  // 成文期间可能被撤销
-  const latest = findItem(t, timer.id);
-  if (!latest || !latest.item.act) { done("成文期间这条念头被撤销了"); return; }
-  // 成文期间手机点了撤销 / 停用：放回待发，让排队的撤销落地，不发
-  if (deps.halted?.(c.characterId, timer.id)) { deps.store.updateTimer(timer.id, { status: "pending", note: "成文期间收到撤销" }); t.steps.push(`${item.time} 成文期间收到撤销，不发`); return; }
+  let generated: GeneratedDraft;
+  try {
+    let rawText = result.text.trim();
+    let reasoning: string | undefined;
+    try { const parsed = visibleResponse(rawText, snap.merge.onlineThinking); rawText = parsed.text; reasoning = parsed.reasoningText; }
+    catch { done("回复里的思考块不完整，没发", "error"); return; }
+    if (!rawText) { done("回复是空的，没发", "error"); return; }
+    const abandoned = /^\[挂念作罢[：:]([^\]\r\n]{1,120})\]$/.exec(rawText);
+    if (abandoned) { done(`核对后作罢：${abandoned[1]}`, "factcheck"); return; }
+    // 发送分流：来电 → 快捷动作 → 发到微信，标记都从正文剥掉（顺序与 push-generate 一致）
+    const called = extractCall(rawText);
+    const shortcut = extractShortcut(called.text);
+    const weixin = extractWeixin(shortcut.text, shortcut.marker);
+    rawText = weixin.text;
+    const botId = weixin.weixin ? String(snap.weixin?.botId || "") : "";
+    if (weixin.weixin && !botId) decide(t, "error", `${item.time} 模型想发到微信，但这个角色没绑定微信 bot，照常发到聊天`, { wakeId: timer.id });
+    let continuation: GeneratedDraft["continuation"];
+    if (shortcut.marker && snap.shortcutContinuation) {
+      const cont = snap.shortcutContinuation;
+      const filled = fillChatTemplate(cont.request, fresh ? snap.merge : { tzOffsetMin: snap.merge.tzOffsetMin, intentPlaceholder: SENTINEL_INTENT }, { intent: item.intent, elapsedMin, nowMs });
+      continuation = { ...cont, request: fillCallInvite(filled, false).request };
+    }
+    // 成文期间可能被撤销
+    const latest = findItem(t, timer.id);
+    if (!latest || !latest.item.act) { done("成文期间这条念头被撤销了"); return; }
+    // 成文期间手机点了撤销 / 停用：放回待发，让排队的撤销落地，不发
+    if (deps.halted?.(c.characterId, timer.id)) { deps.store.updateTimer(timer.id, { status: "pending", note: "成文期间收到撤销" }); t.steps.push(`${item.time} 成文期间收到撤销，不发`); return; }
 
-  const createdAt = new Date(deps.now()).toISOString();
-  const outboxId = `out_${randomUUID()}`;
-  const { snapshotAt: _s, armAt: _a, prevCount: _p, template: _tpl, intentPlaceholder: _ip, elapsedMark: _em, ...merge } = snap.merge;
-  const meta: Record<string, unknown> = {
-    ...merge,
-    sessionId: c.sessionId,
-    pushGenerated: true,
-    companionServer: true,
-    ...(reasoning ? { reasoningText: reasoning } : {}),
-    ...(isPromise ? { guanianPromise: { id: item.from, revision: item.promiseRevision || 1 } } : {}),
-    guanianContext: {
-      messageIds: history.messages.slice(-80).map(m => m.id), checkedAt: createdAt,
-      matterId: matterKey(item, threads), eventId: item.from || null, revision: isPromise ? item.promiseRevision || 1 : null,
-    },
+    const createdAt = new Date(deps.now()).toISOString();
+    const outboxId = `out_${randomUUID()}`;
+    const { snapshotAt: _s, armAt: _a, prevCount: _p, template: _tpl, intentPlaceholder: _ip, elapsedMark: _em, ...merge } = snap.merge;
+    const meta: Record<string, unknown> = {
+      ...merge,
+      sessionId: c.sessionId,
+      pushGenerated: true,
+      companionServer: true,
+      ...(reasoning ? { reasoningText: reasoning } : {}),
+      ...(isPromise ? { guanianPromise: { id: item.from, revision: item.promiseRevision || 1 } } : {}),
+      guanianContext: {
+        messageIds: history.messages.slice(-80).map(m => m.id), checkedAt: createdAt,
+        matterId: matterKey(item, threads), eventId: item.from || null, revision: isPromise ? item.promiseRevision || 1 : null,
+      },
+    };
+    generated = {
+      wakeId: timer.id, userId: deps.userId, sessionId: c.sessionId, outboxId, createdAt, rawText, meta,
+      notify: { title: String(snap.notify.title || c.name || "小手机"), url: snap.notify.url || "/" },
+      ...(called.call ? { deliverAsCall: true } : {}),
+      ...(botId ? { weixinBotId: botId } : {}),
+      ...(shortcut.marker ? { shortcut: shortcut.marker, ...(continuation ? { continuation } : {}) } : {}),
+    };
+    // 第一次异步网络操作之前落盘，之后即使失去租约/投递失败/重启，也不重新调用模型。
+    deps.store.saveDraft(generated);
+  } finally {
+    await usageAdd(deps.rest, deps.userId, sendBudget.tz, "cloud-wake", snap.request.providerKind, result.data);
+  }
+  await deliverDraft(t, timer, history, generated, lease!);
+}
+
+async function deliverDraft(t: Turn, timer: TimerRow, history: CloudHistory, draft: GeneratedDraft, lease: GenerationLease): Promise<void> {
+  const { deps, c, ctx } = t;
+  if (draft.userId !== deps.userId || draft.sessionId !== c.sessionId) throw new Error("已成文消息的账号或会话已变更，保留正文待核对");
+  const latest = findItem(t, timer.id);
+  // 已经发到微信的收不回来，只补记录
+  if (!latest && draft.weixinDone) { deps.store.updateTimer(timer.id, { status: "done", note: "已发到微信" }); deps.store.deleteDraft(timer.id); return; }
+  if (!latest || !latest.item.act && !draft.weixinDone) { deps.store.updateTimer(timer.id, { status: "cancelled", note: "已成文念头被撤销" }); deps.store.deleteDraft(timer.id); return; }
+  if (deps.halted?.(c.characterId, timer.id) && !draft.weixinDone) { deps.store.updateTimer(timer.id, { status: "pending", note: "成文期间收到撤销" }); return; }
+  await lease.check();
+  // 续租等待期间也可能收到取消。
+  if (deps.halted?.(c.characterId, timer.id) && !draft.weixinDone) { deps.store.updateTimer(timer.id, { status: "pending", note: "投递前收到撤销" }); return; }
+  const cc: CloudCtx | null = deps.cloud ? { rest: deps.rest, cloud: deps.cloud, key: deps.cloudKey || "", userId: deps.userId } : null;
+  const { outboxId, rawText, createdAt } = draft;
+
+  // 1. 快捷动作：先建命令（有续跑的延后投递）。建之前记 tried，重启后看到 tried 没结果就不重复执行
+  if (draft.shortcut && !draft.shortcutTried) {
+    draft.shortcutTried = true;
+    deps.store.updateDraft(draft);
+    if (!cc) {
+      draft.shortcutCommand = null;
+      draft.deliveryError = `快捷动作「${draft.shortcut.name}」没执行：后端没接个人云函数`;
+    } else {
+      const created = await createShortcutCommand(cc, draft.shortcut, !!draft.continuation).catch(e => ({ command: null, note: `快捷动作「${draft.shortcut!.name}」没建成：${errText(e)}` }));
+      draft.shortcutCommand = created.command;
+      if (!created.command) draft.deliveryError = created.note;
+      else if (created.command.deliveryMode === "email" && !created.command.continued) {
+        draft.deliveryError = await deliverShortcutCommand(cc, created.command) || undefined;
+        draft.shortcutDelivered = true;
+      }
+    }
+    deps.store.updateDraft(draft);
+  } else if (draft.shortcut && draft.shortcutCommand === undefined) {
+    draft.shortcutCommand = null;
+    draft.deliveryError = `快捷动作「${draft.shortcut.name}」执行结果未确认，没有重复执行`;
+    deps.store.updateDraft(draft);
+  }
+  const command = draft.shortcutCommand || null;
+  // 2. 会回传结果的：挂上续跑，把刚说的这句代入回复占位（按命令 ID 幂等）
+  if (command?.continued && draft.continuation) {
+    const cont = structuredClone(draft.continuation);
+    replaceMarker(cont.request.body, cont.replyMarker, rawText);
+    const canSendImage = command.resultMode === "image" && cont.visionEnabled !== false;
+    if (!canSendImage && cont.imageMarker) replaceMarker(cont.request.body, cont.imageMarker, command.resultMode === "image" ? SHORTCUT_VISION_OFF_NOTE : "（该动作没有图片回传）");
+    const { guanianContext: _g, guanianPromise: _p, companionDeliveredAt: _d, reasoningText: _r, ...merge } = draft.meta;
+    deps.store.saveResume({
+      commandId: command.id, characterId: c.characterId, sessionId: c.sessionId, dueAt: deps.now() + 15_000, tries: 0,
+      outboxId: `out_${randomUUID()}`, request: cont.request, resultMarker: cont.resultMarker, ...(canSendImage && cont.imageMarker ? { imageMarker: cont.imageMarker } : {}),
+      actionName: command.actionName, notify: draft.notify, merge: { ...merge, shortcutCommandId: command.id },
+    });
+  }
+
+  // 3. 改送真实微信：送成了就不进聊天 outbox（微信云助手自己记），送不成照常发到聊天
+  if (draft.weixinBotId && !draft.weixinDone) {
+    const failed = cc ? await sendWeixin(cc, draft.weixinBotId, rawText) : "后端没接个人云函数";
+    if (!failed) { draft.weixinDone = true; deps.store.updateDraft(draft); }
+    else decide(t, "error", `${latest.item.time} 发到微信失败，改发到聊天：${failed}`, { wakeId: timer.id });
+  }
+  const item = latest.item;
+  const deliveredAt = deps.now();
+  const markSent = (sentOutboxId: string) => {
+    item.generatedAt = Date.parse(createdAt);
+    deps.store.saveDay(latest.row);
+    deps.store.addSend({ wakeId: timer.id, characterId: c.characterId, date: latest.row.date, kind: item.kind || "plan", fromId: item.from || "", sentAt: deliveredAt, outboxId: sentOutboxId });
+    deps.store.updateTimer(timer.id, { status: "done", note: draft.weixinDone ? "已发到微信" : "已发送" });
+    const th = (ctx.threads || []).find(x => x.id === item.from);
+    if (th && !th.done) {
+      th.mentionedAt = deliveredAt; th.at = deliveredAt;
+      if (th.kind === "topic") th.done = true;
+      else th.nudge = (String(th.nudge || "") + " said:" + item.time).trim().slice(-200);
+    }
+  };
+  const afterDelivery = async () => {
+    // 角色先说话 → 再弹「运行快捷指令」
+    if (cc && command && !draft.shortcutDelivered) {
+      const failed = await deliverShortcutCommand(cc, command);
+      if (failed) draft.deliveryError = failed;
+    }
+    if (cc && draft.deliveryError) await writeShortcutDiagnostic(cc, c.sessionId, draft.deliveryError);
+    deps.store.deleteDraft(timer.id);
+  };
+  if (draft.weixinDone) {
+    markSent("");
+    await afterDelivery();
+    decide(t, "send", `${item.time} 发到微信了：${rawText.replace(/\s+/g, " ").slice(0, 60)}`, { wakeId: timer.id, weixin: true, shortcut: command?.actionName });
+    return;
+  }
+
+  // 4. 聊天 outbox + 推送（来电是单条通知，点开直达振铃）
+  // 保留生成时间供补收排序；回音窗口和主动间隔从本次成功投递开始。
+  const meta = {
+    ...draft.meta, companionDeliveredAt: new Date(deliveredAt).toISOString(),
+    ...(command && draft.shortcut ? { shortcutMarker: { text: draft.shortcut.text, insertAt: draft.shortcut.insertAt, name: draft.shortcut.name } } : {}),
   };
   const saved = await deps.rest("push_outbox", {
     method: "POST", headers: { Prefer: "return=minimal" },
@@ -910,24 +1077,17 @@ async function fireTimer(t: Turn, timer: TimerRow, history: CloudHistory): Promi
   });
   if (!saved.ok) throw new Error(`outbox 写入失败 HTTP ${saved.status}: ${(await saved.text().catch(() => "")).slice(0, 160)}`);
   rememberOutput(history, { id: outboxId, trigger_key: `timedwake:${timer.id}`, raw_text: rawText, created_at: createdAt, meta });
-  const sentAt = Date.parse(createdAt);
-  latest.item.generatedAt = sentAt;
-  deps.store.saveDay(latest.row === t.row ? t.row : latest.row);
-  deps.store.addSend({ wakeId: timer.id, characterId: c.characterId, date: latest.row.date, kind: item.kind || "plan", fromId: item.from || "", sentAt, outboxId });
-  deps.store.updateTimer(timer.id, { status: "done", note: "已发送" });
-  const th = threads.find(x => x.id === item.from);
-  if (th && !th.done) {
-    th.mentionedAt = sentAt; th.at = sentAt;
-    if (th.kind === "topic") th.done = true;
-    else th.nudge = (String(th.nudge || "") + " said:" + item.time).trim().slice(-200);
-  }
-  const title = String(snap.notify.title || c.name || "小手机");
+  markSent(outboxId);
   const parts = splitPreview(rawText).slice(0, 6);
-  const messages: PushMessage[] = (parts.length ? parts : ["发来一条消息"]).map((body, index) => ({
-    type: "chat_outbox", title, body: body.slice(0, 80), tag: `${timer.id}-${index}`, url: snap.notify.url || "/", characterId: c.characterId,
-  }));
+  const messages: PushMessage[] = draft.deliverAsCall
+    ? [{ type: "incoming_call", title: `📞 ${draft.notify.title}`, body: "来电话了…", tag: `${timer.id}-0`, url: `/?ring=${encodeURIComponent(c.sessionId)}&rt=${deliveredAt}`, characterId: c.characterId, sessionId: c.sessionId, callTs: deliveredAt }]
+    : (parts.length ? parts : ["发来一条消息"]).map((body, index) => ({
+      type: "chat_outbox", title: draft.notify.title, body: body.slice(0, 80), tag: `${timer.id}-${index}`, url: draft.notify.url, characterId: c.characterId,
+    }));
   const pushed = await deps.push(messages).catch(e => ({ sent: 0, total: 0, removed: 0, skippedShell: 0, errors: [errText(e)] }));
-  decide(t, "send", `${item.time} 发出去了：${rawText.replace(/\s+/g, " ").slice(0, 60)}`, { wakeId: timer.id, outboxId, pushed: pushed.sent, pushErrors: pushed.errors, allItems: allItems.length });
+  await afterDelivery();
+  decide(t, "send", `${item.time} ${draft.deliverAsCall ? "打来电话" : "发出去了"}：${rawText.replace(/\s+/g, " ").slice(0, 60)}`,
+    { wakeId: timer.id, outboxId, pushed: pushed.sent, pushErrors: pushed.errors, ...(command ? { shortcut: command.actionName } : {}), ...(draft.deliveryError ? { deliveryError: draft.deliveryError } : {}) });
 }
 
 /** 手动重新生成今天（App「重新生成」） */

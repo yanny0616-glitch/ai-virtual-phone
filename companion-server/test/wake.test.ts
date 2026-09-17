@@ -9,7 +9,7 @@ import { runWake, textCalls, WakeService, type WakeDeps, type WakeEvent, type Wa
 
 const PH = "__FLOAT_WAKE_EVENT__";
 
-function template(kind: "openai-compatible" | "anthropic", protocol: "native" | "text"): WakeTemplate {
+function template(kind: "openai-compatible" | "anthropic", protocol: "native" | "text" | "none"): WakeTemplate {
   const tools = [{ type: "function", function: { name: "garden_look_ab12", description: "看花园", parameters: { type: "object", properties: {} } } }];
   const body: Record<string, unknown> = kind === "anthropic"
     ? { model: "m", system: "你是沈烬言", messages: [{ role: "user", content: [{ type: "text", text: "早" }] }, { role: "assistant", content: [{ type: "text", text: "早啊" }] }, { role: "user", content: [{ type: "text", text: PH }] }], ...(protocol === "native" ? { tools: [{ name: "garden_look_ab12", description: "看花园", input_schema: { type: "object" } }] } : {}), stream: true }
@@ -38,7 +38,8 @@ function harness(modelReplies: unknown[]) {
   const deps: WakeDeps = {
     store, userId: "u1", now: () => Date.parse("2026-09-17T01:00:05Z"), log: () => undefined,
     rest: async (path, init) => {
-      if (path.startsWith("push_outbox")) { outbox.push(...JSON.parse(String(init?.body))); return new Response("", { status: 201 }); }
+      if (path === "rpc/push_generation_lease") return Response.json(true);
+      if (path.startsWith("push_outbox") && init?.method === "POST") { outbox.push(...JSON.parse(String(init?.body))); return new Response("", { status: 201 }); }
       return new Response("[]", { status: 200 });
     },
     fetchModel: async (_url, init) => {
@@ -188,4 +189,52 @@ test("接口：寄底稿要带占位，状态不含密钥，旧底稿不覆盖�
   assert.equal((st.body as any).templates[0].mcpUrl, "https://garden.example/mcp");
   assert.equal(((await call("POST", "/app/wake/templates/mcp_garden/delete")).body as any).deleted, true);
   assert.equal(store.getWakeTemplate("mcp_garden"), null);
+});
+
+test("会话被挂念/旧云端占用时不 ack，拿到锁后补最新聊天再处理", async () => {
+  const h = harness([{ choices: [{ message: { content: "收到" } }] }]);
+  try {
+    h.store.saveWakeTemplate(template("openai-compatible", "none"));
+    const rest = h.deps.rest;
+    let busy = true, claimed = false, acks = 0;
+    h.deps.rest = async (p, init) => {
+      if (p === "rpc/push_generation_lease") {
+        const action = JSON.parse(String(init?.body)).p_action;
+        if (action === "claim") { claimed = !busy; return Response.json(!busy); }
+        return Response.json(true);
+      }
+      if (p.startsWith("push_chat_mirror?")) {
+        assert.equal(claimed, true, "拿到租约后才读聊天");
+        return Response.json([{ id: "new", role: "assistant", content: "我刚刚已经告诉你展览时间了", message_at: "2026-09-17T01:00:01Z" }]);
+      }
+      return rest(p, init);
+    };
+    const svc = new WakeService(h.deps, async body => {
+      if (body.action === "events") return { events: [EVENT], sources: [] };
+      acks++; assert.equal(claimed, true); return { acceptedIds: [EVENT.id] };
+    });
+    assert.equal(await svc.poll(), 0);
+    assert.equal(acks, 0); assert.equal(h.requests.length, 0);
+    busy = false;
+    assert.equal(await svc.poll(), 1);
+    assert.equal(acks, 1);
+    assert.match(JSON.stringify(h.requests[0]), /我刚刚已经告诉你展览时间了/);
+  } finally { h.store.close(); }
+});
+
+test("多轮工具过程中租约失效，不继续执行 MCP 或投递正文", async () => {
+  const h = harness([{ choices: [{ message: { content: "我看看", tool_calls: [{ id: "c1", type: "function", function: { name: "garden_look_ab12", arguments: "{}" } }] } }] }]);
+  try {
+    const rest = h.deps.rest; let renews = 0, releases = 0;
+    h.deps.rest = async (p, init) => {
+      if (p === "rpc/push_generation_lease") {
+        const action = JSON.parse(String(init?.body)).p_action;
+        if (action === "release") releases++;
+        return Response.json(!(action === "renew" && ++renews >= 3));
+      }
+      return rest(p, init);
+    };
+    await assert.rejects(runWake(h.deps, template("openai-compatible", "native"), EVENT), /租约已失效/);
+    assert.equal(h.mcpCalls.length, 0); assert.equal(h.outbox.length, 0); assert.equal(releases, 1);
+  } finally { h.store.close(); }
 });

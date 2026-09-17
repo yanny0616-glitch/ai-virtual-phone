@@ -11,7 +11,7 @@ import { sendPushMessages } from "./push.ts";
 import { Runner } from "./runner.ts";
 import { createApp } from "./server.ts";
 import { Store } from "./store.ts";
-import { createRest, resolveUserId } from "./supabase.ts";
+import { createCloud, createRest, resolveUserId } from "./supabase.ts";
 import { localGateway, WakeService } from "./wake.ts";
 
 const config = loadConfig();
@@ -26,6 +26,7 @@ const recovered = store.recoverRunningTimers();
 if (recovered) console.log(`[companion] 上次退出时有 ${recovered} 条正在生成，已放回待发（重发前先核对投递凭据）`);
 
 const rest = createRest(config);
+const cloud = createCloud(config);
 const userId = await resolveUserId(rest, config.userId);
 
 if (!store.listCharacters().length) {
@@ -36,7 +37,9 @@ if (!store.listCharacters().length) {
 const engine: EngineDeps = {
   store, rest, userId,
   fetchModel: (url, init) => fetch(url, init),
-  push: messages => sendPushMessages(rest, userId, messages),
+  push: messages => sendPushMessages(rest, userId, messages, undefined, undefined, cloud),
+  cloud,
+  cloudKey: config.personalKey,
   now: () => Date.now(),
   random: Math.random,
   log: line => console.log(line),

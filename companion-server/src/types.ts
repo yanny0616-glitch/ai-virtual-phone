@@ -71,6 +71,7 @@ export type Ctx = {
   chatEditsDay?: boolean; threadsOn?: number | boolean; autoGenAt?: string; forkLevel?: number; forkBurst?: number; dayPrompt?: string; moodGate?: number;
   affection?: { score?: number; tier?: string; relation?: string } | null;
   // 跨天状态
+  callInviteAt?: number;
   threads?: Thread[]; fb?: FbBook; fbSeen?: string[]; missKey?: number; echoKey?: number;
   momentsLast?: number; momentsWeekStart?: number; momentsWeekN?: number; momentsRollHour?: number; outbox?: Outbox[];
   // 当天
@@ -89,5 +90,5 @@ export const SETTING_KEYS = [
 ] as const;
 
 export const STATE_KEYS = [
-  "threads", "fb", "fbSeen", "missKey", "echoKey", "momentsLast", "momentsWeekStart", "momentsWeekN", "momentsRollHour", "outbox",
+  "threads", "fb", "fbSeen", "missKey", "echoKey", "momentsLast", "momentsWeekStart", "momentsWeekN", "momentsRollHour", "outbox", "callInviteAt",
 ] as const;

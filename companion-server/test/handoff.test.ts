@@ -60,3 +60,28 @@ test("执行中、暂存成文、其他设备、并发领取、最终读取失�
     if (["running","generated","owner"].includes(mode)) assert.equal(e.calls.filter(c=>c.init.method === "PATCH").length,0);
   }
 });
+
+test("已建档角色走真实 handoff 路由：旧任务撤销后补入缺失定时器，再确认成功", async () => {
+  const { Store } = await import("../src/store.ts");
+  const { Runner } = await import("../src/runner.ts");
+  const { handleApp } = await import("../src/api.ts");
+  const e=await setup();const store=new Store(":memory:");
+  try {
+    store.saveCharacter({characterId:"c1",sessionId:"s1",name:"已建档",enabled:true,settings:{tzOffsetMin:480,quota:7},state:{threads:[]},importedAt:1,updatedAt:1});
+    store.setMeta("handoff:c1", "done"); // 旧版确认过交接，但没做增量补迁
+    const wakeId=e.jobs[0].trigger_key.slice("timedwake:".length);
+    Object.assign(e.plans[0],{character_id:"c1",plan_date:"2026-09-17",items:[{wakeId,act:true,kind:"extra",fireAt:Date.now()+3600000,time:"18:00",intent:"旧云端新加的消息",source:"云端",why:"",sem:"",topic:""}]});
+    const rest: typeof e.rest=async(path,init)=>path.includes("select=trigger_key,status,result_note")
+      ? Response.json(e.jobs.filter(j=>j.trigger_key==='timedwake:'+wakeId)) : e.rest(path,init);
+    const engine={store,rest,userId:"u1",now:Date.now,random:()=>.5,log:()=>{},fetchModel:async()=>{throw Error("不应调模型");},push:async()=>({total:0,sent:0,removed:0,skippedShell:0,errors:[]})};
+    const runner=new Runner(engine,"shadow");
+    const before=await handleApp({store,runner,engine},"GET","/app/state",new URLSearchParams("ids=c1"),async()=>({}));
+    assert.equal((before!.body as {characters:{legacyStopped:boolean}[]}).characters[0].legacyStopped,false);
+    const r=await handleApp({store,runner,engine},"POST","/app/characters/c1/handoff",new URLSearchParams(),async()=>({owner:"device"}));
+    assert.equal(r!.status,200);assert.equal((r!.body as {stopped:boolean}).stopped,true);
+    assert.equal(e.jobs[0].status,"cancelled");assert.equal(store.getTimer(wakeId)!.status,"pending");
+    assert.equal(store.getCharacter("c1")!.enabled,false);assert.equal(store.getCharacter("c1")!.settings.quota,7);
+    assert.equal(store.getMeta("handoff:c1"),"done");
+    assert.equal(store.getMeta("handoff-tasks:c1"),"done");
+  } finally {store.close();}
+});

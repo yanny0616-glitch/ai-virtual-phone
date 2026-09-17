@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { Ctx, GuanianDay, ModelRequest, PlanItem, ProviderKind } from "./types.ts";
 import type { FixedItem, Routine } from "./day.ts";
 import type { WakeRunRow, WakeTemplate } from "./wake.ts";
+import type { ShortcutCommand, ShortcutContinuation, ShortcutMarker } from "./delivery.ts";
 
 export type SnapshotPurpose = "chat" | "judge" | "daily";
 
@@ -28,6 +29,9 @@ export type Snapshot = {
   notify: { title?: string; url?: string };
   /** 写 push_outbox 时带上的 meta：regexes / characterName / userName / appId / appTags / onlineThinking 等 */
   merge: Record<string, unknown>;
+  /** 聊天模板才有：角色绑定的真实微信 bot（可改送微信）、快捷动作结果续跑底稿 */
+  weixin?: { botId?: string };
+  shortcutContinuation?: ShortcutContinuation;
 };
 
 export type SnapshotInfo = { characterId: string; purpose: string; sessionId: string; capturedAt: number; receivedAt: string; bytes: number };
@@ -68,6 +72,24 @@ export type DayRow = {
 
 export type TimerRow = { id: string; characterId: string; date: string; fireAt: number; kind: string; status: string; note: string; updatedAt: number };
 export type SendRow = { wakeId: string; characterId: string; date: string; kind: string; fromId: string; sentAt: number; outboxId: string; fbDone: boolean };
+export type GeneratedDraft = {
+  wakeId: string; userId: string; sessionId: string; outboxId: string; createdAt: string;
+  rawText: string; meta: Record<string, unknown>; notify: { title: string; url: string };
+  /** 发送分流（delivery.ts）：以来电送达 / 改发真实微信 / 要请对方跑的快捷动作 */
+  deliverAsCall?: boolean;
+  weixinBotId?: string; weixinDone?: boolean;
+  shortcut?: ShortcutMarker; continuation?: ShortcutContinuation;
+  /** 建命令前先记 tried：重启后看到 tried 却没有结果，就不重复执行 */
+  shortcutTried?: boolean; shortcutCommand?: ShortcutCommand | null; shortcutDelivered?: boolean;
+  deliveryError?: string;
+};
+
+/** 快捷动作结果续跑：命令建好后等手机回传结果，再由后端生成第二轮 */
+export type ShortcutResume = {
+  commandId: string; characterId: string; sessionId: string; dueAt: number; tries: number;
+  outboxId: string; request: ModelRequest; resultMarker: string; imageMarker?: string;
+  actionName: string; notify: { title: string; url: string }; merge: Record<string, unknown>;
+};
 export type DecisionRow = { id: number; characterId: string; at: number; kind: string; note: string; data: Record<string, unknown> | null; mode: string };
 
 const j = <T>(text: string | null | undefined, fallback: T): T => {
@@ -109,6 +131,8 @@ export class Store {
         kind text not null, status text not null, note text not null default '', updated_at integer not null
       );
       create index if not exists timers_due on timers (status, fire_at);
+      create table if not exists generated_drafts (wake_id text primary key, payload text not null);
+      create table if not exists shortcut_resumes (command_id text primary key, due_at integer not null, payload text not null);
       create table if not exists sends (
         wake_id text primary key, character_id text not null, date text not null, kind text not null,
         from_id text not null default '', sent_at integer not null, outbox_id text not null default '', fb_done integer not null default 0
@@ -309,6 +333,61 @@ export class Store {
   }
 
   // ── 发送记录
+  saveDraft(draft: GeneratedDraft): void {
+    this.#db.prepare("insert into generated_drafts (wake_id, payload) values (?, ?) on conflict(wake_id) do nothing")
+      .run(draft.wakeId, JSON.stringify(draft));
+  }
+
+  updateDraft(draft: GeneratedDraft): void {
+    this.#db.prepare("update generated_drafts set payload = ? where wake_id = ?").run(JSON.stringify(draft), draft.wakeId);
+  }
+
+  saveResume(r: ShortcutResume): void {
+    this.#db.prepare("insert into shortcut_resumes (command_id, due_at, payload) values (?, ?, ?) on conflict(command_id) do nothing")
+      .run(r.commandId, r.dueAt, JSON.stringify(r));
+  }
+
+  dueResumes(nowMs: number): ShortcutResume[] {
+    return (this.#db.prepare("select payload from shortcut_resumes where due_at <= ? order by due_at").all(nowMs) as { payload: string }[])
+      .map(r => JSON.parse(r.payload) as ShortcutResume);
+  }
+
+  updateResume(r: ShortcutResume): void {
+    this.#db.prepare("update shortcut_resumes set due_at = ?, payload = ? where command_id = ?").run(r.dueAt, JSON.stringify(r), r.commandId);
+  }
+
+  deleteResume(commandId: string): void {
+    this.#db.prepare("delete from shortcut_resumes where command_id = ?").run(commandId);
+  }
+
+  getDraft(wakeId: string): GeneratedDraft | null {
+    const row = this.#db.prepare("select payload from generated_drafts where wake_id = ?").get(wakeId) as { payload: string } | undefined;
+    return row ? JSON.parse(row.payload) as GeneratedDraft : null;
+  }
+
+  deleteDraft(wakeId: string): void {
+    this.#db.prepare("delete from generated_drafts where wake_id = ?").run(wakeId);
+  }
+
+  /** 回音计数和结算标记一起提交，重启/重复交接不会漏记或重算。 */
+  settleFeedback(wakeId: string, characterId: string, kind: string, replied: boolean): Ctx["fb"] {
+    this.#db.exec("begin immediate");
+    try {
+      const c = this.getCharacter(characterId);
+      if (!c) throw new Error("回音账角色不存在");
+      const changed = this.#db.prepare("update sends set fb_done = 1 where wake_id = ? and character_id = ? and fb_done = 0").run(wakeId, characterId).changes;
+      if (changed) {
+        const fb = { ...(c.state.fb || {}) };
+        const prev = fb[kind] || [0, 0];
+        fb[kind] = [Number(prev[0] || 0) + 1, Number(prev[1] || 0) + (replied ? 1 : 0)];
+        c.state.fb = fb;
+        this.saveCharacter(c);
+      }
+      this.#db.exec("commit");
+      return c.state.fb;
+    } catch (err) { this.#db.exec("rollback"); throw err; }
+  }
+
   addSend(s: Omit<SendRow, "fbDone">): void {
     this.#db.prepare("insert or ignore into sends (wake_id, character_id, date, kind, from_id, sent_at, outbox_id, fb_done) values (?, ?, ?, ?, ?, ?, ?, 0)")
       .run(s.wakeId, s.characterId, s.date, s.kind, s.fromId, s.sentAt, s.outboxId);
@@ -319,6 +398,11 @@ export class Store {
       wakeId: String(r.wake_id), characterId: String(r.character_id), date: String(r.date), kind: String(r.kind), fromId: String(r.from_id),
       sentAt: Number(r.sent_at), outboxId: String(r.outbox_id), fbDone: Number(r.fb_done) === 1,
     }));
+  }
+
+  firstSendAt(characterId: string): number | null {
+    const row = this.#db.prepare("select min(sent_at) as at from sends where character_id = ?").get(characterId) as { at: number | null };
+    return row.at;
   }
 
   markFeedbackDone(wakeId: string): void {

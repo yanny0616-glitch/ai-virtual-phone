@@ -17,7 +17,7 @@
 //   GET  /app/wake/status?source=x              唤醒后端：底稿概况（不含密钥）、网关来源状态、最近处理记录
 // 改状态的都在 Runner 的锁里做：正在跑的一轮调模型时改了，会被那轮结束时的保存盖掉。
 
-import { importFromCloud } from "./importer.ts";
+import { importFromCloud, importMissingCloudTasks, importPendingCloudFeedback } from "./importer.ts";
 import { stopLegacyScheduler } from "./handoff.ts";
 import type { EngineDeps } from "./engine.ts";
 import { characterTz, generateDayNow } from "./engine.ts";
@@ -177,7 +177,7 @@ export function appState(deps: AppDeps, characterIds: string[], nowMs = deps.eng
       const snapshots = store.listSnapshots().filter(s => s.characterId === id).map(s => ({ purpose: s.purpose, capturedAt: s.capturedAt, receivedAt: s.receivedAt }));
       const decisions = store.listDecisions(id, 120).map(d => ({ at: d.at, kind: d.kind, note: d.note, mode: d.mode, wakeId: d.data && typeof d.data.wakeId === "string" ? d.data.wakeId : "" }));
       return {
-        characterId: id, exists: true, legacyStopped: store.getMeta("handoff:" + id) === "done", name: c.name, enabled: c.enabled, sessionId: c.sessionId, tz, date,
+        characterId: id, exists: true, legacyStopped: store.getMeta("handoff:" + id) === "done" && store.getMeta("handoff-tasks:" + id) === "done", name: c.name, enabled: c.enabled, sessionId: c.sessionId, tz, date,
         settings: c.settings,
         day: dayView(row, tz, nowMs, c.settings.affection),
         prev: dayView(store.getDay(id, prevDate(date)), tz, nowMs, c.settings.affection),
@@ -518,8 +518,12 @@ export async function handleApp(deps: AppDeps, method: string, path: string, que
         const imported = deps.store.getCharacter(id);
         if (imported) { imported.enabled = false; deps.store.saveCharacter(imported); }
       }
+      const migrated = await importMissingCloudTasks(deps.engine.rest, deps.store, deps.engine.userId, id, deps.engine.now());
+      if (migrated.skipped?.length) deps.store.addDecision(id, "setup", `交接：${migrated.skipped.length} 条旧约定找不到对应账本，没有迁入`, deps.runner.mode, { wakeIds: migrated.skipped }, deps.engine.now());
+      await importPendingCloudFeedback(deps.engine.rest, deps.store, deps.engine.userId, id, deps.engine.now());
+      deps.store.setMeta("handoff-tasks:" + id, "done");
       deps.store.setMeta("handoff:" + id, "done");
-      return { stopped: true };
+      return { stopped: true, migrated };
     }, ["char:" + id]));
   }
   if (method === "POST" && parts.length === 3) return change(upsertCharacter(deps, id, await body()));

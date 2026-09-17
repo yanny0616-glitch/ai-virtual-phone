@@ -41,3 +41,15 @@ test("成功、失效、安卓壳、其他错误分别计数，失效订阅被�
   assert.ok(calls.some(c => c.method === "DELETE" && c.path.includes(encodeURIComponent("https://push.example/gone"))));
   assert.ok(!calls.some(c => c.method === "DELETE" && c.path.includes("boom")));
 });
+
+test("安卓壳订阅：接了个人云时发 Realtime 广播，来电带 kind=call", async () => {
+  const { rest } = fakeRest([{ endpoint: "shell:u1" }]);
+  const { sendPushMessages } = await import("../src/push.ts");
+  const broadcasts: any[] = [];
+  const cloud = async (path: string, init: RequestInit = {}) => { broadcasts.push({ path, body: JSON.parse(String(init.body)) }); return new Response("", { status: 202 }); };
+  const result = await sendPushMessages(rest, "u1", [{ type: "incoming_call", title: "📞 赵兖", body: "来电话了…", url: "/?ring=s1", sessionId: "s1", callTs: 5 }], async () => { throw new Error("不该走 Web Push"); }, 0, cloud);
+  assert.equal(result.sent, 1);
+  assert.equal(result.skippedShell, 0);
+  assert.equal(broadcasts[0].path, "realtime/v1/api/broadcast");
+  assert.deepEqual(broadcasts[0].body.messages[0], { topic: "shellpush:u1", event: "notify", payload: { title: "📞 赵兖", body: "来电话了…", url: "/?ring=s1", kind: "call", characterName: "赵兖", sessionId: "s1", callTs: 5 } });
+});

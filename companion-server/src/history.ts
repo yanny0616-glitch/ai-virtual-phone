@@ -183,13 +183,19 @@ export function unansweredRounds(history: CloudHistory, nowMs: number): number {
   return rounds;
 }
 
-/** 最近一次主动消息的时间：约定到点不算，被动回复不算 */
+/** 已成文消息可能延迟投递；旧输出兼容 created_at。 */
+export function outputSentAt(output: CloudOutput): number {
+  const deliveredAt = typeof output.meta?.companionDeliveredAt === "string" ? Date.parse(output.meta.companionDeliveredAt) : NaN;
+  return Number.isFinite(deliveredAt) ? deliveredAt : Date.parse(output.created_at);
+}
+
+/** 最近普通主动消息的投递时间：约定到点和被动回复不算。 */
 export function lastProactiveAt(history: CloudHistory): number {
   return history.outputs.reduce((at, o) => {
     if (!o.trigger_key?.startsWith("timedwake:")) return at;
     const event = o.meta?.guanianPromise as { id?: string } | undefined;
     const context = o.meta?.guanianContext as { revision?: number | null } | undefined;
     if (event?.id || context?.revision) return at;
-    return Math.max(at, Date.parse(o.created_at) || 0);
+    return Math.max(at, outputSentAt(o) || 0);
   }, 0);
 }

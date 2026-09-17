@@ -2,6 +2,8 @@
 import { decryptPayload, type EncryptedPayload } from "./crypto.ts";
 import type { Rest } from "./supabase.ts";
 
+export const LEGACY_HANDOFF_NOTE = "handed off to companion server";
+
 type Plan = { judge_until?: string; last_recheck_at?: string; session_id: string; context: Record<string, any>; items: { wakeId?: string }[] };
 type Job = { id: string; trigger_key: string; status: string; updated_at: string; payload: EncryptedPayload };
 const fail = (message: string) => Object.assign(new Error(message), { status: 409 });
@@ -67,7 +69,7 @@ export async function stopLegacyScheduler(rest: Rest, userId: string, characterI
   for (const job of await active()) {
     const changed = await json<Job[]>(rest, `push_jobs?${scope}&id=eq.${encodeURIComponent(job.id)}&status=eq.pending&updated_at=eq.${encodeURIComponent(job.updated_at)}`, {
       method: "PATCH", headers: { Prefer: "return=representation" },
-      body: JSON.stringify({ status: "cancelled", result_note: "handed off to companion server", updated_at: new Date().toISOString() }),
+      body: JSON.stringify({ status: "cancelled", result_note: LEGACY_HANDOFF_NOTE, updated_at: new Date().toISOString() }),
     });
     if (!Array.isArray(changed) || changed.length !== 1) throw fail("旧预约状态在交接时变化，请重试；未启用 VPS");
   }

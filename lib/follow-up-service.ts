@@ -5,7 +5,7 @@
  * Messages are saved to storage; UI is notified via CustomEvent.
  */
 
-import { loadInstalledCustomApps, readCustomAppCollection } from "./custom-app-storage";
+import { isGuanianServerWake } from "./guanian-wake-ownership";
 import { stripChatSilenceMarker } from "./chat-silence-protocol";
 import {
     loadChatSessions,
@@ -671,10 +671,7 @@ async function fireIdleReconnect(rule: IdleReconnectRule, lastUserAt: number) {
 async function fireTimedWake(sched: TimedWakeSchedule) {
     timedWakeFiringSet.add(sched.id);
     removeTimedWakeSchedule(sched.id);
-    const serverOwned = loadInstalledCustomApps().some(app => app.manifest.id === "gua.nian"
-        && sched.id.startsWith(`timed_wake_capp_${app.id}_`)
-        && readCustomAppCollection(app.id, "settings")[0]?.serverBrain === true);
-    if (serverOwned) { timedWakeFiringSet.delete(sched.id); return; }
+    if (isGuanianServerWake(sched)) { timedWakeFiringSet.delete(sched.id); return; }
     // 本地接手触发：撤销服务端兜底预约（生成中被杀由发送保险单接管）
     cancelBailoutKey(`timedwake:${sched.id}`);
 

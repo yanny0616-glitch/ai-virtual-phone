@@ -15,6 +15,17 @@ export function createRest(config: Pick<Config, "personalUrl" | "personalKey">, 
   });
 }
 
+/** 个人云 REST 以外的地址（functions/v1、storage/v1、realtime/v1），path 不带前导斜杠 */
+export type Cloud = (path: string, init?: RequestInit) => Promise<Response>;
+
+export function createCloud(config: Pick<Config, "personalUrl" | "personalKey">, fetchImpl: typeof fetch = fetch): Cloud {
+  return (path, init = {}) => fetchImpl(`${config.personalUrl}/${path}`, {
+    ...init,
+    headers: { apikey: config.personalKey, Authorization: `Bearer ${config.personalKey}`, ...(init.headers as Record<string, string> | undefined) },
+    signal: init.signal ?? AbortSignal.timeout(30_000),
+  });
+}
+
 export async function restJson<T>(rest: Rest, path: string): Promise<T> {
   const response = await rest(path);
   if (!response.ok) throw new Error(`个人云读取失败 ${response.status}：${path.split("?")[0]}`);

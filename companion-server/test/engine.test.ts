@@ -10,12 +10,13 @@ const at = (local: string) => Date.parse(local + ":00+08:00");
 
 type Call = { path: string; method: string; body?: unknown };
 
-function setup(mode: Mode, startLocal: string, template = false) {
-  const store = new Store(":memory:");
+function setup(mode: Mode, startLocal: string, template = false, storePath = ":memory:") {
+  const store = new Store(storePath);
   let now = at(startLocal);
   const calls: Call[] = [];
   const modelCalls: string[] = [];
   const pushes: PushMessage[][] = [];
+  const delivered: any[] = [];
   const messages = [
     { id: "m1", role: "user", content: "我去上班了", message_at: new Date(at("2026-09-16T12:00")).toISOString() },
     { id: "m2", role: "assistant", content: "路上小心", message_at: new Date(at("2026-09-16T12:01")).toISOString() },
@@ -24,7 +25,15 @@ function setup(mode: Mode, startLocal: string, template = false) {
   const rest = async (path: string, init: RequestInit = {}) => {
     const method = init.method || "GET";
     calls.push({ path, method, body: init.body ? JSON.parse(String(init.body)) : undefined });
-    if (method === "POST") return new Response(null, { status: 201 });
+    if (path === "rpc/push_generation_lease") return json(true);
+    if (method === "POST") {
+      if (path === "push_outbox") delivered.push(...JSON.parse(String(init.body)));
+      return new Response(null, { status: 201 });
+    }
+    if (path.startsWith("push_outbox?")) {
+      const trigger = new URLSearchParams(path.split("?")[1]).get("trigger_key");
+      return json(trigger ? delivered.filter(o => "eq." + o.trigger_key === trigger) : delivered);
+    }
     if (path.startsWith("push_chat_mirror?") && path.includes("media_type.is.null,and(")) return json(messages);
     return json([]);
   };
@@ -154,6 +163,8 @@ test("outbox 503 恢复 pending，五分钟后重试成功", async () => {
     assert.match(env.store.getTimer(item.wakeId)!.note, /tries:1/);
     env.setNow("2026-09-16T16:07"); await env.tick();
     assert.equal(writes, 2);
+    assert.equal(env.modelCalls.filter(x => !x.includes("后台判断任务")).length, 1, "投递重试不重新生成");
+    assert.equal(env.store.getDraft(item.wakeId), null);
     assert.equal(env.store.getTimer(item.wakeId)!.status, "done");
   } finally { env.store.close(); }
 });
@@ -325,5 +336,364 @@ test("撤销在排队：发送前看到就不发；成文期间看到就放回�
     assert.equal(env.store.claimTimer(item.wakeId), true);
     env.store.updateTimer(item.wakeId, { status: "cancelled" });
     assert.equal(env.store.claimTimer(item.wakeId), false);
+  } finally { env.store.close(); }
+});
+
+test("生成日程使用独立回看窗口，包含线下取消摘要并限制线上轮数", async () => {
+  const { generateDayNow } = await import("../src/engine.ts");
+  const e=setup("live","2026-09-16T15:00");
+  try {
+    const c=e.store.getCharacter(CID)!;c.settings.onlineRounds=1;c.settings.offlineRounds=1;e.store.saveCharacter(c);
+    const original=e.deps.rest;let summaryReads=0;
+    e.deps.rest=async(path,init)=>{
+      if(path.includes("media_type=eq.offline_summary")) {summaryReads++;return Response.json([{id:"offline-cancel",role:"user",content:"线下明确取消今晚健身",media_type:"offline_summary",message_at:new Date(at("2026-09-16T14:00")).toISOString()}]);}
+      if(path.includes("media_type.is.null,and(")) return Response.json([
+        {id:"old",role:"user",content:"旧线上轮不应出现",message_at:new Date(at("2026-09-16T12:00")).toISOString()},
+        {id:"new",role:"user",content:"最新线上轮",message_at:new Date(at("2026-09-16T13:00")).toISOString()}]);
+      return original(path,init);
+    };
+    let prompt="";e.deps.fetchModel=async(_url,init)=>{prompt=String(init.body);return Response.json({content:[{type:"text",text:JSON.stringify({schedule:[{time:"16:00",title:"工作"}]})}]});};
+    await generateDayNow(e.deps,CID,"2026-09-16");
+    assert.equal(summaryReads,1);assert.match(prompt,/线下明确取消今晚健身/);assert.match(prompt,/线下摘要/);assert.match(prompt,/最新线上轮/);assert.doesNotMatch(prompt,/旧线上轮不应出现/);
+  }finally{e.store.close();}
+});
+
+test("正文已落盘：进程重启后沿用正文、生成时间、消息 ID，只重试投递", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "companion-draft-"));
+  const path = join(dir, "state.db");
+  const e = setup("live", "2026-09-16T15:00", false, path);
+  try {
+    await e.tick();
+    const wakeId = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+    const rest = e.deps.rest;
+    let down = true;
+    e.deps.rest = async (p, init) => p === "push_outbox" && down ? new Response("down", { status: 503 }) : rest(p, init);
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    const draft = e.store.getDraft(wakeId)!;
+    assert.ok(draft);
+    // 模拟生成进程未能执行外层恢复逻辑便退出。
+    e.store.updateTimer(wakeId, { status: "running" });
+    e.store.close();
+    e.deps.store = new Store(path);
+    assert.equal(e.deps.store.recoverRunningTimers(), 1);
+    const c = e.deps.store.getCharacter(CID)!;
+    c.settings.busyMaxHoldMin = 1; // 正文已成形，不再按等待淡去重新生成/作罢。
+    e.deps.store.saveCharacter(c);
+    down = false;
+    e.setNow("2026-09-16T16:20"); await e.tick();
+    const written = e.calls.find(c => c.path === "push_outbox" && c.method === "POST")!.body as any[];
+    assert.deepEqual([written[0].id, written[0].raw_text, written[0].created_at], [draft.outboxId, draft.rawText, draft.createdAt]);
+    assert.equal(e.modelCalls.filter(x => !x.includes("后台判断任务")).length, 1);
+    assert.equal(e.deps.store.pendingFeedback(CID).length, 1);
+    assert.equal(e.deps.store.pendingFeedback(CID)[0].sentAt, at("2026-09-16T16:20"));
+    const { lastProactiveAt } = await import("../src/history.ts");
+    assert.equal(lastProactiveAt({ messages: [], outputs: written, lastGeneratedAt: 0 }), at("2026-09-16T16:20"));
+    assert.equal(e.deps.store.getTimer(wakeId)!.status, "done");
+    assert.equal(e.deps.store.getDraft(wakeId), null);
+  } finally { e.deps.store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("已经暂存的正文仍尊重取消/停用，不会重试发出去", async () => {
+  for (const cancel of [true, false]) {
+    const e = setup("live", "2026-09-16T15:00");
+    try {
+      await e.tick();
+      const rest = e.deps.rest;
+      e.deps.rest = async (p, init) => p === "push_outbox" ? new Response("down", { status: 503 }) : rest(p, init);
+      e.setNow("2026-09-16T16:01"); await e.tick();
+      const row = e.store.getDay(CID, "2026-09-16")!;
+      assert.ok(e.store.getDraft(row.items[0].wakeId));
+      if (cancel) { row.items[0].act = false; e.store.saveDay(row); }
+      else { const c = e.store.getCharacter(CID)!; c.enabled = false; e.store.saveCharacter(c); }
+      e.deps.rest = rest;
+      e.setNow("2026-09-16T16:07"); await e.tick();
+      assert.equal(e.pushes.length, 0);
+      assert.equal(e.modelCalls.filter(x => !x.includes("后台判断任务")).length, 1);
+      assert.equal(e.calls.filter(x => x.path === "push_outbox").length, 0);
+    } finally { e.store.close(); }
+  }
+});
+
+test("旧云端占用会话时延期不计失败；取得租约后模型使用刚更新的聊天", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    await e.tick();
+    const id = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+    const rest = e.deps.rest;
+    let busy = true, claimed = false;
+    e.deps.rest = async (p, init) => {
+      if (p === "rpc/push_generation_lease") {
+        const action = JSON.parse(String(init?.body)).p_action;
+        if (action === "claim") { claimed = !busy; return Response.json(!busy); }
+        return Response.json(true);
+      }
+      if (claimed && p.startsWith("push_chat_mirror?")) return Response.json([{ id: "fresh", role: "user", content: "刚刚改成明天去公园", message_at: new Date(at("2026-09-16T16:01")).toISOString() }]);
+      return rest(p, init);
+    };
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    assert.equal(e.store.getTimer(id)!.fireAt, at("2026-09-16T16:02"));
+    assert.doesNotMatch(e.store.getTimer(id)!.note, /tries:/);
+    assert.equal(e.modelCalls.filter(x => !x.includes("后台判断任务")).length, 0);
+    busy = false;
+    e.setNow("2026-09-16T16:03"); await e.tick();
+    assert.match(e.modelCalls.find(x => !x.includes("后台判断任务"))!, /刚刚改成明天去公园/);
+  } finally { e.store.close(); }
+});
+
+test("成文后失去租约：保存正文但不投递，重新取得租约后不重复生成", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    await e.tick();
+    const id = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+    const rest = e.deps.rest;
+    let renews = 0, fail = true;
+    e.deps.rest = async (p, init) => {
+      if (p === "rpc/push_generation_lease") {
+        const action = JSON.parse(String(init?.body)).p_action;
+        return Response.json(!(action === "renew" && ++renews >= 2 && fail));
+      }
+      return rest(p, init);
+    };
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    assert.ok(e.store.getDraft(id));
+    assert.equal(e.pushes.length, 0);
+    assert.equal(e.store.getTimer(id)!.status, "pending");
+    fail = false;
+    e.setNow("2026-09-16T16:07"); await e.tick();
+    assert.equal(e.modelCalls.filter(x => !x.includes("后台判断任务")).length, 1);
+    assert.equal(e.pushes.length, 1);
+  } finally { e.store.close(); }
+});
+
+test("挂念与事件唤醒真实入口共用租约：前者生成时后者保留事件，完成后读到前者回复", async () => {
+  const { WakeService } = await import("../src/wake.ts");
+  const e = setup("live", "2026-09-16T15:00");
+  let unblock!: () => void;
+  const blocked = new Promise<void>(r => { unblock = r; });
+  let entered!: () => void;
+  const started = new Promise<void>(r => { entered = r; });
+  try {
+    await e.tick();
+    const rest = e.deps.rest, model = e.deps.fetchModel;
+    let held = "", shouldBlock = true, ack = 0;
+    e.deps.rest = async (p, init) => {
+      if (p === "rpc/push_generation_lease") {
+        const { p_token: token, p_action: action } = JSON.parse(String(init?.body));
+        if (action === "claim") { if (held) return Response.json(false); held = token; return Response.json(true); }
+        if (action === "renew") return Response.json(held === token);
+        if (held === token) held = "";
+        return Response.json(true);
+      }
+      return rest(p, init);
+    };
+    e.deps.fetchModel = async (url, init) => {
+      if (shouldBlock && !String(init.body).includes("后台判断任务")) { shouldBlock = false; entered(); await blocked; }
+      return model(url, init);
+    };
+    const snap = e.store.getSnapshot(CID, "chat")!;
+    e.store.saveWakeTemplate({ sourceId: "source", characterId: CID, sessionId: "sess1", capturedAt: snap.capturedAt,
+      request: { ...snap.request, body: { model: "m", messages: [{ role: "user", content: "__EVENT__" }] } }, placeholder: "__EVENT__", protocol: "none",
+      toolNames: {}, schemaText: {}, mcp: null, maxRounds: 1, notify: snap.notify, merge: snap.merge });
+    const event = { id: "e1", messageId: "msg1", sourceId: "source", serverId: "source", characterId: CID, mode: "server", message: "看看新通知", reason: "new", createdAt: new Date(e.deps.now()).toISOString() };
+    const service = new WakeService(e.deps, async body => body.action === "events" ? { events: [event], sources: [] } : (ack++, { acceptedIds: [event.id] }));
+    e.setNow("2026-09-16T16:01");
+    const sending = e.tick();
+    await started;
+    assert.equal(await service.poll(), 0);
+    assert.equal(ack, 0);
+    unblock(); await sending;
+    assert.equal(held, "");
+    assert.equal(await service.poll(), 1);
+    assert.equal(ack, 1);
+    assert.match(e.modelCalls.at(-1)!, /下午忙不忙呀/);
+    assert.equal(held, "");
+  } finally { unblock(); e.store.close(); }
+});
+
+test("影子模式遇到已成文草稿不投递、不调用租约、不消耗失败重试", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    await e.tick();
+    const rest = e.deps.rest;
+    e.deps.rest = async (p, init) => p === "push_outbox" ? new Response("down", { status: 503 }) : rest(p, init);
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    const id = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+    assert.ok(e.store.getDraft(id));
+    const posts = e.calls.filter(c => c.method === "POST").length;
+    e.setNow("2026-09-16T16:07");
+    const trace = await tickCharacter(e.deps, "shadow", CID);
+    assert.equal(trace.error, undefined);
+    assert.equal(e.calls.filter(c => c.method === "POST").length, posts);
+    assert.equal(e.pushes.length, 0);
+    assert.equal(e.store.getTimer(id)!.status, "shadow");
+    assert.ok(e.store.getDraft(id));
+  } finally { e.store.close(); }
+});
+
+test("作罢的成文仍记录模型用量，但不暂存/投递正文", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    await e.tick();
+    e.deps.fetchModel = async () => Response.json({ content: [{ type: "text", text: "[挂念作罢：聊天已提过]" }] });
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    assert.equal(e.calls.filter(c => c.path === "rpc/ai_phone_usage_add" && (c.body as any).p_source === "cloud-wake").length, 1);
+    assert.equal(e.pushes.length, 0);
+    assert.equal(e.store.getDraft(e.store.getDay(CID, "2026-09-16")!.items[0].wakeId), null);
+  } finally { e.store.close(); }
+});
+
+// ─── 发送分流：来电 / 发到微信 / 快捷动作（delivery.ts、shortcut-resume.ts）
+
+function withChatReply(env: ReturnType<typeof setup>, reply: string) {
+  const original = env.deps.fetchModel;
+  const bodies: string[] = [];
+  env.deps.fetchModel = async (u, init) => {
+    const body = String(init.body);
+    if (body.includes("后台判断任务")) return original(u, init);
+    bodies.push(body);
+    return Response.json({ content: [{ type: "text", text: reply }], usage: { input_tokens: 1, output_tokens: 1 } });
+  };
+  return bodies;
+}
+
+function patchSnapshot(env: ReturnType<typeof setup>, patch: (s: any) => void) {
+  const snap = env.store.getSnapshot(CID, "chat")!;
+  patch(snap);
+  env.store.saveSnapshot(snap);
+}
+
+test("来电：模板占位按 20 小时频控放说明，标记剥掉，推单条来电通知", async () => {
+  const env = setup("live", "2026-09-16T15:00", true);
+  try {
+    patchSnapshot(env, s => { s.request.body.messages.push({ role: "user", content: "__GUANIAN_CALL_INVITE__" }); });
+    await env.tick();
+    const bodies = withChatReply(env, "[我向你发起了语音通话]\n想听听你的声音");
+    env.setNow("2026-09-16T16:01"); await env.tick();
+    assert.match(bodies[0], /可选能力：如果你此刻更想直接给对方打语音电话/);
+    assert.doesNotMatch(bodies[0], /__GUANIAN_CALL_INVITE__/);
+    const out = env.calls.find(c => c.method === "POST" && c.path === "push_outbox")!.body as any[];
+    assert.equal(out[0].raw_text, "想听听你的声音");
+    assert.equal(env.pushes[0].length, 1);
+    assert.equal(env.pushes[0][0].type, "incoming_call");
+    assert.equal(env.pushes[0][0].sessionId, "sess1");
+    assert.match(env.pushes[0][0].url!, /^\/\?ring=sess1&rt=\d+$/);
+    assert.ok(Number(env.store.getCharacter(CID)!.state.callInviteAt) > 0);
+  } finally { env.store.close(); }
+});
+
+function fakeCloud(opts: { weixinOk?: boolean; created?: boolean } = {}) {
+  const calls: { path: string; body: any }[] = [];
+  const cloud = async (path: string, init: RequestInit = {}) => {
+    calls.push({ path, body: init.body ? JSON.parse(String(init.body)) : undefined });
+    if (path.startsWith("storage/v1/object/ai-phone-backup/weixin-cloud/cron-secret.json")) return Response.json({ token: "wx-secret" });
+    if (path === "functions/v1/weixin-assistant") return Response.json({ ok: opts.weixinOk !== false, ...(opts.weixinOk === false ? { error: "bot offline" } : {}) });
+    if (path.includes("action=shortcut-create")) return Response.json(opts.created === false ? { ok: false, error: "too many" } : { ok: true, command: { id: "cmd_1" }, resultUrl: "https://r" });
+    if (path.includes("action=shortcut-deliver")) return Response.json({ ok: true, delivered: true });
+    return new Response("{}", { status: 404 });
+  };
+  return { cloud, calls };
+}
+
+test("发到微信：送成了不进聊天 outbox、记发送；送失败改发到聊天", async () => {
+  for (const ok of [true, false]) {
+    const env = setup("live", "2026-09-16T15:00", true);
+    try {
+      patchSnapshot(env, s => { s.weixin = { botId: "bot1" }; });
+      await env.tick();
+      const fc = fakeCloud({ weixinOk: ok });
+      env.deps.cloud = fc.cloud; env.deps.cloudKey = "k";
+      withChatReply(env, "【发到微信】\n在忙吗");
+      env.setNow("2026-09-16T16:01"); await env.tick();
+      const wx = fc.calls.find(c => c.path === "functions/v1/weixin-assistant")!;
+      assert.deepEqual(wx.body, { action: "send-text", token: "wx-secret", bot: "bot1", text: "在忙吗" });
+      const outbox = env.calls.filter(c => c.method === "POST" && c.path === "push_outbox");
+      const item = env.store.getDay(CID, "2026-09-16")!.items[0];
+      assert.equal(env.store.getTimer(item.wakeId)!.status, "done");
+      assert.equal(env.store.getDraft(item.wakeId), null);
+      if (ok) {
+        assert.equal(outbox.length, 0);
+        assert.equal(env.store.pendingFeedback(CID).length, 1);
+        assert.match(env.store.lastDecision(CID, "send")!.note, /发到微信了：在忙吗/);
+      } else {
+        assert.equal(outbox.length, 1);
+        assert.equal((outbox[0].body as any[])[0].raw_text, "在忙吗");
+      }
+    } finally { env.store.close(); }
+  }
+});
+
+test("快捷动作：建命令、outbox 带标记位置、先推消息再投递命令、挂续跑；结果回来后端生成第二轮", async () => {
+  const env = setup("live", "2026-09-16T15:00", true);
+  try {
+    patchSnapshot(env, s => {
+      s.shortcutContinuation = {
+        request: { ...structuredClone(s.request), body: { model: "m", messages: [{ role: "user", content: "你当时想着：“__GUANIAN_INTENT__”" }, { role: "assistant", content: "__REPLY__" }, { role: "user", content: "__RESULT__" }, { role: "user", content: "__IMAGE__" }] } },
+        replyMarker: "__REPLY__", resultMarker: "__RESULT__", imageMarker: "__IMAGE__", visionEnabled: true,
+      };
+    });
+    await env.tick();
+    const fc = fakeCloud();
+    env.deps.cloud = fc.cloud; env.deps.cloudKey = "k";
+    const baseRest = env.deps.rest;
+    let commandStatus = "pending";
+    env.deps.rest = async (path, init) => {
+      if (path.startsWith("push_bridge_config?")) return Response.json([{ shortcut_actions: [{ actionId: "a1", name: "查天气", shortcutName: "Weather", resultMode: "text", deliveryMode: "push", expiresInSeconds: 120 }] }]);
+      if (path.startsWith("push_server_config?")) return Response.json([{ site_origin: "https://float.example" }]);
+      if (path.startsWith("push_outbox?") && path.includes("&id=eq.")) {
+        const id = new URLSearchParams(path.split("?")[1]).get("id")!.slice(3);
+        return Response.json(env.calls.filter(c => c.method === "POST" && c.path === "push_outbox").flatMap(c => c.body as any[]).filter(o => o.id === id));
+      }
+      if (path.startsWith("push_shortcut_commands?")) return Response.json([{ id: "cmd_1", status: commandStatus, action_name: "查天气", result_mode: "text", result: { text: "晴，26 度" }, error: null, expires_at: new Date(env.deps.now() + 60_000).toISOString() }]);
+      return baseRest(path, init);
+    };
+    withChatReply(env, "我帮你看看天气\n【快捷动作：查天气({\"city\":\"上海\"})】\n等我一下");
+    env.setNow("2026-09-16T16:01"); await env.tick();
+
+    const create = fc.calls.find(c => c.path.includes("shortcut-create"))!;
+    assert.deepEqual(create.body.arguments, { city: "上海" });
+    assert.equal(create.body.deferDelivery, true);
+    const out = (env.calls.find(c => c.method === "POST" && c.path === "push_outbox")!.body as any[])[0];
+    assert.equal(out.raw_text, "我帮你看看天气\n\n等我一下");
+    assert.equal(out.meta.shortcutMarker.name, "查天气");
+    assert.equal(out.meta.shortcutMarker.insertAt, "我帮你看看天气\n".length);
+    assert.ok(fc.calls.some(c => c.path.includes("shortcut-deliver") && c.body.commandId === "cmd_1"));
+
+    const { runShortcutResumes } = await import("../src/shortcut-resume.ts");
+    // 还没跑完：往后排，不调模型
+    env.setNow("2026-09-16T16:02");
+    const second = withChatReply(env, "上海今天晴，26 度，出门不用带伞【快捷动作：查天气】");
+    assert.equal(await runShortcutResumes(env.deps), 0);
+    assert.equal(second.length, 0);
+    commandStatus = "succeeded";
+    env.setNow("2026-09-16T16:03");
+    assert.equal(await runShortcutResumes(env.deps), 1);
+    assert.match(second[0], /我帮你看看天气/);
+    assert.match(second[0], /<action_result name=\\"查天气\\">晴，26 度<\/action_result>/);
+    assert.match(second[0], /该动作没有图片回传/);
+    const resumed = env.calls.filter(c => c.method === "POST" && c.path === "push_outbox").map(c => (c.body as any[])[0]).find(o => o.trigger_key === "shortcut:cmd_1");
+    assert.equal(resumed.raw_text, "上海今天晴，26 度，出门不用带伞");
+    assert.equal(resumed.meta.shortcutCommandId, "cmd_1");
+    assert.equal(env.store.dueResumes(Infinity).length, 0);
+  } finally { env.store.close(); }
+});
+
+test("快捷动作建过但结果未确认（重启）：不重复建命令，照常发消息并落诊断", async () => {
+  const env = setup("live", "2026-09-16T15:00", true);
+  try {
+    await env.tick();
+    const item = env.store.getDay(CID, "2026-09-16")!.items[0];
+    env.store.saveDraft({ wakeId: item.wakeId, userId: "u1", sessionId: "sess1", outboxId: "out_x", createdAt: new Date(at("2026-09-16T16:00")).toISOString(), rawText: "好",
+      meta: {}, notify: { title: "赵兖", url: "/" }, shortcut: { text: "【快捷动作：查天气】", insertAt: 1, name: "查天气", args: {} }, shortcutTried: true });
+    const fc = fakeCloud();
+    env.deps.cloud = fc.cloud; env.deps.cloudKey = "k";
+    env.setNow("2026-09-16T16:01"); await env.tick();
+    assert.equal(fc.calls.filter(c => c.path.includes("shortcut-create")).length, 0);
+    const posts = env.calls.filter(c => c.method === "POST" && c.path === "push_outbox").map(c => (c.body as any[])[0]);
+    assert.equal(posts[0].raw_text, "好");
+    assert.equal(posts[0].meta.shortcutMarker, undefined);
+    assert.equal(posts[1].meta.kind, "shortcut_delivery_error");
   } finally { env.store.close(); }
 });

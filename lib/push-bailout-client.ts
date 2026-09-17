@@ -3,6 +3,7 @@
 // App 被杀则由服务端 cron 到点接管生成并推送。组装用的就是前台同一条
 // buildChatPromptMessages → buildProviderRequest 链路，零新逻辑。
 
+import { isGuanianServerWake } from "./guanian-wake-ownership";
 import { bgSetInterval } from "./bg-timer";
 import { buildChatPromptMessages } from "./chat-engine";
 import { buildProviderRequest, toLlmRequestMessages, type LlmRequestPayload } from "./llm-provider-adapter";
@@ -24,7 +25,7 @@ import {
     loadMenstrualRecords,
     type MenstrualPeriodCareEvent,
 } from "./menstrual-storage";
-import { isGuanianTemplateWake, loadTimedWakeSchedules, type TimedWakeSchedule } from "./timed-wake-storage";
+import { isGuanianTemplateWake, loadTimedWakeSchedules, removeTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
 import {
     IDLE_RECONNECT_MAX_CONSECUTIVE,
     loadIdleReconnectRules,
@@ -508,6 +509,13 @@ export async function armIdleReconnectBailout(rule: IdleReconnectRule): Promise<
 /** 定时唤醒（稍后主动联系）兜底：创建/刷新时把到点生成预约到服务端。
  *  "已过X分钟"的语境按预定触发时刻精确烤入。 */
 export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<BailoutArmResult> {
+    const serverOwned = (): boolean => {
+        if (!isGuanianServerWake(schedule)) return false;
+        // 只退掉本地登记，不删除云端任务/发送凭据，也避免切回本机时复活旧预约。
+        removeTimedWakeSchedule(schedule.id);
+        return true;
+    };
+    if (serverOwned()) return { ok: false, reason: "挂念已由 VPS 接管" };
     if (!bailoutEnabled()) return { ok: false, reason: "当前环境不支持服务端离线预约" };
     try {
         const templateOnly = isGuanianTemplateWake(schedule);
@@ -532,6 +540,8 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
             const req = buildProviderRequest(config, preset, toLlmRequestMessages(messages));
             return { url: req.url, headers: req.headers, body: req.body, providerKind: req.providerKind };
         }, config.enableImageRecognition === true);
+        // 组装快照期间可能刚完成交接，写云端前再次核对。
+        if (serverOwned()) return { ok: false, reason: "挂念已由 VPS 接管" };
         const posted = await postBailoutJob({
             triggerKey: `timedwake:${schedule.id}`,
             kind: "timed_task",
@@ -625,6 +635,8 @@ export async function armTemplateBailout(input: {
 /** 挂念后端的聊天模板：意图和「多久前决定的」留占位，后端到点替换成真实值。 */
 export const COMPANION_INTENT_PLACEHOLDER = "__GUANIAN_INTENT__";
 export const COMPANION_ELAPSED_MARK = 424242;
+/** 来电能力占位：后端到点按 20 小时频控换成「可以打电话」说明或「照常发消息」（companion-server/src/delivery.ts） */
+export const COMPANION_CALL_INVITE_PLACEHOLDER = "__GUANIAN_CALL_INVITE__";
 
 /**
  * 聊天模板：和定时唤醒同款（聊天 APP、带完整聊天记录），但不到点发送，只给 VPS 上的挂念后端当发消息的底稿。
@@ -641,7 +653,15 @@ export async function armCompanionChatTemplate(input: { triggerKey: string; sess
             history,
             { appTags, timedWakeElapsedMinutes: COMPANION_ELAPSED_MARK, timedWakeIntent: COMPANION_INTENT_PLACEHOLDER },
         );
+        // 与定时唤醒同样的离线能力：来电（频控由后端到点决定，这里只留占位）、快捷动作、改送真实微信
+        llmMessages.push({ role: "system", content: COMPANION_CALL_INVITE_PLACEHOLDER });
+        maybeAppendShortcutCapability(llmMessages, { continuationAvailable: true });
+        const weixinBotId = maybeAppendWeixinChannel(llmMessages, character.id);
         const request = buildProviderRequest(config, preset, toLlmRequestMessages(llmMessages));
+        const shortcutContinuation = buildOfflineShortcutContinuation(llmMessages, messages => {
+            const req = buildProviderRequest(config, preset, toLlmRequestMessages(messages));
+            return { url: req.url, headers: req.headers, body: req.body, providerKind: req.providerKind };
+        }, config.enableImageRecognition === true);
         const posted = await postBailoutJob({
             triggerKey: input.triggerKey,
             kind: "template",
@@ -649,6 +669,8 @@ export async function armCompanionChatTemplate(input: { triggerKey: string; sess
             request,
             notifyTitle: character.name,
             notifyCharacterId: character.id,
+            weixinBotId,
+            shortcutContinuation,
             merge: {
                 sessionId: input.session.id,
                 onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },

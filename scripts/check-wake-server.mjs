@@ -56,7 +56,8 @@ try {
   const store = new Store(":memory:");
   const outbox = [], pushes = [], modelBodies = [];
   const rest = async (p, init) => {
-    if (p.startsWith("push_outbox")) { outbox.push(...JSON.parse(init.body)); return new Response("", { status: 201 }); }
+    if (p === "rpc/push_generation_lease") return Response.json(true);
+    if (p.startsWith("push_outbox") && init?.method === "POST") { outbox.push(...JSON.parse(init.body)); return new Response("", { status: 201 }); }
     return new Response("[]", { status: 200 });
   };
   const replies = [

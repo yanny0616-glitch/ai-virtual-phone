@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { stripTypeScriptTypes } from 'node:module';
 const read = path => readFile(new URL('../' + path, import.meta.url), 'utf8');
 const settings = await read('custom-apps/gua-nian/src/ui/settings.js');
 const server = await read('custom-apps/gua-nian/src/cloud/server.js');
@@ -74,6 +75,7 @@ for (const outcome of ['confirmed', 'queued', 'network', 'unconfirmed']) {
 console.log('VPS 启用交接：确认旧调度停止后才保存/启用，草稿连接及失败路径通过');
 
 // 运行真实本地定时发送入口的保护段：VPS 接管后不发消息，也不删云端凭据。
+const ownership = (await read('lib/guanian-wake-ownership.ts')).replace(/^import .*;\n/m, '').replace('export ', '').replace('schedule: { id: string }', 'schedule');
 const follow = await read('lib/follow-up-service.ts');
 const guard = follow.slice(follow.indexOf('async function fireTimedWake('),follow.indexOf('    // 本地接手触发：撤销服务端兜底预约'))
   .replace('sched: TimedWakeSchedule','sched') + '\nreturn "legacy";\n}';
@@ -81,7 +83,7 @@ for (const owned of [true,false]) {
   const removed=[];const firing=new Set();
   const ctx=vm.createContext({timedWakeFiringSet:firing,removeTimedWakeSchedule:id=>removed.push(id),
     loadInstalledCustomApps:()=>[{id:'app_gua.nian_01',manifest:{id:'gua.nian'}}],readCustomAppCollection:()=>[{serverBrain:owned}]});
-  vm.runInContext(guard,ctx);
+  vm.runInContext(stripTypeScriptTypes(ownership + "\n" + guard),ctx);
   const id='timed_wake_capp_app_gua.nian_01_123_x';
   const result=await ctx.fireTimedWake({id});assert.equal(result,owned?undefined:'legacy');assert.deepEqual(removed,[id]);
 }
