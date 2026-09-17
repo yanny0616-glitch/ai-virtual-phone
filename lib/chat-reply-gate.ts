@@ -50,7 +50,8 @@ export type ReplyGateDecision =
     | { kind: "delay"; until: number; note: string; reason: "sleep" | "busy" | "distracted"; what?: string; busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean };
 
 export type DeferredReply = {
-    cloud?: { key: string; projectUrl: string; revision: number; syncedRevision: number; acceptedMessageId?: string; attempted: boolean; cancelRequested?: boolean; state: "syncing" | "active" | "running" | "error" | "done" | "failed" | "cancelled" };
+    /** line：这一轮建在哪边（server = companion-server），建好后不随开关搬家 */
+    cloud?: { key: string; line?: "server"; projectUrl: string; revision: number; syncedRevision: number; acceptedMessageId?: string; attempted: boolean; cancelRequested?: boolean; state: "syncing" | "active" | "running" | "error" | "done" | "failed" | "cancelled" };
     until: number; note: string; firedAt?: number;
     characterId?: string; reason?: "sleep" | "busy";
     busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean;

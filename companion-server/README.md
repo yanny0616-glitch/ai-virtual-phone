@@ -109,11 +109,17 @@ CLI：`node src/cli.ts diagnose | push-test | status | import [--force] | mode s
 
 不重复发：同一 triggerKey 只挂一边。手机重挂时先撤另一边、确认后才挂（`lib/offline-jobs-client.ts`）；后端到点前再查个人云同名任务——正在跑就等，比这条新或这条挂上后已处理过就不发，更早的待发就撤掉它。
 
+忙碌回复（`deferred:*`）走 `POST /app/jobs/deferred`，协议照搬个人云网关 `deferred-reply`：回执带 revision / acceptedMessageId，改版只换快照不重置时钟，撤销留 cancelled 墓碑。到点先按 `src/reply-timing.ts`（照抄 `lib/deferred-reply-timing.ts`，测试核对一致）判断现在回不回，不回就改期；回的时候补最新聊天并把回复接在最新一条用户消息后面。一轮建在哪边就在哪边收尾（手机记在 `cloud.line`）。
+
+### 微信助手（`src/weixin.ts`）
+
+「离线执行」选后端且微信自动回复开着时，后端每 12 秒轮询一次，代替个人云的 `weixin-assistant` 云函数。核心逻辑是同一份：优先用小手机同步到桶里的 `weixin-cloud/function-core.mjs`，读不到或协议版本不对用 `src/vendor/weixin-assistant-core.mjs`（`npm run weixin:build-dist` 同步，测试核对一致）。开关和心跳存 meta，重启后照旧。接口 `GET/POST /app/weixin`、`POST /app/weixin/run`。手机切开关时先开新的一边再关旧的，两边共用桶里的自动回复锁，不会重复回。
+
 ### 还在个人云执行的
 
-- 快捷命令网关本身（建命令、推运行通知、收结果回传：`ai-phone-push`、`push-shortcut-result`）和微信云助手，后端只当调用方
+- 快捷命令网关本身（建命令、推运行通知、收结果回传：`ai-phone-push`、`push-shortcut-result`）、微信主动发送（`weixin-assistant` 的 `send-text`），后端只当调用方
 - 「离线执行」选云端时的所有离线任务；选后端时，切换前已经排在云端、还没重挂的那几条
-- 忙碌回复插件的延后回复（`deferred:`）、在线快捷动作续跑（`shortcut_resume`）
+- 在线快捷动作续跑（`shortcut_resume`）、现实桥（`push-bridge`）、屏幕速聊（`screen-chat`）
 
 ## 配置
 

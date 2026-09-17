@@ -5,7 +5,8 @@
 //    供「下载本地助手包」在浏览器端打包；
 // 2. 把 assistant-core.mjs + cloud-function-wrapper.mjs 拼接成单文件云函数，
 //    写到 public/weixin-local-assistant/cloud-function.mjs（供「复制云函数代码」）
-//    和 supabase/functions/weixin-assistant/index.ts（供 supabase CLI 部署自测）。
+//    和 supabase/functions/weixin-assistant/index.ts（供 supabase CLI 部署自测）；
+// 3. 把 assistant-core.mjs 同步到 companion-server/src/vendor/（后端轮询桶里核心读不到时用）。
 // 源文件改动后运行 npm run weixin:build-dist；npm run build 也会自动执行。
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -49,9 +50,11 @@ writeFileSync(resolve(publicDir, "assistant.mjs"), shell);
 writeFileSync(resolve(publicDir, "assistant-core.mjs"), core);
 writeFileSync(resolve(publicDir, "cloud-function.mjs"), cloudFunction);
 writeFileSync(resolve(edgeFunctionDir, "index.ts"), cloudFunction);
+writeFileSync(resolve(root, "companion-server/src/vendor/weixin-assistant-core.mjs"), core);
 
 console.log("[weixin-assistant-dist] 已生成：");
 console.log("- public/weixin-local-assistant/assistant.mjs");
 console.log("- public/weixin-local-assistant/assistant-core.mjs");
 console.log("- public/weixin-local-assistant/cloud-function.mjs");
 console.log("- supabase/functions/weixin-assistant/index.ts");
+console.log("- companion-server/src/vendor/weixin-assistant-core.mjs");

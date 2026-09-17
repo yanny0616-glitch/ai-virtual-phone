@@ -7,6 +7,7 @@ import { buildProviderRequest, toLlmRequestMessages } from "./llm-provider-adapt
 import { maybeAppendShortcutCapability } from "./offline-shortcut-capability";
 import { getChatPluginRuntime } from "./chat-plugin-runtime";
 import type { CloudReplyTiming } from "./deferred-reply-timing";
+import { deferredReplyServerFetch, offlineJobsOnServer } from "./offline-jobs-client";
 
 const STATUS_EVENT = "deferred-reply-cloud-status";
 const locks = new Set<string>();
@@ -71,10 +72,13 @@ export function settleDeferredReplyDelivery(sessionId: string, key: string | nul
         writeDeferredReply(sessionId, { ...rec, firedAt: Date.now(), note: "", cloud: { ...rec.cloud, state: "done" } });
     }
 }
-async function request(method: string, key?: string, payload?: unknown): Promise<Receipt> {
-    const response = await personalPushFetch("deferred-reply", {
-        method, ...(payload ? { body: JSON.stringify({ payload }) } : {}), signal: AbortSignal.timeout(20_000),
-    }, key ? { key } : undefined);
+// 「离线执行」选后端时，新的一轮建在 companion-server；已经建好的一轮留在原来那边直到结束，两边不会各回一次。
+async function request(method: string, key?: string, payload?: unknown, line?: "server"): Promise<Receipt> {
+    const response = line === "server"
+        ? await deferredReplyServerFetch(method === "DELETE" ? "cancel" : method === "POST" ? "put" : "get", key, payload)
+        : await personalPushFetch("deferred-reply", {
+            method, ...(payload ? { body: JSON.stringify({ payload }) } : {}), signal: AbortSignal.timeout(20_000),
+        }, key ? { key } : undefined);
     const result = await response.json().catch(() => null) as Receipt | null;
     if (!response.ok || !result?.ok) throw new Error(result?.error || "离线等待未同步，请检查网络和云函数版本");
     return result;
@@ -85,7 +89,8 @@ export function queueDeferredReplyCloud(sessionId: string): void {
     const rec = readDeferredReply(sessionId);
     if (!rec || rec.firedAt || !isPersonalPushCloudActive()) return;
     const cloud = rec.cloud ?? { key: `deferred:${crypto.randomUUID()}`, projectUrl: loadPersonalPushCloudState()?.url ?? "", revision: 0, syncedRevision: 0, attempted: false, state: "syncing" as const };
-    writeDeferredReply(sessionId, { ...rec, cloud: { ...cloud, revision: Math.max(Date.now(), cloud.revision + 1), state: "syncing" } });
+    const line = cloud.attempted ? cloud.line : offlineJobsOnServer() ? "server" as const : undefined;
+    writeDeferredReply(sessionId, { ...rec, cloud: { ...cloud, line, revision: Math.max(Date.now(), cloud.revision + 1), state: "syncing" } });
     void sync(sessionId);
 }
 
@@ -100,6 +105,8 @@ async function sync(sessionId: string): Promise<void> {
     }
     locks.add(sessionId);
     const key = rec.cloud.key;
+    const line = rec.cloud.line;
+    const where = line === "server" ? "后端" : "云端";
     const current = () => {
         const value = readDeferredReply(sessionId);
         return value?.cloud?.key === key && !value.firedAt ? value : null;
@@ -107,21 +114,21 @@ async function sync(sessionId: string): Promise<void> {
     try {
         await getChatPluginRuntime().ensureReady();
         if (rec.cloud.cancelRequested) {
-            const receipt = await request("DELETE", key);
+            const receipt = await request("DELETE", key, undefined, line);
             if (receipt.status === "cancelled" || receipt.status === "missing") {
                 const latest = current();
                 if (latest) writeDeferredReply(sessionId, { ...latest, firedAt: Date.now(), note: "", cloud: { ...latest.cloud!, state: "cancelled" } });
-                notify(sessionId, "云端等待已取消，可以再次触发回复");
+                notify(sessionId, `${where}等待已取消，可以再次触发回复`);
             }
             return;
         }
         if (!rec.cloud.attempted) {
             const subscription = await hasAccountPushSubscription();
-            const capability = subscription ? await request("GET") : null;
+            const capability = subscription ? await request("GET", undefined, undefined, line) : null;
             if (!subscription || !capability?.supported || !capability?.policySupported) {
                 const latest = current();
                 if (latest && !latest.cloud!.attempted) writeDeferredReply(sessionId, { ...latest, cloud: undefined });
-                notify(sessionId, subscription ? "云函数尚不支持延后回复，请更新网关和 push-generate；本轮暂由小手机等待" : "未启用离线通知，本轮暂由小手机等待");
+                notify(sessionId, !subscription ? "未启用离线通知，本轮暂由小手机等待" : line === "server" ? "后端尚不支持延后回复，请更新 companion-server；本轮暂由小手机等待" : "云函数尚不支持延后回复，请更新网关和 push-generate；本轮暂由小手机等待");
                 return;
             }
         }
@@ -131,12 +138,12 @@ async function sync(sessionId: string): Promise<void> {
         const revision = rec.cloud.revision;
         const updating = revision > rec.cloud.syncedRevision;
         if (updating) {
-            if (rec.cloud.attempted && !(await request("GET")).policySupported) throw new Error("个人云尚不支持插件回复规则，请更新网关和 push-generate");
+            if (rec.cloud.attempted && !(await request("GET", undefined, undefined, line)).policySupported) throw new Error("个人云尚不支持插件回复规则，请更新网关和 push-generate");
             const session = loadChatSessions().find(s => s.id === sessionId && !s.isGroup);
             if (!session) throw new Error("聊天会话不存在，离线等待未同步");
             const history = loadChatMessages(sessionId);
             const { llmMessages, character, config, preset, regexes, userIdentity, allowSilence } = await buildChatPromptMessages(session, history, { appTags: ["chat", "text"] });
-            if (allowSilence && !(await request("GET")).silenceSupported) throw new Error("请更新支持沉默结果的个人云网关和 push-generate");
+            if (allowSilence && !(await request("GET", undefined, undefined, line)).silenceSupported) throw new Error("请更新支持沉默结果的个人云网关和 push-generate");
             maybeAppendShortcutCapability(llmMessages, { continuationAvailable: false });
             const req = buildProviderRequest(config, preset, toLlmRequestMessages(llmMessages));
             const latest = current();
@@ -153,8 +160,8 @@ async function sync(sessionId: string): Promise<void> {
                 merge: { sessionId, prevCount: 0, regexes, characterName: character.name, userName: userIdentity?.name ?? "用户",
                     appId: "chat", appTags: ["chat", "text"], tzOffsetMin: -new Date().getTimezoneOffset(), armAt: new Date().toISOString(),
                     ...(lastUser ? { replyAfterLocalMessageId: lastUser.id, replyAfterCreatedAt: lastUser.createdAt } : {}) },
-            });
-        } else receipt = await request("GET", key);
+            }, line);
+        } else receipt = await request("GET", key, undefined, line);
         const latest = current();
         if (!latest?.cloud) return;
         if (receipt.status === "missing") {
@@ -168,7 +175,7 @@ async function sync(sessionId: string): Promise<void> {
                 return;
             }
             writeDeferredReply(sessionId, { ...latest, firedAt: Date.now(), note: "", cloud: { ...latest.cloud, state: receipt.status as "done" | "failed" | "cancelled" } });
-            if (receipt.status === "failed") notify(sessionId, "云端延后回复失败，可重新触发回复；详情见云端任务日志");
+            if (receipt.status === "failed") notify(sessionId, `${where}延后回复失败，可重新触发回复；详情见${where}任务日志`);
             return;
         }
         const synced = receipt.status === "pending" && updating;
@@ -176,7 +183,7 @@ async function sync(sessionId: string): Promise<void> {
             cloud: { ...latest.cloud, syncedRevision: synced ? revision : latest.cloud.syncedRevision,
                 acceptedMessageId: receipt.acceptedMessageId || latest.cloud.acceptedMessageId,
                 state: receipt.status === "running" ? "running" : "active" } });
-        if (synced && latest.cloud.revision === revision && !latest.cloud.cancelRequested) notify(sessionId, "等待已同步云端，关闭小手机后仍会继续；补充消息和 API 配置已更新");
+        if (synced && latest.cloud.revision === revision && !latest.cloud.cancelRequested) notify(sessionId, `等待已同步${where}，关闭小手机后仍会继续；补充消息和 API 配置已更新`);
     } catch {
         const latest = current();
         if (latest?.cloud) {
@@ -204,7 +211,7 @@ export async function cancelDeferredReplyCloud(sessionId: string): Promise<boole
     }
     writeDeferredReply(sessionId, { ...rec, cloud: { ...rec.cloud, cancelRequested: true } });
     try {
-        const receipt = await request("DELETE", rec.cloud.key);
+        const receipt = await request("DELETE", rec.cloud.key, undefined, rec.cloud.line);
         if (!["cancelled", "missing", "done", "failed"].includes(receipt.status ?? "")) {
             notify(sessionId, "云端已开始处理本轮，等这次回复完成后再发送");
             return false;

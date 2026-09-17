@@ -1,4 +1,4 @@
-// 挂念后端入口：HTTP 接口 + 每分钟一轮的大脑 + 唤醒后端（每 15 秒领一次事件）。第一次启动时从个人云迁入设置、账本和提示词模板。
+// 挂念后端入口：HTTP 接口 + 每分钟一轮的大脑 + 唤醒后端（每 15 秒领一次事件）+ 离线任务 + 微信助手。第一次启动时从个人云迁入设置、账本和提示词模板。
 
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import { createApp } from "./server.ts";
 import { Store } from "./store.ts";
 import { createCloud, createRest, resolveUserId } from "./supabase.ts";
 import { localGateway, WakeService } from "./wake.ts";
+import { WeixinService } from "./weixin.ts";
 
 const config = loadConfig();
 
@@ -54,7 +55,9 @@ const wake = new WakeService(
   { store, rest, userId, fetchModel: (url, init) => fetch(url, init), push: engine.push, now: () => Date.now(), log: line => console.log(line) },
   localGateway(config.wakeGatewayUrl, config.wakeGatewayTokenFile),
 );
-const deps = { rest, store, userId, auth, startedAt: new Date(), runner, engine, wake };
+// 微信助手：小手机「离线执行」选后端并开着自动回复时，由这里代替云函数轮询（开关存在 meta，重启后照旧）
+const weixin = new WeixinService({ store, url: config.personalUrl, key: config.personalKey, log: line => console.log(line) });
+const deps = { rest, store, userId, auth, startedAt: new Date(), runner, engine, wake, weixin };
 // 每个地址一个 server：127.0.0.1 给命令行，Docker 网桥地址给站点反代（/companion/…）
 const servers = config.bind.map(host => {
   const server = createApp(deps);
@@ -64,6 +67,7 @@ const servers = config.bind.map(host => {
 console.log(`[companion] 已启动，模式 ${runner.mode === "live" ? "真发" : "影子"}`);
 runner.start();
 if (config.wakeEnabled) wake.start();
+weixin.start();
 // 离线任务（回复兜底要在 App 被杀后 90 秒左右接上）：每 15 秒看一次，上一轮没跑完就跳过
 let jobsRunning = false;
 const jobsTimer = setInterval(() => {
@@ -76,6 +80,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     runner.stop();
     wake.stop();
+    weixin.stop();
     clearInterval(jobsTimer);
     let open = servers.length;
     for (const server of servers) server.close(() => { if (--open === 0) { store.close(); process.exit(0); } });

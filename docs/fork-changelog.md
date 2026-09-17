@@ -1,5 +1,12 @@
 # Fork 变更日志
 
+## 2026-09-17：忙碌回复、微信自动回复跟随离线执行开关
+
+- 忙碌回复：后端新接口 `POST /app/jobs/deferred`（get / put / cancel，回执格式同个人云 `deferred-reply`），存进 `offline_jobs`；到点按 `src/reply-timing.ts`（照抄前端 `lib/deferred-reply-timing.ts`）判断忙碌时段、偷看手机、睡眠，不回就改期；回的时候带时机说明、补最新聊天、回复接在最新一条用户消息后面，做完留回执。小手机 `deferred-reply-cloud.ts` 新的一轮按开关建在后端或云端（记在 `cloud.line`），建好后查、改、撤都去同一边，切开关不搬家、不重复回。
+- 微信自动回复：后端 `src/weixin.ts` 每 12 秒轮询，核心逻辑用桶里同步的最新核心、退回 vendor 副本（`weixin:build-dist` 顺带同步）；接口 `GET/POST /app/weixin`、`POST /app/weixin/run`。小手机 `lib/weixin-assistant-line.ts`：自动回复开着时跟随开关，先开新的一边再关旧的（共用回复锁）；启动、切开关时交接，失败 5 分钟后重试。微信设置页按当前一边显示「云端 / 后端轮询」、测试和心跳，后端模式隐藏云函数部署行。
+- 行为变化：已选后端且微信云端轮询开着的，新版网页加载后会自动把微信自动回复交给后端、关掉云端 cron。
+- 验证：后端 109 项测试（新增忙碌回复 2 项、时机规则一致 1 项、微信 2 项）+ tsc；`check-deferred-reply-cloud`（新增后端一边场景）、`check-busy-reply-plugin`；根 `tsc --noEmit`。未做手机端实测。
+
 ## 2026-09-17：回复兜底 / 追问 / 定时消息 / 经期关怀跟随离线执行开关
 
 - 后端 `companion-server/src/jobs.ts`：新表 `offline_jobs`，接口 `POST /app/jobs`、`/app/jobs/cancel`、`/app/jobs/delay`、`GET /app/jobs`，每 15 秒执行到点任务。规则照搬 `push-generate`：会话租约、每天 50 条、补最新聊天、未回应降速、沉默协议、来电 / 快捷动作（含结果续跑）/ 微信分流、outbox + 推送、安静太久续排；成文正文落库后重试不重新调模型；做完删请求本体，7 天后清理。

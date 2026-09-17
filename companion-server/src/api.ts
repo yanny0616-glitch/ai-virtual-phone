@@ -17,8 +17,11 @@
 //   GET  /app/wake/status?source=x              唤醒后端：底稿概况（不含密钥）、网关来源状态、最近处理记录
 //   POST /app/jobs                              离线任务（回复兜底/追问/定时消息/经期关怀）：同键覆盖；正在生成的回 409（见 jobs.ts）
 //   POST /app/jobs/cancel                       撤销 { triggerKey | triggerPrefix, excludeKey }：没开始的删，正在生成的挂撤销 → { deleted, running }
+//   POST /app/jobs/deferred                     忙碌回复 { action: get|put|cancel, key, payload }：回执同个人云 deferred-reply；不带 key 的 get 报能力
 //   POST /app/jobs/delay                        心跳 { triggerKey, runNow }：没开始的推到 90 秒后（runNow 立即）
 //   GET  /app/jobs?limit=30                     最近的离线任务（不含请求本体）
+//   GET  /app/weixin                            微信助手后端轮询 { enabled, heartbeat }（见 weixin.ts）
+//   POST /app/weixin                            开关 { enabled }；POST /app/weixin/run 立刻轮询一次（测试用，不看开关）
 // 改状态的都在 Runner 的锁里做：正在跑的一轮调模型时改了，会被那轮结束时的保存盖掉。
 
 import { importFromCloud, importMissingCloudTasks, importPendingCloudFeedback } from "./importer.ts";
@@ -32,10 +35,11 @@ import type { Runner } from "./runner.ts";
 import type { CharacterRow, DayRow, DecisionRow, Store, TimerRow } from "./store.ts";
 import { threadAlive, threadsEnabled } from "./threads.ts";
 import { validateWakeTemplate, type WakeService, type WakeTemplate } from "./wake.ts";
-import { validateJob } from "./jobs.ts";
+import type { WeixinService } from "./weixin.ts";
+import { DEFERRED_KEY, deferredReceipt, putDeferred, validateJob, type JobPayload } from "./jobs.ts";
 import { SETTING_KEYS, type GuanianDay, type GuanianSched, type PlanItem, type Thread } from "./types.ts";
 
-export type AppDeps = { store: Store; runner: Runner; engine: EngineDeps; wake?: WakeService };
+export type AppDeps = { store: Store; runner: Runner; engine: EngineDeps; wake?: WakeService; weixin?: WeixinService };
 
 export class HttpError extends Error {
   status: number;
@@ -509,6 +513,7 @@ export async function handleApp(deps: AppDeps, method: string, path: string, que
   if (method === "GET" && parts[1] === "archive") return ok(appArchive(deps, String(query.get("id") || ""), Number(query.get("limit")) || 30));
   if (parts[1] === "wake") return appWake(deps, method, parts, query, readBody);
   if (parts[1] === "jobs") return appJobs(deps, method, parts, query, readBody);
+  if (parts[1] === "weixin") return appWeixin(deps, method, parts, readBody);
   if (parts[1] !== "characters" || !parts[2]) return { status: 404, body: { ok: false, error: "not_found" } };
   const id = parts[2];
   const body = async () => { const b = await readBody(); return (b && typeof b === "object" ? b : {}) as Record<string, unknown>; };
@@ -549,6 +554,20 @@ export async function handleApp(deps: AppDeps, method: string, path: string, que
   return { status: 404, body: { ok: false, error: "not_found" } };
 }
 
+async function appWeixin(deps: AppDeps, method: string, parts: string[], readBody: () => Promise<unknown>): Promise<{ status: number; body: unknown }> {
+  const weixin = deps.weixin;
+  if (!weixin) return { status: 404, body: { ok: false, error: "后端没开微信助手" } };
+  if (method === "GET" && parts.length === 2) return { status: 200, body: { ok: true, enabled: weixin.enabled(), heartbeat: weixin.heartbeat() } };
+  if (method === "POST" && parts.length === 2) {
+    const body = await readBody() as { enabled?: unknown } | null;
+    if (typeof body?.enabled !== "boolean") return { status: 400, body: { ok: false, error: "缺少 enabled" } };
+    weixin.setEnabled(body.enabled);
+    return { status: 200, body: { ok: true, enabled: weixin.enabled(), heartbeat: weixin.heartbeat() } };
+  }
+  if (method === "POST" && parts[2] === "run") return { status: 200, body: { ok: true, enabled: weixin.enabled(), heartbeat: await weixin.tick(true) } };
+  return { status: 404, body: { ok: false, error: "not_found" } };
+}
+
 // ─── 唤醒后端
 
 async function appJobs(deps: AppDeps, method: string, parts: string[], query: URLSearchParams, readBody: () => Promise<unknown>): Promise<{ status: number; body: unknown }> {
@@ -571,6 +590,16 @@ async function appJobs(deps: AppDeps, method: string, parts: string[], query: UR
     const saved = store.putJob({ id: `job_${crypto.randomUUID()}`, triggerKey: key(body.triggerKey), kind: String(body.kind),
       executeAt: Date.parse(String(body.executeAt)), payload: body.payload as Record<string, any>, createdAt: nowMs }, nowMs);
     return saved ? { status: 200, body: { ok: true } } : { status: 409, body: { ok: false, running: true, error: "同名任务正在生成" } };
+  }
+  if (parts[2] === "deferred") {
+    // 忙碌回复：{ action: "get" | "put" | "cancel", key, payload }，回执格式同个人云网关 deferred-reply
+    const action = String(body.action || "get"), deferredKey = key(body.key);
+    if (!deferredKey && action === "get") return { status: 200, body: { ok: true, supported: true, policySupported: true, silenceSupported: true } };
+    if (!DEFERRED_KEY.test(deferredKey)) return { status: 400, body: { ok: false, error: "Invalid deferred key" } };
+    if (action === "get") return { status: 200, body: deferredReceipt(store.getJob(deferredKey)) };
+    if (action === "cancel") return { status: 200, body: deferredReceipt(store.cancelDeferredJob(deferredKey, nowMs)) };
+    if (action === "put") return putDeferred(store, deferredKey, body.payload as JobPayload, nowMs);
+    return { status: 400, body: { ok: false, error: "action 无效" } };
   }
   if (parts[2] === "cancel") {
     const triggerKey = key(body.triggerKey), triggerPrefix = key(body.triggerPrefix);

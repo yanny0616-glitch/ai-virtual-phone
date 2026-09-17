@@ -28,10 +28,11 @@ import { validateSnapshot, type Snapshot, type Store } from "./store.ts";
 import type { Rest } from "./supabase.ts";
 import type { FixedItem, Routine } from "./day.ts";
 import type { WakeService } from "./wake.ts";
+import type { WeixinService } from "./weixin.ts";
 
 const MAX_BODY = 4 * 1024 * 1024;
 
-export type ServerDeps = { rest: Rest; store: Store; userId: string; auth: Auth; startedAt: Date; runner: Runner; engine: EngineDeps; wake?: WakeService };
+export type ServerDeps = { rest: Rest; store: Store; userId: string; auth: Auth; startedAt: Date; runner: Runner; engine: EngineDeps; wake?: WakeService; weixin?: WeixinService };
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -75,7 +76,7 @@ export function createApp(deps: ServerDeps): Server {
       }
       if (!await deps.auth.allow(req.headers.authorization)) return send(res, 401, { ok: false, error: "unauthorized" });
 
-      const appDeps = { store: deps.store, runner: deps.runner, engine: deps.engine, wake: deps.wake };
+      const appDeps = { store: deps.store, runner: deps.runner, engine: deps.engine, wake: deps.wake, weixin: deps.weixin };
       const app = await handleApp(appDeps, req.method || "GET", path, url.searchParams, () => readJson(req));
       if (app) return send(res, app.status, app.body);
 

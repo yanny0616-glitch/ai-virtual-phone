@@ -41,6 +41,15 @@ function serverFetch(path: string, body: unknown): Promise<Response> {
   });
 }
 
+/** 忙碌回复走后端时的入口（lib/deferred-reply-cloud.ts）：{ action: get|put|cancel, key, payload } */
+export function deferredReplyServerFetch(action: 'get' | 'put' | 'cancel', key?: string, payload?: unknown): Promise<Response> {
+  return serverFetch('/deferred', { action, key, payload });
+}
+
+export function offlineJobsOnServer(): boolean {
+  return serverMode();
+}
+
 const okResponse = (extra: Record<string, unknown> = {}) => new Response(JSON.stringify({ ok: true, ...extra }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
 /** 与 pushJobsFetch 同签名：push-bailout-client 里所有离线任务的挂、撤、心跳都从这里走 */

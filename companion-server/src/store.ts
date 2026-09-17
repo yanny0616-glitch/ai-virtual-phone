@@ -10,6 +10,7 @@
 //   wake_templates / wake_runs  唤醒后端：每个来源一份底稿、处理记录（见 wake.ts）
 
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 
 import type { Ctx, GuanianDay, ModelRequest, PlanItem, ProviderKind } from "./types.ts";
 import type { FixedItem, Routine } from "./day.ts";
@@ -98,7 +99,7 @@ export type ShortcutResume = {
 };
 /** 离线任务：回复兜底 / 追问 / 定时消息 / 经期关怀。小手机选了「离线执行：后端」时直接寄来，云端看不到（见 jobs.ts） */
 export type OfflineJob = {
-  id: string; triggerKey: string; kind: string; executeAt: number; status: "pending" | "running" | "done" | "failed";
+  id: string; triggerKey: string; kind: string; executeAt: number; status: "pending" | "running" | "done" | "failed" | "cancelled";
   payload: Record<string, any>; note: string; tries: number; createdAt: number; updatedAt: number;
   /** 手机在任务生成期间撤销：发送边界看到就停 */
   cancelRequested?: boolean;
@@ -428,9 +429,17 @@ export class Store {
     return (this.#db.prepare("select * from offline_jobs order by updated_at desc limit ?").all(limit) as Row[]).map(r => this.#job(r)!);
   }
 
+  /** 忙碌回复撤销：没开始的改成 cancelled；还没有就留一条 cancelled 墓碑，免得迟到的上传把它又建出来 */
+  cancelDeferredJob(triggerKey: string, nowMs: number): OfflineJob | null {
+    this.#db.prepare(`insert into offline_jobs (trigger_key, id, kind, execute_at, status, payload, note, tries, cancel_requested, created_at, updated_at)
+      values (?, ?, 'reply_bailout', ?, 'cancelled', '{}', '', 0, 0, ?, ?) on conflict(trigger_key) do nothing`).run(triggerKey, `job_${randomUUID()}`, nowMs, nowMs, nowMs);
+    this.#db.prepare("update offline_jobs set status = 'cancelled', payload = '{}', updated_at = ? where trigger_key = ? and status = 'pending'").run(nowMs, triggerKey);
+    return this.getJob(triggerKey);
+  }
+
   /** 做完的留 7 天查重和诊断，之后清掉 */
   pruneJobs(nowMs: number): number {
-    return Number(this.#db.prepare("delete from offline_jobs where status in ('done', 'failed') and updated_at < ?").run(nowMs - 7 * 86_400_000).changes);
+    return Number(this.#db.prepare("delete from offline_jobs where status in ('done', 'failed', 'cancelled') and updated_at < ?").run(nowMs - 7 * 86_400_000).changes);
   }
 
   // ── 发送记录

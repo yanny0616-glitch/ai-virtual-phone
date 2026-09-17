@@ -13,7 +13,6 @@ import {
 import {
     isWeixinCloudSupabaseReady,
     fetchWeixinCloudAssistantHeartbeat,
-    setWeixinCloudAssistantScheduled,
     loadWeixinCloudSyncConfig,
     syncAllWeixinBotRuntimesToCloud,
     syncWeixinBotRuntimeToCloud,
@@ -22,7 +21,9 @@ import {
     type WeixinCloudSyncConfig,
 } from "@/lib/weixin-cloud-sync";
 import { getWeixinBotStatus } from "@/lib/use-weixin-bridge";
-import { getWeixinCloudDeployedAt, loadWeixinCloudScheduled, saveWeixinCloudScheduled } from "@/lib/cloud-deploy-status";
+import { getWeixinCloudDeployedAt, loadWeixinCloudScheduled } from "@/lib/cloud-deploy-status";
+import { loadOfflineExecutorConfig, OFFLINE_EXECUTOR_CHANGED_EVENT } from "@/lib/offline-executor";
+import { applyWeixinAssistantLine, fetchWeixinServerState, runWeixinServerOnce } from "@/lib/weixin-assistant-line";
 import { getLoginQrCode, pollQrCodeStatus, type QrLoginStatus } from "@/lib/weixin-bridge";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -60,6 +61,9 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
     const [cloudAssistantNotice, setCloudAssistantNotice] = useState<{ ok: boolean; text: string } | null>(null);
     const [cloudHeartbeat, setCloudHeartbeat] = useState<WeixinCloudAssistantHeartbeat | null>(null);
     const [cloudHeartbeatCheckedAt, setCloudHeartbeatCheckedAt] = useState<string | null>(null);
+    // 「离线执行」选后端时，自动回复由 companion-server 轮询（lib/weixin-assistant-line.ts）
+    const [onServer, setOnServer] = useState(() => loadOfflineExecutorConfig().mode === "server");
+    const side = onServer ? "后端" : "云端";
 
     // 添加流程
     const [addStep, setAddStep] = useState<AddStep | null>(null);
@@ -90,6 +94,17 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
         };
     }, []);
 
+    useEffect(() => {
+        const refresh = () => {
+            setOnServer(loadOfflineExecutorConfig().mode === "server");
+            setCloudScheduledOn(loadWeixinCloudScheduled());
+            setCloudHeartbeat(null);
+            setCloudHeartbeatCheckedAt(null);
+        };
+        window.addEventListener(OFFLINE_EXECUTOR_CHANGED_EVENT, refresh);
+        return () => window.removeEventListener(OFFLINE_EXECUTOR_CHANGED_EVENT, refresh);
+    }, []);
+
     // 清理 QR 轮询
     useEffect(() => {
         return () => { qrAbort.current?.abort(); };
@@ -118,7 +133,7 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
     };
 
     const refreshCloudHeartbeat = async () => {
-        const heartbeat = await fetchWeixinCloudAssistantHeartbeat();
+        const heartbeat = onServer ? (await fetchWeixinServerState()).heartbeat : await fetchWeixinCloudAssistantHeartbeat();
         setCloudHeartbeat(heartbeat);
         setCloudHeartbeatCheckedAt(new Date().toISOString());
         return heartbeat;
@@ -129,6 +144,15 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
         setCloudAssistantNotice(null);
         setCloudAssistantBusy("test");
         try {
+            if (onServer) {
+                const { heartbeat } = await runWeixinServerOnce();
+                setCloudHeartbeat(heartbeat);
+                setCloudHeartbeatCheckedAt(new Date().toISOString());
+                setCloudAssistantNotice(heartbeat.lastError
+                    ? { ok: false, text: `后端已运行，但轮询报错：${heartbeat.lastError}` }
+                    : { ok: true, text: `后端测试成功！已轮询 ${heartbeat.polled ?? 0} 个 Bot。打开「后端轮询」即可 24 小时自动回复。` });
+                return;
+            }
             const result = await testWeixinCloudAssistantOnce();
             await refreshCloudHeartbeat().catch(() => null);
             setCloudAssistantNotice({
@@ -157,15 +181,14 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
                 }
                 setCloudSyncConfig(loadWeixinCloudSyncConfig());
             }
-            await setWeixinCloudAssistantScheduled(enabled);
-            saveWeixinCloudScheduled(enabled);
+            const note = await applyWeixinAssistantLine(enabled);
             setCloudScheduledOn(enabled);
-            setCloudAssistantNotice({
-                ok: true,
-                text: enabled
+            const text = onServer
+                ? enabled ? "后端轮询已开启，每 12 秒一次，云端轮询已关。" : "后端轮询已停用。"
+                : enabled
                     ? "云端轮询已开启，每 10 秒一次。刚开启时微信恢复在线可能需要几分钟，之后回复稳定在 10～60 秒。"
-                    : "云端轮询已停用，不再消耗任何配额，随时可再打开，无需重新部署。",
-            });
+                    : "云端轮询已停用，不再消耗任何配额，随时可再打开，无需重新部署。";
+            setCloudAssistantNotice({ ok: true, text: note ? `${text}（${note}）` : text });
         } catch (err) {
             setCloudAssistantNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
         } finally {
@@ -180,7 +203,7 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
         try {
             const heartbeat = await refreshCloudHeartbeat();
             if (!heartbeat) {
-                setCloudAssistantNotice({ ok: false, text: "还没有读到云端心跳。请确认云函数已部署、定时 SQL 已执行，稍等半分钟再刷新。" });
+                setCloudAssistantNotice({ ok: false, text: onServer ? "后端还没轮询过。打开「后端轮询」或点「后端测试一次」。" : "还没有读到云端心跳。请确认云函数已部署、定时 SQL 已执行，稍等半分钟再刷新。" });
             }
         } catch (err) {
             setCloudAssistantNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
@@ -338,29 +361,33 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
                 <div className="flex items-start gap-3">
                     <div className="ui-icon-circle shrink-0"><Cloud size={20} /></div>
                     <div className="flex-1 flex flex-col gap-1">
-                        <span className="menu-label font-medium">微信云端助手</span>
+                        <span className="menu-label font-medium">{onServer ? "微信助手 · 后端" : "微信云端助手"}</span>
                         <span className="menu-desc !mt-0">
-                            部署到你自己的 Supabase，无需电脑常开，云端每 10 秒自动回复。
+                            {onServer
+                                ? "「离线执行」选了后端：由你的后端轮询微信、自动回复，不用云函数。切回云端会自动交还。"
+                                : "部署到你自己的 Supabase，无需电脑常开，云端每 10 秒自动回复。"}
                         </span>
                     </div>
                 </div>
 
                 <div className="flex flex-col gap-3 mt-4">
-                    <div className="flex items-center gap-3">
-                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${weixinCloudDeployed ? "bg-green-500" : "bg-black/20"}`} />
-                        <span className="menu-label flex-1">{weixinCloudDeployed ? "已部署" : "未部署"}</span>
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline shrink-0 whitespace-nowrap !gap-1.5 !px-3 !text-[12px]"
-                            onClick={() => onOpenCloudServices?.()}
-                        >
-                            <CloudUpload size={14} /> {weixinCloudDeployed ? "重新部署" : "去部署"}
-                        </button>
-                    </div>
+                    {!onServer && (
+                        <div className="flex items-center gap-3">
+                            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${weixinCloudDeployed ? "bg-green-500" : "bg-black/20"}`} />
+                            <span className="menu-label flex-1">{weixinCloudDeployed ? "已部署" : "未部署"}</span>
+                            <button
+                                type="button"
+                                className="ui-btn ui-btn-outline shrink-0 whitespace-nowrap !gap-1.5 !px-3 !text-[12px]"
+                                onClick={() => onOpenCloudServices?.()}
+                            >
+                                <CloudUpload size={14} /> {weixinCloudDeployed ? "重新部署" : "去部署"}
+                            </button>
+                        </div>
+                    )}
 
                     <div className="flex items-center gap-3">
                         <div className="flex-1 flex flex-col">
-                            <span className="menu-label">云端轮询</span>
+                            <span className="menu-label">{side}轮询</span>
                             <span className="menu-desc !mt-0">开着才会自动回复；关掉零配额消耗</span>
                         </div>
                         {cloudAssistantBusy === "enable" || cloudAssistantBusy === "disable"
@@ -382,7 +409,7 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
                     >
                         {cloudAssistantBusy === "test"
                             ? <><Loader2 size={15} className="animate-spin" /> 测试中…</>
-                            : <><PlayCircle size={15} /> 云端测试一次</>}
+                            : <><PlayCircle size={15} /> {side}测试一次</>}
                     </button>
 
                     {/* 云端心跳状态行 */}
@@ -398,10 +425,10 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
                         />
                         <span className="menu-desc !mt-0 flex-1">
                             {cloudHeartbeat?.lastRunAt
-                                ? `云端最近轮询：${formatCloudSyncTime(cloudHeartbeat.lastRunAt)}${cloudHeartbeat.lastError ? `（错误：${cloudHeartbeat.lastError}）` : ""}`
+                                ? `${side}最近轮询：${formatCloudSyncTime(cloudHeartbeat.lastRunAt)}${cloudHeartbeat.lastError ? `（错误：${cloudHeartbeat.lastError}）` : ""}`
                                 : cloudHeartbeatCheckedAt
-                                    ? "未读到云端心跳"
-                                    : "云端心跳：尚未检查"}
+                                    ? `未读到${side}心跳`
+                                    : `${side}心跳：尚未检查`}
                         </span>
                         <button
                             type="button"
@@ -409,7 +436,7 @@ export function WeixinSettings({ onOpenCloudServices }: { onOpenCloudServices?: 
                             data-variant="muted"
                             disabled={!cloudSupabaseReady || Boolean(cloudAssistantBusy)}
                             onClick={() => void handleRefreshCloudHeartbeat()}
-                            title="刷新云端心跳"
+                            title={`刷新${side}心跳`}
                         >
                             {cloudAssistantBusy === "heartbeat" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         </button>

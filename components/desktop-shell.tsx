@@ -1891,6 +1891,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       // 现实桥离线联动：规则/快照同步器（规则变更、切后台时刷新服务端快照）
       void import("@/lib/push-bridge-sync").then(m => m.installBridgeServerSync()).catch(() => undefined);
       void import("@/lib/deferred-reply-cloud").then(m => m.installDeferredReplyCloudSync()).catch(() => undefined);
+      // 微信自动回复跟「离线执行」开关走：云函数或后端轮询
+      void import("@/lib/weixin-assistant-line").then(m => m.installWeixinAssistantLineFollower()).catch(() => undefined);
       // 定时唤醒/经期关怀兜底：切后台时刷新快照预约
       void import("@/lib/push-bailout-client").then(m => m.installScheduledBailoutRefresher()).catch(() => undefined);
       void import("@/lib/chat-mirror-client").then(m => m.installChatMirror()).catch(() => undefined);

@@ -198,3 +198,60 @@ test("接口：同键覆盖、正在生成回 409、按前缀撤销保留 exclud
   const listed = (await call("/app/jobs", null, "GET"))!.body as { jobs: { triggerKey: string }[] };
   assert.deepEqual(listed.jobs.map(j => j.triggerKey), ["idle:r:0"]);
 });
+
+test("忙碌回复：没到空闲就按时机规则往后排、不调模型；有空了带时机说明生成，回执带最新一条用户消息", async () => {
+  const e = setup({ mirror: [{ id: "m9", role: "user", content: "还在忙吗", message_at: "2026-09-16T07:59:00Z" }] });
+  const app = { store: e.store, engine: e.deps, runner: {} } as unknown as AppDeps;
+  const call = (body: unknown) => handleApp(app, "POST", "/app/jobs/deferred", new URLSearchParams(), async () => body);
+  const win = { from: T0 - 3_600_000, to: T0 + 3_600_000, title: "开会", key: "w", focused: false, breaks: [] };
+  const timing = { nextAt: T0, note: "", peekMin: 10, adaptive: false, probability: 0, windows: [win], sleeps: [], sleepBufferMin: 0, sleepWakeProbability: 0 };
+  const payload = (revision: number, t: Record<string, unknown> = timing) => ({
+    request: { url: "https://model.test", headers: {}, providerKind: "anthropic", body: { model: "m", messages: [{ role: "user", content: "hi" }] } },
+    deferredReply: { revision, timing: t }, notify: { title: "TA", url: "/", characterId: "c" },
+    merge: { sessionId: "s", replyAfterLocalMessageId: "m1", replyAfterCreatedAt: "2026-09-16T07:50:00Z" },
+  });
+  assert.deepEqual((await call({ action: "get" }))!.body, { ok: true, supported: true, policySupported: true, silenceSupported: true });
+  assert.equal(((await call({ action: "put", key: "deferred:a", payload: payload(1) }))!.body as any).status, "pending");
+
+  await runOfflineJobs(e.deps);
+  assert.equal(e.requests.length, 0);
+  const held = e.store.getJob("deferred:a")!;
+  assert.equal(held.status, "pending");
+  assert.ok(held.executeAt > T0);
+  assert.equal(held.payload.deferredReply.timing.reason, "busy");
+
+  // 改版：只换快照，时钟和已掷的状态沿用；旧版本号不覆盖
+  await call({ action: "put", key: "deferred:a", payload: payload(2, { ...timing, nextAt: T0 + 999_999_999 }) });
+  const updated = e.store.getJob("deferred:a")!;
+  assert.equal(updated.executeAt, held.executeAt);
+  assert.equal(updated.payload.deferredReply.revision, 2);
+  assert.equal(updated.payload.deferredReply.timing.windowKey, "w");
+  assert.equal(((await call({ action: "put", key: "deferred:a", payload: payload(1) }))!.body as any).revision, 2);
+
+  e.advance(held.executeAt - T0);
+  await runOfflineJobs(e.deps);
+  assert.equal(e.requests.length, 1);
+  assert.match(e.requests[0], /<reply_timing>[\s\S]*开会/);
+  assert.match(e.requests[0], /还在忙吗/);
+  assert.equal(e.outputs[0].trigger_key, "deferred:a");
+  assert.equal(e.outputs[0].meta.replyAfterLocalMessageId, "m9");
+  const receipt = (await call({ action: "get", key: "deferred:a" }))!.body as any;
+  assert.equal(receipt.status, "done");
+  assert.equal(receipt.revision, 2);
+  assert.equal(receipt.acceptedMessageId, "m9");
+});
+
+test("忙碌回复撤销：没开始的改成 cancelled；从没上传过的留墓碑，迟到的上传建不出来", async () => {
+  const e = setup();
+  const app = { store: e.store, engine: e.deps, runner: {} } as unknown as AppDeps;
+  const call = (body: unknown) => handleApp(app, "POST", "/app/jobs/deferred", new URLSearchParams(), async () => body);
+  const payload = { request: { url: "https://model.test", headers: {}, providerKind: "anthropic", body: {} },
+    deferredReply: { revision: 1, timing: { nextAt: T0 + 60_000, note: "", peekMin: 0, adaptive: false, probability: 0, windows: [], sleeps: [], sleepBufferMin: 0, sleepWakeProbability: 0 } }, merge: { sessionId: "s" } };
+  await call({ action: "put", key: "deferred:b", payload });
+  assert.equal(((await call({ action: "cancel", key: "deferred:b" }))!.body as any).status, "cancelled");
+  assert.equal(((await call({ action: "cancel", key: "deferred:c" }))!.body as any).status, "cancelled");
+  assert.equal(((await call({ action: "put", key: "deferred:c", payload }))!.body as any).status, "cancelled");
+  assert.equal((await call({ action: "put", key: "reply:x", payload }))!.status, 400);
+  e.advance(120_000);
+  assert.equal(await runOfflineJobs(e.deps), 0);
+});

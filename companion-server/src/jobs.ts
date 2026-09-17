@@ -4,6 +4,9 @@
 //
 // 同一条任务（按 triggerKey）任何时刻只挂在一边：手机重挂时先撤另一边、确认后才挂新的（lib/offline-jobs-client.ts）。
 // 这里到点再兜一道：个人云里还有同名任务在跑、比这条新、或者这条挂上之后云端已经处理过，就不发。
+//
+// 忙碌回复（deferred:*）走 POST /app/jobs/deferred，协议照搬个人云网关的 deferred-reply（回执、改版、撤销墓碑），
+// 这一轮建在哪边就一直在哪边（lib/deferred-reply-cloud.ts 记在 cloud.line），到点先按 reply-timing 判断现在回不回。
 
 import { randomUUID } from "node:crypto";
 
@@ -16,7 +19,8 @@ import { acquireGenerationLease, GenerationBusy, type GenerationLease } from "./
 import { historyText, readHistory, unansweredRounds, type CloudHistory } from "./history.ts";
 import { appendUserNote, callModel, splitPreview, usageAdd, usageBudget } from "./llm.ts";
 import type { PushMessage } from "./push.ts";
-import type { OfflineJob } from "./store.ts";
+import type { OfflineJob, Store } from "./store.ts";
+import { advanceCloudReplyTiming, type CloudReplyTiming } from "./reply-timing.ts";
 import type { ModelRequest, ProviderKind } from "./types.ts";
 
 export const JOB_KINDS = new Set(["reply_bailout", "followup", "timed_task"]);
@@ -33,6 +37,8 @@ export type JobPayload = {
   shortcutContinuation?: ShortcutContinuation;
   allowSilence?: boolean;
   silenceThinkingTag?: string;
+  /** 忙碌回复：手机改版号和冻结的时机规则 */
+  deferredReply?: { revision: number; timing: CloudReplyTiming };
   /** 后端自己记：成文正文和交付进度，重试时不重新调模型、不重复执行外部动作 */
   draft?: JobDraft;
 };
@@ -57,6 +63,41 @@ export function validateJob(body: Record<string, unknown>): string | null {
   if (!r || typeof r.url !== "string" || !/^https?:\/\//.test(r.url) || !r.body || typeof r.body !== "object" || !["openai-compatible", "anthropic", "gemini"].includes(r.providerKind)) return "request 无效";
   if (JSON.stringify(p).length > MAX_JOB_PAYLOAD) return "快照过大";
   return null;
+}
+
+// ─── 忙碌回复（个人云网关 deferred-reply 的同款协议）
+export const DEFERRED_KEY = /^deferred:[A-Za-z0-9_-]{1,150}$/;
+
+export function deferredReceipt(job: OfflineJob | null): Record<string, unknown> {
+  if (!job) return { ok: true, status: "missing" };
+  const p = job.payload as JobPayload & { receipt?: Record<string, unknown> };
+  const accepted = p.receipt ?? (p.deferredReply ? { revision: p.deferredReply.revision, acceptedMessageId: String(p.merge?.replyAfterLocalMessageId || "") } : {});
+  // 已成文还没送达的算「正在处理」，手机不能再撤
+  return { ok: true, status: job.status === "pending" && p.draft ? "running" : job.status, executeAt: new Date(job.executeAt).toISOString(), resultNote: job.note, ...accepted };
+}
+
+/** 新建或改版：新消息 / 换了 API 只更新快照，不重掷机会、不重置时钟 */
+export function putDeferred(store: Store, key: string, payload: JobPayload, nowMs: number): { status: number; body: Record<string, unknown> } {
+  const d = payload?.deferredReply;
+  const r = payload?.request;
+  if (!r || typeof r.url !== "string" || !/^https?:\/\//.test(r.url) || !r.body || typeof r.body !== "object" || !["openai-compatible", "anthropic", "gemini"].includes(r.providerKind)
+    || !d?.timing || !Number.isSafeInteger(d.revision) || d.revision < 1 || !Number.isFinite(d.timing.nextAt)
+    || !Array.isArray(d.timing.windows) || !Array.isArray(d.timing.sleeps)) return { status: 400, body: { ok: false, error: "Invalid deferred snapshot" } };
+  if (JSON.stringify(payload).length > MAX_JOB_PAYLOAD) return { status: 413, body: { ok: false, error: "快照过大，离线等待未同步" } };
+  const row = store.getJob(key);
+  if (row && row.status !== "pending") return { status: 200, body: deferredReceipt(row) };
+  if (row) {
+    const old = row.payload as JobPayload;
+    if (!old.deferredReply) return { status: 409, body: { ok: false, error: "Unexpected task" } };
+    if (old.draft || old.deferredReply.revision >= d.revision) return { status: 200, body: deferredReceipt(row) };
+    const prev = old.deferredReply.timing;
+    const executeAt = d.timing.disabled ? nowMs : row.executeAt;
+    d.timing = { ...d.timing, nextAt: executeAt, reason: prev.reason, windowKey: prev.windowKey, availableUntil: prev.availableUntil, check: prev.check, note: prev.note };
+    store.putJob({ id: row.id, triggerKey: key, kind: "reply_bailout", executeAt, payload, createdAt: row.createdAt }, nowMs);
+  } else {
+    store.putJob({ id: `job_${randomUUID()}`, triggerKey: key, kind: "reply_bailout", executeAt: d.timing.nextAt, payload, createdAt: nowMs }, nowMs);
+  }
+  return { status: 200, body: deferredReceipt(store.getJob(key)) };
 }
 
 // ─── 沉默协议（push-generate「CHAT SILENCE PROTOCOL」）
@@ -133,7 +174,8 @@ export async function runOfflineJobs(deps: EngineDeps): Promise<number> {
 
 /** 做完的只留诊断需要的，请求本体（含上游密钥）删掉 */
 function slim(p: JobPayload): Record<string, any> {
-  return { notify: p.notify, merge: { sessionId: p.merge?.sessionId }, draft: p.draft ? { createdAt: p.draft.createdAt } : undefined };
+  return { notify: p.notify, merge: { sessionId: p.merge?.sessionId }, draft: p.draft ? { createdAt: p.draft.createdAt } : undefined,
+    ...(p.deferredReply ? { receipt: { revision: p.deferredReply.revision, acceptedMessageId: String(p.merge?.replyAfterLocalMessageId || "") } } : {}) };
 }
 
 async function cloudGuard(deps: EngineDeps, job: OfflineJob): Promise<void> {
@@ -174,8 +216,18 @@ async function runJob(deps: EngineDeps, job: OfflineJob): Promise<string> {
     const written = (await existing.json() as unknown[]).length > 0;
     if (!p.draft) {
       if (written) return "generated previously; recovered";
+      let timingNote = "";
+      if (p.deferredReply) {
+        const { ready, ...timing } = advanceCloudReplyTiming(p.deferredReply.timing, deps.now(), deps.random);
+        p.deferredReply.timing = timing;
+        if (!ready) {
+          deps.store.updateJob(job, { payload: p }, deps.now());
+          throw new Hold("deferred: waiting for an opportunity", timing.nextAt);
+        }
+        timingNote = timing.note;
+      }
       await cloudGuard(deps, job);
-      await generate(deps, job, p, sessionId, guard);
+      await generate(deps, job, p, sessionId, guard, timingNote);
       if (!p.draft) return String(job.note || "done");
     }
     return await deliver(deps, job, p, sessionId, outboxId, written, guard);
@@ -184,7 +236,7 @@ async function runJob(deps: EngineDeps, job: OfflineJob): Promise<string> {
   }
 }
 
-async function generate(deps: EngineDeps, job: OfflineJob, p: JobPayload, sessionId: string, guard: () => Promise<void>): Promise<void> {
+async function generate(deps: EngineDeps, job: OfflineJob, p: JobPayload, sessionId: string, guard: () => Promise<void>, timingNote = ""): Promise<void> {
   const merge = p.merge || {};
   const nowMs = deps.now();
   const subs = await deps.rest(`push_subscriptions?user_id=eq.${encodeURIComponent(deps.userId)}&select=endpoint&limit=1`);
@@ -197,10 +249,21 @@ async function generate(deps: EngineDeps, job: OfflineJob, p: JobPayload, sessio
   if (cap.ok && (await cap.json() as unknown[]).length >= DAILY_GENERATION_CAP) throw new Finish("done", `daily cap (${DAILY_GENERATION_CAP}) reached`);
 
   const request: ModelRequest = structuredClone(p.request);
+  if (timingNote && !appendUserNote(request.body, request.providerKind, `<reply_timing>\n${timingNote}\n不要提这段说明本身。\n</reply_timing>`)) {
+    throw new Finish("failed", "deferred prompt unsupported");
+  }
   let history: CloudHistory | null = null;
-  if ((job.kind === "timed_task" || job.kind === "followup") && sessionId) {
+  if ((job.kind === "timed_task" || job.kind === "followup" || p.deferredReply) && sessionId) {
     try { history = await readHistory(deps.rest, deps.userId, sessionId); }
     catch { throw new Hold("最新聊天读取失败，稍后核对", nowMs + 5 * 60_000); }
+    if (p.deferredReply) {
+      // 等待期间别处（微信等）又来了新消息：这轮回复接在最新一条后面
+      const latestUser = [...history.messages].reverse().find(m => m.role === "user");
+      if (latestUser && Date.parse(latestUser.message_at) > Date.parse(String(merge.replyAfterCreatedAt || "1970-01-01"))) {
+        merge.replyAfterLocalMessageId = latestUser.id;
+        merge.replyAfterCreatedAt = latestUser.message_at;
+      }
+    }
     const tz = timezone(merge.tzOffsetMin, merge.idleRepeat?.quietWin?.tzOffsetMin);
     appendUserNote(request.body, request.providerKind,
       `[最新云端聊天事实，非用户消息；${tz === null ? "当地时区未知，下方仅以 UTC 标示，不得推断当地钟点" : `统一时区 UTC${tz >= 0 ? "+" : ""}${tz / 60}，当前当地时间 ${new Date(nowMs + tz * 60000).toISOString().slice(0, 16)}`}。以下时间是生成时间，不代表用户已读；与旧快照冲突时以这里为准。]\n`

@@ -1198,8 +1198,8 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
         saveOfflineExecutorConfig(next);
         setOfflineExec(next);
         setExecHint(mode === "server"
-            ? "已改成后端。回复兜底、追问、定时消息、经期关怀从下一次重新预约起寄到后端（已排着的先从云端撤掉再挂，不会重复发）；挂念下次打开时自动交接。"
-            : "已改成云端。回复兜底、追问、定时消息、经期关怀从下一次重新预约起寄回云端（先撤后端的同名任务）；挂念下次打开时自动交接。");
+            ? "已改成后端。回复兜底、追问、定时消息、经期关怀、忙碌回复从下一次重新预约起寄到后端（已排着的留在云端发完，不会重复发）；微信自动回复现在交给后端轮询；挂念下次打开时自动交接。"
+            : "已改成云端。回复兜底、追问、定时消息、经期关怀、忙碌回复从下一次重新预约起寄回云端（已排着的留在后端发完）；微信自动回复交还云函数；挂念下次打开时自动交接。");
     };
     const saveServerUrl = () => {
         const url = serverUrlDraft.trim().replace(/\/+$/, "");
@@ -1479,7 +1479,7 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                                 )}
                                 <span className="menu-desc !mt-0">
                                     {execHint || (offlineExec.mode === "server"
-                                        ? "挂念、回复兜底、追问、定时消息、经期关怀都由后端生成，个人云只存聊天镜像和推送订阅。后端用「云服务部署」里的个人云 Secret key 认你。"
+                                        ? "挂念、回复兜底、追问、定时消息、经期关怀、忙碌回复、微信自动回复都由后端跑，个人云只存聊天镜像、推送订阅和微信运行包。后端用「云服务部署」里的个人云 Secret key 认你。"
                                         : "个人云里的云函数负责离线消息（原项目做法）。")}
                                     {guanianPending && " 挂念还没切过去，打开挂念会自动交接。"}
                                 </span>
