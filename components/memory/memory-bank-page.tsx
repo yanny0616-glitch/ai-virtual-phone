@@ -27,7 +27,7 @@ import {
 } from "@/lib/memory-storage";
 import { hydrateChatStorage } from "@/lib/chat-storage";
 import { loadNativeTimeline, type NativeTimelineEntry } from "@/lib/short-term-assembler";
-import { runSummarizationPipeline } from "@/lib/memory-summarizer";
+import { runSummarizationPipeline, type SummaryProgress } from "@/lib/memory-summarizer";
 import { runCoreMemoryPipeline } from "@/lib/core-memory-builder";
 import { resolveAuxiliaryApiConfig, resolveUserIdentity } from "@/lib/settings-storage";
 import { generateEmbedding, resolveEmbeddingModel } from "@/lib/memory-embedding";
@@ -202,6 +202,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [summarizing, setSummarizing] = useState(false);
+    const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
     const [rebuildingCore, setRebuildingCore] = useState(false);
     const [editingPrompt, setEditingPrompt] = useState<string | null>(null);
     const [editingCorePrompt, setEditingCorePrompt] = useState<string | null>(null);
@@ -369,23 +370,33 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                 return;
             }
 
+            const charId = selectedCharId;
             const result = await runSummarizationPipeline(
-                selectedCharId,
+                charId,
                 selectedChar?.name ?? "",
-                range === "all" ? { force: true } : sinceTimestamp ? { sinceTimestamp } : undefined,
+                {
+                    ...(range === "all" ? { force: true } : sinceTimestamp ? { sinceTimestamp } : {}),
+                    onProgress: progress => {
+                        setSummaryProgress(progress);
+                        // 上一批已经入库，边总结边出现在列表里
+                        if (progress.batch > 1) loadDetailData(charId);
+                    },
+                },
             );
             if (result.success) {
-                showNotice("总结完成");
+                showNotice(result.batches && result.batches > 1 ? `总结完成，共 ${result.batches} 批` : "总结完成");
                 loadDetailData(selectedCharId);
                 loadCharacterList();
             } else {
                 showNotice(result.error || "总结失败");
+                if (result.batches) loadDetailData(charId);
             }
         } catch (err) {
             console.error("[MemoryBank] Manual summarize failed:", err);
             showNotice("总结失败: " + String(err));
         } finally {
             setSummarizing(false);
+            setSummaryProgress(null);
         }
     };
 
@@ -857,7 +868,11 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                 <MemorySettingsIcon icon={Zap} color={BINDING_ACCENTS.memory} />
                                 <div className="menu-label-group">
                                     <span className="menu-label">长期记忆手动总结</span>
-                                    <span className="menu-desc">将新产生的事件整理为长期记忆</span>
+                                    <span className="menu-desc">
+                                        {summaryProgress && summaryProgress.total > 1
+                                            ? `正在总结第 ${summaryProgress.batch} 批，共 ${summaryProgress.total} 批（每批约 ${config.summarizationEventInterval} 条）`
+                                            : "将新产生的事件整理为长期记忆，记录多时按批总结"}
+                                    </span>
                                 </div>
                                 <div className="menu-right">
                                     <button
@@ -866,7 +881,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                         disabled={summarizing}
                                     >
                                         <Zap size={12} className="mr-1" />
-                                        {summarizing ? "处理中..." : "总结"}
+                                        {summarizing ? (summaryProgress && summaryProgress.total > 1 ? `${summaryProgress.batch}/${summaryProgress.total} 批` : "处理中...") : "总结"}
                                     </button>
                                 </div>
                             </div>

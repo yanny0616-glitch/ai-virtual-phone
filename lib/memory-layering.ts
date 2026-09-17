@@ -41,3 +41,24 @@ export function earliestCoreStart(previousCores: EntryLike[], fallback: string):
     }
     return earliest;
 }
+
+/**
+ * 长期总结分批：每批 size 条，同一时刻的记录不拆开（水位线按「晚于」读，拆开会漏掉同刻的后半截），
+ * 末尾不足 min 条的并进上一批。
+ */
+export function splitSummaryBatches<T extends { timestamp: string }>(entries: T[], size: number, min = 4): T[][] {
+    const step = Math.max(min, Math.floor(size) || 80);
+    const batches: T[][] = [];
+    let start = 0;
+    while (start < entries.length) {
+        let end = Math.min(entries.length, start + step);
+        while (end < entries.length && entries[end].timestamp === entries[end - 1].timestamp) end++;
+        batches.push(entries.slice(start, end));
+        start = end;
+    }
+    if (batches.length > 1 && batches[batches.length - 1].length < min) {
+        const tail = batches.pop()!;
+        batches[batches.length - 1].push(...tail);
+    }
+    return batches;
+}

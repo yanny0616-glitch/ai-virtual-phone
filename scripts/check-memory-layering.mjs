@@ -38,3 +38,19 @@ assert.equal(m.buildCoreMergeEvents([], ['新事一']), '- 新事一', 'no previ
 assert.equal(m.earliestCoreStart(cores, '2026-09-13T00:00:00.000Z'), '2026-08-30T00:00:00.000Z');
 assert.equal(m.earliestCoreStart([], '2026-09-13T00:00:00.000Z'), '2026-09-13T00:00:00.000Z');
 console.log('PASS core merge input keeps old cores and new entries');
+
+{
+  const src2 = fs.readFileSync(new URL('../lib/memory-layering.ts', import.meta.url), 'utf8');
+  const c2 = vm.createContext({});
+  vm.runInContext(stripTypeScriptTypes(src2).replace(/^export /gm, '') + '\nglobalThis.split=splitSummaryBatches;', c2);
+  const ev = (n, same = {}) => Array.from({ length: n }, (_, i) => ({ id: i, timestamp: same[i] ?? `t${String(i).padStart(4, '0')}` }));
+  const sizes = b => Array.from(b, x => x.length);
+  assert.deepEqual(sizes(c2.split(ev(200), 80)), [80, 80, 40]);
+  assert.deepEqual(sizes(c2.split(ev(162), 80)), [80, 82], 'tail under 4 merges into previous batch');
+  assert.deepEqual(sizes(c2.split(ev(50), 80)), [50]);
+  assert.deepEqual(sizes(c2.split([], 80)), []);
+  const tied = ev(100, { 79: 'tie', 80: 'tie', 81: 'tie' });
+  assert.deepEqual(sizes(c2.split(tied, 80)), [82, 18], 'same-timestamp records stay in one batch');
+  assert.deepEqual(sizes(c2.split(ev(10), 0)), [10], 'bad size falls back to 80');
+  console.log('PASS summary batches split at timestamp boundaries');
+}

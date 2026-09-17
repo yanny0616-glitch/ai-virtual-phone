@@ -19,6 +19,7 @@ import { loadNativeTimeline, formatTimelineForSummarization, filterTimelineByAll
 import { generateEmbedding, resolveEmbeddingModel } from "./memory-embedding";
 import { simpleLLMCall } from "./api-helpers";
 import { maybeRunCoreMemoryPipeline } from "./core-memory-builder";
+import { splitSummaryBatches } from "./memory-layering";
 
 /** Per-character lock to prevent concurrent summarization. */
 const summarizingSet = new Set<string>();
@@ -48,6 +49,8 @@ export async function maybeRunSummarization(
  * Does NOT delete short-term events — they are only trimmed by token budget elsewhere.
  * API config is resolved from auxiliary binding (global, not per-character).
  */
+export type SummaryProgress = { batch: number; total: number };
+
 export async function runSummarizationPipeline(
     characterId: string,
     characterName: string,
@@ -55,8 +58,10 @@ export async function runSummarizationPipeline(
         force?: boolean;
         /** 手动指定总结起点（覆盖进度水位线）；force 为真时忽略 */
         sinceTimestamp?: string;
+        /** 每开始一批回调一次 */
+        onProgress?: (progress: SummaryProgress) => void;
     }
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; batches?: number }> {
     if (summarizingSet.has(characterId)) return { success: false, error: "该角色正在整理记忆，请等待完成" };
     summarizingSet.add(characterId);
     try {
@@ -71,7 +76,11 @@ export async function runSummarizationPipeline(
     } finally { summarizingSet.delete(characterId); }
 }
 
-async function summarizeUnlocked(characterId: string, characterName: string, options?: { force?: boolean; sinceTimestamp?: string }): Promise<{ success: boolean; error?: string }> {
+async function summarizeUnlocked(
+    characterId: string,
+    characterName: string,
+    options?: { force?: boolean; sinceTimestamp?: string; onProgress?: (progress: SummaryProgress) => void },
+): Promise<{ success: boolean; error?: string; batches?: number }> {
     const config = loadMemoryConfig();
     const counterAtStart = getEventCounter(characterId);
 
@@ -98,6 +107,29 @@ async function summarizeUnlocked(characterId: string, characterName: string, opt
         return { success: false, error: allEntries.length === 0 ? "没有可总结的事件" : "事件不足 4 条" };
     }
 
+    // 删光总结后水位线清空、或积压很久时，一次喂全部历史会写成横跨几周的一大条，还容易被截断：按自动总结的间隔分批
+    const batches = splitSummaryBatches(allEntries, config.summarizationEventInterval);
+    let done = 0;
+    for (const batch of batches) {
+        options?.onProgress?.({ batch: done + 1, total: batches.length });
+        const result = await summarizeBatch(characterId, characterName, batch, config, apiConfig);
+        if (!result.success) {
+            if (done > 0) consumeEventCounter(characterId, counterAtStart);
+            return { success: false, batches: done, error: done > 0 ? `前 ${done} 批已保存，第 ${done + 1} 批失败：${result.error}` : result.error };
+        }
+        done++;
+    }
+    consumeEventCounter(characterId, counterAtStart);
+    return { success: true, batches: done };
+}
+
+async function summarizeBatch(
+    characterId: string,
+    characterName: string,
+    allEntries: ReturnType<typeof loadNativeTimeline>,
+    config: ReturnType<typeof loadMemoryConfig>,
+    apiConfig: NonNullable<ReturnType<typeof resolveAuxiliaryApiConfig>>,
+): Promise<{ success: boolean; error?: string }> {
     const formatted = formatTimelineForSummarization(allEntries);
     if (!formatted) return { success: false, error: "格式化事件数据失败" };
 
@@ -178,10 +210,8 @@ async function summarizeUnlocked(characterId: string, characterName: string, opt
     };
     await saveMemoryBatch([longTermEntry]);
 
-    // Update last summarized timestamp + reset counter
     const previousWatermark = getLastSummarizedTimestamp(characterId);
     setLastSummarizedTimestamp(characterId, previousWatermark && previousWatermark > latest ? previousWatermark : latest);
-    consumeEventCounter(characterId, counterAtStart);
 
     // 长期记忆不再按条数删最旧的（原来超过 maxLongTermEntries=500 会直接删）：
     // 带不进提示词只影响注入，删了就真的忘了。
