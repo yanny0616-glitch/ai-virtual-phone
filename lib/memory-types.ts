@@ -29,6 +29,8 @@ export type MemoryConfig = {
     /** 已不再使用：长期记忆不按条数删除（2026-09-17），字段留着兼容旧配置 */
     maxLongTermEntries: number;
     summarizationEventInterval: number;     // trigger summarization every N events
+    /** 每批长期总结的字数上限，填进提示词的 {{words}} */
+    summaryWordLimit: number;
     coreSummarizationInterval: number;      // trigger core-memory rebuild every N new long-term memories
     shortTermTokenBudget: number;           // token limit for short-term event log
     coreMemoryTokenBudget: number;          // token limit for injected core memories
@@ -70,10 +72,30 @@ export type MemorySearchResult = {
 };
 
 /**
- * 默认长期总结提示词。占位：{{char}} {{earliest}} {{latest}} {{events}} {{count}}（本批条数）
+ * 默认长期总结提示词。占位：{{char}} {{earliest}} {{latest}} {{events}} {{count}}（本批条数）{{words}}（每批字数上限）
  * 规则参考 Memory Constellations「航海日志」、糯叽机总结规则、ai-memory-gateway，见 docs/memory-refactor-plan.md。
+ * 按事件合并、原话只留关键的、给字数上限：上一版逐条转述，写出来比原记录还长。
  */
 export const DEFAULT_SUMMARIZATION_PROMPT = `你是{{char}}的记忆整理助手。下面是 {{earliest}} 至 {{latest}} 之间还没整理过的 {{count}} 条记录（聊天、朋友圈、日记等），请整理成一段记忆日志，供{{char}}以后回忆。
+
+记录：
+{{events}}
+
+怎么写：
+1. 按事件整理：同一件事（一个话题、一次约定、一场争执）合成一段，不要按消息逐条转述。每段一行，开头写这件事开始的时间，格式「M月D日 HH:MM · 事件：经过和结果」。不要写「今天」「昨天」「刚才」；记录里说的「明天」「周五」「下个月」要换算成具体日期。
+2. 用自己的话概括发生了什么、结果怎样。原话只保留关键的：称呼和昵称、承诺、第一次说出口的话、情绪上有分量的一句，用引号并写明是谁说的。人名、地点、物品、作品名照原文写。
+3. 约定、承诺、计划必须写清：谁答应了谁、什么事、什么时间、什么条件、目前有没有做到。
+4. 普通闲聊和小事可以几件合成一句带过，但不要整件漏掉。
+5. 前后说法不一致、被纠正或改变的事，写最新的说法，并注明「改为……」。
+6. 只写记录里发生了的事，不推测、不解读；记录里没有的内容直接不写，不要写「记录中没有……」「未显示……」这类句子。
+7. 不要用「讨论了」「交流了」「分享了」「表达了」这类空泛的词，直接写内容。
+8. 用第三人称，人物用记录里的名字。全文不超过 {{words}} 字；写不下时先压缩闲聊和小事，时间、约定和关键原话不能丢。
+9. 只写这批记录里的内容。只输出日志正文，不要标题、解释、JSON 或代码块。
+
+记忆日志：`;
+
+/** 2026-09-17 阶段一上线的长期总结提示词（逐条转述、无字数上限），存进配置的同样换成新默认。 */
+export const PHASE1_SUMMARIZATION_PROMPT = `你是{{char}}的记忆整理助手。下面是 {{earliest}} 至 {{latest}} 之间还没整理过的 {{count}} 条记录（聊天、朋友圈、日记等），请整理成一段记忆日志，供{{char}}以后回忆。
 
 记录：
 {{events}}
@@ -204,7 +226,7 @@ export function migrateMemoryPrompts(config: MemoryConfig): MemoryConfig {
     const same = (value: string | undefined, legacy: string) => typeof value === "string" && value.trim() === legacy.trim();
     return {
         ...config,
-        ...(same(config.summarizationPrompt, LEGACY_SUMMARIZATION_PROMPT) ? { summarizationPrompt: DEFAULT_SUMMARIZATION_PROMPT } : {}),
+        ...(same(config.summarizationPrompt, LEGACY_SUMMARIZATION_PROMPT) || same(config.summarizationPrompt, PHASE1_SUMMARIZATION_PROMPT) ? { summarizationPrompt: DEFAULT_SUMMARIZATION_PROMPT } : {}),
         ...(same(config.coreMemoryPrompt, LEGACY_CORE_MEMORY_PROMPT) || same(config.coreMemoryPrompt, PHASE1_CORE_MEMORY_PROMPT) ? { coreMemoryPrompt: DEFAULT_CORE_MEMORY_PROMPT } : {}),
     };
 }
@@ -219,6 +241,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     vectorRecallEnabled: true,
     maxLongTermEntries: 500,
     summarizationEventInterval: 80,
+    summaryWordLimit: 500,
     coreSummarizationInterval: 5,
     shortTermTokenBudget: 100000,
     coreMemoryTokenBudget: 100000,

@@ -1223,7 +1223,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                 </div>
 
                 {/* Summarization interval */}
-                <p className="menu-group-desc mx-2">自动总结间隔</p>
+                <p className="menu-group-desc mx-2">自动总结间隔与字数</p>
                 <div className="menu-group">
                     <MemorySettingsSliderItem
                         icon={Clock}
@@ -1235,6 +1235,21 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         max={200}
                         step={10}
                         onChange={saveInterval}
+                    />
+                    <MemorySettingsSliderItem
+                        icon={FileText}
+                        color={BINDING_ACCENTS.api}
+                        label="每批总结字数"
+                        desc="每批长期记忆最多写多少字，填进提示词的 {{words}}；写不下先压缩闲聊，约定和关键原话保留"
+                        value={config.summaryWordLimit ?? 500}
+                        min={100}
+                        max={2000}
+                        step={50}
+                        onChange={value => {
+                            const next = { ...config, summaryWordLimit: Math.min(2000, Math.max(100, Math.round(value))) };
+                            setConfig(next);
+                            saveMemoryConfig(next);
+                        }}
                     />
                     <MemorySettingsSliderItem
                         icon={Brain}
@@ -1257,7 +1272,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         <div className="menu-label-group">
                             <span className="menu-label">长期记忆总结提示词</span>
                             <span className="menu-desc">
-                                变量：{"{{char}}"} 角色、{"{{earliest}}"} 起始时间、{"{{latest}}"} 结束时间、{"{{events}}"} 记录集合、{"{{count}}"} 本批条数
+                                变量：{"{{char}}"} 角色、{"{{earliest}}"} 起始时间、{"{{latest}}"} 结束时间、{"{{events}}"} 记录集合、{"{{count}}"} 本批条数、{"{{words}}"} 每批字数上限
                                 {!isDefault && "。你改过这份提示词，不会自动换成新版默认；点「恢复默认」会换成新版并覆盖你改的内容"}
                             </span>
                         </div>

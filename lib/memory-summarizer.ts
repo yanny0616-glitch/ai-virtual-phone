@@ -191,7 +191,10 @@ async function summarizeBatch(
         .replace(/\{\{latest\}\}/gi, () => latest)
         .replace(/\{\{events\}\}/gi, () => eventsText)
         .replace(/\{\{count\}\}/gi, () => String(allEntries.length))
-        + (/\{\{events\}\}/i.test(promptTemplate) ? "" : `\n事件记录：\n${eventsText}`);
+        .replace(/\{\{words\}\}/gi, () => String(config.summaryWordLimit))
+        + (/\{\{events\}\}/i.test(promptTemplate) ? "" : `\n事件记录：\n${eventsText}`)
+        // 自己改过、没写 {{words}} 的提示词，设置里的字数也照样生效
+        + (/\{\{words\}\}/i.test(promptTemplate) ? "" : `\n\n（全文不超过 ${config.summaryWordLimit} 字。）`);
 
     // Call LLM for summarization — compatible with all providers
     // label 用于在「底层调用大模型日志」中标识这是记忆总结调用
