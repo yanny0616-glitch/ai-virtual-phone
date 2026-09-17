@@ -54,3 +54,14 @@ console.log('PASS core merge input keeps old cores and new entries');
   assert.deepEqual(sizes(c2.split(ev(10), 0)), [10], 'bad size falls back to 80');
   console.log('PASS summary batches split at timestamp boundaries');
 }
+
+{
+  const src3 = fs.readFileSync(new URL('../lib/memory-layering.ts', import.meta.url), 'utf8');
+  const c3 = vm.createContext({});
+  vm.runInContext(stripTypeScriptTypes(src3).replace(/^export /gm, '') + '\nglobalThis.win=shortTermWindowStart;', c3);
+  assert.equal(c3.win('2026-09-16T14:39:00.000Z', 3), '2026-09-13T14:39:00.000Z', 'window starts N days before the watermark');
+  assert.equal(c3.win('2026-09-16T14:39:00.000Z', 0), '2026-09-16T14:39:00.000Z', '0 days = only after summary');
+  assert.equal(c3.win(null, 3), null, 'never summarized falls back to budget');
+  assert.equal(c3.win('garbage', 3), null);
+  console.log('PASS short-term window anchors on the summary watermark');
+}

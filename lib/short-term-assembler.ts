@@ -947,6 +947,8 @@ export function prepareShortTermContext(
         excludeDirectChat?: boolean;
         /** 覆盖 shortTermTokenBudget（按模型校准后的值） */
         tokenBudget?: number;
+        /** 早于这个时刻的记录不进短期记忆（2.1 总结之后 + 近 N 天），之后仍按预算兜底 */
+        notBefore?: string;
         timeAware?: boolean;
         promptTimestampOptions?: PromptTimestampOptions;
     },
@@ -1112,11 +1114,13 @@ export function prepareShortTermContext(
     for (const r of raw) {
         for (const e of r.entries) {
             entryMeta.set(e.id, { entry: e, sourceTag: r.tag });
+            if (options?.notBefore && e.timestamp < options.notBefore) continue;
             pool.push({ kind: "entry", timestamp: e.timestamp, tokens: estimateTokens(e.content) + 4, entryId: e.id, sourceTag: r.tag });
         }
     }
     for (let i = 0; i < history.length; i++) {
         if (isPromptHiddenChatMessage(history[i], { includeNativeToolHistory: options?.includeNativeToolHistory })) continue;
+        if (options?.notBefore && history[i].createdAt < options.notBefore) continue;
         pool.push({ kind: "history", timestamp: history[i].createdAt, tokens: estimateTokens(history[i].content) + 4, msgIdx: i });
     }
 

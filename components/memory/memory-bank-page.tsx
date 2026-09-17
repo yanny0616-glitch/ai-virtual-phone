@@ -49,6 +49,10 @@ const MEMORY_TOKEN_BUDGET_STEP: Record<MemoryBudgetKey, number> = {
     longTermTokenBudget: 1000,
 };
 const MANUAL_MEMORY_CONTENT_LIMIT = 3000;
+const SHORT_TERM_WINDOW_MODES: { value: MemoryConfig["shortTermWindowMode"]; label: string }[] = [
+    { value: "budget", label: "原来的做法" },
+    { value: "since_summary", label: "总结之后 + 近几天" },
+];
 const LONG_TERM_RECALL_MODES: { value: MemoryConfig["longTermRecallMode"]; label: string }[] = [
     { value: "all", label: "全部放入" },
     { value: "relevant", label: "按话题挑" },
@@ -1090,6 +1094,51 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
 
                 <p className="menu-group-desc mx-2">少带重复内容</p>
                 <div className="menu-group">
+                    <div className="menu-item">
+                        <MemorySettingsIcon icon={Clock} color={BINDING_ACCENTS.memory} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">聊天原话带多少</span>
+                            <span className="menu-desc">
+                                {config.shortTermWindowMode === "since_summary"
+                                    ? `只带上次长期总结之后的原话，再往前多带 ${config.shortTermWindowDays} 天；更早的靠长期、核心记忆。还没总结过、线下模式照原来带`
+                                    : "按「短期记忆」预算从新往旧塞满，已经总结过的旧聊天也照带"}
+                            </span>
+                            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                                {SHORT_TERM_WINDOW_MODES.map(mode => (
+                                    <button
+                                        key={mode.value}
+                                        type="button"
+                                        className="ui-chip"
+                                        {...((config.shortTermWindowMode ?? "budget") === mode.value ? { "data-selected": "" } : {})}
+                                        onClick={() => {
+                                            const next = { ...config, shortTermWindowMode: mode.value };
+                                            setConfig(next);
+                                            saveMemoryConfig(next);
+                                        }}
+                                    >
+                                        {mode.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                    {config.shortTermWindowMode === "since_summary" && (
+                        <MemorySettingsSliderItem
+                            icon={Clock}
+                            color={BINDING_ACCENTS.memory}
+                            label="总结之前多带几天"
+                            desc="0 表示只带总结之后的；多带几天，刚总结完时对话也接得上"
+                            value={config.shortTermWindowDays ?? 3}
+                            min={0}
+                            max={14}
+                            step={1}
+                            onChange={value => {
+                                const next = { ...config, shortTermWindowDays: value };
+                                setConfig(next);
+                                saveMemoryConfig(next);
+                            }}
+                        />
+                    )}
                     <div className="menu-item">
                         <MemorySettingsIcon icon={Archive} color={BINDING_ACCENTS.memory} />
                         <div className="menu-label-group">

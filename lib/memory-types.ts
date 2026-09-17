@@ -35,6 +35,9 @@ export type MemoryConfig = {
     longTermTokenBudget: number;            // token limit for injected long-term memories
     longTermRecallMode: "all" | "relevant"; // all：按预算从新到旧塞满（原来的做法）；relevant：按话题挑、标日期
     longTermRecallTopK: number;
+    /** 2.1 短期原话怎么带：budget 按预算从新往旧带（原来的做法）；since_summary 只带总结水位线往前 N 天之后的，再按预算兜底 */
+    shortTermWindowMode: "budget" | "since_summary";
+    shortTermWindowDays: number;
     /** 2.0：短期 / 长期 / 核心预算按当前模型校准后的 token 数判断 */
     calibratedBudgetEnabled: boolean;
     /** 2.2：核心记忆合成过的长期记忆不再注入；核心改为旧核心 + 新增长期合并成一份，旧版留作历史 */
@@ -222,6 +225,8 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     longTermTokenBudget: 100000,
     longTermRecallMode: "all",
     longTermRecallTopK: 8,
+    shortTermWindowMode: "budget",
+    shortTermWindowDays: 3,
     calibratedBudgetEnabled: false,
     coreDedupEnabled: false,
     guanianJudgeSlimEnabled: true,

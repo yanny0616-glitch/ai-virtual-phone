@@ -62,7 +62,8 @@ import {
 import { setDebugPromptSnapshot, type DebugPromptSnapshot } from "./debug-store";
 import { extractFinishReason } from "./api-helpers";
 import { fetchLlmPayload } from "./llm-http";
-import { loadMemoryConfig, incrementEventCounter } from "./memory-storage";
+import { getLastSummarizedTimestamp, loadMemoryConfig, incrementEventCounter } from "./memory-storage";
+import { shortTermWindowStart } from "./memory-layering";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt, buildLongTermRecallContext, resolveMemoryConfigForModel } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 import { maybeRunSummarization } from "./memory-summarizer";
@@ -2002,6 +2003,10 @@ export async function buildChatPromptMessages(
         excludeOfflineSessionId: options?.excludeOfflineSessionId,
         excludeDirectChat: options?.excludeDirectChatFromShortTerm === true,
         tokenBudget: memConfig.shortTermTokenBudget,
+        // 线下的历史是当前这场戏本身，不按总结窗口裁
+        notBefore: memConfig.shortTermWindowMode === "since_summary" && !isOfflineMode
+            ? shortTermWindowStart(getLastSummarizedTimestamp(character.id), memConfig.shortTermWindowDays) ?? undefined
+            : undefined,
         promptTimestampOptions,
     });
     if (truncatedHistory.some(msg => !msg.isRetracted && msg.mediaData?.xhsNote?.status === "loading")) throw new Error("小红书笔记和配图还在加载，请完成后再回复");

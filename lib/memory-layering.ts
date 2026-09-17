@@ -62,3 +62,15 @@ export function splitSummaryBatches<T extends { timestamp: string }>(entries: T[
     }
     return batches;
 }
+
+/**
+ * 2.1 短期原话窗口的起点：总结水位线往前 days 天。锚在水位线而不是「现在」，
+ * 两次总结之间起点不动，提示词前缀才稳；还没总结过返回 null（照原来按预算带）。
+ */
+export function shortTermWindowStart(watermark: string | null | undefined, days: number): string | null {
+    if (!watermark) return null;
+    const end = Date.parse(watermark);
+    if (!Number.isFinite(end)) return null;
+    const span = Math.max(0, Number.isFinite(days) ? days : 3);
+    return new Date(end - span * 86_400_000).toISOString();
+}
