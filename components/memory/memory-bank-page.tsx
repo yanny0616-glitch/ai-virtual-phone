@@ -680,7 +680,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                     </div>
                                 </div>
                             </div>
-                            <div className="ts-12 leading-[1.7]">
+                            <div className="ts-12 leading-[1.7]" style={{ whiteSpace: "pre-wrap" }}>
                                 {expandedId === entry.id
                                     ? entry.content
                                     : entry.content.length > 100

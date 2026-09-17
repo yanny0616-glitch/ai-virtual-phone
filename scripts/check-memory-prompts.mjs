@@ -11,7 +11,7 @@ const load = (file, names) => {
   return ctx.api;
 };
 
-const types = load('memory-types.ts', 'DEFAULT_MEMORY_CONFIG,DEFAULT_SUMMARIZATION_PROMPT,DEFAULT_CORE_MEMORY_PROMPT,LEGACY_SUMMARIZATION_PROMPT,PHASE1_SUMMARIZATION_PROMPT,LEGACY_CORE_MEMORY_PROMPT,PHASE1_CORE_MEMORY_PROMPT,migrateMemoryPrompts');
+const types = load('memory-types.ts', 'DEFAULT_MEMORY_CONFIG,DEFAULT_SUMMARIZATION_PROMPT,DEFAULT_CORE_MEMORY_PROMPT,LEGACY_SUMMARIZATION_PROMPT,PHASE1_SUMMARIZATION_PROMPT,EVENT_TITLE_SUMMARIZATION_PROMPT,LEGACY_CORE_MEMORY_PROMPT,PHASE1_CORE_MEMORY_PROMPT,migrateMemoryPrompts');
 
 for (const key of ['{{char}}', '{{earliest}}', '{{latest}}', '{{events}}', '{{count}}', '{{words}}']) {
   assert.ok(types.DEFAULT_SUMMARIZATION_PROMPT.includes(key), `summary prompt keeps ${key}`);
@@ -20,7 +20,7 @@ for (const key of ['{{char}}', '{{earliest}}', '{{latest}}', '{{events}}']) {
   assert.ok(types.DEFAULT_CORE_MEMORY_PROMPT.includes(key), `core prompt keeps ${key}`);
 }
 assert.ok(types.DEFAULT_SUMMARIZATION_PROMPT.includes('普通闲聊'), 'ordinary chat must still be recorded');
-assert.ok(types.DEFAULT_SUMMARIZATION_PROMPT.includes('按事件整理'), 'summary merges by event, not per message');
+assert.ok(types.DEFAULT_SUMMARIZATION_PROMPT.includes('同一件事') && types.DEFAULT_SUMMARIZATION_PROMPT.includes('不要加小标题'), 'summary merges by event as plain narrative');
 assert.ok(types.DEFAULT_SUMMARIZATION_PROMPT.includes('不要写「记录中没有'), 'no absence notes');
 assert.equal(types.DEFAULT_MEMORY_CONFIG.summaryWordLimit, 500);
 assert.ok(types.DEFAULT_CORE_MEMORY_PROMPT.includes('普通细节也要保留'), 'core prompt keeps ordinary details');
@@ -38,6 +38,7 @@ assert.equal(migrated.summarizationPrompt, custom.summarizationPrompt, 'edited p
 assert.equal(migrated.coreMemoryPrompt, '我自己的核心提示词');
 assert.equal(types.migrateMemoryPrompts({ ...saved, coreMemoryPrompt: types.PHASE1_CORE_MEMORY_PROMPT }).coreMemoryPrompt, types.DEFAULT_CORE_MEMORY_PROMPT, 'phase-1 core default migrates');
 assert.equal(types.migrateMemoryPrompts({ ...saved, summarizationPrompt: types.PHASE1_SUMMARIZATION_PROMPT }).summarizationPrompt, types.DEFAULT_SUMMARIZATION_PROMPT, 'phase-1 summary default migrates');
+assert.equal(types.migrateMemoryPrompts({ ...saved, summarizationPrompt: types.EVENT_TITLE_SUMMARIZATION_PROMPT }).summarizationPrompt, types.DEFAULT_SUMMARIZATION_PROMPT, 'titled event default migrates');
 console.log('PASS legacy defaults migrate, custom prompts untouched');
 
 const counter = load('token-counter.ts', 'estimateTokens,tokenCalibrationSample,updateTokenCalibration');
