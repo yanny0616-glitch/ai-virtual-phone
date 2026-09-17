@@ -42,20 +42,57 @@ export function earliestCoreStart(previousCores: EntryLike[], fallback: string):
     return earliest;
 }
 
+type RoundEntry = {
+    timestamp: string;
+    sourceApp: string;
+    sourceDetail?: string;
+    authorType?: string;
+    sessionId?: string;
+    groupSessionId?: string;
+};
+
+// 角色隔了这么久又主动发，算新的一轮
+const ROUND_GAP_MS = 30 * 60_000;
+
+/** 每条记录是不是新一轮的开头：用户一句（连发只算一次）+ 角色这次的回复算一轮；朋友圈、日记等每条单独一轮 */
+export function markRoundStarts(entries: RoundEntry[]): boolean[] {
+    const last = new Map<string, RoundEntry>();
+    return entries.map(entry => {
+        if (entry.sourceApp !== "chat") return true;
+        const stream = entry.groupSessionId || entry.sessionId || entry.sourceDetail || "chat";
+        const prev = last.get(stream);
+        last.set(stream, entry);
+        if (!prev) return true;
+        if (entry.authorType === "user") return prev.authorType !== "user";
+        return prev.authorType !== "user" && Date.parse(entry.timestamp) - Date.parse(prev.timestamp) > ROUND_GAP_MS;
+    });
+}
+
+export function countRounds(entries: RoundEntry[]): number {
+    return markRoundStarts(entries).filter(Boolean).length;
+}
+
 /**
- * 长期总结分批：每批 size 条，同一时刻的记录不拆开（水位线按「晚于」读，拆开会漏掉同刻的后半截），
- * 末尾不足 min 条的并进上一批。
+ * 长期总结分批：每批 rounds 轮，只在新一轮开头切，一轮不拆开；
+ * 同一时刻的记录不拆开（水位线按「晚于」读，拆开会漏掉同刻的后半截），末尾不足 min 条的并进上一批。
  */
-export function splitSummaryBatches<T extends { timestamp: string }>(entries: T[], size: number, min = 4): T[][] {
-    const step = Math.max(min, Math.floor(size) || 80);
+export function splitSummaryBatches<T extends RoundEntry>(entries: T[], rounds: number, min = 4): T[][] {
+    const perBatch = Math.max(1, Math.floor(rounds) || 30);
+    const starts = markRoundStarts(entries);
     const batches: T[][] = [];
-    let start = 0;
-    while (start < entries.length) {
-        let end = Math.min(entries.length, start + step);
-        while (end < entries.length && entries[end].timestamp === entries[end - 1].timestamp) end++;
-        batches.push(entries.slice(start, end));
-        start = end;
-    }
+    let current: T[] = [];
+    let roundsInCurrent = 0;
+    entries.forEach((entry, index) => {
+        const sameInstant = current.length > 0 && current[current.length - 1].timestamp === entry.timestamp;
+        if (starts[index] && roundsInCurrent >= perBatch && !sameInstant) {
+            batches.push(current);
+            current = [];
+            roundsInCurrent = 0;
+        }
+        if (starts[index]) roundsInCurrent++;
+        current.push(entry);
+    });
+    if (current.length > 0) batches.push(current);
     if (batches.length > 1 && batches[batches.length - 1].length < min) {
         const tail = batches.pop()!;
         batches[batches.length - 1].push(...tail);

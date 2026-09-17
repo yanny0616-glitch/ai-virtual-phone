@@ -28,7 +28,10 @@ export type MemoryConfig = {
     vectorRecallEnabled: boolean;           // whether vector embedding recall is used for memory retrieval
     /** 已不再使用：长期记忆不按条数删除（2026-09-17），字段留着兼容旧配置 */
     maxLongTermEntries: number;
-    summarizationEventInterval: number;     // trigger summarization every N events
+    /** 已不再使用：原来按「事件」计（一问一答记 2），2026-09-17 起改为 summaryRoundInterval 按轮计，字段留着兼容旧配置 */
+    summarizationEventInterval: number;
+    /** 每 N 轮自动总结一次，也是每批的轮数（用户一句 + 角色这次回复算一轮；朋友圈等每条算一轮） */
+    summaryRoundInterval: number;
     /** 每批长期总结的字数上限，填进提示词的 {{words}} */
     summaryWordLimit: number;
     coreSummarizationInterval: number;      // trigger core-memory rebuild every N new long-term memories
@@ -241,6 +244,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     vectorRecallEnabled: true,
     maxLongTermEntries: 500,
     summarizationEventInterval: 80,
+    summaryRoundInterval: 30,
     summaryWordLimit: 500,
     coreSummarizationInterval: 5,
     shortTermTokenBudget: 100000,

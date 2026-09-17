@@ -445,8 +445,8 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
 
     const saveInterval = (value: number) => {
         if (!Number.isFinite(value)) return;
-        const nextValue = Math.min(200, Math.max(10, Math.round(value)));
-        const next = { ...config, summarizationEventInterval: nextValue };
+        const nextValue = Math.min(300, Math.max(5, Math.round(value)));
+        const next = { ...config, summaryRoundInterval: nextValue };
         setConfig(next);
         saveMemoryConfig(next);
     };
@@ -874,8 +874,8 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                     <span className="menu-label">长期记忆手动总结</span>
                                     <span className="menu-desc">
                                         {summaryProgress && summaryProgress.total > 1
-                                            ? `正在总结第 ${summaryProgress.batch} 批，共 ${summaryProgress.total} 批（每批约 ${config.summarizationEventInterval} 条）`
-                                            : `将新产生的事件整理为长期记忆，每 ${config.summarizationEventInterval} 条一批`}
+                                            ? `正在总结第 ${summaryProgress.batch} 批，共 ${summaryProgress.total} 批（每批 ${config.summaryRoundInterval} 轮）`
+                                            : `将新产生的聊天和事件整理为长期记忆，每 ${config.summaryRoundInterval} 轮一批`}
                                     </span>
                                 </div>
                                 <div className="menu-right">
@@ -1228,12 +1228,12 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                     <MemorySettingsSliderItem
                         icon={Clock}
                         color={BINDING_ACCENTS.api}
-                        label="总结间隔"
-                        desc="每 N 条事件自动触发总结"
-                        value={config.summarizationEventInterval ?? 50}
-                        min={10}
-                        max={200}
-                        step={10}
+                        label="每 N 轮总结一次"
+                        desc="你说一次、TA 回一次算一轮（连发、分段都只算一次）；朋友圈、日记等每条算一轮。也是手动总结每批的轮数"
+                        value={config.summaryRoundInterval ?? 30}
+                        min={5}
+                        max={300}
+                        step={5}
                         onChange={saveInterval}
                     />
                     <MemorySettingsSliderItem
@@ -1243,10 +1243,10 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         desc="每批长期记忆最多写多少字，填进提示词的 {{words}}；写不下先压缩闲聊，约定和关键原话保留"
                         value={config.summaryWordLimit ?? 500}
                         min={100}
-                        max={2000}
+                        max={5000}
                         step={50}
                         onChange={value => {
-                            const next = { ...config, summaryWordLimit: Math.min(2000, Math.max(100, Math.round(value))) };
+                            const next = { ...config, summaryWordLimit: Math.min(5000, Math.max(100, Math.round(value))) };
                             setConfig(next);
                             saveMemoryConfig(next);
                         }}

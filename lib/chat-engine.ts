@@ -2809,8 +2809,7 @@ async function generateChatCompletionCore(
             allowSilence,
         });
         if (completion.parts.some(part => part.text?.trim())) {
-            incrementEventCounter(character.id);
-            incrementEventCounter(character.id);
+            incrementEventCounter(character.id); // 一问一答记一轮
             void maybeRunSummarization(character.id, character.name).catch(err => console.warn("[ChatEngine] Memory summarization failed:", err));
         }
         return completion;
@@ -3129,8 +3128,7 @@ async function generateChatCompletionCore(
     // Memory: increment event counter + check if summarization needed (non-blocking)
     (async () => {
         try {
-            incrementEventCounter(character.id); // user message
-            incrementEventCounter(character.id); // AI reply
+            incrementEventCounter(character.id); // 一问一答记一轮
             await maybeRunSummarization(character.id, character.name);
         } catch (err) {
             console.warn("[ChatEngine] Memory counter/summarization failed:", err);

@@ -1,5 +1,12 @@
 # Fork 变更日志
 
+## 2026-09-17：长期总结改为按轮计数和分批
+
+- 问题：自动总结触发按「事件计数」（一问一答记 2，约 40 轮），分批却按时间线条数（每个气泡一条，80 条只有十几二十轮），同叫「80 条」实际两回事，分批还会把一轮拆开。
+- 统一按轮：用户一句（连发只算一次）+ 角色这次回复（不论几个气泡）算一轮；朋友圈、日记等非聊天记录每条算一轮；角色隔 30 分钟以上又主动发算新一轮（`markRoundStarts` / `splitSummaryBatches`，`lib/memory-layering.ts`）。分批只在一轮开头切。
+- 计数器：私聊一问一答从加 2 改为加 1；新配置 `summaryRoundInterval`（默认 30，滑块 5～300），旧 `summarizationEventInterval` 不再使用。每批字数滑块上限 2000 → 5000。
+- 验证：`check:memory-layering`（新增按轮场景）、`check:memory-prompts`、`check:memory-recall`、根 `tsc --noEmit`。`check-chat-silence`、`check-fork-regressions` 在改动前同样失败（前者沉默提示词断言与现文案不符），与本次无关。
+
 ## 2026-09-17：发布步骤加超时重试、清理草稿
 
 - 起因：9/17 16:14～17:10 UTC 之间 uploads.github.com 不稳，5 次构建的「Publish immutable release」要么 3 分钟后 HTTP 500 `Error saving asset`，要么一直不返回直到被下一次推送取消；原样重跑 10～55 秒就传完。平时这一步 7～15 秒，包 160MB 未变。

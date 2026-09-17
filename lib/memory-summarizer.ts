@@ -57,7 +57,7 @@ export function isSummarizing(characterId: string): boolean {
 
 /**
  * Check if summarization should run based on event counter, then execute.
- * Trigger: counter >= summarizationEventInterval.
+ * Trigger: counter >= summaryRoundInterval（计数器按轮加）.
  * API config is resolved from auxiliary binding (global, not per-character).
  */
 export async function maybeRunSummarization(
@@ -66,7 +66,7 @@ export async function maybeRunSummarization(
 ): Promise<void> {
     const config = loadMemoryConfig();
     const tasks: Promise<unknown>[] = [];
-    if (config.autoSummarizeEnabled && getEventCounter(characterId) >= config.summarizationEventInterval && !summarizingSet.has(characterId)) {
+    if (config.autoSummarizeEnabled && getEventCounter(characterId) >= config.summaryRoundInterval && !summarizingSet.has(characterId)) {
         tasks.push(runSummarizationPipeline(characterId, characterName).then(result => {
             if (!result.success) console.warn("[MemorySummarizer]", result.error);
         }));
@@ -142,8 +142,8 @@ async function summarizeUnlocked(
         return { success: false, error: allEntries.length === 0 ? "没有可总结的事件" : "事件不足 4 条" };
     }
 
-    // 删光总结后水位线清空、或积压很久时，一次喂全部历史会写成横跨几周的一大条，还容易被截断：按自动总结的间隔分批
-    const batches = splitSummaryBatches(allEntries, config.summarizationEventInterval);
+    // 删光总结后水位线清空、或积压很久时，一次喂全部历史会写成横跨几周的一大条，还容易被截断：按自动总结的轮数分批
+    const batches = splitSummaryBatches(allEntries, config.summaryRoundInterval);
     const total = batches.length;
     const who = characterName || "角色";
     let done = 0;

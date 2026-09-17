@@ -42,17 +42,29 @@ console.log('PASS core merge input keeps old cores and new entries');
 {
   const src2 = fs.readFileSync(new URL('../lib/memory-layering.ts', import.meta.url), 'utf8');
   const c2 = vm.createContext({});
-  vm.runInContext(stripTypeScriptTypes(src2).replace(/^export /gm, '') + '\nglobalThis.split=splitSummaryBatches;', c2);
-  const ev = (n, same = {}) => Array.from({ length: n }, (_, i) => ({ id: i, timestamp: same[i] ?? `t${String(i).padStart(4, '0')}` }));
+  vm.runInContext(stripTypeScriptTypes(src2).replace(/^export /gm, '') + '\nglobalThis.split=splitSummaryBatches;globalThis.count=countRounds;', c2);
+  let t = Date.parse('2026-09-10T00:00:00Z');
+  const at = () => new Date(t += 60_000).toISOString();
+  // 一轮：用户连发 userMsgs 条，角色回 bubbles 个气泡
+  const round = (userMsgs = 1, bubbles = 3, session = 's1') => [
+    ...Array.from({ length: userMsgs }, () => ({ sourceApp: 'chat', sourceDetail: 'direct', authorType: 'user', sessionId: session, timestamp: at() })),
+    ...Array.from({ length: bubbles }, () => ({ sourceApp: 'chat', sourceDetail: 'direct', authorType: 'character', sessionId: session, timestamp: at() })),
+  ];
   const sizes = b => Array.from(b, x => x.length);
-  assert.deepEqual(sizes(c2.split(ev(200), 80)), [80, 80, 40]);
-  assert.deepEqual(sizes(c2.split(ev(162), 80)), [80, 82], 'tail under 4 merges into previous batch');
-  assert.deepEqual(sizes(c2.split(ev(50), 80)), [50]);
-  assert.deepEqual(sizes(c2.split([], 80)), []);
-  const tied = ev(100, { 79: 'tie', 80: 'tie', 81: 'tie' });
-  assert.deepEqual(sizes(c2.split(tied, 80)), [82, 18], 'same-timestamp records stay in one batch');
-  assert.deepEqual(sizes(c2.split(ev(10), 0)), [10], 'bad size falls back to 80');
-  console.log('PASS summary batches split at timestamp boundaries');
+  const chat = Array.from({ length: 10 }, (_, i) => round(i % 2 + 1, 3)).flat();
+  assert.equal(c2.count(chat), 10, 'multi-message user input + multi-bubble reply is one round');
+  assert.deepEqual(sizes(c2.split(chat, 4)), [18, 18, 9], 'batches cut only at round starts');
+  const withMoment = [...round(), { sourceApp: 'moments', timestamp: at() }, ...round()];
+  assert.equal(c2.count(withMoment), 3, 'a moments entry is its own round');
+  const proactive = [...round(1, 2), { sourceApp: 'chat', sourceDetail: 'direct', authorType: 'character', sessionId: 's1', timestamp: new Date(t += 3 * 3600_000).toISOString() }];
+  assert.equal(c2.count(proactive), 2, 'character reaching out hours later starts a new round');
+  const tail = [...round(1, 3), ...round(1, 3), { sourceApp: 'moments', timestamp: at() }];
+  assert.deepEqual(sizes(c2.split(tail, 2)), [9], 'tail under 4 entries merges into previous batch');
+  const same = [...round(1, 3)];
+  const tied = { sourceApp: 'moments', timestamp: same[same.length - 1].timestamp };
+  assert.deepEqual(sizes(c2.split([...same, tied, ...round(), ...round()], 1)), [5, 4, 4], 'same-instant entries stay together');
+  assert.deepEqual(sizes(c2.split([], 30)), []);
+  console.log('PASS summary batches split by rounds');
 }
 
 {
