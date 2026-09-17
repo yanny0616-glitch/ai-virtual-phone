@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { calendarReality, parseDayResult } from "../src/day.ts";
+import { buildDayInstruction, calendarReality, parseDayResult, recentDaysBrief } from "../src/day.ts";
 import { guanianAsleep, guanianNow, stateNote } from "../src/life.ts";
 import { appendUserNote, buildTaskRequest, parseModelJson, splitPreview, visibleResponse } from "../src/llm.ts";
 import { feedbackWindowEnd, impulseValue, parseJudgeJson, valueFloor } from "../src/rules.ts";
@@ -139,4 +139,18 @@ test("同一件事的字面兜底：0916 念头撞约定、0914 催睡撞约定�
   assert.match(similarBlock(again, [sent], [], []), /发过的是同一件事/);
   const replied = [{ id: "u", role: "user", content: "起了", message_at: "2026-09-12T09:00:00Z" }];
   assert.equal(similarBlock(again, [sent], [], replied), "");
+});
+
+test("生成一天：前几天带睡眠和起床精力，并要求没睡好之后逐天恢复", () => {
+  const past = recentDaysBrief([
+    { date: "2026-09-15", characterId: "c", day: { ...day, sleep: "两点多才睡着", energy: 62 } },
+    { date: "2026-09-16", characterId: "c", day: { ...day, sleep: "", energy: 70 } },
+  ], "2026-09-17");
+  assert.match(past.lines.join("\n"), /2026-09-15 心情「松弛」 睡眠「两点多才睡着」 起床精力 62：/);
+  assert.match(past.lines.join("\n"), /2026-09-16 心情「松弛」 起床精力 70：/);
+  const inst = buildDayInstruction({ date: "2026-09-17", nowHM: "06:00", past, existing: [], threads: [], routine: {} });
+  assert.match(inst, /前几天没睡好不会自动延续到今天/);
+  assert.match(inst, /逐天回到正常的 70 到 90/);
+  const fresh = buildDayInstruction({ date: "2026-09-17", nowHM: "06:00", past: { lines: [], residue: [] }, existing: [], threads: [], routine: {} });
+  assert.doesNotMatch(fresh, /睡眠和精力会恢复/);
 });

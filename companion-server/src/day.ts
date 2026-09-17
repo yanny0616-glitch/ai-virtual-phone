@@ -41,7 +41,8 @@ export function recentDaysBrief(past: PastDay[], date: string): { lines: string[
     const hits = Array.isArray(r.day.forks) && r.day.forks.length
       ? (applyDueForks(r.day, "23:59", { seed: r.day.forkSeed || r.date + "|" + r.characterId }).day.forks as { state?: string; what?: string }[]).filter(f => f && f.state === "hit")
       : [];
-    return "- " + r.date + (r.day.mood ? " 心情「" + r.day.mood + "」" : "") + "："
+    return "- " + r.date + (r.day.mood ? " 心情「" + r.day.mood + "」" : "")
+      + (r.day.sleep ? " 睡眠「" + r.day.sleep + "」" : "") + (Number.isFinite(Number(r.day.energy)) ? " 起床精力 " + Number(r.day.energy) : "") + "："
       + ((r.day.schedule || []).map(it => it.title).filter(Boolean).join("、") || "没生成日程")
       + (r.day.bed ? "（" + r.day.bed + " 睡）" : "") + (hits.length ? "；那天碰上的事：" + hits.map(f => f.what).join("；") : "");
   });
@@ -75,6 +76,7 @@ export function buildDayInstruction(opts: {
     String(opts.dayPrompt || "").trim() || DEFAULT_DAY_PROMPT,
     "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + opts.nowHM + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
     opts.past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵；跨好几天的事——项目、备考、排练、等结果——按筹备、进行、收尾、余波的顺序往下走，让这几天连成线）：\n" + opts.past.lines.join("\n") : null,
+    opts.past.lines.length ? "睡眠和精力会恢复：前几天没睡好不会自动延续到今天。昨晚没有新的原因（聊到深夜、新的烦心事、生病、通宵）时，今天的睡眠要比前一天好转，起床精力逐天回到正常的 70 到 90；已经连着几天偏低的，今天要明显回升。偶尔没睡好照样可以写，但要有昨晚自己的原因。" : null,
     opts.past.residue.length ? "昨天留下的余波：" + opts.past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
     opts.threads.length ? "惦记账本（已了结项仅供判重，不再安排；未了结事项：约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + opts.threads.join("\n") : null,
     "最近聊天中角色明确要做的事、未取消的承诺，以及双方已明确说定的共同安排，应落进 schedule；仅提过但没说定的共同活动不要当作约定。",
