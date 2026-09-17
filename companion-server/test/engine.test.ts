@@ -697,3 +697,138 @@ test("快捷动作建过但结果未确认（重启）：不重复建命令，�
     assert.equal(posts[1].meta.kind, "shortcut_delivery_error");
   } finally { env.store.close(); }
 });
+
+async function setupShortcutDelivery(resultMode = "text") {
+  const env = setup("live", "2026-09-16T15:00", true);
+  patchSnapshot(env, s => {
+    s.shortcutContinuation = {
+      request: { ...structuredClone(s.request), body: { model: "m", messages: [{ role: "assistant", content: "__REPLY__" }, { role: "user", content: "__RESULT__" }] } },
+      replyMarker: "__REPLY__", resultMarker: "__RESULT__",
+    };
+  });
+  await env.tick();
+  const fc = fakeCloud();
+  env.deps.cloud = fc.cloud; env.deps.cloudKey = "fake";
+  const rest = env.deps.rest;
+  env.deps.rest = async (path, init) => {
+    if (path.startsWith("push_bridge_config?")) return Response.json([{ shortcut_actions: [{ actionId: "a1", name: "查天气", shortcutName: "Weather", resultMode, deliveryMode: "push", expiresInSeconds: 900 }] }]);
+    if (path.startsWith("push_server_config?")) return Response.json([{ site_origin: "https://float.example" }]);
+    return rest(path, init);
+  };
+  const models = withChatReply(env, "我看看【快捷动作：查天气】");
+  const wakeId = env.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+  return { env, fc, models, wakeId };
+}
+
+test("首条 outbox 已提交但回执丢失：恢复后补投快捷通知，再挂结果续跑", async () => {
+  const { env, fc, models, wakeId } = await setupShortcutDelivery();
+  try {
+    const rest = env.deps.rest;
+    let loseResponse = true;
+    env.deps.rest = async (p, init) => {
+      const response = await rest(p, init);
+      if (p === "push_outbox" && loseResponse) { loseResponse = false; throw new Error("committed but response lost"); }
+      return response;
+    };
+    env.setNow("2026-09-16T16:01"); await env.tick();
+    assert.equal(fc.calls.filter(c => c.path.includes("shortcut-deliver")).length, 0);
+    assert.equal(env.store.dueResumes(Infinity).length, 0);
+    assert.ok(env.store.getDraft(wakeId));
+    env.setNow("2026-09-16T16:07"); await env.tick();
+    assert.equal(fc.calls.filter(c => c.path.includes("shortcut-create")).length, 1);
+    assert.equal(fc.calls.filter(c => c.path.includes("shortcut-deliver")).length, 1);
+    assert.equal(env.calls.filter(c => c.path === "push_outbox" && c.method === "POST").length, 1);
+    assert.equal(models.length, 1);
+    assert.equal(env.store.getTimer(wakeId)!.status, "done");
+    assert.equal(env.store.getDraft(wakeId), null);
+    assert.equal(env.store.dueResumes(Infinity)[0].sourceWakeId, wakeId);
+  } finally { env.store.close(); }
+});
+
+test("命令投递失败保留阶段：原消息不重发，恢复后只补同一命令", async () => {
+  const { env, fc, wakeId } = await setupShortcutDelivery();
+  try {
+    const cloud = env.deps.cloud!;
+    let down = true, deliveries = 0;
+    env.deps.cloud = async (p, init) => {
+      if (p.includes("shortcut-deliver")) { deliveries++; if (down) return Response.json({ ok: false, error: "push down" }, { status: 503 }); }
+      return cloud(p, init);
+    };
+    env.setNow("2026-09-16T16:01"); await env.tick();
+    assert.equal(env.store.getTimer(wakeId)!.status, "pending");
+    assert.equal(env.store.dueResumes(Infinity).length, 0);
+    assert.ok(env.store.getDraft(wakeId));
+    down = false;
+    env.setNow("2026-09-16T16:07"); await env.tick();
+    assert.equal(deliveries, 2);
+    assert.equal(fc.calls.filter(c => c.path.includes("shortcut-create")).length, 1);
+    assert.equal(env.calls.filter(c => c.path === "push_outbox").length, 1);
+    assert.equal(env.pushes.length, 1);
+    assert.equal(env.store.getTimer(wakeId)!.status, "done");
+    assert.equal(env.store.dueResumes(Infinity).length, 1);
+  } finally { env.store.close(); }
+});
+
+test("目录读取/建命令等待中取消或失去租约，阻止后续动作与消息", async () => {
+  for (const stage of ["catalog", "create", "lease"] as const) {
+    const { env, fc } = await setupShortcutDelivery("none");
+    try {
+      const rest = env.deps.rest, cloud = env.deps.cloud!;
+      let stopped = false;
+      env.deps.halted = () => stage !== "lease" && stopped;
+      env.deps.rest = async (p, init) => {
+        const response = await rest(p, init);
+        if (stage === "catalog" && p.startsWith("push_bridge_config?")) stopped = true;
+        if (stage === "lease" && stopped && p === "rpc/push_generation_lease" && JSON.parse(String(init?.body)).p_action === "renew") return Response.json(false);
+        return response;
+      };
+      env.deps.cloud = async (p, init) => { const response = await cloud(p, init); if (p.includes("shortcut-create")) stopped = true; return response; };
+      env.setNow("2026-09-16T16:01"); await env.tick();
+      assert.equal(env.calls.filter(c => c.path === "push_outbox").length, 0, stage);
+      assert.equal(fc.calls.filter(c => c.path.includes("shortcut-deliver")).length, 0, stage);
+      assert.equal(env.pushes.length, 0, stage);
+      assert.equal(env.store.dueResumes(Infinity).length, 0, stage);
+      if (stage === "catalog") assert.equal(fc.calls.filter(c => c.path.includes("shortcut-create")).length, 0);
+      else assert.equal(fc.calls.find(c => c.path.includes("shortcut-create"))!.body.deferDelivery, true, "无回传动作也不能在创建时自动执行");
+    } finally { env.store.close(); }
+  }
+});
+
+test("微信明确失败后固定转聊天，聊天写入重试不再尝试微信", async () => {
+  const env = setup("live", "2026-09-16T15:00", true);
+  try {
+    patchSnapshot(env, s => { s.weixin = { botId: "bot1" }; }); await env.tick();
+    const fc = fakeCloud({ weixinOk: false }); env.deps.cloud = fc.cloud;
+    const rest = env.deps.rest; let writes = 0;
+    env.deps.rest = async (p, init) => p === "push_outbox" && ++writes === 1 ? new Response("down", { status: 503 }) : rest(p, init);
+    const models = withChatReply(env, "【发到微信】在忙吗");
+    env.setNow("2026-09-16T16:01"); await env.tick();
+    env.setNow("2026-09-16T16:07"); await env.tick();
+    assert.equal(writes, 2); assert.equal(models.length, 1);
+    assert.equal(fc.calls.filter(c => c.path === "functions/v1/weixin-assistant").length, 1);
+    assert.equal(env.pushes.length, 1);
+  } finally { env.store.close(); }
+});
+
+test("微信已送但回执丢失、5xx 或重启时 sending：保留未知状态，不改投不重发", async () => {
+  for (const failure of ["lost", "500", "restart"] as const) {
+    const env = setup("live", "2026-09-16T15:00", true);
+    try {
+      patchSnapshot(env, s => { s.weixin = { botId: "bot1" }; }); await env.tick();
+      const fc = fakeCloud(); let attempts = 0;
+      env.deps.cloud = async (p, init) => {
+        if (p === "functions/v1/weixin-assistant") { attempts++; if (failure === "lost") throw new Error("accepted but response lost"); return new Response("failure", { status: 500 }); }
+        return fc.cloud(p, init);
+      };
+      withChatReply(env, "【发到微信】在忙吗");
+      const id = env.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+      if (failure === "restart") env.store.saveDraft({ wakeId: id, userId: "u1", sessionId: "sess1", outboxId: "out_saved", createdAt: new Date(env.deps.now()).toISOString(), rawText: "在忙吗", meta: {}, notify: { title: "TA", url: "/" }, weixinBotId: "bot1", weixinState: "sending" });
+      env.setNow("2026-09-16T16:01"); await env.tick();
+      env.setNow("2026-09-16T16:07"); await env.tick();
+      assert.equal(attempts, failure === "restart" ? 0 : 1);
+      assert.equal(env.calls.filter(c => c.path === "push_outbox").length, 0);
+      assert.equal(env.store.getDraft(id)!.weixinState, "unknown");
+      assert.equal(env.store.getTimer(id)!.status, "failed");
+    } finally { env.store.close(); }
+  }
+});

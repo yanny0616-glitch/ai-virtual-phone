@@ -99,7 +99,7 @@ CLI：`node src/cli.ts diagnose | push-test | status | import [--force] | mode s
 
 - **来电**：聊天模板里有 `__GUANIAN_CALL_INVITE__` 占位，后端到点按同一角色 20 小时一次换成「可以打电话」说明，否则换成「照常发消息」。回复开头是 `[我向…发起了语音通话]` / `【拨打电话】` 等标签时，推单条 `incoming_call` 通知（点开 `/?ring=<会话>` 直达振铃），正文照常进 outbox。
 - **发到微信**：模板带角色绑定的 bot（`payload.weixin.botId`）。回复开头 `【发到微信】` 就经微信云助手 `send-text` 发到真实微信，送成了不进聊天 outbox；送不成照常发到聊天。
-- **快捷动作**：`【快捷动作：名称({参数})】` → 读 `push_bridge_config.shortcut_actions` 目录 → 调个人云 `ai-phone-push?action=shortcut-create` 建命令。outbox 的 `meta.shortcutMarker` 带标记原文和位置，补收时原位落 tool_call。角色先说话、推送完，再投递「运行快捷指令」（推送模式调 `shortcut-deliver`，邮件模式请站点代发）。送达失败落一条 `meta.kind = shortcut_delivery_error` 诊断行。建命令前草稿先记 `shortcutTried`，重启后看到没结果就不重复执行。
+- **快捷动作**：`【快捷动作：名称({参数})】` → 读 `push_bridge_config.shortcut_actions` 目录 → 调个人云 `ai-phone-push?action=shortcut-create` 建命令。outbox 的 `meta.shortcutMarker` 带标记原文和位置，补收时原位落 tool_call。角色先说话、推送完，再投递「运行快捷指令」（推送模式调 `shortcut-deliver`，邮件模式请站点代发）。创建失败落 `meta.kind = shortcut_delivery_error` 诊断行；命令投递失败保留草稿阶段并重试，不重新创建命令。建命令前草稿先记 `shortcutTried`，重启后看到没结果就不重复执行。
 - **结果续跑**：会回传结果的动作，把刚说的话代入模板里的续跑底稿（`shortcutContinuation`），存 `shortcut_resumes` 表。Runner 每轮查 `push_shortcut_commands`：没执行完往后排，过期按超时交给角色；结果和截图代入后生成第二轮，写 `trigger_key = shortcut:<命令>` 的 outbox 并推送。第二轮再出动作标记只剥不执行。不再挂 `shortcut_resume` 云任务。
 - **安卓壳通知**：`push.ts` 对 `shell:` 订阅改发 Realtime 广播 `shellpush:<userId>`，来电带 `kind: "call"`。唤醒后端的推送也走这里。
 
@@ -164,3 +164,16 @@ npm test
 挂念定时发送与事件唤醒通过 `generation-lease.ts` 复用个人云 schema 12 的 `push_generation_lease`，与旧云端其他后台消息共享同一把会话锁。锁被占用时挂念延期一分钟（不计失败重试），事件唤醒不 ack；拿到锁后刷新聊天事实。模型/工具执行期间每分钟续租，在模型、工具、outbox 边界校验，失去租约停止后续副作用，最终释放。无需更新云函数或挂念安装包版本。
 
 专项验证：`node --no-warnings --test test/engine.test.ts test/wake.test.ts test/feedback-import.test.ts test/generation-lease.test.ts`；网关/MCP/补收集成验证从仓库根目录运行 `node scripts/check-wake-server.mjs`。
+
+
+### 发送分流的故障恢复
+
+聊天写入和快捷通知分别记录完成状态。快捷命令（包括无回传动作）一律 `deferDelivery=true`，首条消息写入后再投递；outbox 回执丢失时恢复该正文，继续补投同一命令。通知确认后持久化 `shortcutDelivered`，再挂续跑；全部步骤完成才把定时器置 done、删除草稿。推送网关按 notified_at 去重，邮件代发沿用 commandId 幂等键。
+
+`delivery-guard.ts` 在建命令、投递命令、微信发送、写 outbox 和通知前检查角色开关、会话归属、排队中的取消与会话租约；守卫放在各次配置/凭据读取之后、外部请求之前。续跑保存 sourceWakeId，受相同守卫约束；旧版已经挂起但父草稿还没投递命令的续跑先等待。
+
+微信发送在发起请求前持久化 sending。明确失败保存 failed，之后只重试聊天兜底；成功保存 sent。超时、5xx、无效回执或重启发现 sending 均视为结果不明，保留草稿并将定时器标为失败待核对，不自动重发微信或改投聊天。个人云当前没有这条发送请求的幂等回执查询协议，不能把“没收到回执”当作“没发出去”。
+
+快捷结果续跑取得租约后重新读取聊天镜像和 outbox、刷新模板时间、补入最新聊天，再代入结果及图片。生成后将正文、原生成时间、思考内容和图片路径存进 shortcut_resumes；投递失败/重启复用正文及固定 outbox ID，不再次调模型。停用/等待锁/预算满不消耗失败次数；其他错误三次后保留记录及正文待核对。兼容已有 SQLite JSON 记录，不改云函数或安装包版本。
+
+故障专项：`node --no-warnings --test test/delivery.test.ts test/engine.test.ts test/shortcut-resume.test.ts`。

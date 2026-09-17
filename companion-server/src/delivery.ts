@@ -165,7 +165,7 @@ export type ShortcutCommand = {
 };
 
 /** key：个人云管理员密钥，ai-phone-push 用 x-ai-phone-service-key 核对 */
-export type CloudCtx = { rest: Rest; cloud: Cloud; key: string; userId: string };
+export type CloudCtx = { rest: Rest; cloud: Cloud; key: string; userId: string; beforeEffect?: () => Promise<void> };
 
 async function siteOrigin(c: CloudCtx): Promise<string> {
   const r = await c.rest("push_server_config?id=eq.main&select=site_origin&limit=1").catch(() => null);
@@ -173,7 +173,7 @@ async function siteOrigin(c: CloudCtx): Promise<string> {
   return String(rows[0]?.site_origin || "");
 }
 
-/** 建快捷命令。有续跑时延后投递（先让角色第一句话落地、推送完，再弹「运行快捷指令」） */
+/** 建快捷命令，一律延后投递（先让角色第一句话落地、推送完，再弹「运行快捷指令」） */
 export async function createShortcutCommand(c: CloudCtx, marker: ShortcutMarker, canContinue: boolean): Promise<{ command: ShortcutCommand | null; note: string }> {
   const r = await c.rest(`push_bridge_config?user_id=eq.${encodeURIComponent(c.userId)}&select=shortcut_actions&limit=1`).catch(() => null);
   if (!r?.ok) return { command: null, note: "快捷动作目录读不到" };
@@ -184,12 +184,14 @@ export async function createShortcutCommand(c: CloudCtx, marker: ShortcutMarker,
   const resultMode = String(action.resultMode ?? "none");
   const deliveryMode = String(action.deliveryMode ?? "push") === "email" ? "email" : "push";
   const continued = canContinue && resultMode !== "none";
+  const origin = await siteOrigin(c);
+  await c.beforeEffect?.();
   const response = await c.cloud("functions/v1/ai-phone-push?action=shortcut-create", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-ai-phone-service-key": c.key, "x-ai-phone-origin": await siteOrigin(c) },
+    headers: { "Content-Type": "application/json", "x-ai-phone-service-key": c.key, "x-ai-phone-origin": origin },
     body: JSON.stringify({
       actionId: String(action.actionId ?? ""), actionName: String(action.name ?? ""), shortcutName: String(action.shortcutName ?? ""),
-      arguments: marker.args, resultMode, deliveryMode, expiresInSeconds: Number(action.expiresInSeconds) || undefined, deferDelivery: continued,
+      arguments: marker.args, resultMode, deliveryMode, expiresInSeconds: Number(action.expiresInSeconds) || undefined, deferDelivery: true,
     }),
   });
   const data = await response.json().catch(() => ({})) as { ok?: boolean; command?: { id?: string }; resultUrl?: string; error?: string };
@@ -204,13 +206,14 @@ export async function createShortcutCommand(c: CloudCtx, marker: ShortcutMarker,
 }
 
 /** 投递快捷命令：推送模式请网关推「运行快捷指令」，邮件模式请站点代发触发信。返回失败说明，成功为空串 */
-export async function deliverShortcutCommand(c: CloudCtx, command: ShortcutCommand, immediate = false): Promise<string> {
+export async function deliverShortcutCommand(c: CloudCtx, command: ShortcutCommand): Promise<string> {
   if (command.deliveryMode === "email") {
     const origin = await siteOrigin(c);
     if (!origin) return `快捷动作「${command.actionName}」未能送达：站点地址未知`;
     const t = await c.rest(`push_bridge_config?user_id=eq.${encodeURIComponent(c.userId)}&select=site_bridge_token&limit=1`).catch(() => null);
     const token = String((t?.ok ? await t.json() as { site_bridge_token?: string | null }[] : [])[0]?.site_bridge_token || "");
     if (!token) return `快捷动作「${command.actionName}」未能送达：站点代发未启用：请到「设置 → 云服务部署」重新部署个人云`;
+    await c.beforeEffect?.();
     try {
       const response = await fetch(`${origin}/api/push/shortcut-commands/deliver-email`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000),
@@ -220,12 +223,13 @@ export async function deliverShortcutCommand(c: CloudCtx, command: ShortcutComma
       return response.ok && data.ok === true ? "" : `快捷动作「${command.actionName}」未能送达：${String(data.error || response.status).slice(0, 80)}`;
     } catch (e) { return `快捷动作「${command.actionName}」未能送达：${(e instanceof Error ? e.message : String(e)).slice(0, 80)}`; }
   }
-  // 推送模式不延后的，建命令时网关已经推过了
-  if (!command.continued && !immediate) return "";
+  // 新命令一律延后投递；网关按 notified_at 去重，邮件网关按 commandId 去重。
+  const origin = await siteOrigin(c);
+  await c.beforeEffect?.();
   try {
     const response = await c.cloud("functions/v1/ai-phone-push?action=shortcut-deliver", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-ai-phone-service-key": c.key, "x-ai-phone-origin": await siteOrigin(c) },
+      headers: { "Content-Type": "application/json", "x-ai-phone-service-key": c.key, "x-ai-phone-origin": origin },
       body: JSON.stringify({ commandId: command.id }),
     });
     const data = await response.json().catch(() => ({})) as { ok?: boolean; delivered?: boolean; error?: string };
@@ -242,19 +246,30 @@ export async function writeShortcutDiagnostic(c: CloudCtx, sessionId: string, er
   }).catch(() => undefined);
 }
 
-/** 发到用户真实微信（微信云助手）。成功返回空串 */
-export async function sendWeixin(c: CloudCtx, botId: string, text: string): Promise<string> {
+export type WeixinResult = { status: "sent" | "failed" | "unknown"; error?: string };
+
+/** 没发起发送是确定失败；发起后超时/5xx/坏回执无法证明未发送。 */
+export async function sendWeixin(c: CloudCtx, botId: string, text: string): Promise<WeixinResult> {
+  let secret: string;
   try {
-    const secretResponse = await c.cloud("storage/v1/object/ai-phone-backup/weixin-cloud/cron-secret.json");
-    const secret = secretResponse.ok ? String(((await secretResponse.json().catch(() => ({}))) as { token?: unknown }).token || "") : "";
-    if (!secret) return "微信云助手密钥读不到";
+    const response = await c.cloud("storage/v1/object/ai-phone-backup/weixin-cloud/cron-secret.json");
+    secret = response.ok ? String(((await response.json().catch(() => ({}))) as { token?: unknown }).token || "") : "";
+    if (!secret) return { status: "failed", error: "微信云助手密钥读不到" };
+  } catch { return { status: "failed", error: "微信云助手密钥读取失败，尚未发起发送" }; }
+  // 守卫放在 catch 外；取消/丢租约不能被误记为微信发送失败并转投聊天。
+  await c.beforeEffect?.();
+  try {
     const response = await c.cloud("functions/v1/weixin-assistant", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "send-text", token: secret, bot: botId, text }),
     });
-    const data = await response.json().catch(() => ({})) as { ok?: boolean; error?: string };
-    return response.ok && data.ok === true ? "" : `微信发送失败：${String(data.error || response.status).slice(0, 120)}`;
-  } catch (e) { return `微信发送失败：${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`; }
+    const data = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+    if (response.ok && data?.ok === true) return { status: "sent" };
+    const definite = (response.ok && data?.ok === false) || [400, 401, 403, 404, 413, 429].includes(response.status);
+    return { status: definite ? "failed" : "unknown", error: `微信发送${definite ? "失败" : "结果未确认"}：${String(data?.error || response.status).slice(0, 120)}` };
+  } catch (e) {
+    return { status: "unknown", error: `微信发送回执丢失：${(e instanceof Error ? e.message : String(e)).slice(0, 120)}` };
+  }
 }
 
 /** 读快捷命令回传的截图（只认本命令自己的存储路径） */

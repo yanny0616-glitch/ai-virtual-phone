@@ -78,6 +78,8 @@ export type GeneratedDraft = {
   /** 发送分流（delivery.ts）：以来电送达 / 改发真实微信 / 要请对方跑的快捷动作 */
   deliverAsCall?: boolean;
   weixinBotId?: string; weixinDone?: boolean;
+  weixinState?: "sending" | "sent" | "failed" | "unknown";
+  weixinError?: string; deliveredAt?: number;
   shortcut?: ShortcutMarker; continuation?: ShortcutContinuation;
   /** 建命令前先记 tried：重启后看到 tried 却没有结果，就不重复执行 */
   shortcutTried?: boolean; shortcutCommand?: ShortcutCommand | null; shortcutDelivered?: boolean;
@@ -89,6 +91,8 @@ export type ShortcutResume = {
   commandId: string; characterId: string; sessionId: string; dueAt: number; tries: number;
   outboxId: string; request: ModelRequest; resultMarker: string; imageMarker?: string;
   actionName: string; notify: { title: string; url: string }; merge: Record<string, unknown>;
+  sourceWakeId?: string; pauseReason?: string; failed?: boolean;
+  generated?: { rawText: string; createdAt: string; reasoningText?: string; imagePath?: string };
 };
 export type DecisionRow = { id: number; characterId: string; at: number; kind: string; note: string; data: Record<string, unknown> | null; mode: string };
 
@@ -354,6 +358,12 @@ export class Store {
 
   updateResume(r: ShortcutResume): void {
     this.#db.prepare("update shortcut_resumes set due_at = ?, payload = ? where command_id = ?").run(r.dueAt, JSON.stringify(r), r.commandId);
+  }
+
+  shortcutDraft(commandId: string): GeneratedDraft | null {
+    const row = this.#db.prepare("select payload from generated_drafts where json_extract(payload, '$.shortcutCommand.id') = ? limit 1")
+      .get(commandId) as { payload: string } | undefined;
+    return row ? JSON.parse(row.payload) as GeneratedDraft : null;
   }
 
   deleteResume(commandId: string): void {

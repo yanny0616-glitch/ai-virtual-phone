@@ -9,6 +9,7 @@
 import { acquireGenerationLease, GenerationBusy, type GenerationLease } from "./generation-lease.ts";
 import type { GeneratedDraft } from "./store.ts";
 import { importPendingCloudFeedback } from "./importer.ts";
+import { checkDelivery, DeliveryPaused } from "./delivery-guard.ts";
 import { applyChatState } from "./chat-state.ts";
 import {
   CALL_INVITE_WINDOW_MS, createShortcutCommand, deliverShortcutCommand, extractCall, extractShortcut, extractWeixin, fillCallInvite,
@@ -153,6 +154,12 @@ export async function tickCharacter(deps: EngineDeps, mode: Mode, characterId: s
     for (const timer of deps.store.dueTimers(deps.now(), characterId)) {
       try { await fireTimer(t, timer, history); }
       catch (e) {
+        if (e instanceof DeliveryPaused) {
+          deps.store.updateTimer(timer.id, { status: "pending", fireAt: deps.now() + 60_000 });
+          decide(t, "hold", e.message, { wakeId: timer.id });
+          saveTurn(t);
+          continue;
+        }
         const tries = (Number(/tries:(\d+)/.exec(timer.note)?.[1]) || 0) + 1;
         const note = `tries:${tries} ${errText(e)}`;
         if (tries >= 3) deps.store.updateTimer(timer.id, { status: "failed", note });
@@ -770,6 +777,8 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
     if (!Array.isArray(outputs)) throw new Error("发送凭据格式错误");
     const output = outputs[0];
     if (output) {
+      const draft = deps.store.getDraft(timer.id);
+      if (draft) { await deliverDraft(t, timer, history, draft, lease!, output); return; }
       const sentAt = outputSentAt(output);
       if (!Number.isFinite(sentAt) || !output.id || typeof output.raw_text !== "string") throw new Error("发送凭据不完整");
       rememberOutput(history, output);
@@ -978,70 +987,72 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
   await deliverDraft(t, timer, history, generated, lease!);
 }
 
-async function deliverDraft(t: Turn, timer: TimerRow, history: CloudHistory, draft: GeneratedDraft, lease: GenerationLease): Promise<void> {
+async function deliverDraft(t: Turn, timer: TimerRow, history: CloudHistory, draft: GeneratedDraft, lease: GenerationLease, existing?: CloudOutput): Promise<void> {
   const { deps, c, ctx } = t;
   if (draft.userId !== deps.userId || draft.sessionId !== c.sessionId) throw new Error("已成文消息的账号或会话已变更，保留正文待核对");
   const latest = findItem(t, timer.id);
-  // 已经发到微信的收不回来，只补记录
-  if (!latest && draft.weixinDone) { deps.store.updateTimer(timer.id, { status: "done", note: "已发到微信" }); deps.store.deleteDraft(timer.id); return; }
-  if (!latest || !latest.item.act && !draft.weixinDone) { deps.store.updateTimer(timer.id, { status: "cancelled", note: "已成文念头被撤销" }); deps.store.deleteDraft(timer.id); return; }
-  if (deps.halted?.(c.characterId, timer.id) && !draft.weixinDone) { deps.store.updateTimer(timer.id, { status: "pending", note: "成文期间收到撤销" }); return; }
-  await lease.check();
-  // 续租等待期间也可能收到取消。
-  if (deps.halted?.(c.characterId, timer.id) && !draft.weixinDone) { deps.store.updateTimer(timer.id, { status: "pending", note: "投递前收到撤销" }); return; }
-  const cc: CloudCtx | null = deps.cloud ? { rest: deps.rest, cloud: deps.cloud, key: deps.cloudKey || "", userId: deps.userId } : null;
+  if (!latest || !latest.item.act) {
+    if (draft.shortcutCommand) deps.store.deleteResume(draft.shortcutCommand.id);
+    deps.store.updateTimer(timer.id, { status: "cancelled", note: "已成文念头被撤销" });
+    return;
+  }
+  const guard = () => checkDelivery(deps, c.characterId, c.sessionId, timer.id, lease);
+  await guard();
+  const cc: CloudCtx | null = deps.cloud ? { rest: deps.rest, cloud: deps.cloud, key: deps.cloudKey || "", userId: deps.userId, beforeEffect: guard } : null;
   const { outboxId, rawText, createdAt } = draft;
 
-  // 1. 快捷动作：先建命令（有续跑的延后投递）。建之前记 tried，重启后看到 tried 没结果就不重复执行
   if (draft.shortcut && !draft.shortcutTried) {
-    draft.shortcutTried = true;
-    deps.store.updateDraft(draft);
     if (!cc) {
       draft.shortcutCommand = null;
       draft.deliveryError = `快捷动作「${draft.shortcut.name}」没执行：后端没接个人云函数`;
     } else {
-      const created = await createShortcutCommand(cc, draft.shortcut, !!draft.continuation).catch(e => ({ command: null, note: `快捷动作「${draft.shortcut!.name}」没建成：${errText(e)}` }));
+      // 在真正发起建命令之前落 tried；读目录期间取消/丢租约不冒充已执行。
+      const created = await createShortcutCommand({ ...cc, beforeEffect: async () => {
+        await guard(); draft.shortcutTried = true; deps.store.updateDraft(draft);
+      } }, draft.shortcut, !!draft.continuation).catch(e => {
+        if (!draft.shortcutTried) throw e;
+        return { command: null, note: `快捷动作「${draft.shortcut!.name}」创建结果未确认，没有重复执行：${errText(e)}` };
+      });
       draft.shortcutCommand = created.command;
       if (!created.command) draft.deliveryError = created.note;
-      else if (created.command.deliveryMode === "email" && !created.command.continued) {
-        draft.deliveryError = await deliverShortcutCommand(cc, created.command) || undefined;
-        draft.shortcutDelivered = true;
-      }
     }
+    draft.shortcutTried = true;
     deps.store.updateDraft(draft);
   } else if (draft.shortcut && draft.shortcutCommand === undefined) {
     draft.shortcutCommand = null;
     draft.deliveryError = `快捷动作「${draft.shortcut.name}」执行结果未确认，没有重复执行`;
     deps.store.updateDraft(draft);
   }
+  await guard();
   const command = draft.shortcutCommand || null;
-  // 2. 会回传结果的：挂上续跑，把刚说的这句代入回复占位（按命令 ID 幂等）
-  if (command?.continued && draft.continuation) {
-    const cont = structuredClone(draft.continuation);
-    replaceMarker(cont.request.body, cont.replyMarker, rawText);
-    const canSendImage = command.resultMode === "image" && cont.visionEnabled !== false;
-    if (!canSendImage && cont.imageMarker) replaceMarker(cont.request.body, cont.imageMarker, command.resultMode === "image" ? SHORTCUT_VISION_OFF_NOTE : "（该动作没有图片回传）");
-    const { guanianContext: _g, guanianPromise: _p, companionDeliveredAt: _d, reasoningText: _r, ...merge } = draft.meta;
-    deps.store.saveResume({
-      commandId: command.id, characterId: c.characterId, sessionId: c.sessionId, dueAt: deps.now() + 15_000, tries: 0,
-      outboxId: `out_${randomUUID()}`, request: cont.request, resultMarker: cont.resultMarker, ...(canSendImage && cont.imageMarker ? { imageMarker: cont.imageMarker } : {}),
-      actionName: command.actionName, notify: draft.notify, merge: { ...merge, shortcutCommandId: command.id },
-    });
-  }
 
-  // 3. 改送真实微信：送成了就不进聊天 outbox（微信云助手自己记），送不成照常发到聊天
-  if (draft.weixinBotId && !draft.weixinDone) {
-    const failed = cc ? await sendWeixin(cc, draft.weixinBotId, rawText) : "后端没接个人云函数";
-    if (!failed) { draft.weixinDone = true; deps.store.updateDraft(draft); }
-    else decide(t, "error", `${latest.item.time} 发到微信失败，改发到聊天：${failed}`, { wakeId: timer.id });
+  // 发送中的旧草稿意味着外部结果不明。不能猜测失败后改投/重发。
+  if (draft.weixinState === "sending") {
+    draft.weixinState = "unknown"; draft.weixinError = "微信发送被中断，结果未确认";
+    deps.store.updateDraft(draft);
+  }
+  if (!existing && draft.weixinBotId && !draft.weixinDone && !["failed", "unknown"].includes(draft.weixinState || "")) {
+    const result = cc ? await sendWeixin({ ...cc, beforeEffect: async () => {
+      await guard(); draft.weixinState = "sending"; deps.store.updateDraft(draft);
+    } }, draft.weixinBotId, rawText) : { status: "failed" as const, error: "后端没接个人云函数" };
+    draft.weixinState = result.status;
+    draft.weixinError = result.error;
+    if (result.status === "sent") { draft.weixinDone = true; draft.deliveredAt = deps.now(); }
+    deps.store.updateDraft(draft);
+    if (result.status === "failed") decide(t, "error", `${latest.item.time} 发到微信失败，改发到聊天：${result.error}`, { wakeId: timer.id });
+  }
+  if (!existing && draft.weixinState === "unknown") {
+    deps.store.updateTimer(timer.id, { status: "failed", note: "微信结果未确认，已保留正文；核对送达前不自动重发或改投" });
+    decide(t, "error", draft.weixinError || "微信发送结果未确认", { wakeId: timer.id });
+    return;
   }
   const item = latest.item;
-  const deliveredAt = deps.now();
+  const deliveredAt = existing ? outputSentAt(existing) : draft.deliveredAt || deps.now();
   const markSent = (sentOutboxId: string) => {
     item.generatedAt = Date.parse(createdAt);
     deps.store.saveDay(latest.row);
     deps.store.addSend({ wakeId: timer.id, characterId: c.characterId, date: latest.row.date, kind: item.kind || "plan", fromId: item.from || "", sentAt: deliveredAt, outboxId: sentOutboxId });
-    deps.store.updateTimer(timer.id, { status: "done", note: draft.weixinDone ? "已发到微信" : "已发送" });
+    // 定时器到所有交付步骤完成才 done；进程退出后才能继续补投动作。
     const th = (ctx.threads || []).find(x => x.id === item.from);
     if (th && !th.done) {
       th.mentionedAt = deliveredAt; th.at = deliveredAt;
@@ -1050,12 +1061,29 @@ async function deliverDraft(t: Turn, timer: TimerRow, history: CloudHistory, dra
     }
   };
   const afterDelivery = async () => {
-    // 角色先说话 → 再弹「运行快捷指令」
-    if (cc && command && !draft.shortcutDelivered) {
+    if (command && !draft.shortcutDelivered) {
+      if (!cc) throw new Error("快捷命令待投递，但后端没接个人云函数");
       const failed = await deliverShortcutCommand(cc, command);
-      if (failed) draft.deliveryError = failed;
+      if (failed) { draft.deliveryError = failed; deps.store.updateDraft(draft); throw new Error(failed); }
+      draft.shortcutDelivered = true;
+      delete draft.deliveryError;
+      deps.store.updateDraft(draft);
+    }
+    if (command?.continued && draft.continuation) {
+      // 只有首条消息和命令都交付后才允许续跑，避免还没通知手机就报执行超时。
+      const cont = structuredClone(draft.continuation);
+      if (!replaceMarker(cont.request.body, cont.replyMarker, rawText)) throw new Error("续跑底稿缺少首条回复占位");
+      const canSendImage = command.resultMode === "image" && cont.visionEnabled !== false;
+      if (!canSendImage && cont.imageMarker) replaceMarker(cont.request.body, cont.imageMarker, command.resultMode === "image" ? SHORTCUT_VISION_OFF_NOTE : "（该动作没有图片回传）");
+      const { guanianContext: _g, guanianPromise: _p, companionDeliveredAt: _d, reasoningText: _r, ...merge } = draft.meta;
+      deps.store.saveResume({
+        commandId: command.id, sourceWakeId: timer.id, characterId: c.characterId, sessionId: c.sessionId, dueAt: deps.now() + 15_000, tries: 0,
+        outboxId: `out_${randomUUID()}`, request: cont.request, resultMarker: cont.resultMarker, ...(canSendImage && cont.imageMarker ? { imageMarker: cont.imageMarker } : {}),
+        actionName: command.actionName, notify: draft.notify, merge: { ...merge, shortcutCommandId: command.id },
+      });
     }
     if (cc && draft.deliveryError) await writeShortcutDiagnostic(cc, c.sessionId, draft.deliveryError);
+    deps.store.updateTimer(timer.id, { status: "done", note: draft.weixinDone ? "已发到微信" : "已发送" });
     deps.store.deleteDraft(timer.id);
   };
   if (draft.weixinDone) {
@@ -1064,9 +1092,16 @@ async function deliverDraft(t: Turn, timer: TimerRow, history: CloudHistory, dra
     decide(t, "send", `${item.time} 发到微信了：${rawText.replace(/\s+/g, " ").slice(0, 60)}`, { wakeId: timer.id, weixin: true, shortcut: command?.actionName });
     return;
   }
+  if (existing) {
+    rememberOutput(history, existing);
+    markGenerated(t, history);
+    markSent(existing.id);
+    await afterDelivery();
+    decide(t, "send", `${item.time} 已恢复发送凭据并完成动作交付`, { wakeId: timer.id, outboxId: existing.id });
+    return;
+  }
 
-  // 4. 聊天 outbox + 推送（来电是单条通知，点开直达振铃）
-  // 保留生成时间供补收排序；回音窗口和主动间隔从本次成功投递开始。
+  await guard();
   const meta = {
     ...draft.meta, companionDeliveredAt: new Date(deliveredAt).toISOString(),
     ...(command && draft.shortcut ? { shortcutMarker: { text: draft.shortcut.text, insertAt: draft.shortcut.insertAt, name: draft.shortcut.name } } : {}),
@@ -1084,10 +1119,11 @@ async function deliverDraft(t: Turn, timer: TimerRow, history: CloudHistory, dra
     : (parts.length ? parts : ["发来一条消息"]).map((body, index) => ({
       type: "chat_outbox", title: draft.notify.title, body: body.slice(0, 80), tag: `${timer.id}-${index}`, url: draft.notify.url, characterId: c.characterId,
     }));
+  await guard();
   const pushed = await deps.push(messages).catch(e => ({ sent: 0, total: 0, removed: 0, skippedShell: 0, errors: [errText(e)] }));
   await afterDelivery();
   decide(t, "send", `${item.time} ${draft.deliverAsCall ? "打来电话" : "发出去了"}：${rawText.replace(/\s+/g, " ").slice(0, 60)}`,
-    { wakeId: timer.id, outboxId, pushed: pushed.sent, pushErrors: pushed.errors, ...(command ? { shortcut: command.actionName } : {}), ...(draft.deliveryError ? { deliveryError: draft.deliveryError } : {}) });
+    { wakeId: timer.id, outboxId, pushed: pushed.sent, pushErrors: pushed.errors, ...(command ? { shortcut: command.actionName } : {}) });
 }
 
 /** 手动重新生成今天（App「重新生成」） */
