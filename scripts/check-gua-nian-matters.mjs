@@ -36,6 +36,19 @@ const sent = { id: 'output', trigger_key: 'timedwake:old', created_at: new Date(
  assert.equal(both.keep[0].matterId, both.extra[0].matterId);
  assert.equal(promiseNeedsTask(promise, [{ ...promised, act: false, matterSuppressed: true }], now, at('23:59')), false);
  assert.equal(promiseNeedsTask({ ...promise, revision: 2 }, [{ ...promised, promiseRevision: 1, act: false, matterSuppressed: true }], now, at('23:59')), true);
+ {
+  // 约定第一版已发出，账本凭证据改期成第二版：第二版不算重复；第一版仍不能重发，别的同事项发送照样拦。
+  const live = { ...promise, revision: 2, matterId: 'm1' };
+  const v1 = { ...promised, wakeId: 'v1', matterId: 'm1', promiseRevision: 1, generatedAt: at('07:01'), fireAt: at('07:00') };
+  const v2 = { ...promised, wakeId: 'v2', matterId: 'm1', promiseRevision: 2, fireAt: at('19:40') };
+  const v1Sent = { id: 'o1', trigger_key: 'timedwake:v1', created_at: new Date(at('07:01')).toISOString(), raw_text: '' };
+  const metaSent = { id: 'o2', trigger_key: 'timedwake:gone', created_at: new Date(at('07:01')).toISOString(), raw_text: '', meta: { guanianContext: { matterId: 'm1', eventId: 'p1', revision: 1 } } };
+  assert.equal(matters.matterBlock(v2, [v1, v2], [live], [v1Sent, metaSent], []), '');
+  assert.match(matters.matterBlock({ ...v1, generatedAt: 0 }, [{ ...v1, generatedAt: 0 }, v2], [{ ...live, revision: 1 }], [v1Sent], []), /已发过/);
+  assert.match(matters.matterBlock(v2, [v1, v2], [live], [{ ...metaSent, meta: { guanianContext: { matterId: 'm1', eventId: 'p1', revision: 2 } } }], []), /已发过/);
+  assert.match(matters.matterBlock(v2, [v1, v2, { ...ordinary, matterId: 'm1', act: false, generatedAt: at('08:00') }], [live], [], []), /已发过/);
+  assert.match(matters.matterBlock(v2, [v1, v2], [{ ...live, revision: 3 }], [], []), /已发过/, 'stale revision stays blocked');
+ }
  console.log('PASS pure identities, priority, evidence timestamps/speaker, missing IDs, same-result IDs and suppression');
 }
 // Real generation worker: programmatic duplicate gates cannot be bypassed by a model answer.

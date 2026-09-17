@@ -1,5 +1,12 @@
 # Fork 变更日志
 
+## 2026-09-17：挂念约定改期后不再被当成重复拦掉
+
+- 修复：约定第一版到点发出后，角色在消息里改到晚上（账本凭证据升到第二版），第二版被事项去重当成「同一事项已发过，未核实新的聊天进展」撤掉，约定一直挂在惦记里没人提醒。现在活着的约定的新版本不再被它自己旧版本的发送拦住；旧版本本身、同事项其他念头的发送、版本号对不上的旧任务照样拦。
+- 共用规则 `custom-apps/gua-nian/src/domain/matters.mjs`，同步到 companion-server vendor、云函数 push-recheck / push-generate（个人云部署包代号 9 → 10）和挂念安装包，安装包版本号未改。
+- 已经被撤掉的任务不会自动恢复，需另行处理。
+- 验证：`check-gua-nian-matters`（新增改期场景）、`check:push`、`check:apps-dist`、`check:qa`、companion-server 112 项测试与 `tsc`。
+
 ## 2026-09-17：记忆占用提示只记私聊请求
 
 - 修复：挂念等自定义 APP 冻结模板也经 `buildChatPromptMessages` 装配（appId 为 `custom_app:<id>`，历史只有一条任务消息、全部私聊变成事件行），每次角色回复后重冻会覆盖记忆页「上次请求记忆占用」，显示成「短期原话 1 条、近期事件几百条」。现在只记 appId 为 chat 的请求。

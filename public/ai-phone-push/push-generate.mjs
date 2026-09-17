@@ -2628,9 +2628,20 @@ function matterBlock(w, items, threads, outputs, messages) {
   const key = matterKey(w, threads);
   const sameThreads = threads.filter(t => String(t.matterId || 'thread:' + t.id) === key);
   if (sameThreads.some(t => t.done || ['completed', 'cancelled'].includes(t.status))) return '同一事项已经了结';
+  // A live promise re-agreed to a new revision (evidence-checked in the ledger) is not
+  // the same send as its earlier revision; only other sends of this matter still block it.
+  const revision = Number(w.promiseRevision || 1);
+  const current = w.kind === 'promise' && sameThreads.some(t => t.id === w.from && t.kind === 'promise' && Number(t.revision || 1) === revision);
+  const earlierRevision = (from, rev) => current && from === w.from && Number(rev || 1) < revision;
+  const ownItem = i => i.kind === 'promise' && earlierRevision(i.from, i.promiseRevision);
+  const ownOutput = o => {
+    const i = items.find(i => o.trigger_key === 'timedwake:' + i.wakeId);
+    const meta = o.meta?.guanianContext;
+    return i ? ownItem(i) : earlierRevision(meta?.eventId, meta?.revision);
+  };
   // Only genuine generation evidence counts, never a passed scheduled time.
-  const sentAt = Math.max(0, ...items.filter(i => matterKey(i, threads) === key).map(i => Number(i.generatedAt) || 0),
-    ...outputs.filter(o => matterOutputKey(o, items, threads) === key).map(o => Date.parse(o.created_at) || 0));
+  const sentAt = Math.max(0, ...items.filter(i => matterKey(i, threads) === key && !ownItem(i)).map(i => Number(i.generatedAt) || 0),
+    ...outputs.filter(o => matterOutputKey(o, items, threads) === key && !ownOutput(o)).map(o => Date.parse(o.created_at) || 0));
   if (sentAt) {
     const evidence = messages.find(m => String(m.id || '') === String(w.matterEvidenceId || '') && m.id);
     const fresh = evidence && (evidence.role === 'user' || evidence.media_type === 'offline_summary')
