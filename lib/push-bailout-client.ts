@@ -9,7 +9,9 @@ import { buildChatPromptMessages } from "./chat-engine";
 import { buildProviderRequest, toLlmRequestMessages, type LlmRequestPayload } from "./llm-provider-adapter";
 import { loadChatMessages, loadChatSessions, loadFollowUpSchedule, type ChatMessage, type ChatSession } from "./chat-storage";
 import { hasAccountPushSubscription, isWithinPushQuietHours, loadPushQuietHours, peekAccountPushSubscribed } from "./push-client";
-import { isPersonalPushCloudActive, pushJobsFetch, personalPushFetch } from "./personal-push-cloud";
+import { isPersonalPushCloudActive, personalPushFetch } from "./personal-push-cloud";
+// 挂、撤、心跳都经分流：按「离线执行」开关寄个人云或后端，同一条任务只挂一边
+import { offlineJobsFetch as pushJobsFetch } from "./offline-jobs-client";
 import {
     buildOfflineShortcutContinuation,
     maybeAppendShortcutCapability,

@@ -40,11 +40,13 @@ export async function runShortcutResumes(deps: EngineDeps): Promise<number> {
 async function resumeOne(deps: EngineDeps, r: ShortcutResume): Promise<boolean> {
   const parent = deps.store.shortcutDraft(r.commandId);
   const wakeId = r.sourceWakeId || parent?.wakeId || "";
-  assertDeliveryActive(deps, r.characterId, r.sessionId, wakeId);
+  // 离线任务建的命令：角色不一定在挂念名单里，只靠会话租约
+  const fromJob = !!r.sourceJobKey;
+  if (!fromJob) assertDeliveryActive(deps, r.characterId, r.sessionId, wakeId);
   // 兼容旧版先挂续跑再交付动作的记录。
   if (parent && !parent.shortcutDelivered) throw new DeliveryPaused("首条消息或快捷动作尚未交付，等待恢复");
   const lease = await acquireGenerationLease(deps.rest, deps.userId, r.sessionId, "shortcut:" + r.commandId);
-  const guard = () => checkDelivery(deps, r.characterId, r.sessionId, wakeId, lease);
+  const guard = () => fromJob ? lease.check() : checkDelivery(deps, r.characterId, r.sessionId, wakeId, lease);
   const cc: CloudCtx | null = deps.cloud ? { rest: deps.rest, cloud: deps.cloud, key: deps.cloudKey || "", userId: deps.userId } : null;
   const scope = `user_id=eq.${encodeURIComponent(deps.userId)}`;
   try {
@@ -74,10 +76,10 @@ async function resumeOne(deps: EngineDeps, r: ShortcutResume): Promise<boolean> 
         }
         command.status = "expired"; command.error = "等待手机执行超时。";
       }
-      const c = deps.store.getCharacter(r.characterId)!;
-      const window = { ...c.settings, ...c.state };
+      const c = fromJob ? null : deps.store.getCharacter(r.characterId)!;
+      const window = c ? { ...c.settings, ...c.state } : undefined;
       const history = await readHistory(deps.rest, deps.userId, r.sessionId, window);
-      const tz = Number(c.settings.tzOffsetMin ?? r.merge.tzOffsetMin) || 0;
+      const tz = Number(c?.settings.tzOffsetMin ?? r.merge.tzOffsetMin) || 0;
       const request = fillChatTemplate(r.request, { tzOffsetMin: tz }, { intent: "", elapsedMin: 0, nowMs });
       if (!replaceMarker(request.body, r.resultMarker, formatShortcutResult(command))) throw new Error("续跑底稿缺少结果占位");
       appendUserNote(request.body, request.providerKind, `[最新聊天事实，非用户新消息；当前当地时间 ${new Date(nowMs + tz * 60000).toISOString().slice(0, 16)}。与旧底稿冲突时以此为准；用户取消的事情不要继续催促或执行。]\n`
@@ -89,7 +91,7 @@ async function resumeOne(deps: EngineDeps, r: ShortcutResume): Promise<boolean> 
         injectShortcutImage(request.body, request.providerKind, r.imageMarker, read.image);
       }
       const budget = await usageBudget(deps.rest, deps.userId, nowMs);
-      const over = usageExceeded(budget);
+      const over = fromJob ? "" : usageExceeded(budget);
       if (over) throw new DeliveryPaused(over);
       await guard();
       const result = await callModel(request, deps.fetchModel, 300_000);
@@ -100,7 +102,7 @@ async function resumeOne(deps: EngineDeps, r: ShortcutResume): Promise<boolean> 
         r.generated = { rawText, createdAt: new Date(deps.now()).toISOString(), ...(parsed.reasoningText ? { reasoningText: parsed.reasoningText } : {}), ...(imagePath ? { imagePath } : {}) };
         deps.store.updateResume(r);
       } finally {
-        await usageAdd(deps.rest, deps.userId, budget.tz, "cloud-wake", request.providerKind, result.data);
+        await usageAdd(deps.rest, deps.userId, budget.tz, fromJob ? "cloud-chat" : "cloud-wake", request.providerKind, result.data);
       }
     }
     await guard();

@@ -92,7 +92,16 @@ export type ShortcutResume = {
   outboxId: string; request: ModelRequest; resultMarker: string; imageMarker?: string;
   actionName: string; notify: { title: string; url: string }; merge: Record<string, unknown>;
   sourceWakeId?: string; pauseReason?: string; failed?: boolean;
+  /** 离线任务（jobs.ts）建的命令：角色不一定在后端挂念名单里，不查角色启用状态 */
+  sourceJobKey?: string;
   generated?: { rawText: string; createdAt: string; reasoningText?: string; imagePath?: string };
+};
+/** 离线任务：回复兜底 / 追问 / 定时消息 / 经期关怀。小手机选了「离线执行：后端」时直接寄来，云端看不到（见 jobs.ts） */
+export type OfflineJob = {
+  id: string; triggerKey: string; kind: string; executeAt: number; status: "pending" | "running" | "done" | "failed";
+  payload: Record<string, any>; note: string; tries: number; createdAt: number; updatedAt: number;
+  /** 手机在任务生成期间撤销：发送边界看到就停 */
+  cancelRequested?: boolean;
 };
 export type DecisionRow = { id: number; characterId: string; at: number; kind: string; note: string; data: Record<string, unknown> | null; mode: string };
 
@@ -136,6 +145,12 @@ export class Store {
       );
       create index if not exists timers_due on timers (status, fire_at);
       create table if not exists generated_drafts (wake_id text primary key, payload text not null);
+      create table if not exists offline_jobs (
+        trigger_key text primary key, id text not null, kind text not null, execute_at integer not null, status text not null,
+        payload text not null, note text not null default '', tries integer not null default 0, cancel_requested integer not null default 0,
+        created_at integer not null, updated_at integer not null
+      );
+      create index if not exists offline_jobs_due on offline_jobs (status, execute_at);
       create table if not exists shortcut_resumes (command_id text primary key, due_at integer not null, payload text not null);
       create table if not exists sends (
         wake_id text primary key, character_id text not null, date text not null, kind text not null,
@@ -334,6 +349,88 @@ export class Store {
   clearShadowTimers(characterId: string): number {
     const r = this.#db.prepare("delete from timers where character_id = ? and status in ('shadow', 'pending', 'running')").run(characterId);
     return Number(r.changes);
+  }
+
+  // ── 离线任务（jobs.ts）
+  #job(r: Row | undefined): OfflineJob | null {
+    if (!r) return null;
+    return { id: String(r.id), triggerKey: String(r.trigger_key), kind: String(r.kind), executeAt: Number(r.execute_at), status: String(r.status) as OfflineJob["status"],
+      payload: j(r.payload as string, {}), note: String(r.note), tries: Number(r.tries), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at),
+      ...(Number(r.cancel_requested) ? { cancelRequested: true } : {}) };
+  }
+
+  getJob(triggerKey: string): OfflineJob | null {
+    return this.#job(this.#db.prepare("select * from offline_jobs where trigger_key = ?").get(triggerKey) as Row | undefined);
+  }
+
+  /** 同键覆盖；正在生成的不覆盖，返回 false */
+  putJob(job: Omit<OfflineJob, "updatedAt" | "note" | "tries" | "status">, nowMs: number): boolean {
+    const old = this.getJob(job.triggerKey);
+    if (old?.status === "running") return false;
+    this.#db.prepare(`insert into offline_jobs (trigger_key, id, kind, execute_at, status, payload, note, tries, cancel_requested, created_at, updated_at)
+      values (?, ?, ?, ?, 'pending', ?, '', 0, 0, ?, ?)
+      on conflict(trigger_key) do update set id = excluded.id, kind = excluded.kind, execute_at = excluded.execute_at, status = 'pending',
+        payload = excluded.payload, note = '', tries = 0, cancel_requested = 0, created_at = excluded.created_at, updated_at = excluded.updated_at`)
+      .run(job.triggerKey, job.id, job.kind, job.executeAt, JSON.stringify(job.payload), job.createdAt, nowMs);
+    return true;
+  }
+
+  #jobFilter(key: { triggerKey?: string; triggerPrefix?: string; excludeKey?: string }): { where: string; args: string[] } {
+    if (key.triggerKey) return { where: "trigger_key = ?", args: [key.triggerKey] };
+    const prefix = String(key.triggerPrefix || "").replace(/[\\%_]/g, m => "\\" + m);
+    return key.excludeKey
+      ? { where: "trigger_key like ? escape '\\' and trigger_key <> ?", args: [prefix + "%", key.excludeKey] }
+      : { where: "trigger_key like ? escape '\\'", args: [prefix + "%"] };
+  }
+
+  /** 撤销：没开始的直接删，正在生成的挂撤销标记。返回 { deleted, running } */
+  cancelJobs(key: { triggerKey?: string; triggerPrefix?: string; excludeKey?: string }, nowMs: number): { deleted: number; running: number } {
+    const f = this.#jobFilter(key);
+    const deleted = Number(this.#db.prepare(`delete from offline_jobs where status = 'pending' and ${f.where}`).run(...f.args).changes);
+    const running = Number(this.#db.prepare(`update offline_jobs set cancel_requested = 1, updated_at = ? where status = 'running' and ${f.where}`).run(nowMs, ...f.args).changes);
+    return { deleted, running };
+  }
+
+  /** 心跳：没开始的往后推（runNow 立即） */
+  delayJob(triggerKey: string, executeAt: number, nowMs: number): boolean {
+    return Number(this.#db.prepare("update offline_jobs set execute_at = ?, updated_at = ? where trigger_key = ? and status = 'pending'").run(executeAt, nowMs, triggerKey).changes) > 0;
+  }
+
+  dueJobs(nowMs: number, limit = 20): OfflineJob[] {
+    return (this.#db.prepare("select * from offline_jobs where status = 'pending' and execute_at <= ? order by execute_at limit ?").all(nowMs, limit) as Row[])
+      .map(r => this.#job(r)!);
+  }
+
+  /** 原子抢占：只有还是 pending、id 没被同键覆盖时才变 running */
+  claimJob(job: OfflineJob, nowMs: number): boolean {
+    return Number(this.#db.prepare("update offline_jobs set status = 'running', updated_at = ? where trigger_key = ? and id = ? and status = 'pending'")
+      .run(nowMs, job.triggerKey, job.id).changes) > 0;
+  }
+
+  /** 只改这一次抢到的那条（同键被覆盖了就不动新的） */
+  updateJob(job: OfflineJob, patch: { status?: OfflineJob["status"]; executeAt?: number; note?: string; tries?: number; payload?: Record<string, any> }, nowMs: number): void {
+    const next = { ...job, ...patch };
+    this.#db.prepare("update offline_jobs set status = ?, execute_at = ?, note = ?, tries = ?, payload = ?, updated_at = ? where trigger_key = ? and id = ?")
+      .run(next.status, next.executeAt, next.note.slice(0, 300), next.tries, JSON.stringify(next.payload), nowMs, job.triggerKey, job.id);
+    Object.assign(job, patch);
+  }
+
+  jobCancelRequested(job: OfflineJob): boolean {
+    const r = this.#db.prepare("select cancel_requested, id from offline_jobs where trigger_key = ?").get(job.triggerKey) as Row | undefined;
+    return !r || String(r.id) !== job.id || Number(r.cancel_requested) === 1;
+  }
+
+  recoverRunningJobs(nowMs: number): number {
+    return Number(this.#db.prepare("update offline_jobs set status = 'pending', updated_at = ? where status = 'running'").run(nowMs).changes);
+  }
+
+  listJobs(limit = 30): OfflineJob[] {
+    return (this.#db.prepare("select * from offline_jobs order by updated_at desc limit ?").all(limit) as Row[]).map(r => this.#job(r)!);
+  }
+
+  /** 做完的留 7 天查重和诊断，之后清掉 */
+  pruneJobs(nowMs: number): number {
+    return Number(this.#db.prepare("delete from offline_jobs where status in ('done', 'failed') and updated_at < ?").run(nowMs - 7 * 86_400_000).changes);
   }
 
   // ── 发送记录

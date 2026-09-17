@@ -249,7 +249,7 @@ export async function writeShortcutDiagnostic(c: CloudCtx, sessionId: string, er
 export type WeixinResult = { status: "sent" | "failed" | "unknown"; error?: string };
 
 /** 没发起发送是确定失败；发起后超时/5xx/坏回执无法证明未发送。 */
-export async function sendWeixin(c: CloudCtx, botId: string, text: string): Promise<WeixinResult> {
+export async function sendWeixin(c: CloudCtx, botId: string, text: string, extra: Record<string, unknown> = {}): Promise<WeixinResult> {
   let secret: string;
   try {
     const response = await c.cloud("storage/v1/object/ai-phone-backup/weixin-cloud/cron-secret.json");
@@ -261,7 +261,7 @@ export async function sendWeixin(c: CloudCtx, botId: string, text: string): Prom
   try {
     const response = await c.cloud("functions/v1/weixin-assistant", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "send-text", token: secret, bot: botId, text }),
+      body: JSON.stringify({ action: "send-text", token: secret, bot: botId, text, ...extra }),
     });
     const data = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
     if (response.ok && data?.ok === true) return { status: "sent" };

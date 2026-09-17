@@ -15,6 +15,10 @@
 //   PUT  /app/wake/templates/:sourceId          唤醒后端：手机寄来的来源底稿（见 wake.ts）
 //   POST /app/wake/templates/:sourceId/delete   来源不再交给后端
 //   GET  /app/wake/status?source=x              唤醒后端：底稿概况（不含密钥）、网关来源状态、最近处理记录
+//   POST /app/jobs                              离线任务（回复兜底/追问/定时消息/经期关怀）：同键覆盖；正在生成的回 409（见 jobs.ts）
+//   POST /app/jobs/cancel                       撤销 { triggerKey | triggerPrefix, excludeKey }：没开始的删，正在生成的挂撤销 → { deleted, running }
+//   POST /app/jobs/delay                        心跳 { triggerKey, runNow }：没开始的推到 90 秒后（runNow 立即）
+//   GET  /app/jobs?limit=30                     最近的离线任务（不含请求本体）
 // 改状态的都在 Runner 的锁里做：正在跑的一轮调模型时改了，会被那轮结束时的保存盖掉。
 
 import { importFromCloud, importMissingCloudTasks, importPendingCloudFeedback } from "./importer.ts";
@@ -28,6 +32,7 @@ import type { Runner } from "./runner.ts";
 import type { CharacterRow, DayRow, DecisionRow, Store, TimerRow } from "./store.ts";
 import { threadAlive, threadsEnabled } from "./threads.ts";
 import { validateWakeTemplate, type WakeService, type WakeTemplate } from "./wake.ts";
+import { validateJob } from "./jobs.ts";
 import { SETTING_KEYS, type GuanianDay, type GuanianSched, type PlanItem, type Thread } from "./types.ts";
 
 export type AppDeps = { store: Store; runner: Runner; engine: EngineDeps; wake?: WakeService };
@@ -503,6 +508,7 @@ export async function handleApp(deps: AppDeps, method: string, path: string, que
   if (method === "GET" && parts[1] === "host") return ok(appHost(deps, ids(query)));
   if (method === "GET" && parts[1] === "archive") return ok(appArchive(deps, String(query.get("id") || ""), Number(query.get("limit")) || 30));
   if (parts[1] === "wake") return appWake(deps, method, parts, query, readBody);
+  if (parts[1] === "jobs") return appJobs(deps, method, parts, query, readBody);
   if (parts[1] !== "characters" || !parts[2]) return { status: 404, body: { ok: false, error: "not_found" } };
   const id = parts[2];
   const body = async () => { const b = await readBody(); return (b && typeof b === "object" ? b : {}) as Record<string, unknown>; };
@@ -544,6 +550,40 @@ export async function handleApp(deps: AppDeps, method: string, path: string, que
 }
 
 // ─── 唤醒后端
+
+async function appJobs(deps: AppDeps, method: string, parts: string[], query: URLSearchParams, readBody: () => Promise<unknown>): Promise<{ status: number; body: unknown }> {
+  const { store } = deps;
+  const nowMs = deps.engine.now();
+  const input = async () => { const b = await readBody(); return (b && typeof b === "object" ? b : {}) as Record<string, unknown>; };
+  const key = (v: unknown) => typeof v === "string" ? v.trim().slice(0, 200) : "";
+  if (method === "GET" && parts.length === 2) {
+    const jobs = store.listJobs(Math.min(100, Number(query.get("limit")) || 30)).map(j => ({
+      triggerKey: j.triggerKey, kind: j.kind, executeAt: new Date(j.executeAt).toISOString(), status: j.status, note: j.note, tries: j.tries,
+      updatedAt: new Date(j.updatedAt).toISOString(), sessionId: j.payload?.merge?.sessionId || "", characterName: j.payload?.notify?.title || "",
+    }));
+    return { status: 200, body: { ok: true, jobs } };
+  }
+  if (method !== "POST") return { status: 404, body: { ok: false, error: "not_found" } };
+  const body = await input();
+  if (parts.length === 2) {
+    const error = validateJob(body);
+    if (error) return { status: error === "快照过大" ? 413 : 400, body: { ok: false, error } };
+    const saved = store.putJob({ id: `job_${crypto.randomUUID()}`, triggerKey: key(body.triggerKey), kind: String(body.kind),
+      executeAt: Date.parse(String(body.executeAt)), payload: body.payload as Record<string, any>, createdAt: nowMs }, nowMs);
+    return saved ? { status: 200, body: { ok: true } } : { status: 409, body: { ok: false, running: true, error: "同名任务正在生成" } };
+  }
+  if (parts[2] === "cancel") {
+    const triggerKey = key(body.triggerKey), triggerPrefix = key(body.triggerPrefix);
+    if (!triggerKey && !triggerPrefix) return { status: 400, body: { ok: false, error: "缺少预约键" } };
+    return { status: 200, body: { ok: true, ...store.cancelJobs({ triggerKey, triggerPrefix, excludeKey: key(body.excludeKey) }, nowMs) } };
+  }
+  if (parts[2] === "delay") {
+    const triggerKey = key(body.triggerKey);
+    if (!triggerKey) return { status: 400, body: { ok: false, error: "缺少 triggerKey" } };
+    return { status: 200, body: { ok: true, delayed: store.delayJob(triggerKey, nowMs + (body.runNow === true ? 0 : 90_000), nowMs) } };
+  }
+  return { status: 404, body: { ok: false, error: "not_found" } };
+}
 
 async function appWake(deps: AppDeps, method: string, parts: string[], query: URLSearchParams, readBody: () => Promise<unknown>): Promise<{ status: number; body: unknown }> {
   const sourceId = parts[3] || "";

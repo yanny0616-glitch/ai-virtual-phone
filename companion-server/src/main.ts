@@ -7,6 +7,7 @@ import { Auth, supabaseKeyCheck } from "./auth.ts";
 import { loadConfig } from "./config.ts";
 import type { EngineDeps } from "./engine.ts";
 import { importFromCloud } from "./importer.ts";
+import { runOfflineJobs } from "./jobs.ts";
 import { sendPushMessages } from "./push.ts";
 import { Runner } from "./runner.ts";
 import { createApp } from "./server.ts";
@@ -24,6 +25,8 @@ chmodSync(dbPath, 0o600);
 
 const recovered = store.recoverRunningTimers();
 if (recovered) console.log(`[companion] 上次退出时有 ${recovered} 条正在生成，已放回待发（重发前先核对投递凭据）`);
+const recoveredJobs = store.recoverRunningJobs(Date.now());
+if (recoveredJobs) console.log(`[companion] 上次退出时有 ${recoveredJobs} 条离线任务正在跑，已放回待发（已成文的不重新生成）`);
 
 const rest = createRest(config);
 const cloud = createCloud(config);
@@ -61,11 +64,19 @@ const servers = config.bind.map(host => {
 console.log(`[companion] 已启动，模式 ${runner.mode === "live" ? "真发" : "影子"}`);
 runner.start();
 if (config.wakeEnabled) wake.start();
+// 离线任务（回复兜底要在 App 被杀后 90 秒左右接上）：每 15 秒看一次，上一轮没跑完就跳过
+let jobsRunning = false;
+const jobsTimer = setInterval(() => {
+  if (jobsRunning) return;
+  jobsRunning = true;
+  runOfflineJobs(engine).catch(e => console.log(`[companion] 离线任务执行失败：${e instanceof Error ? e.message : String(e)}`)).finally(() => { jobsRunning = false; });
+}, 15_000);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     runner.stop();
     wake.stop();
+    clearInterval(jobsTimer);
     let open = servers.length;
     for (const server of servers) server.close(() => { if (--open === 0) { store.close(); process.exit(0); } });
   });

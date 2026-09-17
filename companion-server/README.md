@@ -103,10 +103,17 @@ CLI：`node src/cli.ts diagnose | push-test | status | import [--force] | mode s
 - **结果续跑**：会回传结果的动作，把刚说的话代入模板里的续跑底稿（`shortcutContinuation`），存 `shortcut_resumes` 表。Runner 每轮查 `push_shortcut_commands`：没执行完往后排，过期按超时交给角色；结果和截图代入后生成第二轮，写 `trigger_key = shortcut:<命令>` 的 outbox 并推送。第二轮再出动作标记只剥不执行。不再挂 `shortcut_resume` 云任务。
 - **安卓壳通知**：`push.ts` 对 `shell:` 订阅改发 Realtime 广播 `shellpush:<userId>`，来电带 `kind: "call"`。唤醒后端的推送也走这里。
 
+### 离线任务（`src/jobs.ts`）
+
+小手机「离线执行」选了后端时，回复兜底、自动追问、定时消息（安静太久 / 一次性定时）、经期关怀不再寄个人云 `push_jobs`，而是 `POST /app/jobs` 寄到这里，存 `offline_jobs` 表，每 15 秒扫一次到点的。规则照搬 `push-generate` 这几类任务的路径：同会话生成租约、每天 50 条硬闸、补最新聊天（定时 / 追问）、未回应降速、沉默协议、来电 / 快捷动作 / 微信分流、写 outbox + 推送、安静太久续排 `key+`。成文正文先落库，写 outbox 失败重试时不重新调模型。
+
+不重复发：同一 triggerKey 只挂一边。手机重挂时先撤另一边、确认后才挂（`lib/offline-jobs-client.ts`）；后端到点前再查个人云同名任务——正在跑就等，比这条新或这条挂上后已处理过就不发，更早的待发就撤掉它。
+
 ### 还在个人云执行的
 
 - 快捷命令网关本身（建命令、推运行通知、收结果回传：`ai-phone-push`、`push-shortcut-result`）和微信云助手，后端只当调用方
-- 回复兜底、自动追问、经期关怀、非挂念的定时唤醒（`push-generate`）
+- 「离线执行」选云端时的所有离线任务；选后端时，切换前已经排在云端、还没重挂的那几条
+- 忙碌回复插件的延后回复（`deferred:`）、在线快捷动作续跑（`shortcut_resume`）
 
 ## 配置
 
