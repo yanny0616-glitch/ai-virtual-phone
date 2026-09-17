@@ -1,6 +1,7 @@
 // lib/reading-storage.ts — Dexie IndexedDB persistence for Reading feature.
 
 import Dexie from "dexie";
+import "./storage-health";
 import type { Book, BookChapter, ReadingProgress, ReadingAnnotation } from "./reading-types";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { DEFAULT_READING_BILINGUAL_PROMPT } from "./bilingual-prompt-defaults";

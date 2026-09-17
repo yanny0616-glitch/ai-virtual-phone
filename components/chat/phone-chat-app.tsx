@@ -222,6 +222,14 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
         window.addEventListener("chat-app-css-updated", onCSSUpdate);
         return () => window.removeEventListener("chat-app-css-updated", onCSSUpdate);
     }, []);
+    // 编辑框里还没保存的 CSS：null = 不在预览
+    const [previewCSS, setPreviewCSS] = useState<string | null>(null);
+    useEffect(() => {
+        const onPreview = (event: Event) => setPreviewCSS((event as CustomEvent<{ css: string | null }>).detail?.css ?? null);
+        window.addEventListener("chat-app-css-preview", onPreview);
+        return () => window.removeEventListener("chat-app-css-preview", onPreview);
+    }, []);
+    const shownChatAppCSS = previewCSS ?? chatAppCSS;
 
     // Listen for tab bar hide/show from sub-pages (e.g. CSS editor)
     useEffect(() => {
@@ -240,7 +248,7 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
             {...(hideTabBar ? { "data-tabbar-hidden": "" } : {})}
         >
             {/* Chat app-level custom CSS (lower priority than per-session CSS) */}
-            {chatAppCSS && <SessionCustomCSS css={chatAppCSS} scope=".chat-app" />}
+            {shownChatAppCSS && <SessionCustomCSS css={shownChatAppCSS} scope=".chat-app" />}
             {/* The Main Content Area */}
             <div className="chat-main-content relative flex-1 flex flex-col overflow-hidden" {...(activeSession || activeMascot ? { "data-covered-by-room": "" } : {})}>
                 {activeTab === "messages" && <ChatMessageList onCloseApp={onClose} activeSession={activeSession} onSelectSession={(session) => { setActiveMascot(false); setActiveSession(session); }} onSelectMascot={handleSelectMascot} />}

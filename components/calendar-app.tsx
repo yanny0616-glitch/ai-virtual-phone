@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, ChevronLeft, HeartPulse, Plus, Trash2, Wand2, X } from "lucide-react";
+import { BarChart3, Bot, Check, ChevronLeft, HeartPulse, Plus, Trash2, Wand2, X } from "lucide-react";
 import { Avatar } from "./ui/primitives";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
@@ -36,7 +36,9 @@ import {
   cancelCurrentPeriodStart,
   finishCurrentPeriod,
   deleteMenstrualRecord,
+  getCycleEstimate,
   getMenstrualSummary,
+  getNextPeriodWindow,
   loadMenstrualConfig,
   loadMenstrualRecords,
   saveMenstrualConfig,
@@ -44,6 +46,7 @@ import {
   validateMenstrualSettings,
   type MenstrualRecord,
 } from "@/lib/menstrual-storage";
+import { daysFrom, eveReminderDate, type CycleEstimate } from "@/lib/menstrual-predict";
 import { CalendarMonthPage } from "./calendar/month-page";
 import { CalendarDetailPage } from "./calendar/detail-page";
 import { CalendarEventEditModal, type CalendarEventDraft } from "./calendar/event-edit-modal";
@@ -124,6 +127,53 @@ function formatSimpleDate(dateText: string | null): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
+const WEEKDAY_TEXT = ["日", "一", "二", "三", "四", "五", "六"];
+const EVE_REMINDER_PRESETS = ["21:00", "21:30", "22:00"];
+
+function formatWindowRange(start: string, end: string, separator = "–"): string {
+  const a = parseIsoDate(start);
+  const b = parseIsoDate(end);
+  const tail = a.getMonth() === b.getMonth() ? `${b.getDate()}日` : `${b.getMonth() + 1}月${b.getDate()}日`;
+  return `${a.getMonth() + 1}月${a.getDate()}日${separator}${tail}`;
+}
+
+const CHART_BAR_MAX = 46;
+// 柱子下方数字那一行的高度（14px 行高 + 4px 间距），平均线要从它上面算起
+const CHART_LABEL_ROW = 18;
+
+function CycleIntervalChart({ estimate }: { estimate: CycleEstimate }) {
+  const used = estimate.intervals.filter(interval => !interval.skipped).map(interval => interval.days);
+  const lo = Math.min(...used, estimate.cycleLength) - 8;
+  const hi = Math.max(...used, estimate.cycleLength) + 2;
+  const barHeight = (days: number) =>
+    Math.round(8 + ((Math.min(Math.max(days, lo), hi) - lo) / (hi - lo)) * (CHART_BAR_MAX - 8));
+  return (
+    <div
+      className="calendar-cycle-chart"
+      role="img"
+      aria-label={`最近 ${estimate.intervals.length} 次间隔：${estimate.intervals.map(interval => interval.days).join("、")} 天`}
+    >
+      {estimate.intervals.map((interval, index) => (
+        <div key={index} className="calendar-cycle-chart-col" data-skipped={interval.skipped ? "true" : undefined}>
+          <i className="calendar-cycle-chart-bar" style={{ height: interval.skipped ? CHART_BAR_MAX : barHeight(interval.days) }} />
+          <span>{interval.days}</span>
+        </div>
+      ))}
+      <span className="calendar-cycle-chart-avg" style={{ bottom: CHART_LABEL_ROW + barHeight(estimate.cycleLength) }}>
+        <span>平均 {estimate.cycleLength}</span>
+      </span>
+    </div>
+  );
+}
+
+function describeSkippedIntervals(estimate: CycleEstimate): string | null {
+  const skipped = estimate.intervals.filter(interval => interval.skipped);
+  if (skipped.length === 0) return null;
+  if (skipped.length > 1) return `${skipped.map(interval => interval.days).join("、")} 天这几次和平常差太多，没算进去`;
+  const days = skipped[0].days;
+  return `${days} 天那次${days > estimate.cycleLength ? "像是漏记了一次" : "和平常差太多"}，没算进去`;
+}
+
 export function PhoneCalendarApp({
   onClose,
   onNotice,
@@ -158,6 +208,9 @@ export function PhoneCalendarApp({
     periodCareEnabled: boolean;
     periodCareCharacterIds: string[];
     periodCareLeadDays: "1" | "2" | "3";
+    autoPredict: boolean;
+    eveReminderTime: string;
+    eveCustom: boolean;
   }>(() => {
     const initial = loadMenstrualConfig();
     return {
@@ -166,6 +219,9 @@ export function PhoneCalendarApp({
       periodCareEnabled: initial.periodCareEnabled,
       periodCareCharacterIds: initial.periodCareCharacterIds,
       periodCareLeadDays: String(initial.periodCareLeadDays) as "1" | "2" | "3",
+      autoPredict: initial.autoPredict,
+      eveReminderTime: initial.eveReminderTime,
+      eveCustom: !!initial.eveReminderTime && !EVE_REMINDER_PRESETS.includes(initial.eveReminderTime),
     };
   });
 
@@ -223,6 +279,11 @@ export function PhoneCalendarApp({
     return buildMenstrualDayMap(start, end, menstrualRecords, menstrualConfig);
   }, [selectedOwner, todayIso, menstrualRecords, menstrualConfig]);
 
+  const nextPeriodWindow = useMemo(
+    () => (selectedOwner?.ownerType === "user" ? getNextPeriodWindow(menstrualRecords, menstrualConfig, todayIso) : null),
+    [selectedOwner, todayIso, menstrualRecords, menstrualConfig],
+  );
+
   const menstrualSummary = useMemo(
     () => getMenstrualSummary(menstrualRecords, menstrualConfig, selectedDate),
     [menstrualRecords, menstrualConfig, selectedDate],
@@ -230,6 +291,24 @@ export function PhoneCalendarApp({
   const periodCareCharacterOptions = useMemo(
     () => (showMenstrualSettings ? buildPeriodCareCharacterOptions() : []),
     [showMenstrualSettings],
+  );
+  const draftCycleConfig = useMemo(
+    () => ({
+      ...menstrualConfig,
+      cycleLength: Number(menstrualDraft.cycleLength) || menstrualConfig.cycleLength,
+      periodLength: Number(menstrualDraft.periodLength) || menstrualConfig.periodLength,
+      autoPredict: menstrualDraft.autoPredict,
+    }),
+    [menstrualConfig, menstrualDraft.cycleLength, menstrualDraft.periodLength, menstrualDraft.autoPredict],
+  );
+  // 统计总是按记录算，开关只决定预测用不用它
+  const recordEstimate = useMemo(
+    () => (showMenstrualSettings ? getCycleEstimate(menstrualRecords, { ...draftCycleConfig, autoPredict: true }) : null),
+    [showMenstrualSettings, menstrualRecords, draftCycleConfig],
+  );
+  const draftPeriodWindow = useMemo(
+    () => (showMenstrualSettings ? getNextPeriodWindow(menstrualRecords, draftCycleConfig, todayIso) : null),
+    [showMenstrualSettings, menstrualRecords, draftCycleConfig, todayIso],
   );
 
   useEffect(() => {
@@ -391,6 +470,9 @@ export function PhoneCalendarApp({
       periodCareEnabled: menstrualConfig.periodCareEnabled,
       periodCareCharacterIds: menstrualConfig.periodCareCharacterIds,
       periodCareLeadDays: String(menstrualConfig.periodCareLeadDays) as "1" | "2" | "3",
+      autoPredict: menstrualConfig.autoPredict,
+      eveReminderTime: menstrualConfig.eveReminderTime,
+      eveCustom: !!menstrualConfig.eveReminderTime && !EVE_REMINDER_PRESETS.includes(menstrualConfig.eveReminderTime),
     });
     setShowMenstrualSettings(true);
   };
@@ -418,6 +500,10 @@ export function PhoneCalendarApp({
       onNotice?.("请选择至少一个已有聊天角色");
       return;
     }
+    if (menstrualDraft.periodCareEnabled && menstrualDraft.eveCustom && !/^\d{2}:\d{2}$/.test(menstrualDraft.eveReminderTime)) {
+      onNotice?.("请填写前一晚提醒的时间");
+      return;
+    }
     const savedConfig = saveMenstrualConfig({
       ...menstrualConfig,
       cycleLength,
@@ -425,6 +511,8 @@ export function PhoneCalendarApp({
       periodCareEnabled: menstrualDraft.periodCareEnabled,
       periodCareCharacterIds,
       periodCareLeadDays: Number(menstrualDraft.periodCareLeadDays) as 1 | 2 | 3,
+      autoPredict: menstrualDraft.autoPredict,
+      eveReminderTime: menstrualDraft.eveReminderTime,
     });
     setMenstrualConfig(savedConfig);
     window.dispatchEvent(new CustomEvent("menstrual-period-care-updated"));
@@ -450,11 +538,57 @@ export function PhoneCalendarApp({
         ? null
         : "点「经期来了」开始记录与预测";
 
+  const cycleForecast = (() => {
+    const win = nextPeriodWindow;
+    if (!win || menstrualSummary.isPeriodActive || selectedDate < todayIso) return null;
+    const peakDate = parseIsoDate(win.peak);
+    const peakText = `最可能 ${peakDate.getDate()} 日 周${WEEKDAY_TEXT[peakDate.getDay()]}`;
+    const peakIndex = daysFrom(win.start, win.peak);
+    const windowBar = Array.from({ length: daysFrom(win.start, win.end) + 1 }, (_, index) => {
+      const offset = Math.abs(index - peakIndex);
+      return offset === 0 ? 1 : offset === 1 ? 0.45 : 0.3;
+    });
+    if (win.lateDays > 0 && selectedDate === todayIso) {
+      return {
+        title: `预计 ${formatWindowRange(win.start, win.end)}`,
+        main: `晚了 ${win.lateDays} 天`,
+        sub: "随时可能来",
+        late: true,
+        segments: [...windowBar.map(() => 0.22), ...Array<number>(Math.min(win.lateDays, 7)).fill(1)],
+      };
+    }
+    const toStart = daysFrom(selectedDate, win.start);
+    const toEnd = daysFrom(selectedDate, win.end);
+    if (toStart <= 0 && toEnd >= 0) return { title: "下次经期", main: "随时可能来", sub: peakText, late: false, segments: windowBar };
+    if (toStart > 0 && toStart <= 10) return { title: "下次经期", main: `${toStart}–${toEnd} 天后`, sub: peakText, late: false, segments: windowBar };
+    return null;
+  })();
+
+  const eveCharacter = periodCareCharacterOptions.find(option => menstrualDraft.periodCareCharacterIds.includes(option.characterId)) ?? null;
+  const eveDate = draftPeriodWindow ? eveReminderDate(draftPeriodWindow) : null;
+  const hasRecordEstimate = recordEstimate?.source === "records";
+  const autoPredictInUse = menstrualDraft.autoPredict && hasRecordEstimate;
+
   // 详情页经期打卡行（仅用户视图）
   const cyclePanel = selectedOwner?.ownerType === "user" ? (
-    <div className="calendar-cycle-line">
-      <i className="calendar-cycle-dot" data-type={cycleStateForSelected?.type ?? "period"} aria-hidden="true" />
-      <span className="calendar-cycle-line-text">{cycleSummaryLine ?? "周期记录"}</span>
+    <div className="calendar-cycle-line" data-forecast={cycleForecast ? "true" : undefined}>
+      {cycleForecast ? (
+        <span className="calendar-cycle-forecast" data-late={cycleForecast.late ? "true" : undefined}>
+          <span className="calendar-cycle-forecast-k">{cycleForecast.title}</span>
+          <span className="calendar-cycle-forecast-v">
+            <b>{cycleForecast.main}</b>
+            <span>{cycleForecast.sub}</span>
+          </span>
+          <span className="calendar-cycle-forecast-bar" aria-hidden="true">
+            {cycleForecast.segments.map((opacity, index) => <i key={index} style={{ opacity }} />)}
+          </span>
+        </span>
+      ) : (
+        <>
+          <i className="calendar-cycle-dot" data-type={cycleStateForSelected?.type ?? "period"} aria-hidden="true" />
+          <span className="calendar-cycle-line-text">{cycleSummaryLine ?? "周期记录"}</span>
+        </>
+      )}
       {canCancelSelectedStart ? (
         <button type="button" className="calendar-mini-btn" data-variant="primary" onClick={() => {
           setMenstrualConfig(cancelCurrentPeriodStart(selectedDate));
@@ -737,7 +871,61 @@ export function PhoneCalendarApp({
             </div>
 
             <div className="modal-body hide-scrollbar flex flex-col gap-3 pb-10" data-ui="modal-body">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="calendar-menstrual-care-panel">
+                <button
+                  type="button"
+                  className="calendar-menstrual-care-toggle"
+                  data-active={menstrualDraft.autoPredict ? "true" : undefined}
+                  onClick={() => setMenstrualDraft(prev => ({ ...prev, autoPredict: !prev.autoPredict }))}
+                >
+                  <span className="calendar-menstrual-care-toggle-icon">
+                    <BarChart3 size={16} />
+                  </span>
+                  <span className="calendar-menstrual-care-toggle-copy">
+                    <strong>按记录自动算</strong>
+                    <span>{hasRecordEstimate ? "用你最近几次的记录算周期和日子" : "再记一次经期，就能按记录算"}</span>
+                  </span>
+                  <span className="calendar-menstrual-pill-switch" aria-hidden="true">
+                    <span className="calendar-menstrual-pill-switch-thumb" />
+                  </span>
+                </button>
+
+                {autoPredictInUse && recordEstimate ? (
+                  <div className="calendar-menstrual-care-body">
+                    <div className="calendar-cycle-stats">
+                      {([
+                        ["平均周期", String(recordEstimate.cycleLength)],
+                        ["波动", `±${recordEstimate.spread}`],
+                        ["经期", String(recordEstimate.periodLength)],
+                      ] as const).map(([label, value]) => (
+                        <div key={label} className="calendar-cycle-stat">
+                          <span>{label}</span>
+                          <span><b>{value}</b><small>天</small></span>
+                        </div>
+                      ))}
+                    </div>
+                    <CycleIntervalChart estimate={recordEstimate} />
+                    {describeSkippedIntervals(recordEstimate) ? (
+                      <div className="calendar-cycle-note">{describeSkippedIntervals(recordEstimate)}</div>
+                    ) : null}
+                    {draftPeriodWindow ? (
+                      <div className="calendar-cycle-next">
+                        <span>
+                          {draftPeriodWindow.lateDays > 0 ? "预计" : "下次"}　<b>{formatWindowRange(draftPeriodWindow.start, draftPeriodWindow.end, " – ")}</b>
+                        </span>
+                        {draftPeriodWindow.lateDays > 0 ? (
+                          <span>已晚 <b>{draftPeriodWindow.lateDays}</b> 天</span>
+                        ) : (
+                          <span>最可能 <b>{parseIsoDate(draftPeriodWindow.peak).getDate()} 日</b></span>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              {autoPredictInUse ? <label className="menu-desc ml-1">记录不够两次时，才用下面这两格</label> : null}
+              <div className="grid grid-cols-2 gap-3 calendar-menstrual-manual" data-dimmed={autoPredictInUse ? "true" : undefined}>
                 <div className="flex flex-col gap-1">
                   <label className="menu-desc ml-1">周期长度</label>
                   <Input
@@ -796,6 +984,58 @@ export function PhoneCalendarApp({
                           </button>
                         ))}
                       </div>
+                    </div>
+
+                    <div className="calendar-menstrual-care-section">
+                      <label className="menu-desc ml-1">前一晚提醒</label>
+                      <div className="calendar-period-care-lead-row">
+                        <button
+                          type="button"
+                          className="calendar-period-care-lead"
+                          data-active={!menstrualDraft.eveCustom && !menstrualDraft.eveReminderTime ? "true" : undefined}
+                          onClick={() => setMenstrualDraft(prev => ({ ...prev, eveReminderTime: "", eveCustom: false }))}
+                        >
+                          不提醒
+                        </button>
+                        {EVE_REMINDER_PRESETS.map(value => (
+                          <button
+                            key={value}
+                            type="button"
+                            className="calendar-period-care-lead"
+                            data-active={!menstrualDraft.eveCustom && menstrualDraft.eveReminderTime === value ? "true" : undefined}
+                            onClick={() => setMenstrualDraft(prev => ({ ...prev, eveReminderTime: value, eveCustom: false }))}
+                          >
+                            {value}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className="calendar-period-care-lead"
+                          data-active={menstrualDraft.eveCustom ? "true" : undefined}
+                          onClick={() => setMenstrualDraft(prev => ({ ...prev, eveCustom: true, eveReminderTime: prev.eveReminderTime || "21:30" }))}
+                        >
+                          自定
+                        </button>
+                      </div>
+                      {menstrualDraft.eveCustom ? (
+                        <Input
+                          type="time"
+                          value={menstrualDraft.eveReminderTime}
+                          onChange={e => setMenstrualDraft(prev => ({ ...prev, eveReminderTime: e.target.value }))}
+                        />
+                      ) : null}
+                      {menstrualDraft.eveReminderTime && eveCharacter ? (
+                        <div className="calendar-eve-preview">
+                          <Avatar src={eveCharacter.avatar || undefined} name={eveCharacter.name} size="sm" />
+                          <div className="calendar-eve-preview-main">
+                            <div className="calendar-eve-preview-bubble">明天可能要来了，包里放一片。今晚别喝冰的，早点睡。</div>
+                            <span className="calendar-eve-preview-meta">
+                              {eveDate && eveDate >= todayIso ? `${formatSimpleDate(eveDate)} ` : ""}
+                              {menstrualDraft.eveReminderTime} 送达 · 示意，真正的话由 TA 按人设说
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="calendar-menstrual-care-section">

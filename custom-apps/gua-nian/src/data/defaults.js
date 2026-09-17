@@ -6,14 +6,31 @@
     return AiPhone.db.create(coll, data);
   }
 
+  const DEFAULT_DAY_PROMPT = [
+    "以当前角色的人设、职业、近期记忆和最近聊天为依据，安排角色自己会过的一天：先定身体底子和情绪底色，再排日程。",
+    "日程的主体是角色，不是用户，也不是替双方编写未来剧情。默认安排角色能独立决定和执行的工作、学习、兴趣、家务、吃饭和休息，保留自己的生活主线。",
+    "涉及用户参与的共同活动，只有最新聊天中双方明确约好、用户明确同意且尚未取消时，才能列为共同日程。仅提过、角色想做、角色单方面要求、过去做过或关系亲密，都不等于用户已答应。",
+    "标题、地点和备注都不能替用户安排未来行动、台词、感受或反应。即使约好一起吃饭，也不能预写用户一定赴约、吃完、嫌淡或如何回应；到点也不代表已经完成。",
+    "可以写角色自己的打算和准备，例如自己吃午饭、准备饭菜、处理文件；没有共同约定时，不写陪用户吃饭、陪用户睡觉等需要用户配合才能成立的既定安排。",
+    "已发生的互动可以作为背景影响角色状态，但不能自动延续成之后一整天的共同剧情。未来备注只写角色自己的准备和计划，不把尚未发生的细节写成事实。",
+  ].join("\n");
+
+  const SERVER_URL_DEF = "https://float.yanny.top/companion";
   // 所有可调参数的默认值；旧版本存的 settings 缺哪个补哪个
   const SET_DEF = {
+    dayPrompt: DEFAULT_DAY_PROMPT,
     quietStart: "23:30", quietEnd: "08:00",
     userSleepOn: false,  // 用户可选睡眠窗：仅暂停回音统计的等待计时，默认不启用
     userSleepStart: "23:30", userSleepEnd: "08:00",
     autoGen: false,      // 每天到点自动生成TA的一天（要挂念开着；错过了下次打开时补）
     autoGenAt: "07:30",
+    forkLevel: 1,        // 日子的起伏：0 平稳 · 1 平常 · 2 多事（生成时埋几个岔子、概率乘几倍）
+    forkPeek: false,     // 提前看还没揭晓的变数（会剧透）
+    forkBurst: true,     // 变数落到「忍不住」时主动来说（占主动额度，守免打扰）
+    routineOn: true,     // 生成TA的一天时照着「忙碌回复」插件里的固定作息和今天的例外
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
+    serverBrain: false,  // 实际已交给后端（跟随小手机「离线执行」，交接确认后才改）：本机不生成、不判断、不排消息
+    serverUrl: "",       // 旧版：后端地址，现由小手机设置；只在小手机没有 offline 接口时兜底
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
     characterIds: [],    // 挂念的人（可以多位）
@@ -35,8 +52,8 @@
     moodGate: true,      // 精力低/心情差时更克制
     injectChat: true,    // 把TA此刻的状态注入聊天提示词（需 chat.context 权限）
     chatEditsDay: true,  // 复核时允许按聊天内容改今天的日程（只动还没到的）
-    cloudUrl: "",        // 个人云（Supabase）项目地址，选填
-    cloudKey: "",        // 个人云 Secret / service_role key，只存本机应用数据
+    cloudUrl: "",        // 旧版：个人云地址，现由小手机「云服务部署」提供；只在小手机没有 offline 接口时兜底
+    cloudKey: "",        // 旧版：个人云 Secret key，同上
     cloudRecheck: true,  // 浏览器关着时也让云端复核（需要云连接）
     // 云端门禁：这几道全过了云端才真的发一次裁决调用，拦下来的不花钱也不占额度
     gateDailyCap: 8,     // 每天最多判几次

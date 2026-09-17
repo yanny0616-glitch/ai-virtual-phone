@@ -58,7 +58,7 @@
 
   // 临时起念不是日程排出来的，是复核时顺着聊天临时起的，重排不该把它推倒。
   // 新旧计划里都靠 source 的「临时」前缀认（本地和云端起念都写这个前缀）。
-  function isImpromptu(w) { return !!w && /^(临时|约定)/.test(String(w.source || "")); }
+  function isImpromptu(w) { return !!w && /^(临时|约定|变数)/.test(String(w.source || "")); }
 
   function keptImpromptu(cx) {
     const floor = Date.now() + 3 * 60000;
@@ -153,6 +153,7 @@
   }
 
   async function orchestrate(cx) {
+    if (serverBrainOn()) { toast("挂念已交给 VPS 后端，本机不排消息"); return; }
     if (cx._planLock && !cx.busy && cx.day) { await log(cx, "编排跳过：复核或合并云端裁决正在进行，稍后再点「重新编排」"); return; }
     if (cx.busy || cx._planLock || !cx.day) return;
     if (!await claimOwner(cx)) { toast("今天由「" + ownerLabel(cx) + "」负责，要改用这台就去诊断页「今天谁在管」"); render(); return; }

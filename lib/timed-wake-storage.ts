@@ -39,15 +39,21 @@ function saveTimedWakeSchedules(schedules: TimedWakeSchedule[]): void {
     kvSet(TIMED_WAKE_SCHEDULES_KEY, JSON.stringify(schedules));
 }
 
+// 插件的预约（如约见面到点）按 key 各自独立，不和「稍后联系」这类每会话一条的预约互相顶掉
+export const CHAT_PLUGIN_WAKE_PREFIX = "chat_plugin_";
+const isPluginWake = (item: TimedWakeSchedule) => item.id.startsWith(CHAT_PLUGIN_WAKE_PREFIX);
+
 export function saveTimedWakeSchedule(schedule: TimedWakeSchedule): void {
     const all = loadTimedWakeSchedules();
-    const next = all.filter(item => item.sessionId !== schedule.sessionId);
+    const next = isPluginWake(schedule)
+        ? all.filter(item => item.id !== schedule.id)
+        : all.filter(item => item.sessionId !== schedule.sessionId || isPluginWake(item));
     next.push(schedule);
     saveTimedWakeSchedules(next);
 }
 
 export function clearTimedWakeSchedule(sessionId: string): void {
-    saveTimedWakeSchedules(loadTimedWakeSchedules().filter(item => item.sessionId !== sessionId));
+    saveTimedWakeSchedules(loadTimedWakeSchedules().filter(item => item.sessionId !== sessionId || isPluginWake(item)));
 }
 
 export function removeTimedWakeSchedule(id: string): void {

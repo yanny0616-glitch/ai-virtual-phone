@@ -125,3 +125,15 @@ export function resample(samples, fromRate, toRate) {
   }
   return out;
 }
+
+// 有界渐弱片段：最多 20 秒，包络和采样位置按整段渐弱进度连续计算。
+export function fadeSegment(channels, fadeSeconds, offsetSeconds, sampleRate = MIX_SAMPLE_RATE) {
+  const total = Math.max(1, Math.floor(fadeSeconds * sampleRate));
+  const start = Math.max(0, Math.floor(offsetSeconds * sampleRate));
+  const len = Math.max(0, Math.min(20 * sampleRate, total - start));
+  return asStereo(channels).map(loop => {
+    const out = new Float32Array(len);
+    for (let i = 0; i < len; i += 1) out[i] = (loop[(start + i) % loop.length] || 0) * Math.pow(1 - (start + i) / total, 1.6);
+    return out;
+  });
+}

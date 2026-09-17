@@ -1,0 +1,16 @@
+[
+  "core/runtime.js",
+  "core/macros.js",
+  "data/defaults.js",
+  "data/validation.js",
+  "data/scan.js",
+  "data/storage.js",
+  "gen/assemble.js",
+  "ui/render.js",
+  "ui/theme.js",
+  "ui/stage.js",
+  "ui/library.js",
+  "ui/favorites.js",
+  "ui/settings.js",
+  "bootstrap.js"
+]

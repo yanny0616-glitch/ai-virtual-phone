@@ -77,6 +77,16 @@ export function fixture() {
     getChatPluginHookBus: () => ({ hasHandlers: () => false }), runChatPluginTransformSync: (point, p) => p,
     registerKvMigration() {}, kvGet: k => kv.get(k), kvSet: (k, v) => kv.set(k, v), kvRemove: k => kv.delete(k), kvKeysWithPrefix: prefix => [...kv.keys()].filter(k => k.startsWith(prefix)),
     loadInstalledCustomApps: () => [{ id: 'gua.nian', permissions: ['chat.context'] }],
+    offlineJobsOnServer: () => h.server === true,
+    deferredReplyServerFetch: async (action, key, payload) => {
+      h.serverCalls = [...(h.serverCalls || []), { action, key }];
+      if (!key) return json({ ok: true, supported: true, policySupported: true, silenceSupported: true });
+      const rows = h.serverRows ||= new Map();
+      if (action === 'put' && !rows.has(key)) rows.set(key, { status: 'pending', revision: payload.deferredReply.revision });
+      if (action === 'cancel') rows.set(key, { status: 'cancelled' });
+      const row = rows.get(key);
+      return json(row ? { ok: true, status: row.status, revision: row.revision, executeAt: new Date(h.now + 60_000).toISOString() } : { ok: true, status: 'missing' });
+    },
     isPersonalPushCloudActive: () => true, loadPersonalPushCloudState: () => ({ url: h.project }), hasAccountPushSubscription: async () => true,
     personalPushFetch: async (action, init, params) => {
       if (h.legacyGateway && init.method === "GET" && !params?.key) return json({ ok: true, supported: true });
@@ -249,3 +259,19 @@ console.log('PASS ordinary quoted markers still deliver a message');
  assert.equal((await decrypt(h.rows[1])).generatedResponse.rawText,'已生成');
  console.log('PASS claimed-turn additions create one successor; late old receipts and updates cannot overwrite cached output');
 }
+{
+  // 「离线执行：后端」：新的一轮建在后端；切回云端后这一轮仍在后端收尾（查、撤都去后端），个人云里不出现
+  const { h, a, drain } = fixture(); h.server = true;
+  a.queueDeferredReplyCloud('s'); await drain();
+  assert.equal(h.rows.length, 0);
+  assert.equal(a.readDeferredReply('s').cloud.line, 'server');
+  assert.equal(a.readDeferredReply('s').cloud.state, 'active');
+  assert.deepEqual(h.serverCalls.map(c => c.action), ['get', 'put']);
+  h.server = false;
+  await a.sync('s');
+  assert.equal(h.serverCalls.at(-1).action, 'get');
+  assert.equal(await a.cancelDeferredReplyCloud('s'), true);
+  assert.equal(h.serverCalls.at(-1).action, 'cancel');
+  assert.equal(h.rows.length, 0);
+}
+console.log('PASS backend line keeps a started turn on the backend after switching back to cloud');

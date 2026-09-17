@@ -12,14 +12,18 @@ const out = path.join(root, 'out/mascot-preview-check');
 await fs.mkdir(out, { recursive: true });
 const read = file => fs.readFile(path.join(root, file), 'utf8');
 assert.doesNotMatch(await read('components/mascot/mascot-float.tsx'), /DIY_WIDGET_PREVIEW_EVENT|diyWidgetPreview/);
-assert.match(await read('components/desktop-shell.tsx'), /<MascotFloat\s*\/>\s*\{\/\*[\s\S]*?\*\/\}\s*<MascotPreviewHost\s*\/>/);
+assert.match(await read('components/desktop-shell.tsx'), /<MascotFloat\s*\/>[\s\S]{0,400}?<MascotPreviewHost\s*\/>/);
 const mappings = {
   'components/mascot/mascot-preview-host.tsx': 'host', 'components/mascot/mascot-edit-review.tsx':'review',
+  'components/mascot/mascot-css-plan-card.tsx':'plancard',
+  'lib/widget-fields.ts':'widgetfields',
   'components/widgets/diy-widget-renderer.tsx':'renderer', 'lib/mascot-events.ts':'events', 'lib/widget-music-bridge.ts':'music',
   'lib/mascot-edit-domain.ts':'domain', 'lib/widget-types.ts':'types', 'lib/kv-db.ts':'kv',
 };
 const replacements = {
   '@/components/widgets/diy-widget-renderer':'renderer', './mascot-edit-review':'review', '@/lib/mascot-events':'events',
+  './mascot-css-plan-card':'plancard', '@/lib/mascot-css-plan':'cssplan',
+  './widget-fields':'widgetfields', '@/lib/widget-fields':'widgetfields', './storage-health':'health',
   '@/lib/mascot-edit-store':'store', '@/lib/mascot-edit-domain':'domain', '@/lib/widget-types':'types', './widget-types':'types',
   '@/lib/theme-storage':'assets', '@/lib/widget-music-bridge':'music', './music-control-bridge':'player',
 };
@@ -32,6 +36,8 @@ for (const [file, name] of Object.entries(mappings)) {
 }
 await fs.writeFile(path.join(out, 'assets.js'), 'export const getThemeAssetMap=async()=>({}); export const collectThemeAssetIds=()=>[];');
 await fs.writeFile(path.join(out, 'store.js'), `export const MASCOT_EDIT_PREVIEW_EVENT='mascot-edit-preview',MASCOT_EDIT_HISTORY_EVENT='mascot-edit-history';export const readEditState=()=>window.fixture;export const readEditJournal=()=>window.plans;export const editIconCatalog=()=>[{id:'music',name:'音乐'},{id:'settings',name:'设置'},{id:'chat',name:'聊天'},{id:'theme',name:'主题'},{id:'contacts',name:'角色'},{id:'calendar',name:'日历'}];export const changedEditFields=(a,b)=>[...new Set([...Object.keys(a||{}),...Object.keys(b||{})])].filter(k=>JSON.stringify(a?.[k])!==JSON.stringify(b?.[k]));export const commitEdit=async(id,undo)=>{window.commitCalls++;const p=window.plans.find(p=>p.id===id);p.status=undo?'undone':'applied';return {...p};};`);
+await fs.writeFile(path.join(out, 'health.js'), 'export {};');
+await fs.writeFile(path.join(out, 'cssplan.js'), `export const CSS_LOCATION_LABEL={chat_app:'聊天应用',chat_session:'单独聊天室',mascot_chat:'AI助手聊天室',story:'剧情模式',music:'音乐',calendar:'日历'};export const readCssPlans=()=>window.cssPlans||[];export const getCssPlan=id=>(window.cssPlans||[]).find(p=>p.id===id);export const readCssLibrary=()=>window.cssLibrary||[];export const previewCssPlan=async id=>{const p=getCssPlan(id);p.status='previewing';return {...p};};export const endCssPreview=async id=>{const p=getCssPlan(id);p.status='draft';window.endPreviewCalls=(window.endPreviewCalls||0)+1;return {...p};};export const applyCssPlan=async id=>{const p=getCssPlan(id);p.status='applied';return {...p};};export const undoCssPlan=async id=>{const p=getCssPlan(id);p.status='undone';return {...p};};export const saveCssPlanToLibrary=id=>({id:'csslib1',name:'x'});export const removeCssLibraryEntry=()=>{};export const planFromLibraryEntry=async()=>(window.cssPlans||[])[0];`);
 await fs.writeFile(path.join(out, 'player.js'), 'export const getMusicControlBridge=()=>window.player;');
 await fs.writeFile(path.join(out, 'entry.js'), `
 import React from 'react';
@@ -111,6 +117,9 @@ await new Promise((resolve, reject) => webpack({ mode: 'development', devtool: f
 await fs.writeFile(path.join(out,'index.html'),'<!doctype html><meta charset="utf-8"><style>.w-full{width:100%}.h-full{height:100%}</style><div id="root" style="width:360px;height:250px"></div><script>window.onerror=function(m){document.body.dataset.result="FAIL: "+m;};window.onunhandledrejection=function(e){document.body.dataset.result="FAIL: "+e.reason;};</script><script src="bundle.js"></script>');
 const profile=await fs.mkdtemp('/tmp/float-mascot-browser-');
 const child=spawn(process.env.CHROMIUM_BIN||'chromium',['--headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--allow-file-access-from-files','--user-data-dir='+profile,'--remote-debugging-port=0','about:blank']);
+// 脚本中途抛错或被打断也要把子进程带走，不然孤儿 Chromium 会一直吃 CPU
+process.on('exit', () => { try { child.kill('SIGKILL'); } catch {} });
+if (!globalThis.__exitHooksInstalled) { globalThis.__exitHooksInstalled = true; process.on('uncaughtException', e => { console.error(e); process.exit(1); }); process.on('unhandledRejection', e => { console.error(e); process.exit(1); }); process.on('SIGINT', () => process.exit(130)); process.on('SIGTERM', () => process.exit(143)); }
 let socket; const pending=new Map(); let serial=0; let errors='';
 try {
   const address=await new Promise((resolve,reject)=>{

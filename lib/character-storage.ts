@@ -179,6 +179,11 @@ export function exportCharacterAsJson(char: Character): void {
     timeZone: char.timeZone || "",
     // 按 SillyTavern 的 character_book 形状导出，导回本端或导进酒馆都认得。
     ...(char.embeddedWorldBook ? { character_book: toCharacterBook(char.embeddedWorldBook) } : {}),
+    polaroidStyle: char.polaroidStyle ?? 0,
+    polaroidSize: char.polaroidSize || "random",
+    polaroidImageX: char.polaroidImageX ?? 50,
+    polaroidImageY: char.polaroidImageY ?? 50,
+    polaroidImageZoom: char.polaroidImageZoom ?? 1,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
@@ -228,6 +233,22 @@ export function parseCharacterFromJson(
     const name = nonEmptyText(src.name);
     if (!name) return null;
 
+    const polaroidStyle = typeof src.polaroidStyle === "number" && Number.isFinite(src.polaroidStyle)
+      ? Math.max(0, Math.min(4, Math.round(src.polaroidStyle)))
+      : undefined;
+    const polaroidSize = src.polaroidSize === "small" || src.polaroidSize === "medium" || src.polaroidSize === "large"
+      ? src.polaroidSize
+      : "random" as const;
+    const polaroidImageX = typeof src.polaroidImageX === "number" && Number.isFinite(src.polaroidImageX)
+      ? Math.max(0, Math.min(100, src.polaroidImageX))
+      : undefined;
+    const polaroidImageY = typeof src.polaroidImageY === "number" && Number.isFinite(src.polaroidImageY)
+      ? Math.max(0, Math.min(100, src.polaroidImageY))
+      : undefined;
+    const polaroidImageZoom = typeof src.polaroidImageZoom === "number" && Number.isFinite(src.polaroidImageZoom)
+      ? Math.max(1, Math.min(3, src.polaroidImageZoom))
+      : undefined;
+
     return {
       name,
       // 只取核心 persona：SillyTavern 的 greeting/scenario/examples 不导入，character_book 另行处理。
@@ -239,6 +260,11 @@ export function parseCharacterFromJson(
       embeddedWorldBook: parseEmbeddedWorldBook(src, obj, name) ?? undefined,
       wechatID: typeof src.wechatID === "string" && src.wechatID.trim() ? src.wechatID : undefined,
       timeZone: normalizeTimeZone(src.timeZone ?? src.timezone ?? src.time_zone),
+      polaroidStyle,
+      polaroidSize,
+      polaroidImageX,
+      polaroidImageY,
+      polaroidImageZoom,
     };
   } catch {
     return null;

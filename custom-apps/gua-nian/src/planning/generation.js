@@ -28,12 +28,12 @@
       const due = k.when ? parseWhen(k.when, nowMs) : existing ? (+existing.due || 0) : 0;
       if (existing) {
         if (kind !== "topic" && !due) continue;
-        Object.assign(existing, { text, due, at: nowMs, by }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
+        Object.assign(existing, { ...(k.matterId ? { matterId: k.matterId } : {}), text, due, at: nowMs, by }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
         notes.push("更新" + THREAD_KIND[kind] + "「" + text + "」");
         continue;
       }
       if (kind !== "topic" && !due) continue; // 约定和日子没时间就不算
-      list.push(newThread(kind, text, due, nowMs, by, (k && k.why) || ""));
+      list.push({ ...newThread(kind, text, due, nowMs, by, (k && k.why) || ""), ...(k.matterId ? { matterId: k.matterId } : {}) });
       notes.push("记下" + THREAD_KIND[kind] + "「" + text + "」");
     }
     const alive = list.filter((t) => threadAlive(t, nowMs, S.settings.threadDays)).slice(-30);
@@ -49,9 +49,10 @@
       const rows = await AiPhone.db.list("days", { limit: 60 });
       const past = (rows || []).filter((r) => r.characterId === cx.character.id && r.date && r.date < upto)
         .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, n || 5);
-      const lines = past.map((r) => "- " + r.date + (r.mood ? " 心情「" + r.mood + "」" : "") + "："
+      const lines = past.map((r) => "- " + r.date + (r.mood ? " 心情「" + r.mood + "」" : "")
+        + (r.sleep ? " 睡眠「" + r.sleep + "」" : "") + (Number.isFinite(Number(r.energy)) && r.energy !== "" && r.energy != null ? " 起床精力 " + Number(r.energy) : "") + "："
         + ((r.schedule || []).map((it) => it.title).filter(Boolean).join("、") || "没生成日程")
-        + (r.bed ? "（" + r.bed + " 睡）" : ""));
+        + (r.bed ? "（" + r.bed + " 睡）" : "") + forkBrief(r));
       const yd = dateOf(upto); yd.setDate(yd.getDate() - 1);
       const y = past.find((r) => r.date === yd.getFullYear() + "-" + pad(yd.getMonth() + 1) + "-" + pad(yd.getDate()));
       const residue = [];
@@ -63,25 +64,35 @@
       return { lines: lines, residue: residue };
     } catch (e) { return { lines: [], residue: [] }; }
   }
+  function forkGuide(nowHM) {
+    const n = ["0 到 1", "1 到 2", "2 到 3"][GuaNianForks.forkLevel(S.settings.forkLevel)];
+    return "forks 是今天可能出的岔子：从 schedule 里挑 " + n + " 件 " + nowHM + " 以后才开始的事，各埋一个。岔子要从这件事本身长出来（面试→来的是老同学，出门→下雨没带伞，开店→熟客抱来一只猫），好事坏事都要有，别全是倒霉事，也别狗血。"
+      + "p 是真实的可能性：平常的小意外 20 到 40，少见的 10 左右。发生后只改写它之后的安排：add 插进一件因此多出来的事，move 把后面的事往后挪，drop 取消后面的事，用不上就给 null 或空数组。"
+      + "tell 看TA的性子和这件事的分量：想分享、憋不住的写忍不住；觉得不值一提、等聊到再说的写聊到才说；丢脸、难过、怕人担心的写憋着。岔子TA事先并不知道，别提前写进 schedule 的 note、mood 或其他字段。";
+  }
   // 本地生成和寄给云端的 genKit 共用这段指令；云端直接使用寄存文本。
-  function buildDayInstruction(cal, nowHM, past, existing, threads) {
+  function buildDayInstruction(cal, nowHM, past, existing, threads, routine) {
     let inst = [
       "【后台系统任务，不是聊天：不要以角色口吻说话，不要解释，只输出 JSON】",
-      "以当前角色的人设、职业、近期记忆和最近的聊天为依据，想象TA今天真实会过的一天：先定今天的身体底子和情绪底色，再排日程。",
+      String(S.settings.dayPrompt || "").trim() || DEFAULT_DAY_PROMPT,
       "今天：" + cal.label + "，" + cal.season + "季，现在时刻 " + nowHM + "。身份决定默认作息（学生上课、上班族通勤、店主开门），日历决定这套作息今天到底发不发生：周末、假期不上班不上课，除非人设是轮班、服务业、演艺这类越放假越忙的；季节要影响户外活动和穿着。夜猫子可以很晚睡，上早班的就得早起。",
       past.lines.length ? "前几天TA过的日子（别重复同一套骨架；昨天开了头的事今天要有下文，做完的事要有余韵；跨好几天的事——项目、备考、排练、等结果——按筹备、进行、收尾、余波的顺序往下走，让这几天连成线）：\n" + past.lines.join("\n") : null,
+      past.lines.length ? "睡眠和精力会恢复：前几天没睡好不会自动延续到今天。昨晚没有新的原因（聊到深夜、新的烦心事、生病、通宵）时，今天的睡眠要比前一天好转，起床精力逐天回到正常的 70 到 90；已经连着几天偏低的，今天要明显回升。偶尔没睡好照样可以写，但要有昨晚自己的原因。" : null,
       past.residue.length ? "昨天留下的余波：" + past.residue.join("；") + "。睡得晚、聊得不痛快、约了事，都可以轻微影响今天的睡眠、精力、胃口和心情；但不要为了戏剧性硬让今天出事，可以毫无影响。" : null,
       threads && threads.length ? "惦记账本（已了结项仅供判重，不再安排；未了结事项：约好在今天的必须落进 schedule；到日子的要影响今天的心情和安排；只是话头的不用硬排）：\n" + threads.join("\n") : null,
-      "最近聊天里如果提过今天要发生的事、约好的事、没做完的承诺，必须落进 schedule；用户没明确说定的不要当真。",
+      "最近聊天中角色明确要做的事、未取消的承诺，以及双方已明确说定的共同安排，应落进 schedule；仅提过但没说定的共同活动不要当作约定。",
       "输出严格 JSON，第一个字符必须是 {，不要代码块标记，字段名必须一字不差用下面这些：",
-      '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-8到8的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-15到15的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}]}',
+      '{"sleep":"昨晚睡得怎样（一句具体的：踏实/浅、半夜醒/失眠/一直做梦/赖床）","mood":"今天刚醒时的情绪底色（8字内，具体，不要「心情不错」这种空话）","moodEmoji":"一个最贴切的emoji","energy":今天刚醒来时的精力基线0到100的整数,"body":[{"label":"此刻身上的小状况（8字内：饿、胃口差、头闷、腰酸、犯困、嗓子哑之类）","mood":"它带来的情绪（4字内）","energy":对精力的影响-8到8的整数,"hours":大概几小时淡一半（1到12）}],"doing":"此刻正在做的事","location":"此刻所在的地点","wake":"今天起床的时刻HH:MM","bed":"今晚上床睡觉的时刻HH:MM（可以过零点，如 00:30）","schedule":[{"time":"HH:MM","end":"这件事大概结束的时刻HH:MM","title":"日程标题（8字内）","place":"做这件事时人在哪（6字内：家里书房/公司/地铁上/医院）","note":"一句具体的细节","mood":"做完这件事之后TA的情绪（8字内）","cost":这件事做完对精力的影响-15到15的整数,"busy":做这件事时顾不上看手机吗（上课/开会/开车/考试/训练/排练之类为true，吃饭/通勤/闲着/看剧为false）}],"forks":[{"at":"埋在哪条日程上（抄那条的 time）","time":"那件事开始后岔子冒出来的时刻HH:MM","what":"发生了什么（30字内，具体）","label":"发生后TA身上带着的状态（6字内：淋了雨/被夸了/捡了只猫）","p":发生的可能性10到60的整数,"mood":"发生后的情绪（8字内）","energy":对精力的影响-10到10的整数,"tell":"TA会不会跟用户说：忍不住/聊到才说/憋着 选一","add":{"time":"HH:MM","end":"HH:MM","title":"因此多出来的事（8字内）","place":"在哪（6字内）","busy":true或false}或null,"move":[{"time":"被挤走的那条原来的time","newTime":"挪到的HH:MM"}],"drop":["因此不做了的那条原来的time"]}]}',
       "body 是今天真实带在身上的状况，多数日子是空数组，最多两条；有近期经历依据才写，不要每天编造胃痛、头闷。轻微不适扣 1 到 3，明显不适扣 4 到 8；情绪低落本身不扣身体精力。",
       "情绪写法：用可感的状态词（迷糊、清爽、松弛、专注、疲惫、烦躁、雀跃、低落、发紧、放空、粘人）再带一点原因或身体感受，例如「开完会后脑子发紧」；一天里要有起伏，别每条都差不多；情绪要和 cost 对得上，耗神的事之后不该是「轻松」，回血的事之后不该是「疲惫」；底色 mood 要能从 sleep 和昨天的余波推出来。",
       "energy 是身体的电量，和情绪底色是两回事：心情差但睡饱了 energy 照样高，心情好但熬了夜 energy 照样低。不要把「今天不开心」「性格沉闷」翻译成「精力低」。",
       "energy 是扣除 body 之前的起床基线，正常睡眠通常 70 到 90；睡眠不足可为 50 到 69，低于 50 需要明确的生病、通宵或严重睡眠不足依据。不能因为角色心情低落就给低精力，也不要把同一身体不适同时扣进基线和 body。",
       "cost 是整段活动做完的总变化，负数=消耗，正数=恢复，不是每小时扣费。普通通勤/事务扣 1 到 3，普通会议/工作扣 3 到 8，连续数小时高强度活动才扣 9 到 15；吃饭/散步恢复 2 到 5，午睡/充分休息恢复 5 到 12，平淡的事给 0。自然清醒消耗由 APP 另算，不要重复扣；日程必须包含真实的吃饭和休息。普通一天日程净消耗尽量不超过 30，避免正常生活还没到中午就接近 0。",
       "schedule 给 5 到 9 条，从起床后第一件事到睡前最后一件事；有主线也有琐碎，时间不均匀；不用把每个小时填满，事与事之间可以留空档（空档里TA就是自己待着）；有的日子轻（3、4 条），有的日子满；最后一件事结束到 bed 之间是TA自己的睡前时间；「睡觉」本身不要写成一条日程。",
+      forkGuide(nowHM),
     ].filter(Boolean).join("\n");
+    const fix = routine ? routineSleep(routine) : {};
+    if (fix.wake || fix.bed) inst += "\nTA的作息是定好的：" + [fix.wake ? fix.wake + " 起床" : "", fix.bed ? fix.bed + " 上床" : ""].filter(Boolean).join("，") + "，wake 和 bed 照抄。";
     if (existing.length) {
       inst += "\nTA的日程表上今天已经定了这些安排（必须原样出现在 schedule 里，时间与标题不要改动，带 busy 的照抄 busy，围绕它们补全其余的一天）：\n" +
         JSON.stringify(existing.map((it) => Object.assign({ time: it.startTime, title: it.title, note: it.location || "" }, it.lock ? { busy: it.lock === "busy" } : {})));
@@ -135,6 +146,7 @@
       sleep: String(pickField(d, ["sleep", "睡眠", "昨晚"]) || "").slice(0, 40),
       schedule: sched,
       conds: bodyConds,
+      forks: GuaNianForks.normalizeForks(pickField(d, ["forks", "变数", "岔子"]), sched, settings.forkLevel),
     };
   }
   async function generateDay(cx) {
@@ -143,24 +155,26 @@
     cx.busy = true; cx._planLock = true; render();
     try {
       const calendarItems = await readTodayCalendar(cx);
-      const existing = fixedCalendarItems(calendarItems); // 排除挂念上次生成的结果
+      const routine = await routineFor(cx, todayStr());
+      const existing = withRoutine(fixedCalendarItems(calendarItems), routine); // 排除挂念上次生成的结果
       const cal = calendarReality(new Date());
       const past = await recentDaysBrief(cx, 7);
-      const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing, S.settings.threadsOn ? threadLines(cx) : []);
+      const inst = buildDayInstruction(cal, fmtHM(Date.now()), past, existing, S.settings.threadsOn ? threadLines(cx) : [], routine);
       const d = await generateJson(cx, {
         characterId: cx.character.id,
         appTags: ["companion", "daily"],
         instruction: inst,
       });
-      const parsed = parseDayResult(d, existing, S.settings, Date.now());
+      const parsed = Object.assign(parseDayResult(d, existing, S.settings, Date.now()), routineSleep(routine));
       const sched = parsed.schedule, wake = parsed.wake, bed = parsed.bed, bodyConds = parsed.conds;
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "local" }, parsed));
+        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "local", forkSeed: todayStr() + "|" + cx.character.id }, parsed));
       const wrote = await syncCalendar(cx, calendarItems); // 清理旧产物仍需要完整日历
-      await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "")
+      await log(cx, "生成今日生活面：" + sched.length + " 条日程（日程表已定 " + existing.length + " 条" + (routine.items.length || routine.wake ? "，含固定作息" : "") + "，写回系统日程 " + wrote + " 条），作息 " + wake + " 起 " + bed + " 睡，心情「" + cx.day.mood + "」" + (cx.day.sleep ? "，昨晚" + cx.day.sleep : "") + (bodyConds.length ? "，身上：" + bodyConds.map((c) => c.cause).join("、") : "") + (parsed.forks.length ? "，埋了 " + parsed.forks.length + " 个岔子" : "")
         + (cx.day.mood ? "" : "（心情为空，模型顶层字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）"));
       cx.busy = false; cx._planLock = false;
       await orchestrate(cx); // 生活面就绪后立即编排心动时刻
+      await revealForks(cx).catch((e) => log(cx, "变数结算失败：" + (e && e.message || e)));
       await syncChatContext(cx, true);
     } catch (e) {
       cx.busy = false; cx._planLock = false;

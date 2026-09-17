@@ -48,7 +48,39 @@ export type ChatSession = {
     chatAvatar?: string; // 仅聊天里显示的角色头像（data URL），空则用角色卡头像
     videoBackground?: string;
     voiceBackground?: string;
+    /** 回复长度：跟情绪（默认，沿用预设原话）/ 短 / 中 / 长 / 自定（replyMin～replyMax 句） */
+    replyLength?: "mood" | "short" | "mid" | "long" | "custom";
+    replyMin?: number;
+    replyMax?: number;
+    /** 一轮回复合成一个气泡，富媒体照旧单独一条 */
+    singleBubble?: boolean;
+    /** 线上允许 *动作* 描写，气泡里灰色斜体 */
+    onlineActions?: boolean;
+    /** 聊到见面角色自己切线下，分开了切回线上 */
+    autoModeSwitch?: boolean;
+    /** 通话里允许（旁白），语音不读；缺省为开 */
+    callNarration?: boolean;
+    /** 通话中角色可以写 [挂断] 主动挂；缺省为开 */
+    allowCharHangup?: boolean;
+    /** 挂断后写一句通话小结；缺省为开 */
+    callSummary?: boolean;
+    /** 视频通话接通就开前置摄像头 */
+    callCameraDefault?: boolean;
+    /** 通话场景按在线状态里 TA 在哪自动挑；缺省为开 */
+    callSceneFollow?: boolean;
+    /** 角色可以写 [立绘:…] [场景:…] 换；缺省为开 */
+    callArtSwitch?: boolean;
+    /** 通话界面自定义 CSS，作用域是 [data-call-screen] */
+    callCSS?: string;
     isBlacklisted?: boolean;
+    /** 用户拉黑角色的时间；isBlacklisted 为真时有效 */
+    blacklistedAt?: string;
+    /** 用户拉黑角色期间角色发来的消息：被拒收、不进聊天，只留给用户在聊天信息页偷看 */
+    blockedInbox?: { at: string; content: string }[];
+    /** 上一次用户拉黑角色的起止和期间被拒收的条数，解除后留在聊天信息页 */
+    lastBlacklist?: { from: string; to: string; count: number };
+    /** 角色因为剧情拉黑了用户（block）或删了用户好友（delete） */
+    charBlock?: CharBlockState;
     customCSS?: string;
     isMuted?: boolean;
     bilingualTranslationEnabled?: boolean;
@@ -81,6 +113,17 @@ export type ChatSession = {
     isSpectator?: boolean; // 围观群：用户不在群内，只能生成/线下
 };
 
+export type CharBlockState = {
+    kind: "block" | "delete";
+    at: string;
+    /** 角色自己写的理由，只给用户在聊天信息页看 */
+    reason?: string;
+    /** 冷静期（分钟）：过了之后用户再发消息或打开聊天，角色会重新想一次 */
+    cooldownMin: number;
+    checkedAt?: string;
+    verifyRejectedAt?: string;
+};
+
 export type ChatMessageStatus = "sending" | "sent" | "read" | "failed";
 export type ChatMessageRole = "user" | "assistant" | "system" | "tool";
 
@@ -110,6 +153,7 @@ export type ChatMessage = {
         | "payment_request" | "accept_payment_request" | "decline_payment_request"
         | "music" | "music_share" | "music_notify" | "music_not_found"
         | "xiaohongshu_note_share"
+        | "xhs_link"
         | "gift"
         | "contact_card"
         | "app_card"
@@ -125,6 +169,7 @@ export type ChatMessage = {
     origin?: "chat" | "reading_discuss" | "custom_app" | "custom_app_background";
     mediaUrl?: string;
     mediaData?: {
+        xhsNote?: import("./xhs-note").XhsNoteSnapshot;
         amount?: number;          // 红包/转账金额
         count?: number;           // 红包个数
         label?: string;           // 红包留言/转账备注/照片描述/位置名/表情名
@@ -199,6 +244,11 @@ export type ChatMessage = {
         xiaohongshuCoverIcon?: string;
         xiaohongshuTone?: string;
         callDuration?: string;    // 通话时长（如 05:23）
+        callMissedCount?: number; // 你连着打、TA 没接的通数
+        callLastAt?: string;      // 最后一通没接的时间
+        callReason?: string;      // TA 拒接时界面上的说明（如「在开会」）
+        callSummary?: string;     // 挂断后 AI 写的一句小结，挂在挂断那条上
+        modeSwitch?: "offline" | "online"; // 角色自动切线上线下时留的那行提示
         voiceDuration?: number;   // 语音条时长（秒）
         synthesizedFromText?: string; // 语音条当前音频对应的合成文本
         ttsText?: string; // 含情绪/声音标记的朗读原文；label/content 保持可读文本
@@ -215,6 +265,8 @@ export type ChatMessage = {
         imageGenerationUsedReference?: boolean;
         imageGenerationStatus?: "pending" | "failed" | "generated";
         imageGenerationError?: string;
+        imagePositive?: string;  // 这张图单独改过的正向提示词，一键重新生图沿用
+        imageNegative?: string;
         mediaCompressedAt?: string;
         mediaCleanedAt?: string;
         readingBookTitle?: string; // 阅读讨论所属书名，用于 prompt 短期记忆边界
@@ -238,6 +290,8 @@ export type ChatMessage = {
     isTyping?: boolean; // temporary flag for UI rendering
     statusPanel?: string; // AI display-only status content from [状态栏] tags
     statusRegionMode?: "custom"; // 该消息生成时会话处于自定义状态栏模式（缺省=原生渲染）
+    rejectedBy?: "block" | "delete"; // 发出时角色已拉黑/删了用户：红色感叹号，角色没收到，不进 AI 上下文
+    uiText?: string; // 系统提示在界面上显示的文字；content 是给 AI 看的第三人称说法
     innerMonologue?: string; // AI inner monologue content from [内心] tags
     silentUpdate?: boolean; // 沉默轮的后台更新记录，不显示、不计未读、不作为对话历史
     reasoningText?: string; // 模型思维链（reasoning/CoT）内容，挂在回复批次的第一条气泡上
@@ -295,11 +349,15 @@ export const CHAT_MESSAGES_DELETED_EVENT = "chat-messages-deleted";
 /** 单条消息内容被编辑：携带编辑后的整条消息，供聊天镜像等就地覆盖。 */
 export const CHAT_MESSAGE_EDITED_EVENT = "chat-message-edited";
 export const CHAT_REQUEST_REPLY_EVENT = "chat-request-reply";
+export const CHAT_OFFLINE_MODE_PREFIX = "chat-offline-mode:";
+/** 线下模式被聊天室以外的地方切换（插件等），detail: { sessionId, on } */
+export const CHAT_OFFLINE_MODE_CHANGED_EVENT = "chat-offline-mode-changed";
 /** 长按编辑整批回复后重建消息：携带新消息与编辑后的原文，供云同步回写。 */
 export const CHAT_RESPONSE_BATCH_REPLACED_EVENT = "chat-response-batch-replaced";
 
 // ── Media Preview Map ─────────────────────────
 const MEDIA_PREVIEW_MAP: Record<string, string> = {
+    xhs_link: "[小红书链接]",
     image: "[图片]", audio: "[语音]", video: "[视频]",
     red_packet: "[红包]", transfer: "[转账]", location: "[位置]",
     poke: "[拍了拍你]", sticker: "[表情]", quote: "[引用]", dice: "[掷骰子]",
@@ -328,7 +386,7 @@ export function getChatMessagePreview(msg: ChatMessage): string {
     if (isReadingDiscussMessage(msg)) return "";
 
     const userName = (() => { try { return resolveUserIdentity()?.name; } catch { return undefined; } })();
-    const toYou = (text: string) => userName ? text.replace(new RegExp(userName, "g"), "你") : text;
+    const toYou = (text: string) => userName ? text.split(userName).join("你") : text;
 
     // Retracted: "你/对方撤回了一条消息"
     if (msg.isRetracted) return (msg.role === "user" ? "你" : "对方") + "撤回了一条消息";
@@ -403,6 +461,14 @@ export function getChatMessagePreview(msg: ChatMessage): string {
 
     // Silent thought/status: empty content + folded panel → "♥"
     if (!msg.content.trim() && (msg.innerMonologue || msg.statusPanel || msg.reasoningText) && msg.role === "assistant") return "♥";
+
+    // 你打过去没接通的记录存在对方名下
+    if (msg.role === "assistant") {
+        const missed = msg.content.match(/^\[我未接听((?:语音|视频)通话)\]/);
+        if (missed) return `对方没接${missed[1]}${(msg.mediaData?.callMissedCount ?? 1) > 1 ? ` ×${msg.mediaData?.callMissedCount}` : ""}`;
+        const rejected = msg.content.match(/^\[我拒绝了((?:语音|视频)通话)\]/);
+        if (rejected) return `对方拒接了${rejected[1]}`;
+    }
 
     // System messages: call messages → clean format, others → user name → "你"
     if (msg.role === "system") {
@@ -1255,7 +1321,32 @@ function prepareChatMessage(msg: NewChatMessage): ChatMessage {
 }
 
 export function pushChatMessage(msg: NewChatMessage): ChatMessage {
-    return publishChatMessage(prepareChatMessage(msg));
+    const prepared = prepareChatMessage(msg);
+    if (divertBlockedAssistantMessage(prepared)) return prepared;
+    return publishChatMessage(prepared);
+}
+
+export const CHAT_BLOCK_INBOX_EVENT = "chat-block-inbox-updated";
+
+/** 单聊拉黑中：用户拉黑了角色 → 角色发来的收进 blockedInbox；角色拉黑/删了用户 → 角色不该再发，丢掉，
+ *  用户这时发的消息照常落库但标上被拒收（不进 AI 上下文）。
+ *  所有来源（回复、追发、推送回传、APP、各种发送入口）都经过这里，所以在这一处截。 */
+function divertBlockedAssistantMessage(msg: ChatMessage): boolean {
+    if (msg.role !== "assistant" && msg.role !== "user") return false;
+    const session = _sessionsCache.find(s => s.id === msg.sessionId);
+    if (!session || session.isGroup) return false;
+    if (msg.role === "user") {
+        if (session.charBlock) msg.rejectedBy = session.charBlock.kind;
+        return false;
+    }
+    if (session.isBlacklisted) {
+        const content = (getChatMessagePreview(msg) || msg.content || "").slice(0, 300);
+        session.blockedInbox = [...(session.blockedInbox ?? []), { at: msg.createdAt || new Date().toISOString(), content }].slice(-50);
+        dbPutSessions([session]);
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(CHAT_BLOCK_INBOX_EVENT, { detail: { sessionId: session.id } }));
+        return true;
+    }
+    return !!session.charBlock;
 }
 
 /** 已提交的气泡再进入内存与事件管线，复用普通聊天的预览/未读更新。 */
@@ -1306,6 +1397,17 @@ export async function persistChatMessages(messages: ChatMessage[], receipts: { s
     const sessions = _sessionsCache.filter(session => sessionIds.has(session.id));
     if (sessions.length !== sessionIds.size) throw new Error("消息所属会话不可用，保留云端消息等待重试。");
     await dbPutMessageBatch(messages, sessions, receipts);
+}
+
+/** 放回一段先前移出的消息，接到会话末尾。必须换新 id：微信云同步已把旧 id 记成删除；
+ *  也要清掉 cloudSync：云端那份已随删除撤掉，带着「来自云端」标记会被上传筛掉。 */
+export async function restoreChatMessages(messages: ChatMessage[]): Promise<ChatMessage[]> {
+    if (messages.length === 0) return [];
+    let order = getNextMessageOrder(messages[0].sessionId);
+    const restored = messages.map(message => ({ ...message, id: createMessageId(), order: order++, cloudSync: undefined }));
+    await persistChatMessages(restored);
+    for (const message of restored) publishChatMessage(message, true);
+    return restored;
 }
 
 /** Import another page's committed bubbles without replaying plugins, unread
@@ -1360,6 +1462,7 @@ export function createChatMessageBatch(retryKey?: string, options?: { insertByCr
             const draftKey = JSON.stringify([msg.sessionId, msg.role, msg.content, msg.mediaType, msg.responseBatchId, msg.senderCharacterId, msg.senderName]);
             const index = reusable.findIndex(item => item.draftKey === draftKey);
             const item = index >= 0 ? reusable.splice(index, 1)[0] : { draftKey, message: prepareChatMessage(msg) };
+            if (divertBlockedAssistantMessage(item.message)) return item.message;
             prepared.push(item);
             messages.push(item.message);
             return item.message;
@@ -2012,7 +2115,7 @@ export async function persistMessageVoiceAudio(
 
 export function updateChatMessage(
     messageId: string,
-    patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData">>,
+    patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData" | "stateValues" | "freshStateValues">>,
 ): ChatMessage | null {
     const idx = _messagesCache.findIndex(m => m.id === messageId);
     if (idx === -1) return null;
@@ -2408,6 +2511,20 @@ function isBeforeStateCutoff(
     const beforeTime = getMessageTimeValue(before);
     if (msgTime !== beforeTime) return msgTime < beforeTime;
     return msg.id < before.id;
+}
+
+/** 角色最新一份状态值挂在哪条消息上（聊天变量面板手动改数值时改这条） */
+export function getLatestCharacterStateMessage(characterId: string): ChatMessage | null {
+    if (!characterId) return null;
+    const sessionsById = new Map(loadChatSessions().map(session => [session.id, session]));
+    let best: ChatMessage | null = null;
+    for (const msg of _loadAllMessages()) {
+        if (getStateOwnerCharacterId(msg, sessionsById) !== characterId) continue;
+        if (!best) { best = msg; continue; }
+        const diff = getMessageTimeValue(msg) - getMessageTimeValue(best);
+        if (diff > 0 || (diff === 0 && msg.id.localeCompare(best.id) > 0)) best = msg;
+    }
+    return best;
 }
 
 /** Scan all direct and group chat messages for a character's latest stateValues. */

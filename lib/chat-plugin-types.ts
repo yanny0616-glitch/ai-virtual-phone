@@ -69,6 +69,7 @@ export type ChatPluginModule = {
  *   llm.request       每次请求体发出前（含流式/工具通道）。可改 messages/model/temperature
  *   llm.response      模型原始回复文本落地前（正则式改写在这里做）
  *   moments.beforePost  朋友圈定时发帖到点、真正生成前。cancelled=true 则这次不发，retryAfterMs 后再问；hint 追加到发帖指令后
+ *   call.beforeConnect  你打给单聊角色、接通前：接不接、响多久（默认 3 秒接通）
  * 同步 transform 点（handler 必须同步返回，返回 Promise 会被忽略并记一次警告）：
  *   message.beforePersist  任何消息写入存储前（用户/角色/系统/群聊全路径）
  *   moments.schedule       朋友圈算「下次几点到点」时（首次建档 / 发完一条 / 被插件押后）。改 nextPostAfter 即改时机
@@ -82,7 +83,8 @@ export type ChatPluginTransformPoint =
     | "message.beforeReveal"
     | "moments.beforePost"
     | "moments.schedule"
-    | "chat.replyGate";
+    | "chat.replyGate"
+    | "call.beforeConnect";
 
 export type UserBeforeSendPayload = {
     text: string;
@@ -171,7 +173,30 @@ export type MomentsSchedulePayload = {
     nextPostAfter: number;
 };
 
+/** 你打给单聊角色、接通前。宿主默认 3 秒接通；插件可改成没人接或拒接 */
+export type CallBeforeConnectPayload = {
+    sessionId: string;
+    characterId: string;
+    kind: "voice" | "video";
+    /** answer 接通；noAnswer 响满 ringMs 没人接；reject 响 ringMs 后被挂掉 */
+    outcome: "answer" | "noAnswer" | "reject";
+    /** 响多久，毫秒（500～60000） */
+    ringMs: number;
+    /** 拒接时界面上和聊天记录里的一句说明，如「在开会」 */
+    reason?: string;
+};
+
+export type CallEndedPayload = {
+    sessionId: string;
+    characterId: string;
+    kind: "voice" | "video";
+    /** cancel：你没等接通就挂了 */
+    outcome: "answer" | "noAnswer" | "reject" | "cancel";
+    durationSec: number;
+};
+
 export type ChatPluginTransformPayloadMap = {
+    "call.beforeConnect": CallBeforeConnectPayload;
     "chat.replyGate": { characterId: string; nowMs: number; source: ReplyGate | null; gate: ReplyGate | null };
     "user.beforeSend": UserBeforeSendPayload;
     "prompt.system": PromptSystemPayload;
@@ -193,6 +218,7 @@ export type ChatPluginTransformPayloadMap = {
  *   llm.streamChunk    流式分片（高频，勿做重活）
  *   plugins.changed    插件列表/启停状态变化
  *   variables.changed  共享变量池有写入（插件或自定义 APP 都算）
+ *   call.ended         单聊通话结束（接通后挂断 / 没人接 / 被拒接 / 你没等接通就挂了）
  */
 export type ChatPluginEventPoint =
     | "app.ready"
@@ -202,7 +228,8 @@ export type ChatPluginEventPoint =
     | "message.deleted"
     | "llm.streamChunk"
     | "plugins.changed"
-    | "variables.changed";
+    | "variables.changed"
+    | "call.ended";
 
 export type ChatPluginEventPayloadMap = {
     "app.ready": Record<string, never>;
@@ -213,6 +240,7 @@ export type ChatPluginEventPayloadMap = {
     "llm.streamChunk": { chunk: string; sessionId?: string; purpose: string };
     "plugins.changed": Record<string, never>;
     "variables.changed": { name: string; scope: ChatPluginVarScope; targetId?: string };
+    "call.ended": CallEndedPayload;
 };
 
 // ── UI 坑位 ────────────────────────────────────────────────
@@ -226,6 +254,9 @@ export type ChatPluginEventPayloadMap = {
  *   message.footer     每条文本消息气泡下方
  *   message.side       每条文本消息气泡旁边（对方消息在右侧、自己的在左侧），放小图标用
  *   settings.section   插件管理页内该插件的自定义设置区
+ *   chatInfo.section   聊天信息页里本插件的一栏（折叠分类，标题用插件名；props 带 characterId）
+ *   float.panel        手机壳里的悬浮小窗，聊天之外也在；宿主给标题栏、拖动、收起和位置记忆
+ *   app.panel          任意 APP 页面底部的浮层（props 带 appId），按 appId 决定在哪个 APP 出现
  */
 export type ChatPluginSlotName =
     | "chat.header"
@@ -235,7 +266,10 @@ export type ChatPluginSlotName =
     | "message.footer"
     | "message.side"
     | "message.panel"
-    | "settings.section";
+    | "settings.section"
+    | "chatInfo.section"
+    | "float.panel"
+    | "app.panel";
 
 export type ChatPluginSlotProps = {
     sessionId?: string;
@@ -244,6 +278,10 @@ export type ChatPluginSlotProps = {
     characterId?: string;
     /** message.footer / message.side / message.panel 坑位携带当前消息 */
     message?: ChatMessage;
+    /** chat.header 坑位：会话当前是否在线下模式（切换时坑位重挂载） */
+    offlineMode?: boolean;
+    /** app.panel 坑位携带当前打开的 APP id（desktop-shell 的 activeApp） */
+    appId?: string;
 };
 
 export type ChatPluginSlotMount = (
@@ -358,6 +396,25 @@ export type ChatPluginContext = {
         /** text 传空串等于清除；sessionId 缺省为全局片段 */
         set(text: string, opts?: { sessionId?: string }): void;
         clear(opts?: { sessionId?: string }): void;
+    };
+
+    /** 会话动作：让角色回一轮、切线下、到点唤醒 */
+    chat: {
+        /** 让该会话的角色现在回复一轮（聊天室开着由它接，没开走后台生成） */
+        requestReply(sessionId: string): void;
+        offline: {
+            get(sessionId: string): boolean;
+            /** 切线下模式；聊天室开着会立刻切过去 */
+            set(sessionId: string, on: boolean): void;
+            /** 线下剧情记录（只读，按时间先后） */
+            turns(sessionId: string): { userContent: string; assistantContent: string; summary: string; createdAt: string }[];
+        };
+        /**
+         * 到点让角色主动发一条（App 关着走离线推送，前提是开了离线推送）。
+         * 同一插件同一 key 只留一条，重复预约即覆盖。fireAt 至少 1 分钟后、最多 7 天内。
+         */
+        scheduleWake(input: { characterId: string; fireAt: number; intent: string; key: string }): Promise<{ id: string; armed: boolean; reason?: string }>;
+        cancelWake(key: string): void;
     };
 
     ui: {

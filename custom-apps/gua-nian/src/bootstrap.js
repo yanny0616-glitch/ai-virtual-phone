@@ -38,6 +38,15 @@
         const rows = await AiPhone.db.list("logs", { limit: 5 });
         S.logs = (rows && rows[0]) || null;
       } catch (e) { /* 无日志可读 */ }
+      // 离线执行位置跟小手机走：那边改了就在这里交接，切成功会重新载入
+      await loadHostOffline();
+      if (await followHostMode().catch(() => false)) return;
+      setInterval(() => { loadHostOffline().then(followHostMode).catch(() => { /* 下一分钟再试 */ }); }, 60000);
+      if (serverBrainOn()) {
+        // 交给后端：界面直接读后端，本机不跑任何判断和预约
+        await serverStart();
+        return;
+      }
       for (const cx of allCx()) { await loadDayAndPlan(cx); await settleFired(cx).catch(() => { /* 已在函数内记日志 */ }); }
       render();
       for (const cx of allCx()) {
@@ -47,6 +56,7 @@
         if (generationStopState(cx) && generationStopState(cx).status !== "synced") await stopCloudGeneration(cx);
         await syncChatContext(cx, true);
         await adoptCloudDay(cx);
+        await revealForks(cx).catch((e) => log(cx, "变数结算失败：" + (e && e.message || e)));
         uploadGenKitCloud(cx).catch(() => { /* 已在函数内记日志 */ });
       }
       render();
@@ -85,6 +95,7 @@
           await flushJudgeFinish(cx).catch(() => {});
           await maybeAutoGen(cx).catch(() => { /* 已在函数内记日志 */ });
           await settleFired(cx).catch(() => { /* 已在函数内记日志 */ });
+          await revealForks(cx).catch((e) => log(cx, "变数结算失败：" + (e && e.message || e)));
           await syncChatContext(cx).catch(() => { /* 已在函数内记日志 */ });
           if (S.settings && S.settings.recheckMin > 0 && Date.now() - (cx._rcTry || 0) >= S.settings.recheckMin * 60000) {
             cx._rcTry = Date.now();

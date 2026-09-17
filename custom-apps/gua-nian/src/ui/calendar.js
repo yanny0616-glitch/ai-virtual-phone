@@ -71,6 +71,7 @@
   // 重排要花一次模型调用，还会取消已挂的预约，得用户自己按
   async function saveSchedule(cx, sched, note, planStale) {
     sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    if (serverBrainOn()) return serverSaveSchedule(cx, sched, note);
     cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
       { date: todayStr(), characterId: cx.character.id, schedule: sched });
     try { await syncCalendar(cx, await readTodayCalendar(cx)); } catch (e) { await log(cx, "日程改动写回系统日程失败：" + (e && e.message || e)); }

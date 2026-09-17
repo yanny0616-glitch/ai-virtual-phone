@@ -4,6 +4,9 @@
   const SET_SECTIONS = [
     { id: "base", name: "基本", groups: [
       { title: "挂念的人", sub: "可以多选，每位各有自己的一天", fields: [{ type: "chars" }] },
+      { title: "日程生成提示词", sub: "所有选中角色共用", fields: [
+        { type: "textarea", key: "dayPrompt", label: "日程生成提示词" },
+      ], hint: "可编辑角色日程的内容要求。日期、聊天资料和输出格式由程序自动补齐。保存后用于下一次生成，不自动改写今天已有日程。<br>云端在下次打开挂念或重新编排、上传生成原料后使用新内容。恢复默认只回填编辑框，点保存才生效；留空保存会使用默认提示词。", open: true },
       { title: "模型调用", adv: true, fields: [
         { type: "stepper", key: "apiDailyCap", min: 0, max: 500, step: 5, label: "一天最多", unit: "次" },
         { type: "stepper", key: "tokenDailyCap", min: 0, max: 5000000, step: 50000, label: "一天最多", unit: "token" },
@@ -17,6 +20,13 @@
         { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }, { key: "cloudGen", label: "浏览器关着也生成（云端）" }] },
         { type: "timeRange", keys: ["autoGenAt"], label: "每天几点" },
       ], hint: "到点自动生成TA今天的状态、日程和心动时刻。挂念在后台也算开着。<br>开了「云端」：每次打开挂念会把明天的生成原料和一份和本地同源的提示词模板寄到你的个人云，到点由云函数生成并编排，你打开时直接接管；云端 45 分钟没生成会本地补。需要云连接和离线推送。<br>错过了这个点，下次打开时补。浏览器一整天没开就生成不了，那天只有云端的兜底问候。" },
+      { title: "日子的起伏", sub: "给几件事埋岔子，到点才揭晓", fields: [
+        { type: "seg", key: "forkLevel", options: [[0, "平稳", "三天一次"], [1, "平常", "一天一次"], [2, "多事", "一天两三次"]] },
+        { type: "toggles", items: [{ key: "forkPeek", label: "提前看今天的变数（会剧透）" }, { key: "forkBurst", label: "忍不住时主动来说" }] },
+      ], hint: "说不说，看关系：好感高时更愿意跟你讲。倾向由生成日程时一起给，这里不用调。<br>档位从下一次生成TA的一天起生效。「忍不住」的那次主动占今天的额度，也守免打扰和TA的睡眠；约不上就改成聊到再说。" },
+      { title: "固定作息", sub: "读「忙碌回复」插件里写的", fields: [
+        { type: "toggles", items: [{ key: "routineOn", label: "排TA的一天时照着固定作息" }] },
+      ], hint: "当天的固定作息（上课、上班、做饭…）和还没过期的例外（临时加、推迟、不去了）当成定好的安排排进去；「睡觉」那条定起床和上床时间。日历上同一时刻已有安排的，以日历为准。<br>只在生成那一刻读，生成后再改例外，今天的日程不跟着变；回复快慢仍由插件判。没装插件或没写作息，就和以前一样。" },
       { title: "什么时候生效", adv: true, fields: [], hint: "保存后本机设置立即更新；开着云端复核且已有今天的计划时，会同步现有计划的规则，是否成功看页面上的同步结果。<br>随用随判：同步成功后，下一次云端复核按新规则起念，不必为了上传设置而重置今天。<br>已经排好的时刻不会因保存而重排。要按新额度、间隔、免打扰、倾向或锚点重新安排，去「心动」页点「重新编排／重置今天」。切换起念模式会改变后续判断，但不会自动转换已有预约；如需整理今天的预约，也在该页操作。保留的临时起念不会随重排重建，其原预约的未回应降速阈值也不随保存更新。<br>今天的计划同步不等于明日生成原料已更新；明日原料在下次打开挂念或重新编排时刷新。", open: true },
     ] },
     { id: "pace", name: "分寸", groups: [
@@ -58,12 +68,10 @@
         hint: "让TA聊天时知道自己此刻在做什么、什么心情、剩多少精力、接下来做什么。<br>每次刷新覆盖上一次，不会堆进聊天记录，也不影响前面人设和世界书的缓存。<br>关掉立刻撤销。" },
     ] },
     { id: "cloud", name: "云端", groups: [
-      { title: "云连接", sub: "个人云后端，选填", fields: [
-        { type: "text", key: "cloudUrl", placeholder: "https://xxxx.supabase.co" },
-        { type: "text", key: "cloudKey", password: true, placeholder: "sb_secret_… 或 service_role key" },
-        { type: "cloudTest" },
+      { title: "离线执行", sub: "在小手机里设", fields: [
+        { type: "hostOffline" },
         { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }] },
-      ], hint: "填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
+      ], hint: "个人云在小手机「设置 → 云服务部署」里连；浏览器关着时由云端还是后端管TA，在小手机「离线推送与定时消息 → 离线执行」里选，挂念跟着切。<br>选了后端：TA的一天、念头、账本和判断都在后端，挂念直接读写后端显示；本机不再生成、复核、排消息。三份提示词模板（判断 / 生成一天 / 聊天）照旧寄到个人云给后端用，TA每次回复、小手机切到后台都会自动重寄。注入聊天、在线状态、朋友圈和写回日程由小手机每分钟从后端取。切换时先确认停用旧的一边，再由新的一边接管。<br>选了云端并开着「浏览器关着也复核」：今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
       { title: "复核门禁", adv: true, sub: "拦下来的不花钱、不占额度", fields: [
         { type: "stepper", key: "gateDailyCap", min: 1, max: 24, step: 1, label: "每天最多判", unit: "次" },
         { type: "stepper", key: "gateGapMin", min: 5, max: 240, step: 5, label: "两次判至少隔", unit: "分钟" },
@@ -116,18 +124,27 @@
     }
     if (f.type === "seg") {
       return '<div class="seg" id="set-' + f.key + '">' +
-        (f.options || []).map((o) => '<button data-v="' + o[0] + '">' + esc(o[1]) + "</button>").join("") + "</div>";
+        (f.options || []).map((o) => '<button data-v="' + o[0] + '">' + esc(o[1]) + (o[2] ? "<small>" + esc(o[2]) + "</small>" : "") + "</button>").join("") + "</div>";
     }
     if (f.type === "toggles") {
       return '<div class="tgl-row">' +
         (f.items || []).map((it) => '<button class="tgl" id="set-' + it.key + '">' + esc(it.label) + "</button>").join("") + "</div>";
     }
+    if (f.type === "textarea") {
+      return '<input type="hidden" id="set-' + f.key + '">' +
+        '<div class="frow"><div class="fl">角色的一天怎么安排<div class="fu">默认规则可编辑，也可随时恢复</div></div>' +
+        '<button type="button" class="mini day-prompt-edit" id="edit-dayPrompt">编辑提示词 ›</button></div>';
+    }
     if (f.type === "text") {
       return '<input type="' + (f.password ? "password" : "text") + '" class="txt-in" id="set-' + f.key +
         '" placeholder="' + esc(f.placeholder || "") + '" spellcheck="false" autocomplete="off">';
     }
-    if (f.type === "cloudTest") {
-      return '<div class="cloud-row"><button class="tgl" id="btn-cloud-test">测试连接</button><span id="cloud-test-r"></span></div>';
+    if (f.type === "hostOffline") {
+      const server = hostWantsServer();
+      const state = !S.host && !cloudCfg() ? "小手机版本偏旧，读不到设置" : (server ? "后端" : "云端") + (cloudCfg() ? " · 个人云已连接" : " · 个人云未连接")
+        + (server !== serverBrainOn() ? " · 还没切过去" : "");
+      return '<div class="frow"><div class="fl">现在由<div class="fu">' + esc(state) + '</div></div></div>' +
+        '<div class="cloud-row"><button type="button" class="mini" id="btn-cloud-test">测试连接</button><span id="cloud-test-r"></span></div>';
     }
     return "";
   }
@@ -196,14 +213,50 @@
       else if (f.type === "seg") document.querySelectorAll("#set-" + f.key + " button")
         .forEach((b) => b.classList.toggle("on", +b.dataset.v === (+S.settings[f.key] || 0)));
       else if (f.type === "toggles") (f.items || []).forEach((it) => $("#set-" + it.key).classList.toggle("on", !!S.settings[it.key]));
+      else if (f.type === "textarea") $("#set-" + f.key).value = S.settings[f.key] ?? SET_DEF[f.key];
       else if (f.type === "text") $("#set-" + f.key).value = S.settings[f.key] || "";
     }
+    const recheck = $("#set-cloudRecheck");
+    if (recheck && recheck.parentNode) recheck.parentNode.hidden = hostWantsServer();
     bindSheet();
     document.body.classList.add("sheet-open");
   }
-  function closeSheet() { document.body.classList.remove("sheet-open"); }
+  function closeSheet() { closeDayPromptEditor(); document.body.classList.remove("sheet-open"); }
+
+  function closeDayPromptEditor() {
+    document.body.classList.remove("day-prompt-open");
+    $("#day-prompt-sheet").inert = true;
+    $("#sheet").inert = false;
+    const button = $("#edit-dayPrompt");
+    if (button) button.focus();
+  }
+  function openDayPromptEditor() {
+    const editor = $("#day-prompt-input");
+    editor.value = $("#set-dayPrompt").value || DEFAULT_DAY_PROMPT;
+    $("#day-prompt-sheet").inert = false;
+    $("#sheet").inert = true;
+    document.body.classList.add("day-prompt-open");
+    $("#day-prompt-close").onclick = closeDayPromptEditor;
+    $("#day-prompt-mask").onclick = closeDayPromptEditor;
+    $("#restore-dayPrompt").onclick = () => { editor.value = DEFAULT_DAY_PROMPT; editor.focus(); };
+    $("#day-prompt-done").onclick = () => {
+      $("#set-dayPrompt").value = editor.value.trim() || DEFAULT_DAY_PROMPT;
+      closeDayPromptEditor();
+    };
+    $("#day-prompt-sheet").onkeydown = event => {
+      if (event.key === "Escape") { event.preventDefault(); closeDayPromptEditor(); }
+      if (event.key !== "Tab") return;
+      const controls = Array.from($("#day-prompt-sheet").querySelectorAll("button,textarea"));
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    $("#day-prompt-close").focus();
+  }
 
   function bindSheet() {
+    const editDayPrompt = $("#edit-dayPrompt");
+    if (editDayPrompt) editDayPrompt.onclick = openDayPromptEditor;
     const stepper = {};
     for (const f of SET_FIELDS()) if (f.type === "stepper") stepper[f.key] = f;
     $("#sheet-body").querySelectorAll("[data-step]").forEach((b) => {
@@ -225,16 +278,22 @@
     const test = $("#btn-cloud-test");
     if (test) test.onclick = async () => {
       const r = $("#cloud-test-r");
-      const u = ($("#set-cloudUrl").value || "").trim().replace(/\/+$/, "");
-      const k = ($("#set-cloudKey").value || "").trim();
-      if (!/^https:\/\//.test(u) || !k) { r.textContent = "先填完整地址和密钥"; return; }
+      await loadHostOffline();
+      const c = cloudCfg();
+      if (!c) { r.textContent = "个人云没连上：去小手机「设置 → 云服务部署」"; return; }
       r.textContent = "测试中…";
       try {
-        const res = await fetch(u + "/functions/v1/ai-phone-push?action=health", { cache: "no-store", headers: { "x-ai-phone-service-key": k } });
+        if (hostWantsServer()) {
+          const data = await serverFetch("/app/state?ids=" + encodeURIComponent(S.order.join(",")), {}, 15000);
+          const known = (data.characters || []).filter((x) => x.exists).length;
+          r.textContent = "✓ 后端已连通 · " + (data.mode === "live" ? "真发" : "影子") + " · 后端有 " + known + "/" + (data.characters || []).length + " 位";
+          return;
+        }
+        const res = await fetch(c.url + "/functions/v1/ai-phone-push?action=health", { cache: "no-store", headers: { "x-ai-phone-service-key": c.key } });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || data.ok !== true) throw new Error((data && data.error) || ("HTTP " + res.status));
         const mir = (data.capabilities || []).indexOf("chat-mirror") >= 0;
-        r.textContent = "✓ 已连通 · 云函数 v" + (data.schemaVersion || "?") +
+        r.textContent = "✓ 个人云已连通 · 云函数 v" + (data.schemaVersion || "?") +
           (mir ? " · 支持聊天镜像" : " · 版本偏旧：去小手机「设置→云服务部署」重新部署离线推送");
       } catch (e) { r.textContent = "✗ " + (e && e.message || e); }
     };
@@ -266,9 +325,9 @@
         const on = document.querySelector("#set-" + f.key + " button.on");
         out[f.key] = on ? +on.dataset.v : SET_DEF[f.key];
       } else if (f.type === "toggles") (f.items || []).forEach((it) => { out[it.key] = $("#set-" + it.key).classList.contains("on"); });
+      else if (f.type === "textarea") out[f.key] = ($("#set-" + f.key).value || "").trim() || SET_DEF[f.key];
       else if (f.type === "text") out[f.key] = ($("#set-" + f.key).value || "").trim();
     }
-    if (typeof out.cloudUrl === "string") out.cloudUrl = out.cloudUrl.replace(/\/+$/, "");
     return out;
   }
 
@@ -276,6 +335,7 @@
   function settingsSaveEffects(before, after) {
     const changed = (keys) => keys.some((key) => before[key] !== after[key]);
     const notes = [];
+    if (changed(["dayPrompt"])) notes.push("日程生成提示词已保存，下一次生成使用新内容；今天已有日程不变。云端在下次打开挂念或重新编排上传生成原料后生效。");
     if (changed(["userSleepOn", "userSleepStart", "userSleepEnd"])) notes.push(after.userSleepOn
       ? "你的睡眠时段已保存；计划同步成功后，尚未结算的回音会跳过这段时间，已结算记录不重算。"
       : "睡眠时段已关闭；计划同步成功后，尚未结算的回音恢复按发送后 3 小时统计。未回复仍保持中性。");
@@ -299,24 +359,67 @@
       notes.map((note) => '<div class="d-why">' + esc(note) + '</div>').join("") + '</div>' : "";
   }
 
+  function hostWantsServer() { return hostCfg().mode === "server"; }
+
   async function saveSettings() {
     const picked = Array.from(document.querySelectorAll(".char-cell.sel")).map((el) => el.dataset.id);
+    const sheet = readSheet();
+    sheet.serverBrain = hostWantsServer();
+    return applySettings(picked, sheet);
+  }
+
+  // 小手机改了离线执行位置：按保存设置的流程交接（先确认停掉旧的一边，再切）。失败的 5 分钟后再试。
+  async function followHostMode() {
+    if (!S.host || hostWantsServer() === serverBrainOn() || S._following) return false;
+    if (S._followAt && Date.now() - S._followAt < 5 * 60000) return false;
+    if (allCx().some((cx) => cx.busy || cx._planLock)) return false;
+    S._following = true; S._followAt = Date.now();
+    try {
+      const sheet = {};
+      for (const f of SET_FIELDS()) {
+        for (const k of f.keys || (f.items || []).map((it) => it.key).concat(f.key ? [f.key] : [])) sheet[k] = S.settings[k];
+      }
+      sheet.serverBrain = hostWantsServer();
+      toast("小手机改成了" + (sheet.serverBrain ? "后端" : "云端") + "执行，挂念正在交接…");
+      await applySettings(S.order.slice(), sheet);
+      return serverBrainOn() === sheet.serverBrain;
+    } finally { S._following = false; }
+  }
+
+  async function applySettings(picked, sheet) {
     const ids = picked.length ? picked : S.order.slice();
     const prevIds = S.order.slice();
     const removed = prevIds.filter((id) => !ids.includes(id));
     const added = ids.filter((id) => !prevIds.includes(id));
-    const sheet = readSheet();
     validateUserSleepSettings(sheet);
+    if (sheet.serverBrain) {
+      try {
+        for (const id of ids) {
+          const cx = S.byId[id] || ctxOf(S.characters.find(c => c.id === id));
+          if (!S.settings.serverBrain || !cx.server?.legacyStopped) await serverHandoff(cx);
+        }
+      } catch (e) { toast("设置未保存：" + (e && e.message || e)); return; }
+      sheet.cloudRecheck = false; sheet.cloudGen = false;
+    }
+    // 先确认后端停用，才切换本机调度。
+    if (S.settings.serverBrain) {
+      const stopIds = sheet.serverBrain ? removed : prevIds;
+      try {
+        for (const id of stopIds) { const cx = S.byId[id]; if (cx && cx.character) await serverForget(cx); }
+      } catch (e) { toast("设置未保存：" + (e && e.message || e)); return; }
+    }
     if (!ids.includes(S.cur)) S.cur = ids[0] || "";
     const before = Object.assign({}, S.settings);
     const cloudGenWas = !!S.settings.cloudGen;
     const generationResults = [];
     await patchSettings(() => Object.assign({ characterIds: ids, characterId: S.cur }, sheet));
+    if (before.dayPrompt !== S.settings.dayPrompt) for (const cx of allCx()) cx._kitAt = 0;
     S._settingsEffects = settingsSaveEffects(before, S.settings);
     renderSettingsEffects();
     closeSheet();
     // 关掉云端生成：宿主每次角色回复后还会替我们重冻模板，得告诉它别冻了
-    if (cloudGenWas && !S.settings.cloudGen) for (const cx of allCx()) await unfreezeGenTemplates(cx);
+    if (cloudGenWas && !S.settings.cloudGen && !serverBrainOn()) for (const cx of allCx()) await unfreezeGenTemplates(cx);
+    if (serverBrainOn()) for (const cx of allCx()) await freezeServerTemplates(cx);
     if (cloudCfg() && !(S.settings.autoGen && S.settings.cloudGen)) {
       for (const cx of allCx()) {
         const pendingStop = generationStopState(cx);
@@ -337,6 +440,19 @@
     }
     S.order = ids;
     const syncResults = [];
+    if (serverBrainOn()) {
+      const failed = [];
+      for (const cx of allCx()) {
+        try { await serverEnsure(cx); } catch (e) { failed.push(cx.character.name + "：" + (e && e.message || e)); }
+      }
+      await serverPull().catch(() => { /* 下一分钟再读 */ });
+      syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
+      render();
+      toast(failed.length ? "本地已保存，后端没同步上：" + failed.join("；") : "已保存，后端已同步");
+      // 刚切到后端：本机那套每分钟的编排循环还在跑，重新载入换成后端模式
+      if (!before.serverBrain) setTimeout(() => location.reload(), 1200);
+      return;
+    }
     for (const cx of allCx()) {
       cx._ctx = null; // 开关可能变了，强制重写一次（包括关掉时写空串撤销）
       await syncChatContext(cx, true);
@@ -344,6 +460,7 @@
     }
     syncUsageCloud(true).catch(() => { /* 已在函数内记日志 */ });
     render();
+    if (before.serverBrain) { toast("已改回本机管，重新载入…"); setTimeout(() => location.reload(), 1200); return; }
     const incomplete = [...syncResults, ...generationResults].some((r) => ["failed", "partial", "syncing"].includes(r.status));
     toast(incomplete ? "本地已保存，云端同步未完成；请查看页面提示"
       : !S.settings.cloudRecheck && syncResults.some((r) => r.status === "synced") ? "本地已保存，云端已确认关闭复核"

@@ -15,7 +15,12 @@ import { MASCOT_EDIT_PREVIEW_EVENT, MASCOT_EDIT_HISTORY_EVENT } from "@/lib/masc
 import type { EditPlan } from "@/lib/mascot-edit-domain";
 import type { WidgetSize } from "@/lib/widget-types";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
+import { MascotCssPlanReview, MascotCssLibrary } from "./mascot-css-plan-card";
+import { readCssPlans, CSS_LOCATION_LABEL } from "@/lib/mascot-css-plan";
 import {
+  MASCOT_CSS_PLAN_EVENT,
+  MASCOT_CSS_LIBRARY_EVENT,
+  type CssPlanEventDetail,
   DIY_WIDGET_PREVIEW_EVENT,
   type DiyWidgetPreviewEventDetail,
   type DiyWidgetPreviewRequest,
@@ -67,11 +72,15 @@ function StatusBarPreviewDialog({ request, onClose }: { request: StatusBarPrevie
   );
 }
 
+const CSS_PLAN_STATUS_TEXT: Record<string, string> = { draft: "草稿", previewing: "预览中", applied: "已应用", undone: "已撤销" };
+
 export function MascotPreviewHost() {
   const [editPreview, setEditPreview] = useState<EditPlan | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [diyWidgetPreview, setDiyWidgetPreview] = useState<DiyWidgetPreviewRequest | null>(null);
   const [statusBarPreview, setStatusBarPreview] = useState<StatusBarPreviewRequest | null>(null);
+  const [cssPlanId, setCssPlanId] = useState<string | null>(null);
+  const [cssLibraryOpen, setCssLibraryOpen] = useState(false);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -97,20 +106,49 @@ export function MascotPreviewHost() {
       setEditPreview(detail.plan); setHistoryOpen(false); setDiyWidgetPreview(null); setStatusBarPreview(null);
     };
     const historyHandler = () => { setHistoryOpen(true); setEditPreview(null); setDiyWidgetPreview(null); setStatusBarPreview(null); };
+    const cssPlanHandler = (event: Event) => {
+      const detail = (event as CustomEvent<CssPlanEventDetail>).detail;
+      if (!detail?.planId) return;
+      detail.handled = true;
+      setCssPlanId(detail.planId); setCssLibraryOpen(false);
+      setEditPreview(null); setHistoryOpen(false); setDiyWidgetPreview(null); setStatusBarPreview(null);
+    };
+    const cssLibraryHandler = () => {
+      setCssLibraryOpen(true); setCssPlanId(null);
+      setEditPreview(null); setHistoryOpen(false); setDiyWidgetPreview(null); setStatusBarPreview(null);
+    };
     window.addEventListener(MASCOT_EDIT_PREVIEW_EVENT, editHandler);
     window.addEventListener(MASCOT_EDIT_HISTORY_EVENT, historyHandler);
     window.addEventListener(STATUS_BAR_PREVIEW_EVENT, handler);
     window.addEventListener(DIY_WIDGET_PREVIEW_EVENT, diyHandler);
+    window.addEventListener(MASCOT_CSS_PLAN_EVENT, cssPlanHandler);
+    window.addEventListener(MASCOT_CSS_LIBRARY_EVENT, cssLibraryHandler);
     return () => {
       window.removeEventListener(MASCOT_EDIT_PREVIEW_EVENT, editHandler);
       window.removeEventListener(MASCOT_EDIT_HISTORY_EVENT, historyHandler);
       window.removeEventListener(STATUS_BAR_PREVIEW_EVENT, handler);
       window.removeEventListener(DIY_WIDGET_PREVIEW_EVENT, diyHandler);
+      window.removeEventListener(MASCOT_CSS_PLAN_EVENT, cssPlanHandler);
+      window.removeEventListener(MASCOT_CSS_LIBRARY_EVENT, cssLibraryHandler);
     };
   }, []);
 
+  if (cssPlanId) return <MascotCssPlanReview key={cssPlanId} planId={cssPlanId} onClose={() => setCssPlanId(null)} />;
+  if (cssLibraryOpen) return <MascotCssLibrary onClose={() => setCssLibraryOpen(false)} onOpenPlan={planId => { setCssLibraryOpen(false); setCssPlanId(planId); }} />;
   if (editPreview) return <MascotEditReview key={editPreview.id} initialPlan={editPreview} onClose={() => setEditPreview(null)} />;
-  if (historyOpen) return <MascotEditHistory onClose={() => setHistoryOpen(false)} onSelect={plan => { setHistoryOpen(false); setEditPreview(plan); }} />;
+  if (historyOpen) return <MascotEditHistory
+    onClose={() => setHistoryOpen(false)}
+    onSelect={plan => { setHistoryOpen(false); setEditPreview(plan); }}
+    cssRows={readCssPlans().map(plan => ({
+      id: plan.id,
+      title: plan.title,
+      createdAt: plan.createdAt,
+      tone: plan.status === 'applied' ? 'applied' as const : plan.status === 'undone' ? 'undone' as const : 'draft' as const,
+      statusText: CSS_PLAN_STATUS_TEXT[plan.status] || plan.status,
+      subtitle: `主题 · ${CSS_LOCATION_LABEL[plan.location] || plan.location}${plan.displayName ? ` · ${plan.displayName}` : ""}`,
+    }))}
+    onSelectCssPlan={planId => { setHistoryOpen(false); setCssPlanId(planId); }}
+  />;
   if (diyWidgetPreview) return <DiyWidgetPreviewDialog request={diyWidgetPreview} onClose={() => setDiyWidgetPreview(null)} />;
   if (!statusBarPreview) return null;
   return <StatusBarPreviewDialog request={statusBarPreview} onClose={() => setStatusBarPreview(null)} />;

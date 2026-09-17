@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import "./storage-health";
 import { CHECKPHONE_APP_SPECS, type CheckPhoneAppId, type CheckPhoneManifest, type CheckPhoneSnapshot } from "./checkphone-config";
 import { kvGet, kvRemove, kvSet, registerDynamicPrefix } from "./kv-db";
 import { formatPromptTimestamp } from "./prompt-time";

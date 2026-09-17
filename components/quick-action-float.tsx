@@ -158,13 +158,14 @@ export function QuickActionFloat() {
         const layer = layerRef.current;
         if (!layer) return;
         const apply = () => {
-            const rect = layer.getBoundingClientRect();
-            clampFloatingDockAnchor(rect.width, rect.height);
+            clampFloatingDockAnchor(layer.clientWidth, layer.clientHeight, getStatusSafeTop(layer));
         };
         apply();
+        const observer = new ResizeObserver(apply);
+        observer.observe(layer);
         window.addEventListener("resize", apply);
-        return () => window.removeEventListener("resize", apply);
-    }, [floatingDockEnabled, enabled]);
+        return () => { observer.disconnect(); window.removeEventListener("resize", apply); };
+    }, [floatingDockEnabled, enabled, dockState.anchorPosition]);
 
     useLayoutEffect(() => {
         const layer = layerRef.current;
@@ -281,8 +282,8 @@ export function QuickActionFloat() {
         }
         event.stopPropagation();
         const button = event.currentTarget;
-        const anchor = isDual ? dockState.anchorPosition : null;
-        const bounds = getFloatingButtonBounds(button, (isDual && anchor) ? anchor : floatingPosition);
+        const anchor = floatingDockEnabled ? dockState.anchorPosition : null;
+        const bounds = getFloatingButtonBounds(button, anchor ?? floatingPosition);
         floatingDragRef.current = {
             pointerId: event.pointerId,
             startClientX: event.clientX,
@@ -406,7 +407,7 @@ export function QuickActionFloat() {
     const isExpanded = floatingDockEnabled && !open && dockState.isExpanded;
     const isPaired = isDual && !isQuickPrimary && !open && dockState.isExpanded;
     const dockSide = dockState.dockSide;
-    const anchor = isDual ? dockState.anchorPosition : null;
+    const anchor = floatingDockEnabled ? dockState.anchorPosition : null;
 
     const buttonClass = [
         "prompt-viewer-float-button",
@@ -421,7 +422,7 @@ export function QuickActionFloat() {
     let buttonStyle: CSSProperties | undefined;
     if (draggingFloatingButton && floatingPosition) {
         buttonStyle = { left: floatingPosition.left, top: floatingPosition.top };
-    } else if (isDual && anchor) {
+    } else if (anchor) {
         buttonStyle = { left: anchor.left, top: anchor.top };
     } else if (floatingPosition) {
         buttonStyle = { left: floatingPosition.left, top: floatingPosition.top };
@@ -439,7 +440,7 @@ export function QuickActionFloat() {
                 type="button"
                 className={buttonClass}
                 aria-label="打开快捷操作"
-                data-positioned={(isDual ? !!anchor : !!floatingPosition) ? "" : undefined}
+                data-positioned={buttonStyle?.left !== undefined ? "" : undefined}
                 data-dragging={draggingFloatingButton ? "" : undefined}
                 data-dock-side={floatingDockEnabled ? dockSide : undefined}
                 onPointerDown={handleFloatingPointerDown}

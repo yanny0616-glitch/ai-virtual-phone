@@ -13,7 +13,7 @@ import {
   deactivateMascot,
 } from "@/lib/mascot-state";
 import { getMascotContext, subscribeMascotContext } from "@/lib/mascot-context";
-import { mascotNavigate } from "@/lib/mascot-events";
+import { mascotNavigate, openCssLibrary } from "@/lib/mascot-events";
 import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
 import {
   clearMascotToolHistoryMessages,
@@ -2145,6 +2145,9 @@ export function MascotFloat() {
                     )}
                     <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("mascot-edit-history"))} style={{ border: 0, background: "transparent", color: "inherit", cursor: "pointer", padding: "8px 12px" }}>
                       修改记录 · 预览与撤销
+                    </button>
+                    <button type="button" onClick={openCssLibrary} style={{ border: 0, background: "transparent", color: "inherit", cursor: "pointer", padding: "8px 12px" }}>
+                      主题库 · 存下的 CSS 主题
                     </button>
                     <button
                       type="button"

@@ -1,7 +1,13 @@
 "use client";
 
+import { ambientAttrs, useAmbientContext } from "@/lib/ui-context-attrs";
+import { groupToolNotices } from "@/lib/tool-notice-groups";
+import { ToolNoticeGroup } from "./tool-notice-group";
+import { extractXhsNoteUrls } from "@/lib/xhs-note";
+import { hasPendingXhsNotes, hydrateXhsNote, XHS_NOTE_UPDATED } from "@/lib/xhs-note-client";
+
 import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, markChatSessionRead, CHAT_MESSAGE_PUSHED_EVENT } from "@/lib/chat-storage";
+import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, CHAT_OFFLINE_MODE_PREFIX, CHAT_OFFLINE_MODE_CHANGED_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, markChatSessionRead, CHAT_MESSAGE_PUSHED_EVENT, restoreChatMessages } from "@/lib/chat-storage";
 import { cleanStreamText, splitStreamPreviewSegments, stripLiteralTexts, stripXmlTagBlocks } from "@/lib/stream-preview";
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
@@ -11,6 +17,9 @@ import { translateReasoningText } from "@/lib/reasoning-translate";
 import { MessageBubble, MediaDetailModal, prewarmStickerCache, BilingualTextBlock, isStandaloneHtmlPreviewContent, normalizeTextBubbleContent } from "./message-bubble";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { PhotoInputModal, TextPhotoModal, VoiceRecordModal, RedPacketModal, LocationInputModal, SystemInstructionModal } from "./rich-input-modals";
+import { RerollDialog, ReplyVersionPicker, type RerollRequest } from "./reroll-dialogs";
+import { buildRerollInstruction, describeReplyVersions, getLiveReplyVersions, planReplyVersionSwitch, recordReplyVersionBeforeRetry, type ReplyVersionView } from "@/lib/chat-reroll";
+import { describeOfflineReplyVersions, getLiveOfflineReplyVersions, recordOfflineReplyVersionBeforeRetry, switchOfflineReplyVersion } from "@/lib/chat-offline-reroll";
 import { EmojiPanel, StickerPanel } from "./emoji-panel";
 import { StickerSearchSuggest } from "./sticker-search-suggest";
 import { StateValuesPanel } from "./state-values-panel";
@@ -45,7 +54,7 @@ import { ConfirmDialog } from "@/components/ui/modal";
 import { deleteWeixinCloudMessagesFromCloud, emitWeixinSyncToast, syncAllWeixinBotRuntimesToCloud } from "@/lib/weixin-cloud-sync";
 import { loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
 import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseGroupChatResponse, buildEditableGroupRoundText } from "@/lib/group-chat-engine";
-import { appendChatOfflineTurn, createChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
+import { appendChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
 import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating, isBackgroundMessagePending } from "@/lib/follow-up-service";
 import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismiss-auto-send";
@@ -53,7 +62,16 @@ import { queueDeferredReplyCloud, cancelDeferredReplyCloud, DEFERRED_REPLY_CLOUD
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Braces, Camera, Check, Trash2, User, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { arrangePlusMenu, CHAT_PLUS_MENU_CHANGED_EVENT, isFreshPlusItem, loadPlusMenuPrefs, savePlusMenuPrefs, type PlusMenuPrefs } from "@/lib/chat-plus-menu";
+import { PlusMenuEditor } from "./plus-menu-editor";
+import { ChatVariablesSheet } from "./chat-variables-sheet";
+import { ChatBlockBar, FriendVerifySheet, RejectTip } from "./chat-block-ui";
+import { takeChatDirectives } from "@/lib/chat-directives";
+import { CHAT_MODE_SWITCHED_EVENT, extractModeSwitch, mergeSingleBubble, switchChatMode } from "@/lib/reply-style";
+import { CallRecordsPage } from "@/components/chat/call-records-page";
+import { ChatScreenshotSheet } from "@/components/chat/chat-screenshot-sheet";
+import { CHAT_BLOCK_CHANGED_EVENT, maybeReconsiderCharBlock, readChatBlock, setUserBlacklist } from "@/lib/chat-block";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -94,7 +112,7 @@ import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
 // ── Call system message detection ──────────────────────────
 // Call messages are stored with user/assistant role for correct prompt alternation,
 // but should render as centered system notifications in the UI.
-const CALL_SYS_RE = /\[我(?:向.+)?(?:发起了|挂断了|拒绝了|取消了)(?:群?(?:语音|视频)通话)/;
+const CALL_SYS_RE = /\[我(?:向.+)?(?:发起了|挂断了|拒绝了|取消了|未接听)(?:群?(?:语音|视频)通话)/;
 function isCallSysMsg(msg: ChatMessage): boolean {
     return CALL_SYS_RE.test(msg.content);
 }
@@ -222,6 +240,7 @@ function getWeixinCloudDeleteTargetCount(messages: ChatMessage[]): number {
 }
 
 const CHAT_MEDIA_BUBBLE_TYPES = new Set([
+    "xhs_link",
     "sticker",
     "dice",
     "red_packet",
@@ -287,7 +306,6 @@ function isHiddenChatFlowMessage(msg: ChatMessage, displayContent?: string): boo
 // ── Background generation tracking ──────────────────────────
 const GENERATING_PREFIX = "chat-generating:";
 const CHAT_BG_COMPLETE = "chat-bg-complete";
-const CHAT_OFFLINE_MODE_PREFIX = "chat-offline-mode:";
 const CHAT_THEATER_MODE_PREFIX = "chat-theater-mode:";
 const GENERATING_LOCK_TTL_MS = 5 * 60 * 1000;
 const OFFLINE_INITIAL_LOAD = 10;
@@ -316,12 +334,6 @@ type ManagedGenerationOptions = {
     generationIntent?: "regenerate";
     errorPrefix?: string;
     onDecline?: () => void | Promise<void>;
-    /**
-     * 本轮确实往存储里写进了新消息之后调用一次。中断、报错、沉默、以及回了空内容
-     * 都不会调用。重试用它把「删掉旧回复」推迟到确认有新回复之后，生成没成功就
-     * 什么都不动。
-     */
-    onSaved?: () => void;
 };
 
 const activeGenerationRuns = new Map<string, ActiveGenerationRun>();
@@ -444,17 +456,6 @@ function finishOfflineGenerationRun(sessionId: string, runId: string): boolean {
     if (!run || run.runId !== runId) return false;
     activeOfflineGenerationRuns.delete(sessionId);
     return true;
-}
-
-/**
- * 本次线下运行是否已被更晚的一次运行接管。
- * 接管时界面归那一次负责，失败/中断回滚必须跳过，否则会把新一轮的显示覆盖掉。
- * 注意与 isOfflineGenerationRunActive 的区别：用户按「停止」后登记会被整条删除，
- * 那不算接管，仍然需要回滚。
- */
-function isOfflineGenerationRunSuperseded(sessionId: string, runId: string): boolean {
-    const run = activeOfflineGenerationRuns.get(sessionId);
-    return Boolean(run && run.runId !== runId);
 }
 
 function cancelOfflineGenerationRun(sessionId: string): boolean {
@@ -643,6 +644,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onCloseTheaterMode: () => void;
     onOpenRichModal: (modal: RichModalKind) => void;
     onOpenCustomPlusAction: (action: RegisteredCustomAppChatPlusAction) => void;
+    onOpenChatVariables: () => void;
     onStartVideoCall: () => void;
     onStartVoiceCall: () => void;
     onSendText: (text: string, options?: { autoReply?: boolean }) => boolean;
@@ -675,6 +677,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onCloseTheaterMode,
     onOpenRichModal,
     onOpenCustomPlusAction,
+    onOpenChatVariables,
     onStartVideoCall,
     onStartVoiceCall,
     onSendText,
@@ -739,19 +742,33 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         [isGroup, stickerCharacterIds, characterId],
     );
     const suggestEnabled = !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length > 0;
+    const [plusPrefs, setPlusPrefs] = useState<PlusMenuPrefs | null>(() => loadPlusMenuPrefs());
+    const [plusRestOpen, setPlusRestOpen] = useState(false);
+    const [plusEditorOpen, setPlusEditorOpen] = useState(false);
+    useEffect(() => {
+        const sync = () => setPlusPrefs(loadPlusMenuPrefs());
+        window.addEventListener(CHAT_PLUS_MENU_CHANGED_EVENT, sync);
+        return () => window.removeEventListener(CHAT_PLUS_MENU_CHANGED_EVENT, sync);
+    }, []);
+    useEffect(() => {
+        if (!showPlusMenu || loadPlusMenuPrefs()) return;
+        savePlusMenuPrefs({ order: [], hidden: [], seen: customPlusActions.map(action => `app:${action.appId}:${action.id}`) });
+    }, [showPlusMenu, customPlusActions]);
     const plusMenuItems = [
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
-        { icon: <AlertCircle size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "系统指令", onClick: () => onOpenRichModal("system_instruction") },
-        { icon: <Clapperboard size={22} strokeWidth={1.5} color={theaterMode ? "var(--c-icon-active)" : "var(--c-text)"} />, label: "番外指令模式", active: theaterMode, onClick: onToggleTheaterMode },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>, label: "视频通话", onClick: onStartVideoCall },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>, label: "语音通话", onClick: onStartVoiceCall },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>, label: "红包", onClick: () => onOpenRichModal("red_packet") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><text x="12" y="16" textAnchor="middle" fontSize="12" fill="var(--c-text)" stroke="none">¥</text></svg>, label: "转账", onClick: () => onOpenRichModal(isGroup ? "transfer_target" : "transfer") },
-        { icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>, label: "位置", onClick: () => onOpenRichModal("location") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" /></svg>, label: "语音条", onClick: () => onOpenRichModal("voice_msg") },
+        { id: "photo", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
+        { id: "text_image", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
+        { id: "system_instruction", icon: <AlertCircle size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "系统指令", onClick: () => onOpenRichModal("system_instruction") },
+        { id: "theater", icon: <Clapperboard size={22} strokeWidth={1.5} color={theaterMode ? "var(--c-icon-active)" : "var(--c-text)"} />, label: "番外指令模式", active: theaterMode, onClick: onToggleTheaterMode },
+        { id: "video_call", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>, label: "视频通话", onClick: onStartVideoCall },
+        { id: "voice_call", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>, label: "语音通话", onClick: onStartVoiceCall },
+        { id: "red_packet", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>, label: "红包", onClick: () => onOpenRichModal("red_packet") },
+        { id: "transfer", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><text x="12" y="16" textAnchor="middle" fontSize="12" fill="var(--c-text)" stroke="none">¥</text></svg>, label: "转账", onClick: () => onOpenRichModal(isGroup ? "transfer_target" : "transfer") },
+        { id: "gift", icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") },
+        { id: "location", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>, label: "位置", onClick: () => onOpenRichModal("location") },
+        { id: "voice_message", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" /></svg>, label: "语音条", onClick: () => onOpenRichModal("voice_msg") },
+        { id: "chat_variables", icon: <Braces size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "聊天变量", onClick: onOpenChatVariables },
         ...customPlusActions.map(action => ({
+            id: `app:${action.appId}:${action.id}`,
             icon: action.appIconDataUrl
                 ? <span className="chat-plus-custom-app-icon" style={{ backgroundImage: `url(${action.appIconDataUrl})` }} aria-hidden="true" />
                 : <Blocks size={22} strokeWidth={1.5} color="var(--c-text)" />,
@@ -759,6 +776,26 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             onClick: () => onOpenCustomPlusAction(action),
         })),
     ];
+    const plusArranged = arrangePlusMenu(plusMenuItems, plusPrefs);
+    const renderPlusItem = (item: (typeof plusMenuItems)[number], rest = false) => {
+        const fresh = isFreshPlusItem(item.id, plusPrefs);
+        return (
+            <div
+                key={item.id}
+                onClick={() => {
+                    if (fresh && plusPrefs) savePlusMenuPrefs({ ...plusPrefs, seen: [...plusPrefs.seen, item.id] });
+                    item.onClick();
+                }}
+                className={`chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer${rest ? " is-rest" : ""}${fresh ? " is-fresh" : ""}`}
+                {...(item.active ? { "data-active": "" } : {})}
+            >
+                <div className="chat-plus-icon-box">
+                    {item.icon}
+                </div>
+                <span className="ts-11 text-[var(--c-text)]">{item.label}</span>
+            </div>
+        );
+    };
 
     return (
         <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input">
@@ -904,16 +941,31 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 
             {showPlusMenu && (
                 <div className="chat-plus-menu">
-                    {plusMenuItems.map((item, i) => (
-                        <div key={`${item.label}-${i}`} onClick={item.onClick} className="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer" {...(item.active ? { "data-active": "" } : {})}>
-                            <div className="chat-plus-icon-box">
-                                {item.icon}
-                            </div>
-                            <span className="ts-11 text-[var(--c-text)]">{item.label}</span>
-                        </div>
-                    ))}
+                    {plusArranged.visible.map(item => renderPlusItem(item))}
                     <ChatPluginSlot name="chat.inputToolbar" slotProps={{ sessionId, isGroup }} className="chat-plugin-input-toolbar" />
+                    <div className="cx-plus-more">
+                        {plusArranged.rest.length > 0 ? (
+                            <button type="button" aria-expanded={plusRestOpen} onClick={() => setPlusRestOpen(open => !open)}>
+                                {plusRestOpen ? "收起" : `显示其余 ${plusArranged.rest.length} 个功能`}
+                                <ChevronDown size={12} />
+                            </button>
+                        ) : <span />}
+                        <button type="button" className="is-edit" onClick={() => setPlusEditorOpen(true)}>编辑</button>
+                    </div>
+                    {plusRestOpen && plusArranged.rest.map(item => renderPlusItem(item, true))}
                 </div>
+            )}
+            {plusEditorOpen && (
+                <PlusMenuEditor
+                    items={plusMenuItems.map(item => ({
+                        id: item.id,
+                        label: item.label,
+                        icon: item.icon,
+                        tag: item.id === "chat_variables" ? "新" : item.id.startsWith("app:") ? "APP" : undefined,
+                    }))}
+                    prefs={plusPrefs}
+                    onClose={() => setPlusEditorOpen(false)}
+                />
             )}
 
             {showEmojiPanel && (
@@ -1144,10 +1196,22 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [cloudDeletePending, setCloudDeletePending] = useState<{ count: number } | null>(null);
     const [showPlusMenu, setShowPlusMenu] = useState(false);
     const [customPlusActions, setCustomPlusActions] = useState<RegisteredCustomAppChatPlusAction[]>(() => loadCustomAppChatPlusActions());
+    const [showChatVariables, setShowChatVariables] = useState(false);
+    const [blockInfo, setBlockInfo] = useState(() => readChatBlock(session.id));
+    const [showFriendVerify, setShowFriendVerify] = useState(false);
+    useEffect(() => {
+        const sync = (e: Event) => {
+            if ((e as CustomEvent<{ sessionId?: string }>).detail?.sessionId === session.id) setBlockInfo(readChatBlock(session.id));
+        };
+        window.addEventListener(CHAT_BLOCK_CHANGED_EVENT, sync);
+        void maybeReconsiderCharBlock(session.id);
+        return () => window.removeEventListener(CHAT_BLOCK_CHANGED_EVENT, sync);
+    }, [session.id]);
     const [activeCustomChatPlus, setActiveCustomChatPlus] = useState<ActiveCustomChatPlus | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [showVoiceCall, setShowVoiceCall] = useState(false);
     const [showVideoCall, setShowVideoCall] = useState(false);
+    const [callMinimized, setCallMinimized] = useState(false);
     const [callInitiator, setCallInitiator] = useState<"user" | "character">("user");
     const [callInitiatorName, setCallInitiatorName] = useState<string>("");
     const [userIdentity, setUserIdentity] = useState<UserIdentity | null>(null);
@@ -1246,6 +1310,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [bgLoading, setBgLoading] = useState(!!session.backgroundImage);
 
     const wrapperRef = useRef<HTMLDivElement>(null);
+    // T4：会话 CSS 作用域就在这个元素上，时辰属性挂这儿，用户写 :root[data-time-of-day="night"] 才生效
+    const ambient = useAmbientContext();
 
     // 全屏特效：命中触发词的新消息播放表情雨/礼花（微信同款）
     const [activeScreenEffect, setActiveScreenEffect] = useState<ActiveScreenEffect | null>(null);
@@ -1333,6 +1399,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [expandedMonologueId, setExpandedThinkingId] = useState<string | null>(null);
     // 思维链底部弹窗：存当前查看的 reasoning 文本，null = 关闭
     const [reasoningSheetText, setReasoningSheetText] = useState<string | null>(null);
+    const [rerollTargetId, setRerollTargetId] = useState<string | null>(null);
+    const [versionPicker, setVersionPicker] = useState<ReplyVersionView[] | null>(null);
+    const [offlineRerollTargetId, setOfflineRerollTargetId] = useState<string | null>(null);
+    const [offlineVersionPicker, setOfflineVersionPicker] = useState<ReplyVersionView[] | null>(null);
     // 思维链翻译（弹窗内点击翻译按钮生成，切换弹窗内容时重置）
     const [reasoningTranslation, setReasoningTranslation] = useState<string | null>(null);
     const [reasoningTranslating, setReasoningTranslating] = useState(false);
@@ -1367,6 +1437,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [editingResponseRoundId, setEditingResponseRoundId] = useState<string | null>(null);
     const [editingResponseContent, setEditingResponseContent] = useState("");
     const [expandedVoiceCallIds, setExpandedVoiceCallIds] = useState<Set<string>>(new Set());
+    /** undefined 关着；null 打开列表；字符串直接打开那一通 */
+    const [callRecordsFor, setCallRecordsFor] = useState<string | null | undefined>(undefined);
+    const [showScreenshot, setShowScreenshot] = useState(false);
     const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
     const INITIAL_LOAD = CHAT_INITIAL_VISIBLE_MESSAGE_COUNT;
@@ -1851,6 +1924,39 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             kvRemove(pendingKey);
             void runManagedGeneration({ history: msgs, onDecline: triggerReply });
         }
+    }, [session.id]);
+
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent<{ sessionId?: string; on?: boolean }>).detail;
+            if (!detail || detail.sessionId !== session.id) return;
+            setShowPlusMenu(false);
+            setRichModal(null);
+            setActiveOfflineTarget(null);
+            setOfflineTurns(loadChatOfflineTurns(session.id));
+            setOfflineVisibleCount(OFFLINE_INITIAL_LOAD);
+            setOfflineMode(detail.on === true);
+        };
+        window.addEventListener(CHAT_OFFLINE_MODE_CHANGED_EVENT, handler);
+        return () => window.removeEventListener(CHAT_OFFLINE_MODE_CHANGED_EVENT, handler);
+    }, [session.id]);
+
+    // TA 自己切了线上/线下：顶上挂 8 秒提示，点「切回去」连那条见面/分开的说明一起撤掉
+    const [modeSwitchNote, setModeSwitchNote] = useState<{ target: "offline" | "online"; charName: string } | null>(null);
+    useEffect(() => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const onSwitched = (e: Event) => {
+            const detail = (e as CustomEvent<{ sessionId?: string; target?: "offline" | "online"; charName?: string }>).detail;
+            if (!detail?.target || detail.sessionId !== session.id) return;
+            setModeSwitchNote({ target: detail.target, charName: detail.charName || "对方" });
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => setModeSwitchNote(null), 8000);
+        };
+        window.addEventListener(CHAT_MODE_SWITCHED_EVENT, onSwitched);
+        return () => {
+            window.removeEventListener(CHAT_MODE_SWITCHED_EVENT, onSwitched);
+            if (timer) clearTimeout(timer);
+        };
     }, [session.id]);
 
     const needsInitialScrollRef = useRef(true);
@@ -2782,9 +2888,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const clearOfflineGeneration = () => {
         const cancelled = cancelOfflineGenerationRun(session.id);
         if (!cancelled && !isOfflineGenerating) return;
-        // 重试期间界面按基底轮次显示，存储里被重试的那一轮还在。停止后按存储读回来，
-        // 这一楼就不会停留在「已消失」的样子。普通发送没有待恢复的轮次，读回是空操作。
-        setOfflineTurns(loadChatOfflineTurns(session.id));
         const pendingText = offlineGenerationInputRef.current || pendingOfflineUserText;
         offlineTextInputRef.current?.restoreIfEmpty(pendingText);
         setPendingOfflineUserText("");
@@ -2901,8 +3004,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             ? getLatestStateValues(session.id)
             : getLatestCharacterStateValues(session.contactId);
 
-        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(aiResponseText, previousState);
-        const parts = stripInvalidStickerParts(rawParts);
+        // [变量 …] / [拉黑:…] 这类指令行先摘掉，气泡全部落库后再生效
+        const directives = takeChatDirectives(aiResponseText, session);
+        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(directives.text, previousState);
+        const parts = stripInvalidStickerParts(session.singleBubble ? mergeSingleBubble(rawParts) : rawParts);
         throwIfGenerationStopped(options);
 
         // Detect call triggers and AI media actions, filter them out
@@ -2974,6 +3079,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 });
                 setMessages(prev => [...prev, aiMsg]);
             }
+            directives.apply();
             return { hasVisible: false, stateValues, triggerCall, hasDecline };
         }
 
@@ -3089,6 +3195,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             await Promise.allSettled(imageReplacementTasks);
             throwIfGenerationStopped(options);
         }
+        directives.apply();
         return { hasVisible: true, stateValues, triggerCall, hasDecline };
     };
 
@@ -3181,6 +3288,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             });
         }
         for (const result of results) {
+            for (const snapshot of result.xhsCards || []) {
+                throwIfGenerationStopped(guard);
+                const msg = pushChatMessage({
+                    sessionId: session.id, role: "assistant", content: "[小红书分享]", mediaType: "xhs_link",
+                    mediaData: { xhsNote: snapshot }, toolExecutionId,
+                    ...(session.isGroup ? { senderCharacterId: result.actorCharacterId, senderName: result.actorName } : {}),
+                });
+                setMessages(prev => [...prev, msg]);
+            }
             for (const att of result.mediaAttachments || []) {
                 throwIfGenerationStopped(guard);
                 const msg = pushChatMessage({
@@ -3262,10 +3378,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         text = text.replace(/\[我发起了((?:语音|视频)通话)\]/, `${charN}发起了$1`);
         // Hangup: [我挂断了XX通话] (duration now in mediaData, not content)
         text = text.replace(/\[我挂断了(.+?通话)\](?:\(时长\s*(.+?)\))?/, (_, callType, dur) =>
-            dur ? `你挂断了${callType}，时长 ${dur}` : `你挂断了${callType}`
+            `${msg?.role === "assistant" ? msg.senderName || charN : "你"}挂断了${callType}${dur ? `，时长 ${dur}` : ""}`
         );
-        // Reject: [我拒绝了XX通话]
-        text = text.replace(/\[我拒绝了(.+?通话)\]/, `你拒绝了$1`);
+        // Reject: [我拒绝了XX通话]；角色名下的是你打过去被挂掉，括号里是拒接说明
+        text = text.replace(/\[我拒绝了(.+?通话)\](?:\((.+?)\))?/, (_, callType, why) =>
+            msg?.role === "assistant" ? `${charN}拒接了你的${callType}${why ? ` · ${why}` : ""}` : `你拒绝了${callType}`
+        );
+        // Missed: [我未接听XX通话](N次，最后一次 HH:MM)
+        text = text.replace(/\[我未接听(.+?通话)\](?:\((\d+)次，最后一次\s*(.+?)\))?/, (_, callType, n, at) =>
+            n ? `${charN}没接你的${callType} ×${n} · 最后一次 ${at}` : `${charN}没接你的${callType}`
+        );
         // Cancel: [我取消了XX通话]
         text = text.replace(/\[我取消了(.+?通话)\]/, `你取消了$1`);
         // General user name → "你"
@@ -3292,7 +3414,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         generationIntent,
         errorPrefix = "发送失败",
         onDecline,
-        onSaved,
     }: ManagedGenerationOptions) => {
         if (isGeneratingRef.current) {
             if (activeGenerationRuns.has(session.id)) return;
@@ -3355,9 +3476,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     },
                 );
                 if (!isCurrentGeneration()) return;
-                const savedCountBefore = loadChatMessages(session.id).length;
                 await processGroupParts(results, setMessages, generationGuard, roundReasoning, { instantReveal: isSessionStreamingEnabled(session, true) });
-                if (loadChatMessages(session.id).length > savedCountBefore) onSaved?.();
             } else {
                 let capturedReasoning: string | undefined;
                 const cr = await generateChatCompletion(
@@ -3393,9 +3512,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 );
                 if (!isCurrentGeneration()) return;
                 if (cr.silenced) { cancelFollowUp(session.id); setStreamPreview(null); return; }
-                const savedCountBefore = loadChatMessages(session.id).length;
                 const result = await splitAndSaveAIMessages(flattenCompletionResult(cr), { ...generationGuard, reasoningText: capturedReasoning, instantReveal: isSessionStreamingEnabled(session, true) });
-                if (loadChatMessages(session.id).length > savedCountBefore) onSaved?.();
                 if (!isCurrentGeneration()) return;
                 scheduleFollowUp(session.id, 0, result.stateValues);
                 handleCallTrigger(result.triggerCall);
@@ -3517,6 +3634,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return false;
         }
         cancelFollowUp(session.id);
+        if ((mediaType === "transfer" || mediaType === "red_packet") && !session.isGroup && readChatBlock(session.id).charBlock) {
+            showChatToast("对方拒收了你的消息，钱没有转出去");
+            return false;
+        }
 
         if (mediaType === "poke") {
             const pokeSender = userIdentity?.name || "你";
@@ -3646,7 +3767,22 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return sent;
     };
 
+    // TA 拉黑/删了你：不生成回复；冷静期过了就让 TA 重新想一次
+    const rejectIfBlocked = (quiet = false): boolean => {
+        if (session.isGroup) return false;
+        const block = readChatBlock(session.id).charBlock;
+        if (!block) return false;
+        if (!quiet) showChatToast(block.kind === "block" ? "消息被拒收了，TA 暂时不会回" : "你们已经不是好友了，先发送朋友验证");
+        void maybeReconsiderCharBlock(session.id);
+        return true;
+    };
+
     const triggerAIResponse = async () => {
+        if (rejectIfBlocked()) return;
+        if (hasPendingXhsNotes(loadChatMessages(session.id))) {
+            showChatToast("小红书笔记和配图还在加载，完成后再回复");
+            return;
+        }
         let silencedUserId: string | undefined;
         if (isGeneratingRef.current) {
             if (activeGenerationRuns.has(session.id)) return;
@@ -4014,13 +4150,31 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // 被动回复闸门：单聊里按 app（挂念）留下的作息判——睡着押到醒来再回、忙着偷空再回。
     // 已同步个人云的等待由云端执行；其余由桌面壳到点发回复请求。
     const scheduleGatedReply = async (text: string) => {
+        if (rejectIfBlocked(true)) return;
+        if (hasPendingXhsNotes(loadChatMessages(session.id))) {
+            showChatToast("小红书笔记和配图还在加载，完成后再回复");
+            return;
+        }
         await getChatPluginRuntime().ensureReady();
         const replyGate = readEffectiveReplyGate(session.contactId);
         if (session.isGroup) { void triggerAIResponse(); return; }
         if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) return;
+        // 上次TA回复之后你连发了几条：分神时发够数，TA 就放下手里的事
+        const pendingCount = (() => {
+            let n = 0;
+            for (const m of [...loadChatMessages(session.id)].reverse()) { if (m.role === "assistant") break; if (m.role === "user") n++; }
+            return Math.max(1, n);
+        })();
+        // 分神的短等待不上云：没被拽过来就等原来那一下，不重新计时
+        const heldAny = readDeferredReply(session.id);
+        if (heldAny?.distracted && !heldAny.firedAt) {
+            const again = evaluateReplyGate(replyGate, text, undefined, pendingCount);
+            if (again.kind === "delay" && again.reason === "distracted") { setPendingGenerate(false); return; }
+            writeDeferredReply(session.id, null);
+        }
         // 已经押后了（睡着 / 忙着），再点「触发回复」也不该把TA叫起来：到点由桌面壳派回来。
         // 紧急词例外：闸门会判成立刻回，顺手把旧等待清掉，免得到点再生成一次
-        const held = readDeferredReply(session.id);
+        const held = heldAny?.distracted ? null : heldAny;
         if (held?.cloud && !held.firedAt && isUrgentReplyText(text, replyGate)) {
             void cancelDeferredReplyCloud(session.id).then(cancelled => { if (cancelled) void triggerAIResponse(); });
             return;
@@ -4038,10 +4192,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 : "消息已合并，正在等待本轮回复", 3000);
             return;
         }
-        const decision = evaluateReplyGate(replyGate, text);
+        const decision = evaluateReplyGate(replyGate, text, undefined, pendingCount);
         if (decision.kind === "now") {
             writeDeferredReply(session.id, decision.note ? { until: Date.now(), note: decision.note, firedAt: Date.now() } : null);
             void triggerAIResponse();
+            return;
+        }
+        if (decision.reason === "distracted") {
+            writeDeferredReply(session.id, { until: decision.until, note: decision.note, distracted: true });
+            setPendingGenerate(false);
+            showChatToast(decision.what ? `TA在${decision.what.slice(0, 12)}，一会儿就回` : "TA手上有事，一会儿就回", 2000);
             return;
         }
         writeDeferredReply(session.id, {
@@ -4057,13 +4217,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return;
         }
         const at = new Date(decision.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+        const doing = decision.what ? `TA在${decision.what.slice(0, 12)}` : decision.busyCheck ? "TA正专注" : "TA正忙";
         showChatToast(decision.reason === "sleep" ? `TA睡着了，${at} 醒来再回`
-            : decision.busyCheck ? `TA正专注，${at} 左右再看有没有空` : `TA正忙，${at} 左右再回`, 3000);
+            : decision.busyCheck ? `${doing}，${at} 左右再看有没有空` : `${doing}，${at} 左右再回`, 3000);
     };
     // 「触发回复」按钮和收起键盘自动触发都走这里：和按回复键发一样过闸门，
     // 否则夜里点一下TA就得醒着回，提示词里却写着「在睡觉」。判据用你最后一句（紧急词能破门）
     const triggerGatedReply = () => {
         if (session.isGroup) { void triggerAIResponse(); return; }
+        if (rejectIfBlocked()) return;
         const lastUser = [...loadChatMessages(session.id)].reverse().find(m => m.role === "user");
         scheduleGatedReply(lastUser?.content || "");
     };
@@ -4123,6 +4285,20 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return true;
     };
 
+    useEffect(() => {
+        const sync = (event: Event) => {
+            if ((event as CustomEvent).detail?.sessionId === session.id) setMessages(loadChatMessages(session.id));
+        };
+        window.addEventListener(XHS_NOTE_UPDATED, sync);
+        return () => window.removeEventListener(XHS_NOTE_UPDATED, sync);
+    }, [session.id]);
+
+    useEffect(() => {
+        for (const message of messages) {
+            if (!message.isRetracted && message.mediaData?.xhsNote?.status === "loading") void hydrateXhsNote(message);
+        }
+    }, [messages]);
+
     const handleSendText = (text: string, options?: { autoReply?: boolean }): boolean => {
         if (!ensureGroupSpeakPermission()) return false;
         if (isGenerating) {
@@ -4131,6 +4307,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         }
         const trimmed = text.trim();
         if (!trimmed) return false;
+        if (extractXhsNoteUrls(trimmed).length > 3) {
+            showChatToast("每次最多分享 3 条小红书笔记，请分开发送");
+            return false;
+        }
 
         // Cancel any pending follow-up for this session
         cancelFollowUp(session.id);
@@ -4159,6 +4339,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             });
 
             setMessages(prev => [...prev, newMsg]);
+            const xhsCards = extractXhsNoteUrls(currentText).map(url => pushChatMessage({
+                sessionId: session.id,
+                role: "user",
+                content: "[小红书链接]",
+                mediaType: "xhs_link",
+                mediaData: { xhsNote: { sourceUrl: url, status: "loading", stage: "正在读取笔记…" } },
+            }));
+            if (xhsCards.length) setMessages(prev => [...prev, ...xhsCards]);
             if (diceOnly) {
                 const diceAside = pushChatMessage({
                     sessionId: session.id,
@@ -4170,7 +4358,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             setPendingGenerate(true);
             // 按回复键发送：消息落库后立即触发模型回复（无论插件是否异步改写，
             // 都在消息真正写入后触发，避免回复基于旧上下文）
-            if (options?.autoReply) scheduleGatedReply(currentText);
+            if (xhsCards.length) {
+                void Promise.all(xhsCards.map(hydrateXhsNote)).then(() => {
+                    if (options?.autoReply && loadChatMessages(session.id).some(m => m.id === newMsg.id)) void scheduleGatedReply(currentText);
+                });
+            } else if (options?.autoReply) scheduleGatedReply(currentText);
         };
 
         // 聊天插件织入点 user.beforeSend：无插件时走原同步路径，
@@ -4372,7 +4564,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     ? await generateGroupOfflineChatCompletion(session, history, { signal: offlineRun.controller.signal, onStreamDelta: onOfflineDelta })
                     : await generateOfflineChatCompletion(session, history, { signal: offlineRun.controller.signal, onStreamDelta: onOfflineDelta });
                 if (!isCurrentOfflineRun()) return;
-                const assistantContent = result.content.trim() || result.rawText.trim();
+                const modeSwitch = extractModeSwitch(result.content.trim() || result.rawText.trim());
+                const assistantContent = modeSwitch.text.trim();
                 if (!assistantContent) throw new Error("AI 没有返回线下正文");
                 if (!result.summary.trim()) showChatToast(`未提取到 <${result.summaryTag}> 摘要`);
                 const saved = appendChatOfflineTurn({
@@ -4387,6 +4580,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     thinkingTag: result.thinkingTag,
                 });
                 setOfflineTurns(prev => [...prev, saved]);
+                if (modeSwitch.target === "online" && session.autoModeSwitch && !session.isGroup) switchChatMode(session, "online", "char");
             } catch (error: any) {
                 if (!isCurrentOfflineRun() || isAbortLikeError(error)) return;
                 offlineTextInputRef.current?.setText(currentText);
@@ -4462,7 +4656,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setActiveOfflineTarget(null);
     };
 
-    const handleOfflineRetryFrom = async (turnId: string) => {
+    const handleOfflineRetryFrom = async (turnId: string, request?: RerollRequest) => {
         if (isOfflineGenerating) {
             showChatToast("线下回复生成中");
             return;
@@ -4471,11 +4665,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (idx < 0) return;
         const targetTurn = offlineTurns[idx];
         const baseTurns = offlineTurns.slice(0, idx);
+        const removedTurns = offlineTurns.slice(idx);
         const retryInput = targetTurn.userContent.trim();
         if (!retryInput) {
             showChatToast("这一轮没有可重试的用户输入");
             return;
         }
+        const replyVersion = recordOfflineReplyVersionBeforeRetry(session.id, offlineTurns, idx);
+        const instruction = request
+            ? buildRerollInstruction({
+                tags: request.tags,
+                note: request.note,
+                previousReply: request.attachPrevious ? [{
+                    id: `${targetTurn.id}_assistant`, sessionId: session.id, role: "assistant",
+                    content: targetTurn.assistantContent, status: "sent", createdAt: targetTurn.createdAt,
+                }] : undefined,
+            })
+            : null;
 
         cancelFollowUp(session.id);
         setActiveOfflineTarget(null);
@@ -4483,8 +4689,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setShowEmojiPanel(false);
         setShowStickerPanel(false);
         setRichModal(null);
-        // 存储保持原样直到新的一轮生成成功：中途退出、断网或停止都不会把被重试的
-        // 这一轮弄丢。界面先按基底轮次显示，回滚时再从存储读回来。
+        saveChatOfflineTurns(session.id, baseTurns);
         setOfflineTurns(baseTurns);
         setPendingOfflineUserText(retryInput);
         offlineGenerationInputRef.current = retryInput;
@@ -4497,6 +4702,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
         try {
             const history = buildOfflinePromptHistory(baseTurns, retryInput);
+            // 重写要求只跟这一次请求走，不落库
+            if (instruction) history.push({
+                id: `reroll-note-${Date.now()}`, sessionId: session.id, role: "system", content: instruction,
+                status: "sent", createdAt: new Date().toISOString(), mediaType: "system_instruction",
+            });
             const onOfflineDelta = (delta: string) => {
                 if (!isCurrentOfflineRun()) return;
                 offlineStreamAccumRef.current += delta;
@@ -4526,7 +4736,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const assistantContent = result.content.trim() || result.rawText.trim();
             if (!assistantContent) throw new Error("AI 没有返回线下正文");
             if (!result.summary.trim()) showChatToast(`未提取到 <${result.summaryTag}> 摘要`);
-            const saved = createChatOfflineTurn({
+            const saved = appendChatOfflineTurn({
                 sessionId: session.id,
                 userContent: retryInput,
                 assistantContent,
@@ -4537,18 +4747,18 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 thinkingText: result.thinking,
                 thinkingTag: result.thinkingTag,
             });
-            // 被重试的那一轮到这里才删：基底 + 新一轮一次写入，替换掉旧的整份列表。
-            const nextTurns = [...baseTurns, saved];
-            saveChatOfflineTurns(session.id, nextTurns);
-            setOfflineTurns(nextTurns);
+            replyVersion.finish(saved);
+            setOfflineTurns([...baseTurns, saved]);
         } catch (error: any) {
-            // 已被更晚的一次重试接管：界面归那一次管，这里什么都不要动。
-            if (isOfflineGenerationRunSuperseded(session.id, offlineRunId)) return;
-            // 失败、中断、用户停止：存储里那一轮还在，把界面读回来。
-            setOfflineTurns(loadChatOfflineTurns(session.id));
-            if (isAbortLikeError(error)) return;
-            offlineTextInputRef.current?.setText(retryInput);
-            showChatToast(`线下重试失败: ${error?.message || String(error)}`, 3000);
+            // 没生成出来就把原来那一截放回去，不丢回复；期间有别的改动就不动存储
+            const stored = loadChatOfflineTurns(session.id);
+            if (stored.length === baseTurns.length && stored.every((turn, i) => turn.id === baseTurns[i].id)) {
+                saveChatOfflineTurns(session.id, [...baseTurns, ...removedTurns]);
+                replyVersion.rollback();
+                if (isCurrentOfflineRun()) setOfflineTurns([...baseTurns, ...removedTurns]);
+            }
+            if (!isCurrentOfflineRun() || isAbortLikeError(error)) return;
+            showChatToast(`线下重试失败，已放回原回复: ${error?.message || String(error)}`, 3000);
         } finally {
             if (!finishOfflineGenerationRun(session.id, offlineRunId)) return;
             setPendingOfflineUserText("");
@@ -4559,39 +4769,82 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         }
     };
 
-    const handleRetry = async (msgId: string) => {
+    const handleSwitchOfflineReplyVersion = (target: number) => {
+        setOfflineVersionPicker(null);
+        if (isOfflineGenerating) {
+            showChatToast("线下回复生成中");
+            return;
+        }
+        const next = switchOfflineReplyVersion(session.id, loadChatOfflineTurns(session.id), target);
+        if (!next) return;
+        cancelFollowUp(session.id);
+        saveChatOfflineTurns(session.id, next);
+        setOfflineTurns(loadChatOfflineTurns(session.id));
+    };
+
+    const handleRetry = async (msgId: string, request?: RerollRequest) => {
+        if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) {
+            showChatToast("请先等待对方回复");
+            return;
+        }
         const msgIndex = messages.findIndex(m => m.id === msgId);
         if (msgIndex === -1 || messages[msgIndex].role !== "assistant") return;
 
         const contextMessages = messages.slice(0, msgIndex);
-
-        // 要被替换掉的是这条及其之后的全部消息。先按存储把 id 定下来，等新回复确实
-        // 落盘之后才真删：中途退出、断网、报错、沉默或空回复都不会把旧回复弄丢。
-        // 按 id 删而不是「从这条往后删」，新回复和重试期间到达的推送都不会被卷走。
         const storedMessages = loadChatMessages(session.id);
         const storedIndex = storedMessages.findIndex(m => m.id === msgId);
-        const doomedIds = storedIndex === -1 ? [msgId] : storedMessages.slice(storedIndex).map(m => m.id);
-        let removedOldMessages = false;
+        const removedTail = storedIndex >= 0 ? storedMessages.slice(storedIndex) : messages.slice(msgIndex);
+        if (storedIndex >= 0) recordReplyVersionBeforeRetry(session.id, storedMessages, storedIndex);
+        const instruction = request
+            ? buildRerollInstruction({ tags: request.tags, note: request.note, previousReply: request.attachPrevious ? removedTail : undefined })
+            : null;
 
+        // Delete this message and everything after it
+        deleteChatMessagesFrom(msgId);
         setMessages(prev => prev.slice(0, msgIndex));
         setActiveMessageId(null);
 
         // Cancel any pending follow-up for this session
         cancelFollowUp(session.id);
 
+        // 重写要求只跟这一次请求走，不落库：落库会在聊天里多出一张系统指令卡片
+        const rerollNote: ChatMessage | null = instruction ? {
+            id: `reroll-note-${Date.now()}`,
+            sessionId: session.id,
+            role: "system",
+            content: instruction,
+            status: "sent",
+            createdAt: new Date().toISOString(),
+            mediaType: "system_instruction",
+        } : null;
+
         await runManagedGeneration({
-            history: contextMessages,
+            history: rerollNote ? [...contextMessages, rerollNote] : contextMessages,
             generationIntent: "regenerate",
             errorPrefix: "重试失败",
-            onSaved: () => {
-                deleteChatMessagesByIds(session.id, doomedIds);
-                removedOldMessages = true;
-            },
             onDecline: triggerReply,
         });
+    };
 
-        // 没产出新回复：旧的还在存储里，把界面读回来，别停在「已消失」的样子。
-        if (!removedOldMessages) syncMessagesFromStorage();
+    const handleSwitchReplyVersion = async (target: number) => {
+        setVersionPicker(null);
+        if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) {
+            showChatToast("请先等待对方回复");
+            return;
+        }
+        const plan = planReplyVersionSwitch(session.id, loadChatMessages(session.id), target);
+        if (!plan) return;
+        cancelFollowUp(session.id);
+        if (plan.removeFromId) deleteChatMessagesFrom(plan.removeFromId);
+        try {
+            await restoreChatMessages(plan.restore);
+            plan.commit();
+        } catch (error) {
+            await restoreChatMessages(plan.removed).catch(() => undefined);
+            showChatToast(`换版本失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+        markChatSessionRead(session.id);
+        syncMessagesFromStorage();
     };
 
     const handleRetractMessage = (msgId: string) => {
@@ -5067,7 +5320,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 <div className="flex">
                     <button onClick={() => { copyTextToClipboard(getOfflineCopyText(turn, role)); setActiveOfflineTarget(null); }} className="ctx-menu-btn">复制</button>
                     <button onClick={() => handleOfflineEditStart(turn, role)} className="ctx-menu-btn">编辑</button>
-                    <button onClick={() => void handleOfflineRetryFrom(turn.id)} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
+                    {(() => {
+                        const live = getLiveOfflineReplyVersions(session.id, loadChatOfflineTurns(session.id));
+                        if (!live || !live.tail.some(item => item.id === turn.id)) return null;
+                        return (
+                            <button onClick={() => { setActiveOfflineTarget(null); setOfflineVersionPicker(describeOfflineReplyVersions(live)); }} className="ctx-menu-btn">
+                                换一版 {live.set.active + 1}/{live.set.versions.length}
+                            </button>
+                        );
+                    })()}
+                    <button onClick={() => { setActiveOfflineTarget(null); setOfflineRerollTargetId(turn.id); }} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
                 </div>
                 <div className="flex">
                     <button onClick={() => handleOfflineDeleteTurn(turn.id)} className="ctx-menu-btn ctx-menu-btn-danger">删除</button>
@@ -5122,8 +5384,17 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     {m.role === "user" && (
                         <button onClick={() => handleRetractMessage(storedMessageId)} className="ctx-menu-btn">撤回消息</button>
                     )}
+                    {m.role === "assistant" && (() => {
+                        const live = getLiveReplyVersions(session.id, loadChatMessages(session.id));
+                        if (!live || !live.tail.some(item => item.id === storedMessageId)) return null;
+                        return (
+                            <button onClick={() => { setActiveMessageId(null); setVersionPicker(describeReplyVersions(live)); }} className="ctx-menu-btn">
+                                换一版 {live.set.active + 1}/{live.set.versions.length}
+                            </button>
+                        );
+                    })()}
                     {m.role === "assistant" && (
-                        <button onClick={() => handleRetry(storedMessageId)} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
+                        <button onClick={() => { setActiveMessageId(null); setRerollTargetId(storedMessageId); }} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
                     )}
                 </div>
                 <div className="flex">
@@ -5379,8 +5650,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return projected;
     }, [dedupedMessages, normalizeDisplayParts, renderDisplayText]);
 
+    const groupedToolNotices = useMemo(() => groupToolNotices(projectedMessages, msg => isHiddenChatFlowMessage(msg)), [projectedMessages]);
+
     // Build a map: startMsgId → { startIdx, endIdx, duration }
     // and a set of all message indices that belong to a voice call group
+    const deleteCallMessages = (targets: ChatMessage[]) => deleteWeixinCloudBeforeLocal(targets, () => {
+        const ids = new Set(targets.map(m => m.id));
+        deleteChatMessagesByIds(session.id, [...ids]);
+        setMessages(prev => prev.filter(m => !ids.has(m.id)));
+    });
+
     const voiceCallGroups = useMemo(() => {
         const groups: { startId: string; startIdx: number; endIdx: number; duration: string; callType: "voice" | "video" }[] = [];
         const memberSet = new Set<number>();
@@ -5442,6 +5721,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         });
         return ids;
     }, [getMessageDisplayContent, getSelectableStoredMessageId, projectedMessages, voiceCallGroups.memberSet]);
+
+    const screenshotRows = useMemo(() => {
+        if (!showScreenshot) return [];
+        return projectedMessages.flatMap(msg => {
+            const storedId = getSelectableStoredMessageId(msg);
+            return storedId && selectedMessageIds.has(storedId) ? [{ renderId: msg.id, storedId, at: msg.createdAt }] : [];
+        });
+    }, [getSelectableStoredMessageId, projectedMessages, selectedMessageIds, showScreenshot]);
 
     const multiDeleteTargetIds = useMemo(() => {
         if (selectedMessageIds.size === 0) return [];
@@ -5569,6 +5856,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // Shared handler: reload messages + re-trigger scroll-to-bottom after call ends
     const returnFromCall = (hide: () => void) => {
         hide();
+        setCallMinimized(false);
         needsInitialScrollRef.current = true;
         prevMsgCountRef.current = 0;
         syncMessagesFromStorage();
@@ -5578,55 +5866,34 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const editingMessage = editingMessageId ? messages.find(m => m.id === editingMessageId) : null;
     const editingSystemInstruction = editingMessage ? isSystemInstructionMessage(editingMessage) : false;
 
-    if (showVoiceCall) {
-        if (session.isGroup && groupCharacters.length > 0) {
-            return (
-                <GroupCallScreen
-                    type="voice"
-                    session={session}
-                    characters={groupCharacters}
-                    initiator={callInitiator}
-                    initiatorName={callInitiatorName}
-                    onEnd={() => returnFromCall(() => setShowVoiceCall(false))}
-                />
-            );
-        }
-        if (character) {
-            return (
-                <VoiceCallScreen
-                    session={session}
-                    character={character}
-                    initiator={callInitiator}
-                    onEnd={() => returnFromCall(() => setShowVoiceCall(false))}
-                />
-            );
-        }
+    // 群聊通话没有缩小悬浮窗，维持原有的整屏早退渲染
+    if (showVoiceCall && session.isGroup && groupCharacters.length > 0) {
+        return (
+            <GroupCallScreen
+                type="voice"
+                session={session}
+                characters={groupCharacters}
+                initiator={callInitiator}
+                initiatorName={callInitiatorName}
+                onEnd={() => returnFromCall(() => setShowVoiceCall(false))}
+            />
+        );
     }
 
-    if (showVideoCall) {
-        if (session.isGroup && groupCharacters.length > 0) {
-            return (
-                <GroupCallScreen
-                    type="video"
-                    session={session}
-                    characters={groupCharacters}
-                    initiator={callInitiator}
-                    initiatorName={callInitiatorName}
-                    onEnd={() => returnFromCall(() => setShowVideoCall(false))}
-                />
-            );
-        }
-        if (character) {
-            return (
-                <VideoCallScreen
-                    session={session}
-                    character={character}
-                    initiator={callInitiator}
-                    onEnd={() => returnFromCall(() => setShowVideoCall(false))}
-                />
-            );
-        }
+    if (showVideoCall && session.isGroup && groupCharacters.length > 0) {
+        return (
+            <GroupCallScreen
+                type="video"
+                session={session}
+                characters={groupCharacters}
+                initiator={callInitiator}
+                initiatorName={callInitiatorName}
+                onEnd={() => returnFromCall(() => setShowVideoCall(false))}
+            />
+        );
     }
+    // 单聊语音/视频通话改为在下方主返回内联渲染（而非提前 return），
+    // 这样缩小为悬浮窗时聊天页与通话组件可以同时挂载，通话状态（计时/字幕）不会丢失。
 
     const chatRoomBackgroundStyle = bgImageResolved ? {
         backgroundColor: "#fff",
@@ -5637,7 +5904,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     } : undefined;
 
     return (
-        <div ref={wrapperRef} className={`session-${session.id} chat-room-wrapper page-shell inset-0 flex flex-col z-20`} style={chatRoomBackgroundStyle} {...(bgLoading ? { "data-loading": "" } : {})} {...(bgImageResolved ? { "data-has-bg-image": "" } : {})} {...(showSettings ? { "data-settings-open": "" } : {})}>
+        <div ref={wrapperRef} className={`session-${session.id} chat-room-wrapper page-shell inset-0 flex flex-col z-20`} style={chatRoomBackgroundStyle} {...ambientAttrs(ambient)} {...(bgLoading ? { "data-loading": "" } : {})} {...(bgImageResolved ? { "data-has-bg-image": "" } : {})} {...(showSettings ? { "data-settings-open": "" } : {})} {...(session.onlineActions && !session.isGroup ? { "data-online-actions": "" } : {})}>
             {/* Custom CSS Injection for this session — scoped to prevent leaking */}
             {liveCSS && (
                 <SessionCustomCSS css={liveCSS} scope={`.session-${session.id}`} />
@@ -5675,7 +5942,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             </header>
             <ChatPluginSlot
                 name="chat.header"
-                slotProps={{ sessionId: session.id, isGroup: !!session.isGroup }}
+                slotProps={{ sessionId: session.id, isGroup: !!session.isGroup, offlineMode }}
                 className="chat-plugin-header chat-room-main-pane"
             />
 
@@ -5888,12 +6155,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     </button>
                 )}
                 {!offlineMode && projectedMessages.map((msg, idx) => {
+                    if (!isMultiSelectMode) {
+                        const notices = groupedToolNotices.groups.get(idx);
+                        if (notices) return <ToolNoticeGroup key={`tools-${msg.id}`} messages={notices} onContextMenu={(id,x,y)=>openMessageContextMenu(id,{x,y})} renderActions={id => { const entry = notices.find(item => item.id === id); return entry && activeMessageId === id ? renderBubbleContextMenu(entry, { allowMultiSelect: true }) : null; }} />;
+                        if (groupedToolNotices.members.has(idx)) return null;
+                    }
+
                     // ── Voice call group: collapsed widget ──
                     const vcGroup = voiceCallGroups.groups.find(g => g.startIdx === idx);
                     if (vcGroup) {
                         const isExpanded = expandedVoiceCallIds.has(vcGroup.startId);
                         const groupMessages = projectedMessages.slice(vcGroup.startIdx, vcGroup.endIdx + 1);
                         const chatCount = groupMessages.filter(m => uiRole(m) !== "system").length;
+                        const vcSummary = groupMessages[groupMessages.length - 1]?.mediaData?.callSummary;
                         return (
                             <div key={`vc-${vcGroup.startId}`} className="flex flex-col gap-2">
                                 <div
@@ -5918,7 +6192,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             return next;
                                         });
                                     }}
-                                    className="chat-sys-msg flex items-center justify-center gap-[6px] py-[6px] px-[14px] mx-auto rounded-2xl cursor-pointer relative"
+                                    className="chat-sys-msg flex flex-wrap items-center justify-center gap-[6px] py-[6px] px-[14px] mx-auto rounded-2xl cursor-pointer relative"
                                     {...(activeMessageId === `vc-${vcGroup.startId}` ? { "data-active": "" } : {})}
                                 >
                                     {vcGroup.callType === "video" ? (
@@ -5935,6 +6209,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         className="ui-chevron-down-flip" {...(isExpanded ? { "data-open": "" } : {})}>
                                         <polyline points="6 9 12 15 18 9" />
                                     </svg>
+                                    {vcSummary && <span className="cx-vc-sum">{vcSummary}</span>}
                                     {activeMessageId === `vc-${vcGroup.startId}` && renderDeleteOnlyContextMenu(() => {
                                         const groupMsgIds = groupMessages.map(m => m.id);
                                         void deleteWeixinCloudBeforeLocal(groupMessages, () => {
@@ -6001,6 +6276,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 </div>
                                             )
                                         ))}
+                                        {!session.isGroup && (
+                                            <button type="button" className="cx-vc-link" onClick={() => setCallRecordsFor(getSelectableStoredMessageId(groupMessages[0]) ?? vcGroup.startId)}>查看通话记录 ›</button>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -6053,7 +6331,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     return (
                         <div key={msg.id} className="flex flex-col gap-4" {...(hiddenEmpty ? { style: { display: "none" } } : {})} {...(isEmptyBubble && renderMsg.reasoningText && !showTime ? { "data-reasoning-only": "" } : {})}>
                             {showTime && (
-                                <div className="flex justify-center w-full">
+                                <div className="flex justify-center w-full" data-time-row="">
                                     <span className="chat-sys-msg py-[2px] px-2 rounded select-none">
                                         {formatChatUiTime(msg.createdAt)}
                                     </span>
@@ -6132,7 +6410,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                         const displayTarget = target === userIdentity?.name ? "你" : target;
                                                         return `${displaySender} 拍了拍 ${displayTarget}`;
                                                     })()
-                                                    : formatSysMsgForUI(msg.content, msg)}
+                                                    : (msg.uiText ?? formatSysMsgForUI(msg.content, msg))}
                                             </>
                                         )}
                                         {activeMessageId === msg.id && renderSystemContextMenu(msg)}
@@ -6214,6 +6492,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 </div>
                                             )
                                         )}
+                                        {msg.role === "user" && msg.rejectedBy && !isEmptyBubble && <span className="cx-bang" role="img" aria-label="被拒收">!</span>}
                                         {!isSilentThought && !isEmptyBubble && <div
                                             className={`chat-msg-content-wrap relative flex flex-col min-w-0 max-w-[70%] ${isStandaloneHtmlPreview ? "chat-msg-content-wrap-html" : ""}`}
                                             {...(isStandaloneHtmlPreview ? { "data-html": "true" } : {})}
@@ -6295,6 +6574,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     </>
                                 )}
                             </div>
+                            {msg.role === "user" && msg.rejectedBy && (
+                                <RejectTip
+                                    kind={msg.rejectedBy}
+                                    charName={character?.name || "对方"}
+                                    onVerify={blockInfo.charBlock?.kind === "delete" ? () => setShowFriendVerify(true) : undefined}
+                                />
+                            )}
                             {/* Voice message: text transcription bubble */}
                             {renderMsg.mediaType === "audio" && voiceTextIds.has(msg.id) && renderMsg.mediaData?.label && (
                                 <div className={`chat-msg-wrapper`} data-role={uiRole(msg)} style={{ marginTop: -12 }}>
@@ -6414,6 +6700,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             </div>
 
             {/* Input Bar — absolute at bottom, same layer as header */}
+            {modeSwitchNote && (
+                <div className="cx-mode-note" role="status">
+                    <span>{modeSwitchNote.charName}把聊天切到了{modeSwitchNote.target === "offline" ? "线下" : "线上"}</span>
+                    <button type="button" onClick={() => {
+                        const notice = [...loadChatMessages(session.id)].reverse().find(m => m.mediaData?.modeSwitch === modeSwitchNote.target);
+                        if (notice) deleteChatMessage(notice.id);
+                        switchChatMode(session, modeSwitchNote.target === "offline" ? "online" : "offline", "user");
+                        setModeSwitchNote(null);
+                        syncMessagesFromStorage();
+                    }}>切回去</button>
+                    <button type="button" className="cx-mode-note-x" aria-label="关闭提示" onClick={() => setModeSwitchNote(null)}><X size={12} /></button>
+                </div>
+            )}
             {isMultiSelectMode && !offlineMode && (
                 <div className="chat-multi-select-bar chat-room-main-pane" data-ui="multi-select">
                     <button
@@ -6435,6 +6734,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     </div>
                     <button
                         type="button"
+                        className="chat-multi-select-delete-btn cx-shot-btn"
+                        disabled={selectedMessageIds.size === 0}
+                        onClick={() => setShowScreenshot(true)}
+                    >
+                        <Camera size={18} strokeWidth={1.8} />
+                        截图
+                    </button>
+                    <button
+                        type="button"
                         className="chat-multi-select-delete-btn"
                         disabled={selectedMessageIds.size === 0 || multiDeleteTargetIds.length === 0}
                         onClick={confirmMultiDelete}
@@ -6444,7 +6752,29 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     </button>
                 </div>
             )}
-            {!isMultiSelectMode && (offlineMode ? (
+            {showChatVariables && <ChatVariablesSheet session={session} characterName={character?.name || "对方"} onClose={() => setShowChatVariables(false)} />}
+            {callRecordsFor !== undefined && (
+                <CallRecordsPage session={session} characterName={character?.name || "对方"} initialRecordId={callRecordsFor ?? undefined}
+                    onDeleteMessages={deleteCallMessages} onClose={() => setCallRecordsFor(undefined)} />
+            )}
+            {showScreenshot && (
+                <ChatScreenshotSheet
+                    rootRef={wrapperRef}
+                    rows={screenshotRows}
+                    title={session.isGroup ? session.groupName || "群聊" : character?.name || "对方"}
+                    onDeselect={ids => setSelectedMessageIds(prev => {
+                        const next = new Set(prev);
+                        ids.forEach(id => next.delete(id));
+                        return next;
+                    })}
+                    onSaved={() => { setShowScreenshot(false); cancelMultiSelect(); }}
+                    onClose={() => setShowScreenshot(false)}
+                />
+            )}
+            {showFriendVerify && <FriendVerifySheet sessionId={session.id} charName={character?.name || "对方"} userName={userIdentity?.name || "我"} onClose={() => setShowFriendVerify(false)} />}
+            {!isMultiSelectMode && (blockInfo.isBlacklisted ? (
+                <ChatBlockBar charName={character?.name || "对方"} onUnblock={() => setUserBlacklist(session.id, false)} />
+            ) : offlineMode ? (
                 <OfflineTextInputBar
                     key={session.id}
                     ref={offlineTextInputRef}
@@ -6486,8 +6816,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 	                onCloseTheaterMode={closeTheaterMode}
 	                onOpenRichModal={(modal) => { setShowPlusMenu(false); setRichModal(modal); }}
                 onOpenCustomPlusAction={handleOpenCustomPlusAction}
-                onStartVideoCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVideoCall(true); }}
-                onStartVoiceCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
+                onOpenChatVariables={() => { setShowPlusMenu(false); setShowChatVariables(true); }}
+                onStartVideoCall={() => { if (rejectIfBlocked()) return; cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVideoCall(true); }}
+                onStartVoiceCall={() => { if (rejectIfBlocked()) return; cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
                 onSendText={handleSendText}
                 onStopGeneration={clearStuckGeneration}
                 onTriggerAIResponse={triggerGatedReply}
@@ -6528,6 +6859,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         }}
                         onToolHistoryCleared={syncMessagesFromStorage}
                         offlineHistoryBusy={isOfflineGenerating}
+                        onDeleteMessages={deleteCallMessages}
                         onOfflineHistoryCleared={() => {
                             setOfflineTurns([]);
                             setOfflineVisibleCount(OFFLINE_INITIAL_LOAD);
@@ -6635,7 +6967,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             )}
             {richModal === "photo" && (
                 <PhotoInputModal
-                    onSend={(desc, imageDataUrl) => { setRichModal(null); sendRichMessage("image", { label: desc }, "", imageDataUrl); }}
+                    onSend={(desc, imageDataUrls) => {
+                        setRichModal(null);
+                        // 多张按选择顺序连发；描述只跟第一张，免得每条都重复一遍
+                        for (const [i, url] of imageDataUrls.entries()) {
+                            if (!sendRichMessage("image", { label: i === 0 ? desc : "" }, "", url)) break;
+                        }
+                    }}
                     onClose={() => setRichModal(null)}
                 />
             )}
@@ -6699,6 +7037,40 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 <LocationInputModal
                     onSend={(loc) => { setRichModal(null); sendRichMessage("location", { label: loc }); }}
                     onClose={() => setRichModal(null)}
+                />
+            )}
+            {rerollTargetId && (
+                <RerollDialog
+                    onCancel={() => setRerollTargetId(null)}
+                    onConfirm={(request) => {
+                        const targetId = rerollTargetId;
+                        setRerollTargetId(null);
+                        void handleRetry(targetId, request);
+                    }}
+                />
+            )}
+            {offlineRerollTargetId && (
+                <RerollDialog
+                    onCancel={() => setOfflineRerollTargetId(null)}
+                    onConfirm={(request) => {
+                        const targetId = offlineRerollTargetId;
+                        setOfflineRerollTargetId(null);
+                        void handleOfflineRetryFrom(targetId, request);
+                    }}
+                />
+            )}
+            {offlineVersionPicker && (
+                <ReplyVersionPicker
+                    versions={offlineVersionPicker}
+                    onPick={(index) => handleSwitchOfflineReplyVersion(index)}
+                    onClose={() => setOfflineVersionPicker(null)}
+                />
+            )}
+            {versionPicker && (
+                <ReplyVersionPicker
+                    versions={versionPicker}
+                    onPick={(index) => void handleSwitchReplyVersion(index)}
+                    onClose={() => setVersionPicker(null)}
                 />
             )}
             {richModal === "system_instruction" && (
@@ -6962,6 +7334,32 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         ) : chatToast}
                     </div>
                 </div>
+            )}
+
+            {/* 单聊语音/视频通话：内联挂载（而非提前 return），使缩小为悬浮窗时通话组件
+                不被卸载，计时/字幕等状态得以保留；组件内部依据 minimized 决定渲染
+                全屏界面还是左侧悬浮窗 */}
+            {showVoiceCall && character && (
+                <VoiceCallScreen
+                    session={session}
+                    character={character}
+                    initiator={callInitiator}
+                    minimized={callMinimized}
+                    onMinimize={() => setCallMinimized(true)}
+                    onRestore={() => setCallMinimized(false)}
+                    onEnd={() => returnFromCall(() => setShowVoiceCall(false))}
+                />
+            )}
+            {showVideoCall && character && (
+                <VideoCallScreen
+                    session={session}
+                    character={character}
+                    initiator={callInitiator}
+                    minimized={callMinimized}
+                    onMinimize={() => setCallMinimized(true)}
+                    onRestore={() => setCallMinimized(false)}
+                    onEnd={() => returnFromCall(() => setShowVideoCall(false))}
+                />
             )}
 
         </div >

@@ -1,0 +1,17 @@
+[Unit]
+Description=Float tool event gateway and inbox
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/node /root/vibe-coding/float/tool-events-vps/service.mjs
+WorkingDirectory=/root/vibe-coding/float/tool-events-vps
+Restart=no
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/float-garden-wake
+TimeoutStopSec=20
+[Install]
+WantedBy=multi-user.target

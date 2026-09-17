@@ -1770,6 +1770,154 @@
   text-align: left;
 }
 
+/* 点开图片 → 编辑 */
+.gi-edit {
+  max-width: 360px;
+  max-height: min(84vh, 640px);
+}
+
+.gi-edit-body {
+  gap: 10px;
+}
+
+.gi-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gi-edit-label {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--c-text-title);
+  font-size: calc(12px*var(--app-text-scale,1));
+  font-weight: 600;
+}
+
+.gi-edit-hint {
+  color: var(--c-icon);
+  font-size: calc(11px*var(--app-text-scale,1));
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.gi-edit-textarea {
+  min-height: 76px;
+  max-height: 30vh;
+  resize: vertical;
+  font-size: calc(13px*var(--app-text-scale,1));
+  line-height: 1.5;
+}
+
+.gi-edit-textarea--small {
+  min-height: 50px;
+  font-size: calc(12px*var(--app-text-scale,1));
+}
+
+.gi-edit-check {
+  flex-wrap: wrap;
+  min-height: 28px;
+}
+
+.gi-edit-cameo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c-icon-active) 6%, transparent);
+}
+
+.gi-edit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gi-edit-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.gi-edit-chip {
+  min-height: 28px;
+  padding: 3px 11px;
+  border: 1px solid color-mix(in srgb, var(--c-icon) 35%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-text);
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  cursor: pointer;
+}
+
+.gi-edit-chip[data-on] {
+  border-color: var(--c-icon-active);
+  background: var(--c-icon-active);
+  color: var(--c-bg, #fff);
+}
+
+.gi-edit-chip--add {
+  border-style: dashed;
+  color: var(--c-icon);
+}
+
+.gi-edit-chip-x {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--c-text-title);
+  color: var(--c-bg, #fff);
+  cursor: pointer;
+}
+
+.gi-edit-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gi-edit-name-input {
+  width: 96px;
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: calc(12px*var(--app-text-scale,1));
+}
+
+.gi-edit-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gi-edit-advanced > summary {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  color: var(--c-icon);
+  font-size: calc(12px*var(--app-text-scale,1));
+  cursor: pointer;
+  user-select: none;
+}
+
+.gi-edit-advanced[open] > summary {
+  margin-bottom: 6px;
+}
+
+.gi-edit-advanced > .gi-edit-field + .gi-edit-field {
+  margin-top: 8px;
+}
+
 @keyframes chat-generated-image-spin {
   to { transform: rotate(360deg); }
 }
@@ -5131,6 +5279,105 @@
   flex-shrink: 0;
 }
 
+.call-text-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.call-text-input-row .call-text-input-shell {
+  flex: 1;
+  width: auto;
+}
+
+.call-regenerate-btn {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(20, 20, 24, 0.34);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.call-regenerate-btn:disabled {
+  opacity: 0.36;
+  cursor: default;
+}
+
+/* ── 左上角返回键（缩小通话为悬浮窗） ── */
+.call-back-btn {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: 14px;
+  z-index: 20;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.call-back-btn:active {
+  background: rgba(0, 0, 0, 0.42);
+}
+
+/* ── 缩小后的悬浮通话窗口（左侧，仅背景+名字） ── */
+.call-mini-window {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 90;
+  width: 84px;
+  height: 112px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 14px;
+  overflow: hidden;
+  background-color: #1a1a2e;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-end;
+  cursor: pointer;
+}
+.call-mini-window-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.68), rgba(0, 0, 0, 0) 55%);
+}
+.call-mini-window-name {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  padding: 6px 6px;
+  color: #fff;
+  font-size: calc(11.7px * var(--app-text-scale, 1));
+  font-weight: 600;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .call-keyboard-shift {
   transform: translateY(calc(var(--call-keyboard-offset, 0px) * -1));
   transition: transform 180ms ease;
@@ -6164,15 +6411,21 @@
 
 .incoming-call-bar {
   position: absolute;
-  top: 54px;
-  left: 8px;
-  right: 8px;
+  top: var(--notif-top, 54px);
+  left: var(--notif-left, 8px);
+  right: var(--notif-right, 8px);
+  width: var(--notif-width, auto);
+  margin: var(--notif-margin, 0);
   z-index: 200;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 16px;
-  border-radius: 16px;
+  flex-direction: var(--notif-layout, row);
+  align-items: var(--notif-align, center);
+  justify-content: var(--notif-justify, space-between);
+  gap: var(--notif-gap, 10px);
+  min-height: var(--notif-min-height, 0px);
+  padding: var(--notif-padding, 16px);
+  border-radius: var(--notif-radius, 16px);
+  text-align: var(--notif-text-align, left);
   background: rgba(40, 40, 40, 0.92);
   backdrop-filter: blur(var(--ui-blur));
   -webkit-backdrop-filter: blur(var(--ui-blur));
@@ -6183,16 +6436,17 @@
 
 .incoming-call-bar-info {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: var(--notif-info-layout, row);
+  align-items: var(--notif-info-align, center);
+  gap: var(--notif-info-gap, 10px);
   min-width: 0;
   flex: 1;
 }
 
 .incoming-call-bar-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  width: var(--notif-avatar-w, 44px);
+  height: var(--notif-avatar-h, var(--notif-avatar-w, 44px));
+  border-radius: var(--notif-avatar-radius, 50%);
   flex-shrink: 0;
   object-fit: cover;
 }
@@ -6226,6 +6480,8 @@
   display: flex;
   gap: 10px;
   flex-shrink: 0;
+  order: var(--notif-action-order, 0);
+  align-self: var(--notif-action-align, auto);
 }
 
 .incoming-call-bar-btn {
@@ -6251,20 +6507,26 @@
   color: #fff;
 }
 
+/* T8 版式变量：换的是布局不只是配色。
+   --notif-layout: row / row-reverse / column（column 时把头像变成大图，就是拍立得样式）
+   其余变量见 lib/theme-types.ts 顶部的契约清单。 */
 .chat-message-notice-bar {
   position: absolute;
-  top: 54px;
-  left: 10px;
-  right: 10px;
+  top: var(--notif-top, 54px);
+  left: var(--notif-left, 10px);
+  right: var(--notif-right, 10px);
+  width: var(--notif-width, auto);
+  margin: var(--notif-margin, 0);
   z-index: 190;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 66px;
-  padding: 11px 12px;
+  flex-direction: var(--notif-layout, row);
+  align-items: var(--notif-align, center);
+  justify-content: var(--notif-justify, space-between);
+  gap: var(--notif-gap, 12px);
+  min-height: var(--notif-min-height, 66px);
+  padding: var(--notif-padding, 11px 12px);
   border: 0;
-  border-radius: 18px;
+  border-radius: var(--notif-radius, 18px);
   background: color-mix(in srgb, var(--c-surface) 88%, white 12%);
   color: var(--c-text);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.2);
@@ -6272,7 +6534,7 @@
   -webkit-backdrop-filter: blur(var(--ui-blur));
   animation: incoming-call-slide-in 0.3s ease-out;
   cursor: pointer;
-  text-align: left;
+  text-align: var(--notif-text-align, left);
 }
 
 .chat-message-notice-bar:active {
@@ -6281,16 +6543,17 @@
 
 .chat-message-notice-info {
   display: flex;
-  align-items: center;
+  flex-direction: var(--notif-info-layout, row);
+  align-items: var(--notif-info-align, center);
   min-width: 0;
   flex: 1;
-  gap: 10px;
+  gap: var(--notif-info-gap, 10px);
 }
 
 .chat-message-notice-avatar {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
+  width: var(--notif-avatar-w, 42px);
+  height: var(--notif-avatar-h, var(--notif-avatar-w, 42px));
+  border-radius: var(--notif-avatar-radius, 50%);
   flex-shrink: 0;
   object-fit: cover;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
@@ -6335,6 +6598,8 @@
 
 .chat-message-notice-action {
   flex-shrink: 0;
+  order: var(--notif-action-order, 0);
+  align-self: var(--notif-action-align, auto);
   border-radius: 999px;
   background: color-mix(in srgb, var(--c-primary) 14%, transparent);
   color: var(--c-primary);
@@ -6363,10 +6628,12 @@
    .chat-msg-wrapper[data-consecutive] > .flex-col.items-center.shrink-0 { opacity: 0; pointer-events: none; }
 */
 
-/* ── In-call volume control (top-right, self-positioned, glass) ── */
+/* ── In-call volume control (top-left, self-positioned, glass) ──
+   往下让出一截给左上角的缩小/返回键（.call-back-btn 占了同样的左上角位），
+   避免两者在通话界面里重叠。 */
 .call-volume {
   position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  top: calc(max(14px, env(safe-area-inset-top, 0px)) + 46px);
   left: 12px;
   z-index: 40;
   display: flex;
@@ -7166,4 +7433,381 @@
   left: auto;
   right: 100%;
   margin: 0 6px 0 0;
+}
+
+/* 工具调用折叠：贴着系统消息的气泡语言，收起时是一个胶囊 */
+.chat-tool-fold {
+  margin: 4px auto;
+  width: 100%;
+  text-align: center;
+}
+.chat-tool-fold > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 16px;
+  background: rgba(0,0,0,0.05);
+  color: var(--c-icon);
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  line-height: 1.5;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.chat-tool-fold > summary::-webkit-details-marker { display: none; }
+.chat-tool-fold > summary::after {
+  content: "›";
+  font-size: calc(13px*var(--app-text-scale,1));
+  line-height: 1;
+  transition: transform 0.16s ease;
+}
+.chat-tool-fold[open] > summary::after { transform: rotate(90deg); }
+.chat-tool-fold-count { opacity: 0.7; }
+.chat-tool-fold-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--c-success);
+  flex: none;
+}
+.chat-tool-fold-dot.is-running { background: var(--c-warning); animation: chat-tool-fold-blink 1s ease-in-out infinite; }
+.chat-tool-fold-dot.is-failed { background: var(--c-danger); }
+@keyframes chat-tool-fold-blink { 50% { opacity: 0.3; } }
+.chat-tool-fold-body {
+  text-align: left;
+  width: fit-content;
+  max-width: 88%;
+  margin: 6px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.04);
+}
+.chat-tool-fold-item {
+  color: var(--c-icon);
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.chat-tool-fold-body > div + div { border-top: 1px solid rgba(0,0,0,0.05); padding-top: 4px; }
+
+/* ── 重新生成：附说明弹窗 / 选一版 ── */
+.chat-reroll-dialog,
+.chat-reply-version-dialog {
+  width: 86%;
+  max-width: 340px;
+  align-items: stretch;
+  max-height: min(78vh, 600px);
+}
+
+/* 宿主 .modal-dialog .modal-body 默认居中，这里要压过它 */
+.modal-dialog.chat-reroll-dialog .modal-body,
+.modal-dialog.chat-reply-version-dialog .modal-body {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.chat-reroll-hint {
+  margin-bottom: 10px;
+  font-size: calc(11px*var(--app-text-scale,1));
+  line-height: 1.5;
+  color: var(--c-icon);
+}
+
+.chat-reroll-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-reroll-chips .ui-chip {
+  padding: 4px 10px;
+}
+
+.chat-reroll-chips .ui-chip.chat-reroll-mine {
+  background: color-mix(in srgb, var(--c-icon-active) 10%, transparent);
+  color: var(--c-icon-active);
+}
+
+.chat-reroll-mine-remove {
+  margin-left: 2px;
+  opacity: 0.6;
+}
+
+.chat-reroll-textarea {
+  min-height: 64px;
+  max-height: 30vh;
+  margin-top: 10px;
+  resize: vertical;
+  font-size: calc(12.5px*var(--app-text-scale,1));
+}
+
+.chat-reroll-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0 6px;
+  font-size: calc(11px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+.chat-reroll-label-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-reroll-label button {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: inherit;
+  color: var(--c-icon-active);
+  cursor: pointer;
+}
+
+.chat-reroll-label button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-reroll-empty {
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+.chat-reroll-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  margin-top: 12px;
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.chat-reroll-check input {
+  margin: 0;
+}
+
+.chat-reroll-check span {
+  justify-self: start;
+}
+
+.chat-reroll-check small {
+  grid-column: 2;
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+.chat-reply-version-dialog .modal-title {
+  font-size: calc(14px*var(--app-text-scale,1));
+}
+
+.chat-reply-version-dialog .modal-footer .ui-btn {
+  font-size: calc(12px*var(--app-text-scale,1));
+}
+
+.chat-reply-version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-reply-version-card {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1.5px solid transparent;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c-icon) 8%, transparent);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-reply-version-card[data-current] {
+  border-color: var(--c-icon-active);
+  background: color-mix(in srgb, var(--c-icon-active) 6%, transparent);
+  cursor: default;
+}
+
+.chat-reply-version-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  font-size: calc(10px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+.chat-reply-version-meta b {
+  font-weight: 500;
+  color: var(--c-icon-active);
+}
+
+.chat-reply-version-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-line;
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  line-height: 1.5;
+}
+
+.chat-reply-version-note {
+  margin-top: 10px;
+  font-size: calc(10px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+/* T8：横幅里三块的顺序和对齐也交给变量，column 布局下文字块要能占满宽度 */
+.chat-message-notice-text {
+  text-align: inherit;
+  width: var(--notif-text-width, auto);
+}
+
+.chat-message-notice-action {
+  order: var(--notif-action-order, 0);
+  align-self: var(--notif-action-align, auto);
+}
+
+/* 朋友圈多图：两张四张走两列，其余九宫格 */
+.feed-post-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+}
+.feed-post-photo-grid[data-count="2"],
+.feed-post-photo-grid[data-count="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.feed-post-photo-grid .chat-media-file-wrap,
+.feed-post-photo-grid .chat-media-file-card {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.feed-post-photo-grid .chat-media-file-card {
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 4px;
+}
+.feed-post-photo-grid .chat-media-file-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 发照片弹窗：多选后的缩略图 */
+.photo-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+.photo-modal-thumb {
+  position: relative;
+  aspect-ratio: 1 / 1;
+}
+.photo-modal-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.photo-modal-thumb-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 2;
+}
+
+/* 朋友圈发帖：图还在压缩时的占位 */
+.compose-photo-block-preview[data-loading] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-input);
+  border-radius: 6px;
+}
+.compose-photo-loading {
+  font-size: calc(12px*var(--app-text-scale,1));
+  color: var(--c-icon);
+}
+
+/* ── 插件坑位：聊天之外 ── */
+.plugin-float-window {
+  position: absolute;
+  z-index: 60;
+  width: 216px;
+  max-width: calc(100% - 24px);
+  border-radius: 16px;
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.plugin-float-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: grab;
+  touch-action: none;
+  background: var(--c-card-2, rgba(127, 127, 127, 0.08));
+}
+
+.plugin-float-title {
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  font-weight: 600;
+  color: var(--c-text-sub);
+  letter-spacing: 0.04em;
+}
+
+.plugin-float-toggle {
+  border: none;
+  background: transparent;
+  color: var(--c-icon);
+  font-size: calc(12px*var(--app-text-scale,1));
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.plugin-float-body {
+  padding: 10px;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.plugin-float-window[data-minimized] .plugin-float-body {
+  display: none;
+}
+
+.chat-plugin-app-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.chat-plugin-app-panel > * {
+  pointer-events: auto;
 }

@@ -2,6 +2,7 @@
 import type { Character } from './character-types';
 import type { DIYWidgetTemplate, WidgetInstance, WidgetSize } from './widget-types';
 import { WIDGET_CATALOG, WIDGET_SIZE_CELLS, GRID_ROWS, GRID_COLS } from './widget-types';
+import { DIY_FIELD_TYPES, MAX_DIY_FIELDS, isValidFieldKey } from './widget-fields';
 import type { DesktopIconLayout, DesktopFolderMap } from './desktop-layout-storage';
 import type { DesktopIconId } from './desktop-config';
 import type { ThemeProfile } from './theme-types';
@@ -134,6 +135,19 @@ function checkTemplate(t: DIYWidgetTemplate) {
   if (t.mode === 'code') { if (!text(t.htmlString, 'htmlString').trim()) throw Error('HTML 不能为空'); }
   else if (t.mode === 'image') { requiredText(t.bgAssetId, '图片素材 ID'); }
   else throw Error('组件模式不合法');
+  if (t.fields !== undefined) {
+    if (!Array.isArray(t.fields) || t.fields.length > MAX_DIY_FIELDS) throw Error(`用户可填字段最多 ${MAX_DIY_FIELDS} 项`);
+    const keys = new Set<string>();
+    for (const field of t.fields) {
+      const key = requiredText(field.key, '字段 key', 40);
+      if (!isValidFieldKey(key)) throw Error('字段 key 只能用字母数字下划线，且不能数字开头');
+      if (keys.has(key)) throw Error(`字段 key 重复：${key}`);
+      keys.add(key);
+      requiredText(field.label, '字段名称', 40);
+      if (!DIY_FIELD_TYPES.includes(field.type)) throw Error('字段类型不合法');
+      if (field.type === 'select' && (!Array.isArray(field.options) || field.options.length === 0)) throw Error('下拉字段至少要有一个选项');
+    }
+  }
   if (t.slots !== undefined) {
     if (!Array.isArray(t.slots)) throw Error('slots 需要数组');
     for (const slot of t.slots) { requiredText(slot.id, '插槽 ID'); for (const key of ['top', 'bottom', 'left', 'right'] as const) if (typeof slot[key] !== 'number' || !Number.isFinite(slot[key]) || slot[key] < 0 || slot[key] > 100) throw Error('插槽边距需要 0–100 的数字'); }
@@ -141,7 +155,7 @@ function checkTemplate(t: DIYWidgetTemplate) {
 }
 function applyTemplatePatch(template: DIYWidgetTemplate, raw: unknown) {
   const patch = object(raw);
-  checkKeys(patch, ['name', 'size', 'htmlString', 'htmlEdits', 'bgAssetId', 'slots']);
+  checkKeys(patch, ['name', 'size', 'htmlString', 'htmlEdits', 'bgAssetId', 'slots', 'fields']);
   if (patch.htmlEdits !== undefined) {
     if (patch.htmlString !== undefined) throw Error('htmlString 与 htmlEdits 只能使用一个');
     if (!Array.isArray(patch.htmlEdits) || patch.htmlEdits.length > 50) throw Error('htmlEdits 需要最多 50 项的数组');

@@ -403,12 +403,14 @@ async function runMomentImageMaintenance(result: MediaMaintenanceResult, nowMs: 
   for (const post of posts) {
     if (!post.photoUrl) continue;
     if (isOlderThan(post.createdAt, CLEAN_AFTER_MS, nowMs)) {
-      const updated = updateMomentPost(post.id, { photoUrl: undefined, photoCleanedAt: nowIso });
+      const all = post.photoUrls?.length ? post.photoUrls : [post.photoUrl];
+      const updated = updateMomentPost(post.id, { photoUrl: undefined, photoUrls: undefined, photoCleanedAt: nowIso });
       if (updated) await momentsDb.posts.put(updated);
-      result.freedBytes += estimateValueBytes(post.photoUrl);
+      for (const url of all) result.freedBytes += estimateValueBytes(url);
       result.momentImagesCleaned += 1;
       continue;
     }
+    // 压缩仍只处理第一张：多图是 asset:// 引用，本来就已经压过一轮。
     if (post.photoCompressedAt || !isOlderThan(post.createdAt, COMPRESS_AFTER_MS, nowMs)) continue;
     const assetId = themeAssetIdFromUrl(post.photoUrl);
     if (assetId) {
@@ -449,22 +451,32 @@ async function runXiaohongshuImageMaintenance(result: MediaMaintenanceResult, no
   let changed = false;
 
   for (const note of state.notes) {
-    if (!note.imageAssetId) continue;
+    // 多图帖子把全部图片一起清理/压缩；旧单图帖子只有 imageAssetId
+    const assetIds = note.imageAssetIds?.length
+      ? note.imageAssetIds
+      : (note.imageAssetId ? [note.imageAssetId] : []);
+    if (assetIds.length === 0) continue;
     if (isOlderThan(note.createdAt, CLEAN_AFTER_MS, nowMs)) {
       state = updateXiaohongshuStateNotes(state, item =>
-        item.id === note.id ? { ...item, imageAssetId: undefined, imageCleanedAt: nowIso, updatedAt: nowIso } : item
+        item.id === note.id
+          ? { ...item, imageAssetId: undefined, imageAssetIds: undefined, imageCleanedAt: nowIso, updatedAt: nowIso }
+          : item
       );
       result.xiaohongshuImagesCleaned += 1;
       changed = true;
       continue;
     }
     if (note.imageCompressedAt || !isOlderThan(note.createdAt, COMPRESS_AFTER_MS, nowMs)) continue;
-    const compressed = await compressThemeAssetById(note.imageAssetId).catch(() => ({ changed: false, freedBytes: 0 }));
+    let anyCompressed = false;
+    for (const assetId of assetIds) {
+      const compressed = await compressThemeAssetById(assetId).catch(() => ({ changed: false, freedBytes: 0 }));
+      result.freedBytes += compressed.freedBytes;
+      if (compressed.changed) anyCompressed = true;
+    }
     state = updateXiaohongshuStateNotes(state, item =>
       item.id === note.id ? { ...item, imageCompressedAt: nowIso, updatedAt: nowIso } : item
     );
-    result.freedBytes += compressed.freedBytes;
-    if (compressed.changed) result.xiaohongshuImagesCompressed += 1;
+    if (anyCompressed) result.xiaohongshuImagesCompressed += 1;
     changed = true;
   }
 

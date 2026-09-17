@@ -168,6 +168,8 @@ export type ApiConfig = {
     /** 提示缓存：Anthropic 打 cache_control 断点，官方 OpenAI 带 prompt_cache_key。
      *  按配置开关，缺省关闭——缓存写入按 1.25 倍计费，短聊单发的场景反而更贵。 */
     promptCache?: boolean;
+    /** 推理深度；缺省＝按服务商默认，请求里不带任何推理参数。按模型名换写法见 lib/reasoning-effort.ts */
+    reasoningEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
 };
 
 // --- VoiceApiConfig (migrated from voice-settings.tsx) ---
@@ -198,6 +200,18 @@ export type VoiceApiConfig = {
 export type ImageGenerationProvider = "openai" | "novelai";
 
 export type ImageGenerationRequestMode = "server" | "direct";
+
+export type OpenAiImagePreset = {
+    id: string;
+    name: string;
+    requestMode: ImageGenerationRequestMode;
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+    size: string;
+    quality: string;
+    extraPrompt: string;
+};
 
 export type ImageHostingProvider = "none" | "imgbb";
 
@@ -236,19 +250,23 @@ export type ImageGenerationSettings = {
     enabled: boolean;
     provider?: ImageGenerationProvider;
     requestMode: ImageGenerationRequestMode;
-    // OpenAI 模式配置
+    // OpenAI 模式配置（旧字段保留用于兼容迁移）
     apiKey: string;
     baseUrl: string;
     model: string;
     size: string;
     quality: string;
     extraPrompt: string;
+    openaiPresets?: OpenAiImagePreset[];
+    activeOpenAiPresetId?: string;
     // NovelAI 模式配置
     novelai?: NovelAiSettings;
     characterReferences: Record<string, {
         assetId: string;
         updatedAt: number;
     }>;
+    /** 角色出镜（使用参考图）时把从人设提取的长相写进生图提示词；缺省为开 */
+    appearanceOn?: boolean;
     imageHosting: ImageHostingSettings;
 };
 

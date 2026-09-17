@@ -1,13 +1,22 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { QA_IMAGE_CONTEXT_WEIGHT } from "@/lib/qa-context-budget";
+import { loadQaMcpAccess, saveQaMcpAccess } from "@/lib/qa-mcp-access";
+import { listQaSelectableTools, loadQaToolAccess, saveQaToolAccess } from "@/lib/qa-tool-access";
+import { loadMcpServers } from "@/lib/tool-storage";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 // CommonMark 的 flanking 规则会让 **「加粗」** 这类紧贴全角标点的写法解析失败
 // （** 后跟标点时要求前面是空格/标点，中文里前面通常是汉字），中文消息大量中招。
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkBreaks from "remark-breaks";
-import { AppWindow, ArrowUp, BrushCleaning, Check, ChevronLeft, ChevronRight, Copy, Drama, FileCode2, FileText, Gamepad2, Github, Image as ImageIcon, Loader2, Menu, MoreVertical, Paperclip, Pencil, Pin, PinOff, Play, Plus, Square, Trash2, Wrench, X } from "lucide-react";
+import { AppWindow, ArrowUp, BrushCleaning, Check, ChevronLeft, ChevronRight, Copy, Drama, FileCode2, FileText, Gamepad2, Github, Image as ImageIcon, Loader2, Menu, MoreVertical, Paperclip, Pencil, Pin, PinOff, Play, Plus, Square, Trash2, Wrench, X,
+  RefreshCw,
+  ChevronDown,
+} from "lucide-react";
+import { highlightQaCode } from "@/lib/qa-highlight";
+import { computeQaLineDiff, type QaLineDiff } from "@/lib/qa-diff";
 import { getQaApiLogs, clearQaApiLogs, type DebugInfo } from "@/lib/api-log-store";
 import { QaFileCard } from "@/components/qa-file-card";
 import { parseQaFileMarker } from "@/lib/qa-computer-tools";
@@ -39,6 +48,7 @@ import {
   QA_TEXT_ATTACHMENTS_MAX_CHARS,
   setQaContextBudgetChars,
   retryQaMessage,
+  regenerateQaMessage,
   renameQaSession,
   revertQaAppliedCommit,
   sendQaMessage,
@@ -67,6 +77,11 @@ import {
   getQaPromptCache,
   setQaPromptCache,
   setQaMaxOutputTokens,
+  getQaTemperature,
+  setQaTemperature,
+  QA_DEFAULT_TEMPERATURE,
+  QA_TEMPERATURE_MIN,
+  QA_TEMPERATURE_MAX,
   QA_DEFAULT_MAX_OUTPUT_TOKENS,
   QA_MAX_OUTPUT_TOKENS_MIN,
   QA_MAX_OUTPUT_TOKENS_MAX,
@@ -109,6 +124,7 @@ function QaCodeBlock({ className, children }: { className?: string; children?: R
   const [copied, setCopied] = useState(false);
   const language = /language-(\w+)/.exec(className || "")?.[1] ?? "";
   const code = String(children ?? "").replace(/\n$/, "");
+  const html = useMemo(() => highlightQaCode(code, language), [code, language]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard
@@ -129,7 +145,7 @@ function QaCodeBlock({ className, children }: { className?: string; children?: R
         </button>
       </div>
       <pre>
-        <code>{code}</code>
+        {html != null ? <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} /> : <code>{code}</code>}
       </pre>
     </div>
   );
@@ -156,6 +172,55 @@ const QA_MARKDOWN_COMPONENTS = {
 } as any;
 
 // ── 提交提案卡片 ─────────────────────────────────────
+
+/** 单个文件行：点开看逐行 diff。原文缺省（提案时没读到）就只能整文件展示新内容。 */
+function QaCommitFileRow({ path, content, original }: { path: string; content: string; original?: string | null }) {
+  const [open, setOpen] = useState(false);
+  const diff: QaLineDiff | null = useMemo(
+    () => (open ? computeQaLineDiff(original ?? "", content) : null),
+    [open, original, content],
+  );
+  const isNew = original === null;
+  const unknown = original === undefined;
+  const stat = diff && !diff.tooLarge ? (
+    <span className="qa-commit-stat">
+      {diff.added > 0 && <span className="is-add">+{diff.added}</span>}
+      {diff.removed > 0 && <span className="is-del">−{diff.removed}</span>}
+    </span>
+  ) : null;
+  return (
+    <li className={`qa-commit-file${open ? " is-open" : ""}`}>
+      <button type="button" className="qa-commit-file-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <ChevronDown size={12} className="qa-commit-file-chevron" />
+        <span className="qa-commit-file-path">{path}</span>
+        {isNew && <span className="qa-commit-file-tag">新文件</span>}
+        {unknown && <span className="qa-commit-file-tag">原文未读取</span>}
+        {stat}
+      </button>
+      {open && diff && (
+        diff.tooLarge ? (
+          <div className="qa-commit-diff-note">文件太大（超过 4000 行），不逐行比对：整文件替换，新内容 {content.split("\n").length} 行。</div>
+        ) : diff.hunks.length === 0 ? (
+          <div className="qa-commit-diff-note">内容与仓库原文完全一致，没有实际改动。</div>
+        ) : (
+          <pre className="qa-commit-diff">
+            {diff.hunks.map((hunk, index) => (
+              <Fragment key={index}>
+                <div className="qa-diff-line is-hunk">@@ -{hunk.oldStart} +{hunk.newStart} @@</div>
+                {hunk.lines.map((line, lineIndex) => (
+                  <div key={lineIndex} className={`qa-diff-line is-${line.kind}`}>
+                    <span className="qa-diff-sign">{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}</span>
+                    {line.text || " "}
+                  </div>
+                ))}
+              </Fragment>
+            ))}
+          </pre>
+        )
+      )}
+    </li>
+  );
+}
 
 function QaCommitCard({ msg }: { msg: QaMsg }) {
   const pending = msg.pendingCommit;
@@ -186,7 +251,7 @@ function QaCommitCard({ msg }: { msg: QaMsg }) {
       <div className="qa-commit-msg">{proposal.message}</div>
       <ul className="qa-commit-files">
         {files.map((f) => (
-          <li key={f.path}>{f.path}</li>
+          <QaCommitFileRow key={f.path} path={f.path} content={f.content} original={f.original} />
         ))}
         {(proposal.deletes ?? []).map((path) => (
           <li key={`del-${path}`} className="qa-commit-file-delete">− {path}（删除）</li>
@@ -296,6 +361,7 @@ const QaMessageItem = memo(function QaMessageItem({
   onViewImage,
   onCopy,
   onEdit,
+  onRegenerate,
 }: {
   msg: QaMsg;
   isStreaming: boolean;
@@ -303,6 +369,8 @@ const QaMessageItem = memo(function QaMessageItem({
   onViewImage: (url: string) => void;
   onCopy: (content: string) => void;
   onEdit: (msg: QaMsg) => void;
+  /** 只有会话最后一条回复才给：重新生成会删掉这条回复重来 */
+  onRegenerate?: (id: string) => void;
 }) {
   const thinkingOnly = isStreaming && !msg.content && (!msg.tools || msg.tools.length === 0);
   // 消息操作（复制原始内容 / 编辑原始内容——前端渲染会吞掉一些特殊标签，
@@ -321,6 +389,11 @@ const QaMessageItem = memo(function QaMessageItem({
           <button type="button" className="qa-msg-action" aria-label="修改原始内容" title="修改" onClick={() => onEdit(msg)}>
             <Pencil size={14} strokeWidth={2} />
           </button>
+          {msg.role === "assistant" && onRegenerate && (
+            <button type="button" className="qa-msg-action" aria-label="重新生成" title="重新生成" onClick={() => onRegenerate(msg.id)}>
+              <RefreshCw size={14} strokeWidth={2} />
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -559,11 +632,19 @@ function QaSessionDrawer({
 // ── 工坊配置面板 ─────────────────────────────────────
 
 function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?: (msg: string) => void }) {
+  const [mcpServers] = useState(() => loadMcpServers());
+  const [mcpAccess, setMcpAccess] = useState(() => loadQaMcpAccess());
+  const [toolboxTools] = useState(() => listQaSelectableTools());
+  const [toolAccess, setToolAccess] = useState(() => loadQaToolAccess());
   const [budget, setBudget] = useState(() => String(getQaContextBudgetChars()));
   const [pageChars, setPageChars] = useState(() => String(getQaPageChars()));
   const [maxRounds, setMaxRounds] = useState(() => String(getQaMaxRounds()));
   const [maxOutTokens, setMaxOutTokens] = useState(() => {
     const v = getQaMaxOutputTokens();
+    return v == null ? "" : String(v);
+  });
+  const [temperature, setTemperature] = useState(() => {
+    const v = getQaTemperature();
     return v == null ? "" : String(v);
   });
   const [promptCache, setPromptCache] = useState(() => getQaPromptCache());
@@ -592,12 +673,21 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
       onNotice?.(`单次最大输出 token 需留空或为 ${QA_MAX_OUTPUT_TOKENS_MIN.toLocaleString()} - ${QA_MAX_OUTPUT_TOKENS_MAX.toLocaleString()} 之间的数字。`);
       return;
     }
+    const trimmedTemp = temperature.trim();
+    const parsedTemp = trimmedTemp ? Number(trimmedTemp) : null;
+    if (parsedTemp != null && (!Number.isFinite(parsedTemp) || parsedTemp < QA_TEMPERATURE_MIN || parsedTemp > QA_TEMPERATURE_MAX)) {
+      onNotice?.(`温度需留空或为 ${QA_TEMPERATURE_MIN} - ${QA_TEMPERATURE_MAX} 之间的数字。`);
+      return;
+    }
     setQaContextBudgetChars(parsed);
     setQaPageChars(parsedPage);
     setQaMaxRounds(parsedRounds);
     // 留空 = 显式不传 max_tokens（0 哨兵），与"没设置用默认值"区分开
     setQaMaxOutputTokens(trimmedTokens ? parsedTokens : 0);
+    setQaTemperature(parsedTemp ?? "omit");
     setQaPromptCache(promptCache);
+    saveQaMcpAccess(mcpAccess);
+    saveQaToolAccess(toolAccess);
     onNotice?.("已保存工坊配置。");
     onClose();
   };
@@ -607,21 +697,57 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
     setQaPageChars(null);
     setQaMaxRounds(null);
     setQaMaxOutputTokens(null);
+    setQaTemperature(null);
     setQaPromptCache(null);
+    saveQaMcpAccess({});
+    setMcpAccess({});
+    saveQaToolAccess({});
+    setToolAccess({});
     setPromptCache(true);
     setBudget(String(QA_DEFAULT_CONTEXT_BUDGET_CHARS));
     setPageChars(String(QA_DEFAULT_PAGE_CHARS));
     setMaxRounds(String(QA_DEFAULT_MAX_ROUNDS));
     setMaxOutTokens(String(QA_DEFAULT_MAX_OUTPUT_TOKENS));
+    setTemperature(String(QA_DEFAULT_TEMPERATURE));
     onNotice?.("已恢复默认配置。");
   };
 
   return (
     <div className="qa-devnotice-backdrop" onClick={onClose}>
-      <div className="qa-devnotice" role="dialog" aria-label="工坊配置" onClick={(e) => e.stopPropagation()}>
+      <div className="qa-devnotice" style={{ maxHeight: "85dvh", overflowY: "auto" }} role="dialog" aria-label="工坊配置" onClick={(e) => e.stopPropagation()}>
         <div className="qa-devnotice-title">工坊配置</div>
+        <div className="qa-settings-hint">允许工坊调用的 MCP（沿用聊天工具箱配置）</div>
+        <div style={{ maxHeight: "24vh", overflowY: "auto" }}>
+          {mcpServers.length ? mcpServers.map(server => (
+            <label key={server.id} className="qa-settings-toggle">
+              <span>{server.name}{!server.enabled ? "（工具箱已关闭）" : ""}</span>
+              <input type="checkbox" checked={mcpAccess[server.id] === server.url} onChange={e => setMcpAccess(previous => {
+                const next = { ...previous }; if (e.target.checked) next[server.id] = server.url; else delete next[server.id]; return next;
+              })} />
+            </label>
+          )) : <div className="qa-settings-hint">先让工坊配置聊天工具箱，再到这里选择允许调用的 MCP。</div>}
+        </div>
+        <div className="qa-settings-hint">默认不选。工具箱关闭、取消勾选或服务器地址变化后，工坊不能继续调用；更换地址需重新选择。</div>
+
+        <div className="qa-settings-hint">允许工坊调用的工具箱工具（REST / 组合 / 自定义 APP 工具）</div>
+        <div style={{ maxHeight: "24vh", overflowY: "auto" }}>
+          {toolboxTools.length ? toolboxTools.map(tool => (
+            <label key={tool.key} className="qa-settings-toggle">
+              <span>
+                {tool.name}
+                <span className="qa-settings-tag">{tool.kind === "rest" ? "REST" : tool.kind === "composite" ? "组合" : tool.appName ?? "APP"}</span>
+                {!tool.enabled ? "（工具箱已关闭）" : ""}
+              </span>
+              <input type="checkbox" checked={toolAccess[tool.key] === tool.fingerprint} onChange={e => setToolAccess(previous => {
+                const next = { ...previous }; if (e.target.checked) next[tool.key] = tool.fingerprint; else delete next[tool.key]; return next;
+              })} />
+            </label>
+          )) : <div className="qa-settings-hint">聊天工具箱里还没有 REST / 组合工具，也没有装带共享工具的自定义 APP。</div>}
+        </div>
+        <div className="qa-settings-hint">默认不选。REST 换了地址、组合工具被修改、APP 升级后授权自动失效，需重新勾选。</div>
+
         <label className="qa-settings-field">
-          <span>上下文预算（字符）</span>
+          <span>上下文预算（等效字符）</span>
           <input
             type="number"
             inputMode="numeric"
@@ -635,7 +761,7 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
         <div className="qa-settings-hint">
           上下文满 100% 时自动压缩成摘要并重新累计。中文约 1 字符 ≈ 1 token；默认 {QA_DEFAULT_CONTEXT_BUDGET_CHARS.toLocaleString()}，小上下文（32k）模型建议 30000–50000。
         </div>
-        <div className="qa-settings-hint">当前会话已用 {usedChars.toLocaleString()} 字符（约 {pct}%）。</div>
+        <div className="qa-settings-hint">当前会话估算 {usedChars.toLocaleString()} 等效字符（约 {pct}%）。图片按每张 {QA_IMAGE_CONTEXT_WEIGHT.toLocaleString()} 等效字符预估，不按 Base64 长度计数，也不代表实际计费 tokens。</div>
         <label className="qa-settings-field">
           <span>单页读取字符数</span>
           <input
@@ -681,6 +807,22 @@ function QaSettingsSheet({ onClose, onNotice }: { onClose: () => void; onNotice?
         </label>
         <div className="qa-settings-hint">
           输出长度护栏：每次请求带 max_tokens，小坊会按该预算分段写大文件，写超被安全截断后自动续接，不再整轮报废。默认 {QA_DEFAULT_MAX_OUTPUT_TOKENS.toLocaleString()}；留空 = 不传该参数（部分模型/中转不支持 max_tokens 时请留空）。
+        </div>
+        <label className="qa-settings-field">
+          <span>采样温度</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={QA_TEMPERATURE_MIN}
+            max={QA_TEMPERATURE_MAX}
+            step={0.1}
+            placeholder="留空 = 不传"
+            value={temperature}
+            onChange={(e) => setTemperature(e.target.value)}
+          />
+        </label>
+        <div className="qa-settings-hint">
+          工坊不走聊天预设，温度只在这里调。写代码、排障建议 0.5 - 0.8，越低越稳。默认 {QA_DEFAULT_TEMPERATURE}；留空 = 不传该参数（部分推理模型/中转不接受 temperature 时请留空）。
         </div>
         <label className="qa-settings-toggle">
           <span>提示缓存</span>
@@ -937,6 +1079,14 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, []);
 
+  const isCoarsePointer = useCallback(() => {
+    try {
+      return window.matchMedia("(pointer: coarse)").matches;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     if ((!text && pendingImages.length === 0 && pendingFiles.length === 0) || snapshot.isGenerating || snapshot.isCompacting) return;
@@ -1006,6 +1156,16 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
     stickToBottomRef.current = true;
     void retryQaMessage(assistantMsgId);
   }, []);
+
+  const handleRegenerate = useCallback((assistantMsgId: string) => {
+    if (!snapshot.activeSessionId) return;
+    const result = regenerateQaMessage(snapshot.activeSessionId, assistantMsgId);
+    if (!result.ok) {
+      onNotice?.(result.reason);
+      return;
+    }
+    stickToBottomRef.current = true;
+  }, [snapshot.activeSessionId, onNotice]);
 
   const handleCopyMessage = useCallback((content: string) => {
     void navigator.clipboard?.writeText(content).then(
@@ -1154,8 +1314,8 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
           </div>
         ) : (
           <div className="qa-messages">
-            {messages.map((msg) => (
-              <QaMessageItem key={msg.id} msg={msg} isStreaming={msg.id === streamingMsgId} onRetry={handleRetry} onViewImage={setViewerImage} onCopy={handleCopyMessage} onEdit={handleEditMessage} />
+            {messages.map((msg, index) => (
+              <QaMessageItem key={msg.id} msg={msg} isStreaming={msg.id === streamingMsgId} onRetry={handleRetry} onViewImage={setViewerImage} onCopy={handleCopyMessage} onEdit={handleEditMessage} onRegenerate={index === messages.length - 1 && !snapshot.isGenerating ? handleRegenerate : undefined} />
             ))}
           </div>
         )}
@@ -1208,6 +1368,14 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
             onChange={(e) => {
               setInput(e.target.value);
               autoGrow();
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              const modifier = e.metaKey || e.ctrlKey;
+              // 触屏设备 Enter 保留换行（软键盘没有 Shift+Enter），桌面 Enter 直接发送
+              if (!modifier && (e.shiftKey || isCoarsePointer())) return;
+              e.preventDefault();
+              handleSend();
             }}
           />
           <div className="qa-composer-toolbar">

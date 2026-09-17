@@ -13,6 +13,7 @@
 | [微信云端助手](weixin-cloud-assistant.md) | 部署、停用、自更新与开发者自测 |
 | [成年审核部署](verify-setup.md) | 激活码申请与审核流程；原文含 Netlify 配置说明，本 VPS 的部署方式见仓库外 AGENTS.md |
 | [拾光核心记忆提示词](shiguang-core-memory-prompt.txt) | 可复制使用的核心记忆整理模板 |
+| [记忆系统方案](memory-refactor-plan.md) | 现状诊断、参考项目调研、修复 → 优化 → 重构 → 缓存的分阶段计划与进度 |
 
 ## 数据库脚本
 

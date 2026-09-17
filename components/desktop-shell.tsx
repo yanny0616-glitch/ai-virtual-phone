@@ -1,5 +1,6 @@
 "use client";
 
+import { ambientAttrs, useAmbientContext } from "@/lib/ui-context-attrs";
 import { Component, memo, useCallback, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type ReactNode } from "react";
 
 import { updateStatusBarTone } from "@/lib/bg-tone";
@@ -132,6 +133,9 @@ import {
 } from "@/lib/desktop-layout-storage";
 import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
+import { WidgetFieldForm } from "@/components/widgets/widget-field-form";
+import { ChatPluginFloat } from "@/components/chat-plugin-float";
+import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
 import { DebugPromptPanel } from "@/components/debug-prompt-panel";
 import { QuickActionFloat } from "@/components/quick-action-float";
 import { getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
@@ -610,6 +614,20 @@ function sanitizeDesktopFolders(
   }
   if (!changed) return { folders, layout, changed: false };
   return { folders: nextFolders, layout: trimEmptyTrailingPages(nextLayout, widgets), changed: true };
+}
+
+/** 横幅停多久：读 --notif-duration（外观 →「通知横幅」在调它），夹在 1.2–30s。 */
+function readNoticeDurationMs(el: HTMLElement | null): number {
+  const FALLBACK = 6000;
+  if (typeof window === "undefined") return FALLBACK;
+  const target = el ?? document.querySelector<HTMLElement>(".phone-shell");
+  if (!target) return FALLBACK;
+  const raw = window.getComputedStyle(target).getPropertyValue("--notif-duration").trim();
+  if (!raw) return FALLBACK;
+  const value = Number.parseFloat(raw);
+  if (!Number.isFinite(value)) return FALLBACK;
+  const ms = raw.endsWith("ms") ? value : value * 1000;
+  return Math.min(30000, Math.max(1200, ms));
 }
 
 function StatusClock() {
@@ -1116,6 +1134,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     isGroup?: boolean;
   } | null>(null);
   const chatMessageNoticeTimerRef = useRef<number | null>(null);
+  // T4：根容器的时辰 / 深浅色语境，主题 CSS 靠它写「入夜换配色」
+  const ambient = useAmbientContext();
   // Swipe-up-to-dismiss state for the chat message notice banner.
   const [noticeDragY, setNoticeDragY] = useState(0);
   const noticeDragRef = useRef({ startY: 0, dy: 0, dragging: false, far: false });
@@ -1189,11 +1209,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [showWidgetPicker, setShowWidgetPicker] = useState(false);
   const [diyTemplates, setDiyTemplates] = useState<DIYWidgetTemplate[]>([]);
 
+  // 编辑模式也要有模板：可填字段的 ✎ 按钮得知道这个 DIY 组件声明了哪些字段。
   useEffect(() => {
-    if (showWidgetPicker) {
+    if (showWidgetPicker || editMode) {
       setDiyTemplates(loadDIYTemplates());
     }
-  }, [showWidgetPicker]);
+  }, [showWidgetPicker, editMode]);
+
+  const [fieldFormWidgetId, setFieldFormWidgetId] = useState<string | null>(null);
 
   const mergedCatalog = useMemo(() => {
     const diyEntries = diyTemplates.map(t => ({
@@ -1820,6 +1843,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     let servicesStarted = false;
     let cleanupWeixinCloudRealtimeSync: (() => void) | null = null;
     let cleanupGuanianPresence: (() => void) | null = null;
+    let cleanupGuanianServer: (() => void) | null = null;
+    let cleanupWakeServer: (() => void) | null = null;
 
     void (async () => {
       try {
@@ -1866,11 +1891,22 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       // 现实桥离线联动：规则/快照同步器（规则变更、切后台时刷新服务端快照）
       void import("@/lib/push-bridge-sync").then(m => m.installBridgeServerSync()).catch(() => undefined);
       void import("@/lib/deferred-reply-cloud").then(m => m.installDeferredReplyCloudSync()).catch(() => undefined);
+      // 微信自动回复跟「离线执行」开关走：云函数或后端轮询
+      void import("@/lib/weixin-assistant-line").then(m => m.installWeixinAssistantLineFollower()).catch(() => undefined);
       // 定时唤醒/经期关怀兜底：切后台时刷新快照预约
       void import("@/lib/push-bailout-client").then(m => m.installScheduledBailoutRefresher()).catch(() => undefined);
       void import("@/lib/chat-mirror-client").then(m => m.installChatMirror()).catch(() => undefined);
       // 自定义 APP 冻在服务端的提示词模板：角色回复后记忆会变，自动重冻
       void import("@/lib/custom-app-host-api").then(m => m.installCustomAppTemplateRefresher()).catch(() => undefined);
+      // 挂念交给 VPS 后端时：从后端取状态注入聊天、写回日程、补发朋友圈，并把好感和作息寄过去
+      void import("@/lib/guanian-server-sync").then(m => {
+        if (cancelled) return;
+        cleanupGuanianServer = m.startGuanianServerSync();
+      }).catch(() => undefined);
+      void import("@/lib/wake-server-sync").then(m => {
+        if (cancelled) return;
+        cleanupWakeServer = m.startWakeServerSync();
+      }).catch(() => undefined);
       // 延后跑，别抢启动窗口的解码/IO。
       window.setTimeout(() => {
         void import("@/lib/notification-avatar-cache").then(m => m.syncNotificationAvatarCache()).catch(() => undefined);
@@ -1881,6 +1917,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       cancelled = true;
       cleanupWeixinCloudRealtimeSync?.();
       cleanupGuanianPresence?.();
+      cleanupGuanianServer?.();
+      cleanupWakeServer?.();
       if (servicesStarted) {
         stopFollowUpService();
         stopMomentsService();
@@ -2588,7 +2626,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     chatMessageNoticeTimerRef.current = window.setTimeout(() => {
       setChatMessageNotice(null);
       chatMessageNoticeTimerRef.current = null;
-    }, 6000);
+    }, readNoticeDurationMs(shellRef.current));
   }, []);
 
   const handleNoticePointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
@@ -2664,7 +2702,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       chatMessageNoticeTimerRef.current = window.setTimeout(() => {
         setChatMessageNotice(null);
         chatMessageNoticeTimerRef.current = null;
-      }, 6000);
+      }, readNoticeDurationMs(shellRef.current));
     };
 
     window.addEventListener(CHAT_MESSAGE_NOTICE_EVENT, handler);
@@ -4302,6 +4340,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               ref={shellRef}
               className={activeApp ? "phone-shell app-open-shell" : "phone-shell"}
               data-ui="phone-screen"
+              {...ambientAttrs(ambient)}
               data-active-app={activeApp || ""}
               data-app={activeApp || ""}
               data-shadows={Number(draftTheme.cssOverrides["--desktop-global-shadow"] ?? (draftTheme.enableGlobalShadows ? "0.5" : "0")) > 0 ? "on" : "off"}
@@ -4475,7 +4514,12 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
 
               {/* Incoming call bar — global overlay */}
               {incomingCall && (
-                <div className="incoming-call-bar">
+                <div
+                  className="incoming-call-bar"
+                  data-notif-kind="call"
+                  data-call-type={incomingCall.type}
+                  data-group={incomingCall.isGroup ? "1" : "0"}
+                >
                   <div className="incoming-call-bar-info">
                     {incomingCall.charAvatar ? (
                       <img src={incomingCall.charAvatar} alt="" className="incoming-call-bar-avatar" />
@@ -4558,6 +4602,9 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                 <button
                   type="button"
                   className="chat-message-notice-bar"
+                  data-notif-kind="message"
+                  data-group={chatMessageNotice.isGroup ? "1" : "0"}
+                  data-session={chatMessageNotice.sessionId}
                   style={{
                     transform: noticeDragY ? `translateY(${noticeDragY}px)` : undefined,
                     opacity: noticeDragY < 0 ? Math.max(0, 1 + noticeDragY / 160) : 1,
@@ -4704,6 +4751,21 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                                       aria-label="删除组件"
                                     >
                                       ×
+                                    </button>
+                                  )}
+                                  {editMode && !wDragging && (diyTemplates.find((t) => t.id === widget.type)?.fields?.length ?? 0) > 0 && (
+                                    <button
+                                      type="button"
+                                      className="widget-config-btn"
+                                      style={{ gridRow: widget.row, gridColumn: `${widget.col}` }}
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setFieldFormWidgetId(widget.id);
+                                      }}
+                                      aria-label="填写组件内容"
+                                    >
+                                      ✎
                                     </button>
                                   )}
                                 </div>
@@ -4854,6 +4916,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                   <>
                     <section className="phone-app-pane" style={activeApp === "dwelling" || activeApp === "xiaohongshu" || activeApp === "shopping" ? { display: "none" } : undefined}>
                       {renderAppBody()}
+                      {activeApp && <ChatPluginSlot name="app.panel" slotProps={{ appId: activeApp }} className="chat-plugin-app-panel" />}
                     </section>
                     {/* DwellingApp stays mounted while generating — auto-unmounts when idle */}
                     {dwellingMounted && (
@@ -4973,8 +5036,27 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               <DebugPromptPanel />
               <QuickActionFloat />
               <MascotFloat />
+              <ChatPluginFloat />
               {/* 预览弹窗宿主：独立于桌宠的展开/收起状态，否则桌宠收成小球时弹不出来 */}
               <MascotPreviewHost />
+
+              {fieldFormWidgetId && (() => {
+                const target = widgets.find((w) => w.id === fieldFormWidgetId);
+                const template = target ? diyTemplates.find((t) => t.id === target.type) : undefined;
+                if (!target || !template?.fields?.length) return null;
+                return (
+                  <WidgetFieldForm
+                    title={template.name || "组件内容"}
+                    fields={template.fields}
+                    values={target.config || {}}
+                    onClose={() => setFieldFormWidgetId(null)}
+                    onSave={(values) => {
+                      handleWidgetConfigChange(target.id, values);
+                      setFieldFormWidgetId(null);
+                    }}
+                  />
+                );
+              })()}
 
               {/* Widget Picker Bottom Sheet */}
               {showWidgetPicker && (

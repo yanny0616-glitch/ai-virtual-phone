@@ -68,6 +68,7 @@ import {
   recognizeCustomAppSpeech,
   recordCustomAppSpeech,
   stopCustomAppRecording,
+  stopCustomAppSpeechRecognition,
   requestCustomAppReply,
   runCustomAppAiChat,
   runCustomAppAiClassify,
@@ -102,6 +103,7 @@ import {
 import { REALITY_BRIDGE_APP_EVENT_NAME, REALITY_BRIDGE_DATA_EVENT } from "@/lib/reality-bridge/types";
 import { OnlineRoomConnection, onlineCloudApi } from "@/lib/online-room-client";
 import { submitContentReport } from "@/lib/moderation-client";
+import { offlineConfigForApp } from "@/lib/offline-executor";
 
 type CustomAppRunnerProps = {
   app: InstalledCustomApp;
@@ -125,6 +127,29 @@ type CustomAppRunnerProps = {
 };
 
 type BridgeResult = unknown;
+
+function createCustomAppStreamBridge(action: string, payload: unknown, post: (chunk: { delta: string; text: string }) => void) {
+  if ((action !== "ai.generate" && action !== "ai.chat") || !payload || typeof payload !== "object"
+    || (payload as Record<string, unknown>).stream !== true) return undefined;
+  let open = true, text = "", emitted = false;
+  return {
+    onDelta(delta: string) {
+      if (!open || !delta) return;
+      text += delta; emitted = true; post({ delta, text });
+    },
+    finish(result: unknown) {
+      if (!open) return;
+      open = false;
+      const finalText = result && typeof result === "object" ? (result as Record<string, unknown>).text : undefined;
+      if (typeof finalText === "string" && (!emitted || finalText !== text)) {
+        // Postprocessing may replace, trim or suppress preview text. An empty delta signals reconciliation.
+        post({ delta: finalText.startsWith(text) ? finalText.slice(text.length) : "", text: finalText });
+      }
+    },
+    close() { open = false; },
+  };
+}
+
 
 const CUSTOM_APP_BACKGROUND_RUNNER_TIMEOUT_MS = 5 * 60_000;
 
@@ -255,11 +280,12 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
   }
   setTimeout(checkBlank, 4000);
 
-  function request(action, payload){
+  function request(action, payload, onChunk){
     var requestId = frameId + '_' + (++seq);
     parent.postMessage({ source:'ai-phone-custom-app-frame', type:'request', frameId:frameId, appId:appId, requestId:requestId, action:action, payload:payload || {} }, '*');
     return new Promise(function(resolve, reject){
       pending[requestId] = { resolve: resolve, reject: reject };
+      if (onChunk) pending[requestId].onChunk = onChunk;
     });
   }
   window.addEventListener('message', function(event){
@@ -329,10 +355,22 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
     if (!data.requestId) return;
     var item = pending[data.requestId];
     if (!item) return;
+    if (data.type === 'stream.chunk') {
+      if (item.onChunk) {
+        try { Promise.resolve(item.onChunk({ delta: data.delta, text: data.text })).catch(function(err){ console.error('[AiPhone onChunk]', err); }); }
+        catch (err) { console.error('[AiPhone onChunk]', err); }
+      }
+      return;
+    }
+    if (data.type !== 'response') return;
     delete pending[data.requestId];
     if (data.ok) item.resolve(data.result);
     else item.reject(new Error(data.error || 'AiPhone request failed'));
   });
+  function requestGeneration(action, payload, handlers){
+    if (!handlers || typeof handlers.onChunk !== 'function') return request(action, payload || {});
+    return request(action, Object.assign({}, payload || {}, { stream: true }), handlers.onChunk);
+  }
   function onEvent(eventName, handler){
     var key = String(eventName || '').trim();
     if (!key) throw new Error('AiPhone.on 需要 eventName');
@@ -376,9 +414,9 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       delete: function(collection, id){ return request('db.delete', { collection: collection, id: id }); }
     },
     ai: {
-      generate: function(payload){ return request('ai.generate', payload || {}); },
+      generate: function(payload, handlers){ return requestGeneration('ai.generate', payload, handlers); },
       generateImage: function(payload){ return request('ai.generateImage', payload || {}); },
-      chat: function(payload){ return request('ai.chat', payload || {}); },
+      chat: function(payload, handlers){ return requestGeneration('ai.chat', payload, handlers); },
       embed: function(payload){ return request('ai.embed', payload || {}); },
       classify: function(payload){ return request('ai.classify', payload || {}); }
     },
@@ -395,6 +433,7 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       tts: function(payload){ return request('voice.tts', payload || {}); },
       stt: function(payload){ return request('voice.stt', payload || {}); },
       record: function(payload){ return request('voice.record', payload || {}); },
+      stopSTT: function(payload){ return request('voice.stopSTT', payload || {}); },
       stopRecord: function(payload){ return request('voice.stopRecord', payload || {}); },
       clone: function(payload){ return request('voice.clone', payload || {}); },
       play: function(payload){ return request('voice.play', payload || {}); },
@@ -485,6 +524,9 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       readLogDetail: function(payload){ return request('usage.readLogDetail', payload || {}); },
       getSettings: function(){ return request('usage.getSettings', {}); },
       setSettings: function(payload){ return request('usage.setSettings', payload || {}); }
+    },
+    offline: {
+      getConfig: function(){ return request('offline.getConfig', {}); }
     },
     variables: {
       get: function(name, opts){ return request('variables.get', Object.assign({ name: name }, opts || {})).then(function(r){ return r && r.value; }); },
@@ -627,7 +669,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 // 就把 PWA 导航到空白页);而 Web Audio 又会被 iOS 静音拨键掐掉输出。所以
 // 播放必须由宿主页面持有的 <audio> 元素来做:卡片绑到站点本身,点击无害,
 // 静音拨键也不影响媒体元素。
-type FrameAudioChannel = { el: HTMLAudioElement; settle: (() => void) | null; objectUrl: string | null };
+type FrameAudioChannel = { el: HTMLAudioElement; settle: (() => void) | null; objectUrl: string | null; revision: number };
 
 const FRAME_AUDIO_UNLOCK_WAV = "data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YRAAAACAgICAgICAgICAgICAgICA";
 
@@ -942,7 +984,7 @@ export function CustomAppRunner({
     if (!entry) {
       const el = new Audio();
       el.setAttribute("playsinline", "");
-      entry = { el, settle: null, objectUrl: null };
+      entry = { el, settle: null, objectUrl: null, revision: 0 };
       frameAudioChannelsRef.current.set(name, entry);
     }
     return entry;
@@ -964,6 +1006,7 @@ export function CustomAppRunner({
       window.removeEventListener("pointerdown", unlockAll);
       window.removeEventListener("touchend", unlockAll);
       for (const entry of channels.values()) {
+        entry.revision += 1;
         const settle = entry.settle;
         entry.settle = null;
         cleanupFrameAudioChannel(entry);
@@ -1111,7 +1154,7 @@ export function CustomAppRunner({
     throw new Error(`应用未声明权限：${permissions.join(" 或 ")}`);
   }, [app]);
 
-  const handleBridgeRequest = useCallback(async (action: string, payload: unknown): Promise<BridgeResult> => {
+  const handleBridgeRequest = useCallback(async (action: string, payload: unknown, onDelta?: (delta: string) => void): Promise<BridgeResult> => {
     const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
     const launchRecord = launchContext && typeof launchContext === "object" ? launchContext : {};
     const backgroundRecord = launchRecord.origin === "custom_app_background" && !record.origin
@@ -1142,7 +1185,7 @@ export function CustomAppRunner({
           ai: ["generate", "chat", "embed", "classify"],
           user: ["getProfile", "getPersona", "getPreferences"],
           network: ["fetch"],
-          voice: ["readProfiles", "tts", "stt", "record", "stopRecord", "clone", "play", "stopPlayback", "pausePlayback", "resumePlayback"],
+          voice: ["readProfiles", "tts", "stt", "stopSTT", "record", "stopRecord", "clone", "play", "stopPlayback", "pausePlayback", "resumePlayback"],
           calendar: ["read", "list", "write", "create", "update", "delete", "replaceWeek"],
           world: ["read", "list", "get", "write", "create", "update", "delete", "activate"],
           media: ["pick", "save", "put", "get", "revoke", "delete"],
@@ -1411,7 +1454,8 @@ export function CustomAppRunner({
       }
       if (action === "db.list") {
         const limit = Math.max(1, Math.min(500, Number((record.query as Record<string, unknown> | undefined)?.limit ?? 100) || 100));
-        return rows.slice(0, limit);
+        const offset = Math.max(0, Math.floor(Number((record.query as Record<string, unknown> | undefined)?.offset) || 0));
+        return rows.slice(offset, offset + limit);
       }
       if (action === "db.delete") {
         const id = recordId(record.id);
@@ -1440,23 +1484,30 @@ export function CustomAppRunner({
     if (action === "voice.play") {
       requirePermission("voice.tts");
       const channel = normalizeFrameAudioChannelName(record.channel);
+      // 在第一个 await 前登记所有权；stop、新 play 和卸载均使旧请求失效。
+      const entry = getFrameAudioChannel(channel);
+      const revision = ++entry.revision;
+      const current = () => entry.revision === revision;
+      const cancelled = () => ({ ok: false, cancelled: true });
+      const prevSettle = entry.settle;
+      entry.settle = null;
+      cleanupFrameAudioChannel(entry);
+      prevSettle?.();
       const rawSrc = String(record.dataUrl ?? record.src ?? record.ref ?? "");
       let src = rawSrc;
       let mediaObjectUrl: string | null = null;
       if (isMediaStoreRef(rawSrc)) {
         // 媒体库引用:宿主直接读 Blob 转 objectURL,音频数据不过桥
-        const media = await loadMediaBlob(rawSrc);
+        let media;
+        try { media = await loadMediaBlob(rawSrc); }
+        catch (error) { if (!current()) return cancelled(); throw error; }
+        if (!current()) return cancelled();
         if (!media) throw new Error("voice.play 找不到对应媒体,可能已被删除。");
         mediaObjectUrl = URL.createObjectURL(media.blob);
         src = mediaObjectUrl;
       } else if (!src.startsWith("data:audio/") && !src.startsWith("blob:")) {
         throw new Error("voice.play 需要音频 dataUrl 或 media-store:// 引用。");
       }
-      const entry = getFrameAudioChannel(channel);
-      const prevSettle = entry.settle;
-      entry.settle = null;
-      cleanupFrameAudioChannel(entry);
-      prevSettle?.();
       const el = entry.el;
       entry.objectUrl = mediaObjectUrl;
       el.loop = record.loop === true;
@@ -1465,10 +1516,11 @@ export function CustomAppRunner({
       el.src = src;
       if (el.loop) {
         try { await el.play(); } catch (err) {
+          if (!current()) return cancelled();
           cleanupFrameAudioChannel(entry);
           throw new Error(`宿主音频播放被拦截:${err instanceof Error ? err.message : String(err)}`);
         }
-        return { ok: true, loop: true };
+        return current() ? { ok: true, loop: true } : cancelled();
       }
       return await new Promise((resolve, reject) => {
         let settled = false;
@@ -1476,13 +1528,14 @@ export function CustomAppRunner({
           if (settled) return;
           settled = true;
           if (entry.settle === settle) entry.settle = null;
-          cleanupFrameAudioChannel(entry);
-          resolve({ ok: true });
+          if (current()) cleanupFrameAudioChannel(entry);
+          resolve(current() ? { ok: true } : cancelled());
         };
         const fail = (message: string) => {
           if (settled) return;
           settled = true;
           if (entry.settle === settle) entry.settle = null;
+          if (!current()) { resolve(cancelled()); return; }
           cleanupFrameAudioChannel(entry);
           reject(new Error(message));
         };
@@ -1557,6 +1610,7 @@ export function CustomAppRunner({
       requirePermission("voice.tts");
       const entry = frameAudioChannelsRef.current.get(normalizeFrameAudioChannelName(record.channel));
       if (entry) {
+        entry.revision += 1;
         const settle = entry.settle;
         entry.settle = null;
         cleanupFrameAudioChannel(entry);
@@ -1584,6 +1638,10 @@ export function CustomAppRunner({
     if (action === "voice.tts") {
       requirePermission("voice.tts");
       return synthesizeCustomAppSpeech(app, record);
+    }
+    if (action === "voice.stopSTT") {
+      requirePermission("voice.stt");
+      return stopCustomAppSpeechRecognition(app, record);
     }
     if (action === "voice.stt") {
       requirePermission("voice.stt");
@@ -1736,6 +1794,10 @@ export function CustomAppRunner({
         })),
       };
     }
+    if (action === "offline.getConfig") {
+      requirePermission("offline.config");
+      return offlineConfigForApp();
+    }
     if (action === "usage.getSettings") {
       requirePermission("usage.read");
       const logs = getUsageApiLogs();
@@ -1877,8 +1939,8 @@ export function CustomAppRunner({
       requirePermission("ai.generate");
       // 分流只看 APP 显式传参，避免 launchContext 里的 sessionId 误触发群聊模式
       return isCustomAppGroupGenerateRecord(record)
-        ? generateCustomAppGroupText(app, { ...launchRecord, ...record })
-        : generateCustomAppText(app, { ...launchRecord, ...record });
+        ? generateCustomAppGroupText(app, { ...launchRecord, ...record }, record.stream === true ? onDelta : undefined)
+        : generateCustomAppText(app, { ...launchRecord, ...record }, record.stream === true ? onDelta : undefined);
     }
     if (action === "ai.generateImage") {
       requirePermission("ai.generateImage");
@@ -1886,7 +1948,7 @@ export function CustomAppRunner({
     }
     if (action === "ai.chat") {
       requirePermission("ai.chat");
-      return runCustomAppAiChat(app, { ...launchRecord, ...record });
+      return runCustomAppAiChat(app, { ...launchRecord, ...record }, record.stream === true ? onDelta : undefined);
     }
     if (action === "ai.embed") {
       requirePermission("ai.embed");
@@ -2177,9 +2239,20 @@ export function CustomAppRunner({
       const requestId = String(record.requestId ?? "");
       const action = String(record.action ?? "");
       if (!requestId || !action) return;
-      void Promise.resolve(handleBridgeRequest(action, record.payload))
-        .then(result => postResponse(requestId, true, result))
-        .catch(err => postResponse(requestId, false, undefined, err instanceof Error ? err.message : String(err)));
+      const stream = createCustomAppStreamBridge(action, record.payload, chunk => {
+        iframeRef.current?.contentWindow?.postMessage({
+          source: "ai-phone-custom-app-host", type: "stream.chunk", frameId, requestId, ...chunk,
+        }, "*");
+      });
+      void Promise.resolve(handleBridgeRequest(action, record.payload, stream?.onDelta))
+        .then(result => {
+          stream?.finish(result);
+          postResponse(requestId, true, result);
+        })
+        .catch(err => {
+          stream?.close();
+          postResponse(requestId, false, undefined, err instanceof Error ? err.message : String(err));
+        });
     };
     window.addEventListener("message", handleMessage);
     // 监听器先注册，再在微任务中挂载 iframe，避免 iframe 首次脚本早于宿主监听器执行。

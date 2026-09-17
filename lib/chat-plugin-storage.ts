@@ -176,6 +176,17 @@ export function getChatPluginVar(name: string, scope: ChatPluginVarScope, target
     try { return JSON.parse(raw); } catch { return raw; }
 }
 
+/** 一个作用域里的全部变量（聊天变量面板用） */
+export function listChatPluginVars(scope: ChatPluginVarScope, targetId?: string): Record<string, unknown> {
+    const store = loadVarStore();
+    const bucket = scope === "global" ? store.global : targetId ? (scope === "session" ? store.sessions : store.characters)[targetId] : undefined;
+    const out: Record<string, unknown> = {};
+    for (const [name, raw] of Object.entries(bucket ?? {})) {
+        try { out[name] = JSON.parse(raw); } catch { out[name] = raw; }
+    }
+    return out;
+}
+
 /** 变量池有写入就广播一次；插件运行时转成 variables.changed 事件 */
 export const CHAT_PLUGIN_VARS_CHANGED_EVENT = "chat-plugin-vars-changed";
 export type ChatPluginVarsChangedDetail = { name: string; scope: ChatPluginVarScope; targetId?: string };

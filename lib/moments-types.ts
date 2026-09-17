@@ -8,11 +8,14 @@ export type MomentPost = {
     content: string;
     requestId?: string;             // 自定义 APP 发帖重试的稳定标识
     photoUrl?: string;              // user-uploaded base64 image
+    photoUrls?: string[];           // 多图：整组图；第一张同时写进 photoUrl，老代码照常读第一张
     photoDescription?: string;      // AI-generated photo description (for placeholder rendering)
     photoUseReferenceImage?: boolean; // AI-generated photo should use character reference image
     photoGenerationStatus?: "pending" | "failed" | "generated";
     photoGenerationPrompt?: string;
     photoGenerationError?: string;
+    photoPositive?: string;         // 这张图单独改过的正向提示词，一键重新生图沿用
+    photoNegative?: string;
     photoCompressedAt?: string;
     photoCleanedAt?: string;
     visibility: string[];           // characterId[] of who can see this post

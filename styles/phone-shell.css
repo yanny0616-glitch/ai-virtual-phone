@@ -752,6 +752,32 @@
   animation: none;
 }
 
+.widget-config-btn {
+  display: none;
+  justify-self: start;
+  align-self: start;
+  z-index: 10;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: calc(12px*var(--app-text-scale,1));
+  line-height: 20px;
+  text-align: center;
+  padding: 0;
+  margin-top: -4px;
+  margin-left: 2px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.edit-mode .widget-config-btn {
+  display: block;
+  animation: none;
+}
+
 .edit-mode-edit,
 .edit-mode-done {
   position: absolute;

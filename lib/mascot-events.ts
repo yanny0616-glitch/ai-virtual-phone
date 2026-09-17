@@ -75,3 +75,23 @@ export function requestStatusBarPreview(request: StatusBarPreviewRequest): boole
   window.dispatchEvent(new CustomEvent<StatusBarPreviewEventDetail>(STATUS_BAR_PREVIEW_EVENT, { detail }));
   return detail.handled;
 }
+
+// ── Mascot → UI: open the CSS plan card (出主题) ──
+export const MASCOT_CSS_PLAN_EVENT = "mascot-css-plan";
+export const MASCOT_CSS_LIBRARY_EVENT = "mascot-css-library";
+
+export type CssPlanEventDetail = {
+  planId: string;
+  /** 由前端处理器置 true；派发后仍为 false 说明没有挂载弹窗宿主 */
+  handled: boolean;
+};
+
+export function requestCssPlanReview(planId: string): boolean {
+  const detail: CssPlanEventDetail = { planId, handled: false };
+  window.dispatchEvent(new CustomEvent<CssPlanEventDetail>(MASCOT_CSS_PLAN_EVENT, { detail }));
+  return detail.handled;
+}
+
+export function openCssLibrary(): void {
+  window.dispatchEvent(new CustomEvent(MASCOT_CSS_LIBRARY_EVENT));
+}

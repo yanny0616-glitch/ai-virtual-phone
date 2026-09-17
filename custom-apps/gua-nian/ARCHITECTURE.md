@@ -2,7 +2,7 @@
 
 维护 `src/`，构建得到 `index.html`，安装包仍用单 HTML 入口。根目录的 `index.html` 是提交到仓库的生成产物，不直接编辑。
 
-当前结构包括 25 个 JS 片段（23 个原有片段及回执查询、同步状态展示两个新增片段）与 4 个独立模块（含共享的历史窗口 TypeScript 模块）。片段仍共享原来的 IIFE 闭包，`S` 是应用状态，各角色的 `cx` 保存当天计划、账本和运行状态；时间计算与规则评分已抽到 `src/domain/`，有独立作用域和明确导出，不读取 `S`、宿主 SDK、存储或系统当前时间。其他片段之间仍有双向调用。
+当前结构包括 27 个 JS 片段（23 个原有片段及回执查询、同步状态展示、变数结算、固定作息四个新增片段）与 6 个独立模块（含共享的在线状态、历史窗口两个 TypeScript 模块）。片段仍共享原来的 IIFE 闭包，`S` 是应用状态，各角色的 `cx` 保存当天计划、账本和运行状态；时间计算与规则评分已抽到 `src/domain/`，有独立作用域和明确导出，不读取 `S`、宿主 SDK、存储或系统当前时间。其他片段之间仍有双向调用。
 
 ## 独立模块接口
 
@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | `domain/time.mjs` | `localDateKey`、`formatLocalTime`、`parseLocalDate`、`normalizeTime`、`timeOnLocalDay`、`addMinutes`、`isInTimeWindow`、`getSleepWindow`、`isAsleep` | 日期、时间戳、时间字符串、作息设置由调用方传入；按运行环境本地时区计算 |
 | `domain/scoring.mjs` | `fitScore`、`calculateScore`、`countUnansweredRounds` | 明确传入当地小时数、预约时间、已预约数量、未回应轮数、额度、间隔；统计轮数时传入 `nowMs` |
+| `domain/forks.mjs` | `forkRoll`、`forkLevel`、`normalizeForks`、`forkSay`、`applyDueForks`、`forkNotes` | 日程、档位、此刻 HH:MM、种子、好感和揭晓时刻换算由调用方传入；已结算的岔子原样返回 |
 
 模块可由 Node 直接 `import`，不需要模拟 `AiPhone` 或加载 APP。它们不修改参数；时钟留在旧调用位置的薄封装中，设置按每次调用时的当前值传入，避免缓存旧设置。
 
@@ -25,6 +26,7 @@
 | `src/styles.css` | 所有界面样式 | 颜色、布局、字体 |
 | `src/domain/time.mjs` | 独立的日期、时间窗和作息计算 | 时间边界 |
 | `src/domain/scoring.mjs` | 独立的评分与未回应轮次计算 | 评分公式 |
+| `src/domain/forks.mjs` | 独立的变数归一、固定种子结算、说不说 | 变数规则（云端有带类型副本，改完跑 `check-gua-nian-forks`） |
 | `src/core/runtime.js` | `S`、角色上下文、日期和 DOM 工具、toast、日志 | 共享状态和日志 |
 | `src/core/model.js` | JSON 解析、模型调用、用量汇总和日期解析 | 生成调用与用量限制 |
 | `src/core/character-state.js` | 作息、精力、情绪、情况衰减、读取聊天 | TA 此刻的生活状态 |
@@ -34,6 +36,7 @@
 | `src/cloud/plans.js` | 裁决上下文、串行计划上传、同步状态持久化和重试 | 本地计划寄存云端 |
 | `src/cloud/receipts.js` | 按预约键精确读取回执、60 秒会话缓存 | 发送状态证据 |
 | `src/cloud/day.js` | 模板冻结、明日生成原料、接管云端生成结果 | 关闭浏览器后的生成 |
+| `src/cloud/server.js` | 「交给 VPS 后端」时直连 `companion-server`：读 `/app/state` 填 day / plan / threads，按钮、账本、改日程、设置、记录页、诊断页走 `/app/*` | 后端模式下的全部界面数据 |
 | `src/cloud/decisions.js` | 合并云端裁决、回执、同步账本 | 云端与本地计划对齐 |
 | `src/planning/calendar.js` | 系统日历读写、自动生成入口、节假日信息 | 日历同步 |
 | `src/planning/threads.js` | 惦记存活、日期、发送结算、撤预约、存账本 | 惦记与发送结果 |
@@ -41,6 +44,8 @@
 | `src/planning/generation.js` | 应用模型给出的惦记变更、生成一天、提示词与结果解析 | 生活面生成 |
 | `src/planning/wakes.js` | 规则评分、预约、取消、哨兵、编排 | 主动消息计划 |
 | `src/planning/recheck.js` | 打开/定时动态复核、临时起念 | 调整当天计划 |
+| `src/planning/routine.js` | 生成那天前读「忙碌回复」插件的固定作息和今天的例外，折成已定安排和起床 / 上床时间 | 固定作息 |
+| `src/planning/forks.js` | 变数揭晓落库、忍不住时约主动消息、时间线与记录里的变数展示 | 突发事件 |
 | `src/chat/context.js` | 预览、提示词注入、回复门、好感和在线状态 | 与宿主聊天的联动 |
 | `src/ui/sync-status.js` | 跨页签显示计划同步结果、绑定重试入口 | 本地保存与云端同步反馈 |
 | `src/ui/main.js` | 主渲染、页签、总览卡片与事件 | 首页和心动页 |
@@ -353,3 +358,46 @@ ui/diagnostics.js 的 diagnosticJobGroups 先判角色，再分消息任务、�
 本地整天生成与云端生成原料使用 `fixedCalendarItems` 排除 ID 以 `guanian_` 开头的挂念写回条目，避免旧产物成为必须原样保留的约束或在模型漏写时被补回。其他来源的日历安排继续保留；聊天与惦记仍参与模型判断，因此重新生成不保证所有内容不同。日历同步继续读取完整旧列表，以清理并替换挂念自己的旧条目。
 
 随宿主发布后，已安装用户打开挂念点击「立即更新」升级至 0.9.35，再重新生成即可生效；无需手动导入 ZIP，不自动改写已有日程。云端在下次上传生成原料后使用新筛选结果，无需更改云函数。专项检查：`node scripts/check-gua-nian-calendar-regeneration.mjs`；未做手机端完整实测。
+
+## 0.9.36：日程生成提示词
+
+`data/defaults.js` 的 DEFAULT_DAY_PROMPT 是恢复默认的正本，SET_DEF.dayPrompt 负责旧设置补齐；schema 新增 textarea 类型，复用设置回填/读表/保存流程。恢复按钮只编辑输入框，留空读表回退默认。提示词不含动态日期、聊天资料和结构协议。
+
+`buildDayInstruction` 读取 dayPrompt，既用于本地 generateDay，也用于 uploadGenKitCloud 的 genKit.instruction。保存变化清零各角色 _kitAt，让下次既有上传入口刷新；不自动生成日程，也不声称今天计划同步已更新明日原料。无需改 worker 或 schema。默认内容限定角色独立日程与用户自主行动；输出仍依赖模型遵守。
+
+专项：check-gua-nian-day-prompt.mjs 覆盖草稿、保存回填、恢复及空白回退；calendar-regeneration 专项同时验证真实本地请求和云端原料都包含自定义提示词。
+
+## 0.9.37：提示词编辑抽屉
+
+settings 的日程字段在配置页渲染隐藏草稿和编辑按钮，独立 day-prompt-sheet 复用 sheet/txt-in/mini/big-btn 样式。专用遮罩不关闭父设置层；关闭丢弃弹窗草稿，完成复制回隐藏字段，恢复默认仅编辑弹窗。打开期间父设置 inert，Esc关闭、Tab限制在弹窗内，关闭恢复入口焦点。云端逻辑不变。
+
+## 变数
+
+`domain/forks.mjs` 是纯规则。`normalizeForks` 归一模型给的 forks：按档位截个数、乘概率，锚点必须在日程里，move / drop 只能动揭晓之后的事，按揭晓先后排序。`applyDueForks` 只结算没结算过且到了揭晓时刻的岔子：发生与否 = FNV(`forkSeed|id`) % 100 < p；发生了就改写日程（插入项带 `fork`、挪过的带 `moved`），追加一条 conds，`say` 由模型倾向按好感挪档。已结算的原样返回，重复调用结果不变。锚点先按标题、再按原时刻找，聊天挪过也跟得上，删了就作废（`void`）。
+
+App 在打开、每分钟循环和生成之后调用 `revealForks` 落库；忍不住走一次普通心动预约（`adj: "fork"`），只有管事那台约。云端不落库：push-recheck / push-generate 读 `context.day` 时用 `guanianForkDay` 按日程时区重算，所以和 App 的结果一致。`forkSeed` = 日期|角色 id，生成时写进 day，随 `dayForCloud` 寄上去；云端生成的那天由 push-recheck 写进 `dayFull`。
+
+两份云函数里的副本逐字相同，`scripts/check-gua-nian-forks.mjs` 把它转译后和 App 模块逐条对照。
+
+## 固定作息（0.9.40）
+
+`routineFor(cx, date)` 读变量池里本角色的 `routine` 和 `routineExceptions`（「忙碌回复」插件写的），返回 `{ items, wake, bed }`：`items` 是和日历条目同形的已定安排（`id` 前缀 `routine_`，`lock` 按插件的档位：专注 / 忙 → busy，分神 → free），`withRoutine` 并进 `fixedCalendarItems` 的结果，同一 `startTime` 以日历为准。本地 `generateDay` 和寄给云端的 `uploadGenKitCloud` 走同一套，所以云端不用改；`wake`/`bed` 本地落库时覆盖模型输出，`adoptCloudDay` 接管时再覆盖一次。设置 `routineOn` 默认开。只在生成时读，不订阅插件的 `routine.exception`。
+
+
+## 0.9.41：跨类型事项去重
+
+`src/domain/matters.mjs` 是无 IO 的纯模块，由 APP 构建器编为 `GuaNianMatters`，同时由 push:build-dist 内联进两个 worker，并由 check:push 校验同源。`matterId` 标识具体沟通目的：旧数据使用 thread/wake/slot 编号，新事项使用本轮时间和 new:1/2 派生编号。模型在现有复核请求中通过 `links` 把不同措辞的旧念头关联到同一编号，extra/keep 携带事项编号；不增加独立判重模型调用。
+
+复核提示提供全部当前任务/账本及最近 12 条实际云端成文（每条最多 4000 字），普通聊天继续沿用已有窗口。本机复核读取 guanian-history 的最近 50 条记录，云端沿用原先最多 200 条输出窗口；硬规则使用各自已读取的全部输出，已清理或窗口以外记录不保证可判重。网关仅补充返回 guanianContext 的 matterId/eventId，不暴露完整 outbox meta。
+
+`prepareMatters` 校验事项引用，统一同轮 keep/extra 与旧任务的编号；`matterBlock` 在预约及发送前执行：已了结阻止跟进，同事项明确约定优先，普通事项只留一个有效任务；有实际发送证据后须 relation=followup 且引用更晚的用户消息或线下摘要。角色主动消息本身不能成为再次催问的证据。重复任务持久化 matterSuppressed，约定同版本不再重挂。事项关联不刷新话头存活时间或提醒间隔。
+
+本机先处理 keep/settle 再处理 extra，防同一模型返回同时创建约定和临时念头。云端依原计划版本条件写回，由现有数据库规则撤普通旧预约；约定任务即使仍在队列，发送端也因 inactive/suppressed 拦截。成文后再次读取计划检查，防生成期间已被去重仍交付。outbox 保存事项编号，当前计划不再含旧任务时仍可按编号核对发送证据。既有无编号正文仍由模型语义判断关联，不宣称语义判重绝对准确。
+
+网关、APP 上传与下载保留事项字段；`matter-dedup-v1` 要求网关同时核对两个 worker，混合版本不报告支持。沿用 schema 12；未变更设备锁和正文预览。专项覆盖纯函数、本机真实 recheck、云端真实 recheck、发送 worker、成文期间撤销和读取失败，不含手机端实测。上线需发布宿主分发产物、升级挂念，并重新部署三个个人云函数。
+
+## VPS 交接与聊天状态
+
+开启后端前由 `serverHandoff` 调用 `/app/characters/:id/handoff`，确认旧云端复核、生成与未成文预约停用；失败/排队不保存开启设置。后端记交接结果，暂不启用角色；随后 `serverEnsure` 才确认启用。宿主本地定时消息在 VPS 模式让位，保留云端凭据。版本维持 0.10.0。
+
+聊天情绪/改日程的执行移到 `companion-server/src/chat-state.ts`，通过引擎落 day/conds 后由现有 state/host 接口展示、注入聊天及写回日历；`serverSettings` 同步现有 `chatEditsDay` 开关。仅变更未来日程，不修改既往精力账。

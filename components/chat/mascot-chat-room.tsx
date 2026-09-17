@@ -45,6 +45,7 @@ import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import { CHAT_APP_SETTINGS_UPDATED_EVENT, loadChatAppSettings } from "@/lib/chat-storage";
 import { shouldSendChatInputOnEnter } from "@/lib/chat-input-keyboard";
 import { useChatBottomReserve } from "./use-chat-bottom-reserve";
+import { openCssLibrary } from "@/lib/mascot-events";
 
 type MascotChatRoomProps = {
     onBack: () => void;
@@ -269,6 +270,9 @@ function MascotInfoPanel({
                 <div className="menu-group">
                     <button type="button" className="menu-item" onClick={() => window.dispatchEvent(new CustomEvent("mascot-edit-history"))}>
                         <span className="menu-label">小卷修改记录</span><span className="menu-desc">查看草稿、预览和撤销修改</span>
+                    </button>
+                    <button type="button" className="menu-item" onClick={openCssLibrary}>
+                        <span className="menu-label">主题库</span><span className="menu-desc">存下的 CSS 主题，随时套用</span>
                     </button>
                     <button
                         className="menu-item"

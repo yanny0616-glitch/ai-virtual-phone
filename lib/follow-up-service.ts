@@ -5,6 +5,7 @@
  * Messages are saved to storage; UI is notified via CustomEvent.
  */
 
+import { isGuanianServerWake } from "./guanian-wake-ownership";
 import { stripChatSilenceMarker } from "./chat-silence-protocol";
 import {
     loadChatSessions,
@@ -37,6 +38,8 @@ import { loadFollowUpConfig } from "./settings-storage";
 import { parseAIResponse } from "./rich-message-parser";
 import type { ParsedMessagePart } from "./rich-message-parser";
 import { getStatusRegionConfig, isCustomStatusRegionActive } from "./chat-status-region";
+import { takeChatDirectives } from "./chat-directives";
+import { mergeSingleBubble } from "./reply-style";
 import { isKnownStickerLabel } from "./sticker-data";
 import { loadCharacters } from "./character-storage";
 import { bgSetInterval, bgSetTimeout } from "./bg-timer";
@@ -54,6 +57,8 @@ import {
     type TimedWakeSchedule,
 } from "./timed-wake-storage";
 import {
+    EVE_REMINDER_GRACE_MS,
+    getMenstrualEveReminder,
     getMenstrualPeriodCareEvent,
     hasMenstrualPeriodCareTriggered,
     loadMenstrualConfig,
@@ -176,6 +181,13 @@ export function stopFollowUpService() {
 export function scheduleFollowUp(sessionId: string, count: number, stateValues?: StateValue[]) {
     const config = loadFollowUpConfig();
 
+    // TA 拉黑/删了你：不会再追着你发
+    if (loadChatSessions().find(s => s.id === sessionId)?.charBlock) {
+        clearFollowUpSchedule(sessionId);
+        cancelFollowUpBailout(sessionId);
+        return;
+    }
+
     if (!stateValues || stateValues.length === 0) {
         console.log(`[FollowUp] No state values, not scheduling.`);
         clearFollowUpSchedule(sessionId);
@@ -213,6 +225,7 @@ export async function requestBackgroundChatReply(sessionId: string): Promise<{ o
     if (backgroundReplyFiringSet.has(sessionId)) return { ok: false, skipped: "already_running" };
     const session = loadChatSessions().find(s => s.id === sessionId);
     if (!session) return { ok: false, skipped: "missing_session" };
+    if (session.charBlock) return { ok: false, skipped: "blocked" };
 
     backgroundReplyFiringSet.add(sessionId);
     try {
@@ -413,8 +426,12 @@ function pollMenstrualPeriodCare(now: number) {
     if (!config.periodCareEnabled || config.periodCareCharacterIds.length === 0) return;
 
     const records = loadMenstrualRecords();
-    const event = getMenstrualPeriodCareEvent(records, config);
-    if (!event) return;
+    const events: MenstrualPeriodCareEvent[] = [];
+    const careEvent = getMenstrualPeriodCareEvent(records, config);
+    if (careEvent) events.push(careEvent);
+    const eveReminder = getMenstrualEveReminder(records, config, new Date(now));
+    if (eveReminder && now >= eveReminder.fireAtMs && now < eveReminder.fireAtMs + EVE_REMINDER_GRACE_MS) events.push(eveReminder);
+    if (events.length === 0) return;
 
     const selectedIds = new Set(config.periodCareCharacterIds);
     const sessions = loadChatSessions()
@@ -427,18 +444,20 @@ function pollMenstrualPeriodCare(now: number) {
         }
     }
 
-    for (const characterId of selectedIds) {
-        if (hasMenstrualPeriodCareTriggered(characterId, event.cycleKey)) continue;
-        const session = latestSessionByCharacter.get(characterId);
-        if (!session) continue;
-        const firingKey = `${characterId}:${event.cycleKey}`;
-        if (periodCareFiringSet.has(firingKey)) continue;
-        console.log(`[PeriodCare] Firing now for session=${session.id}, cycle=${event.cycleKey}`);
-        fireMenstrualPeriodCare({
-            sessionId: session.id,
-            characterId,
-            event,
-        });
+    for (const event of events) {
+        for (const characterId of selectedIds) {
+            if (hasMenstrualPeriodCareTriggered(characterId, event.cycleKey)) continue;
+            const session = latestSessionByCharacter.get(characterId);
+            if (!session) continue;
+            const firingKey = `${characterId}:${event.cycleKey}`;
+            if (periodCareFiringSet.has(firingKey)) continue;
+            console.log(`[PeriodCare] Firing now for session=${session.id}, cycle=${event.cycleKey}`);
+            fireMenstrualPeriodCare({
+                sessionId: session.id,
+                characterId,
+                event,
+            });
+        }
     }
 }
 
@@ -652,6 +671,7 @@ async function fireIdleReconnect(rule: IdleReconnectRule, lastUserAt: number) {
 async function fireTimedWake(sched: TimedWakeSchedule) {
     timedWakeFiringSet.add(sched.id);
     removeTimedWakeSchedule(sched.id);
+    if (isGuanianServerWake(sched)) { timedWakeFiringSet.delete(sched.id); return; }
     // 本地接手触发：撤销服务端兜底预约（生成中被杀由发送保险单接管）
     cancelBailoutKey(`timedwake:${sched.id}`);
 
@@ -950,9 +970,10 @@ export async function parseAndSaveResponse(
     const sess = sessions.find(s => s.id === sessionId);
     const previousState = sess && !sess.isGroup ? getLatestCharacterStateValues(sess.contactId) : [];
 
-    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(
-        options?.suppressReply ? stripChatSilenceMarker(rawText) : rawText, previousState,
-    );
+    const directives = takeChatDirectives(options?.suppressReply ? stripChatSilenceMarker(rawText) : rawText, sess);
+    const parsed = parseAIResponse(directives.text, previousState);
+    const { stateValues, freshStateValues, statusPanel, innerMonologue } = parsed;
+    const parts = sess?.singleBubble ? mergeSingleBubble(parsed.parts) : parsed.parts;
 
     // 自定义状态栏渲染戳：追发/屏幕速聊/离线回传落库的消息此前从不盖
     // statusRegionMode，custom 模式下 [状态栏] 原文被当 markdown 渲染成一坨
@@ -970,6 +991,7 @@ export async function parseAndSaveResponse(
             innerMonologue, reasoningText, stateValues, freshStateValues,
         });
         if (batch) await batch.commit();
+        directives.apply();
         return { hasVisible: false, newCount: currentCount, stateValues };
     }
 
@@ -1091,6 +1113,7 @@ export async function parseAndSaveResponse(
         if (triggerCall && typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId, type: triggerCall } }));
         }
+        directives.apply();
         return { hasVisible: false, newCount: MAX_FOLLOW_UPS, stateValues };
     }
 
@@ -1227,5 +1250,6 @@ export async function parseAndSaveResponse(
         window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId, type: triggerCall } }));
     }
 
+    directives.apply();
     return { hasVisible: true, newCount: currentCount + 1, stateValues };
 }

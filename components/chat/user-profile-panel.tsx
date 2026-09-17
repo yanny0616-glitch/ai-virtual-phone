@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, type CSSProperties } from "react";
+import { useState, useEffect, useMemo, useRef, type CSSProperties } from "react";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import {
     loadFollowUpConfig,
@@ -28,6 +28,7 @@ import { requestNotificationPermission } from "@/lib/browser-notification";
 import { disableOfflinePush, enableOfflinePush, getOfflinePushState, isShellEnvironment, loadPushQuietHours, savePushQuietHours, sendTestOfflinePush, type OfflinePushState } from "@/lib/push-client";
 import { isPersonalPushCloudActive, setPersonalPushCloudScheduled } from "@/lib/personal-push-cloud";
 import { loadPushCloudScheduled, savePushCloudScheduled } from "@/lib/cloud-deploy-status";
+import { DEFAULT_COMPANION_SERVER_URL, guanianPendingSwitch, loadOfflineExecutorConfig, saveOfflineExecutorConfig, testCompanionServer, type OfflineExecutorMode } from "@/lib/offline-executor";
 import { armIdleReconnectBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "@/lib/push-bailout-client";
 import { loadTimedWakeSchedules, makeTimedWakeId, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "@/lib/timed-wake-storage";
 import { IDLE_RECONNECT_MAX_CONSECUTIVE, loadIdleReconnectRules, removeIdleReconnectRule, upsertIdleReconnectRule, type IdleReconnectRule } from "@/lib/idle-reconnect-storage";
@@ -490,17 +491,22 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
    ══════════════════════════════════════════ */
 function ChatCSSEditor({ onBack }: { onBack: () => void }) {
     const [css, setCss] = useState(() => kvGet("chat-app-custom-css") || "");
+    const [saved, setSaved] = useState(css.trim());
+    const mounted = useRef(false);
+
+    useEffect(() => {
+        if (!mounted.current) { mounted.current = true; return; }
+        const timer = window.setTimeout(() => window.dispatchEvent(new CustomEvent("chat-app-css-preview", { detail: { css } })), 250);
+        return () => window.clearTimeout(timer);
+    }, [css]);
+    useEffect(() => () => { window.dispatchEvent(new CustomEvent("chat-app-css-preview", { detail: { css: null } })); }, []);
 
     const handleApply = () => {
         const trimmed = css.trim();
         if (trimmed) kvSet("chat-app-custom-css", trimmed);
         else kvRemove("chat-app-custom-css");
-        window.dispatchEvent(new CustomEvent("chat-app-css-updated"));
-    };
-
-    const handleClear = () => {
-        setCss("");
-        kvRemove("chat-app-custom-css");
+        setSaved(trimmed);
+        window.dispatchEvent(new CustomEvent("chat-app-css-preview", { detail: { css: null } }));
         window.dispatchEvent(new CustomEvent("chat-app-css-updated"));
     };
 
@@ -508,7 +514,7 @@ function ChatCSSEditor({ onBack }: { onBack: () => void }) {
         <PageShell title="自定义 CSS" onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); onBack(); }}>
             <div className="p-4 flex flex-col gap-3 flex-1">
                 <div className="ts-12 text-[var(--c-text)] opacity-70">
-                    在此输入 CSS 自定义聊天页面样式（联系人列表、朋友圈、聊天室默认样式等）。单独聊天室的 CSS 优先级更高。
+                    在此输入 CSS 自定义聊天页面样式（联系人列表、朋友圈、聊天室默认样式等）。单独聊天室的 CSS 优先级更高。停手就能看到效果，点「保存并应用」才会保存；不保存直接返回会恢复原样。
                 </div>
                 <textarea
                     value={css}
@@ -520,9 +526,10 @@ function ChatCSSEditor({ onBack }: { onBack: () => void }) {
                 <div className="flex gap-2 items-center">
                     <CSSSchemeBar target="chat_app" currentCSS={css} onLoad={setCss} />
                     <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCss(CHAT_APP_CSS_EXAMPLE)}>示例</button>
-                    <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={handleClear}>清除</button>
-                    <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={handleApply}>应用</button>
+                    <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCss("")}>清除</button>
+                    <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={handleApply}>保存并应用</button>
                 </div>
+                {css.trim() !== saved && <div className="ts-11 text-[var(--c-text)] opacity-60">预览中 · 还没保存</div>}
             </div>
         </PageShell>
     );
@@ -1179,6 +1186,42 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
     const [pushCloudScheduled, setPushCloudScheduled] = useState(() => loadPushCloudScheduled());
     const [pushScheduleBusy, setPushScheduleBusy] = useState(false);
     const [pushScheduleHint, setPushScheduleHint] = useState("");
+    const [offlineExec, setOfflineExec] = useState(() => loadOfflineExecutorConfig());
+    const [serverUrlDraft, setServerUrlDraft] = useState(() => loadOfflineExecutorConfig().serverUrl);
+    const [execHint, setExecHint] = useState("");
+    const [execTesting, setExecTesting] = useState(false);
+    const guanianPending = useMemo(() => guanianPendingSwitch(offlineExec), [offlineExec]);
+
+    const handleOfflineExecMode = (mode: OfflineExecutorMode) => {
+        if (mode === offlineExec.mode) return;
+        const next = { ...offlineExec, mode };
+        saveOfflineExecutorConfig(next);
+        setOfflineExec(next);
+        setExecHint(mode === "server"
+            ? "已改成后端。回复兜底、追问、定时消息、经期关怀、忙碌回复从下一次重新预约起寄到后端（已排着的留在云端发完，不会重复发）；微信自动回复现在交给后端轮询；挂念下次打开时自动交接。"
+            : "已改成云端。回复兜底、追问、定时消息、经期关怀、忙碌回复从下一次重新预约起寄回云端（已排着的留在后端发完）；微信自动回复交还云函数；挂念下次打开时自动交接。");
+    };
+    const saveServerUrl = () => {
+        const url = serverUrlDraft.trim().replace(/\/+$/, "");
+        if (url === offlineExec.serverUrl) return;
+        if (url && !/^https:\/\//.test(url)) { setExecHint("后端地址要以 https:// 开头"); return; }
+        const next = { ...offlineExec, serverUrl: url };
+        saveOfflineExecutorConfig(next);
+        setOfflineExec(next);
+        setExecHint("后端地址已保存。");
+    };
+    const handleTestServer = async () => {
+        if (execTesting) return;
+        setExecTesting(true);
+        setExecHint("测试中…");
+        try {
+            setExecHint(`✓ ${await testCompanionServer(serverUrlDraft)}`);
+        } catch (error) {
+            setExecHint(`✗ ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setExecTesting(false);
+        }
+    };
 
     const handleTogglePushCloudSchedule = async (enabled: boolean) => {
         if (pushScheduleBusy) return;
@@ -1399,6 +1442,47 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                                 {pushScheduleHint && (
                                     <span className="menu-desc !mt-0">{pushScheduleHint}</span>
                                 )}
+                            </div>
+                            <div className="menu-item" style={{ alignItems: "stretch", flexDirection: "column", gap: 10 }}>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex-1 flex flex-col">
+                                        <span className="menu-label">离线执行</span>
+                                        <span className="menu-desc !mt-0">浏览器关着时，由谁判断和生成角色的消息</span>
+                                    </div>
+                                    <div className="flex shrink-0 overflow-hidden rounded-full border border-black/10">
+                                        {(["cloud", "server"] as const).map(mode => (
+                                            <button
+                                                key={mode}
+                                                type="button"
+                                                className={`px-3 py-1 ts-12 ${offlineExec.mode === mode ? "bg-[var(--c-text-title)] text-[var(--c-card)]" : "text-[var(--c-text)]"}`}
+                                                onClick={() => handleOfflineExecMode(mode)}
+                                            >
+                                                {mode === "cloud" ? "云端" : "后端"}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                {offlineExec.mode === "server" && (
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="url"
+                                            className="flex-1 min-w-0 border-none outline-none bg-transparent ts-13 text-[var(--c-text)]"
+                                            placeholder={DEFAULT_COMPANION_SERVER_URL}
+                                            value={serverUrlDraft}
+                                            spellCheck={false}
+                                            autoComplete="off"
+                                            onChange={e => setServerUrlDraft(e.target.value)}
+                                            onBlur={saveServerUrl}
+                                        />
+                                        <button type="button" className="ui-btn ui-btn-outline py-1 px-2 ts-11 shrink-0" style={{ whiteSpace: "nowrap" }} onClick={() => void handleTestServer()} disabled={execTesting}>测试</button>
+                                    </div>
+                                )}
+                                <span className="menu-desc !mt-0">
+                                    {execHint || (offlineExec.mode === "server"
+                                        ? "挂念、回复兜底、追问、定时消息、经期关怀、忙碌回复、微信自动回复都由后端跑，个人云只存聊天镜像、推送订阅和微信运行包。后端用「云服务部署」里的个人云 Secret key 认你。"
+                                        : "个人云里的云函数负责离线消息（原项目做法）。")}
+                                    {guanianPending && " 挂念还没切过去，打开挂念会自动交接。"}
+                                </span>
                             </div>
                         </div>
                         <p className="menu-group-desc mx-2">系统推送</p>

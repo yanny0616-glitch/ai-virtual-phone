@@ -32,7 +32,7 @@ import ts from ${JSON.stringify(pathToFileURL(path.join(root, "node_modules/type
 const ROOT = ${JSON.stringify(root)};
 const EXTS = ["", ".ts", ".tsx", "/index.ts", "/index.tsx", ".mjs", ".js"];
 // Dexie 是 CJS，ESM 具名导入拿不到 default；这里只需要它能被 import 而已。
-const STUBS = { dexie: "export default class Dexie { version(){return{stores(){return{upgrade(){}}}}} table(){return{}} open(){return Promise.resolve()} }" };
+const STUBS = { dexie: "export default class Dexie { static addons = []; version(){return{stores(){return{upgrade(){}}}}} table(){return{}} open(){return Promise.resolve()} }" };
 
 export async function resolve(specifier, context, next) {
   if (STUBS[specifier]) {

@@ -10,6 +10,8 @@ import { ConfirmDialog } from "@/components/ui/modal";
 import { Toggle, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 import { determineBaseUrl, simpleLLMCall } from "@/lib/api-helpers";
+import { ApiUrlPreview } from "./api-url-preview";
+import { ReasoningDepthCard } from "./reasoning-depth-card";
 
 const DEFAULT_CONFIGS: ApiConfig[] = [
     {
@@ -348,6 +350,12 @@ export function ApiSettings() {
                                                             : "默认用官方端点，留空即可"
                                                 }
                                             />
+                                            <ApiUrlPreview
+                                                provider={config.provider}
+                                                baseUrl={config.baseUrl}
+                                                onApply={(fixed) => updateConfig(config.id, { baseUrl: fixed })}
+                                                onSwitchProvider={(provider) => updateConfig(config.id, { provider })}
+                                            />
                                         </div>
 
                                         <div className="flex flex-col gap-1">
@@ -412,6 +420,11 @@ export function ApiSettings() {
                                                 <span className="break-all leading-[1.5]">{testResult[config.id].message}</span>
                                             </Alert>
                                         )}
+
+                                        <ReasoningDepthCard
+                                            config={config}
+                                            onChange={(level) => updateConfig(config.id, { reasoningEffort: level })}
+                                        />
 
                                         <div
                                             className="ui-toggle-row mt-2 overflow-visible"

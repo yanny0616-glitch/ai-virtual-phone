@@ -4,6 +4,7 @@
 // Used by: memory-bank-page (UI display), memory-summarizer (summarization input).
 
 import { isReadingDiscussMessage, isSystemInstructionMessage, loadChatSessions, loadChatMessages, type ChatMessage } from "./chat-storage";
+import { foldSummarizedCalls } from "./call-records";
 import { buildGroupAdminBracketText } from "./group-admin";
 import { loadMomentPosts, loadMomentComments } from "./moments-storage";
 import { loadCharacters } from "./character-storage";
@@ -169,6 +170,8 @@ export function loadNativeTimeline(
         excludeOfflineSessionId?: string;
         timeAware?: boolean;
         promptTimestampOptions?: PromptTimestampOptions;
+        /** 有小结的通话只留小结（长期记忆总结用） */
+        callSummaries?: boolean;
     }
 ): NativeTimelineEntry[] {
     const entries: NativeTimelineEntry[] = [];
@@ -280,7 +283,11 @@ export function loadNativeTimeline(
 
     if (session) {
         const messages = loadChatMessages(session.id);
-        for (const msg of messages) {
+        const callFold = options?.callSummaries ? foldSummarizedCalls(messages) : null;
+        for (const raw of messages) {
+            if (callFold?.skip.has(raw.id)) continue;
+            const folded = callFold?.replace.get(raw.id);
+            const msg = folded ? { ...raw, content: folded } : raw;
             if (msg.isRetracted) continue;
             if (isPromptHiddenChatMessage(msg)) continue;
             if (options?.afterTimestamp && msg.createdAt <= options.afterTimestamp) continue;

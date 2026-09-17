@@ -13,7 +13,8 @@ export function formatLongTermMemories(memories: MemoryEntry[]): string {
 
     const lines: string[] = [];
     for (const entry of memories) {
-        lines.push(`- ${entry.content}`);
+        const label = entry.metadata?.recallLabel;
+        lines.push(typeof label === "string" && label ? `- 【${label}】${entry.content}` : `- ${entry.content}`);
     }
     return lines.join("\n");
 }

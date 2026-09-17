@@ -22,12 +22,14 @@
       wake: String(cx.day.wake || ""), bed: String(cx.day.bed || ""),
       schedule: (cx.day.schedule || []).map((it) => ({
         time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: Math.max(-15, Math.min(15, Math.round(+it.cost || 0))), mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined,
+        fork: it.fork || undefined, moved: it.moved || undefined,
         steps: Array.isArray(it.steps) ? it.steps.map((x) => ({ time: x.time, what: x.what })) : undefined,
       })),
       conds: (cx.day.conds || []).filter((c) => condWeight(c, Date.now()) > 0.08).map((c) => ({
         startAt: c.startAt, halfLifeMin: c.halfLifeMin, intensity: c.intensity,
         energyDelta: c.energyDelta, mood: c.mood, cause: c.cause,
       })),
+      forks: Array.isArray(cx.day.forks) ? cx.day.forks : [], forkSeed: forkSeedOf(cx), forkBurst: S.settings.forkBurst ? 1 : 0,
     };
   }
   function userSleepContext() {
@@ -141,7 +143,7 @@
     await finish("syncing", "正在同步今天的计划…", reset);
     S._diagCache = {}; // 计划变了，诊断页那几张云端卡的缓存作废
     try {
-      await requireRecheckFeatures(["scheduler-state-v1"]);
+      await requireRecheckFeatures(["scheduler-state-v1", "matter-dedup-v1"]);
       if (GuaNianHistory.guanianHasWindow(S.settings)) await requireRecheckFeatures(["history-window-v1"]);
       if (cx.plan.cloudStateUrl !== cloudCfg().url || !Number.isFinite(cx.plan.cloudStateVersion)) await pullCloudDecisionsBody(cx, true);
       if (S.settings.threadsOn) await requireRecheckFeatures(["promise-tasks-v2"]);
@@ -158,6 +160,7 @@
           resetDecisions: reset,
           context: cloudContext(cx),
           items: cx.plan.items.map((w) => ({
+            ...GuaNianMatters.matterFields(w), matterSuppressed: !!w.matterSuppressed,
             time: w.time, fireAt: w.fireAt, source: w.source, act: !!w.act,
             intent: w.intent || "", why: w.why || "", sem: w.sem || "", topic: w.topic || "",
             wakeId: w.wakeId || "", until: +w.until || 0, origFireAt: +w.origFireAt || 0, from: w.from || "",

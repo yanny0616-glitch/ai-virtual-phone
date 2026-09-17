@@ -18,7 +18,7 @@ type JobPayload = {
   [key: string]: unknown;
 };
 
-type PlanItem = { promiseRevision?: number; generatedAt?: number;
+type PlanItem = { matterSuppressed?: boolean; matterId?: string; matterRelation?: string; matterEvidenceId?: string; promiseRevision?: number; generatedAt?: number;
   time: string;
   fireAt: number;
   source: string;
@@ -106,6 +106,7 @@ type GuanianCond = { startAt?: number; halfLifeMin?: number; intensity?: number;
 type GuanianDay = {
   tz?: number; mood?: string; energy?: number; location?: string; doing?: string;
   wake?: string; bed?: string; schedule?: GuanianSched[]; conds?: GuanianCond[];
+  forks?: any[]; forkSeed?: string; forkBurst?: number;
 };
 // 睡眠窗：bed 起到 wake 止，允许过零点；老版本 App 没寄 wake/bed 时退回免打扰时段。与 App 端 asleepAt 同步。
 function guanianAsleep(day: GuanianDay, hm: string, quietStart?: string, quietEnd?: string): boolean {
@@ -119,7 +120,7 @@ function affectionLine(aff: { tier?: string; relation?: string } | null | undefi
   return `你对用户：${aff.tier || "说不上"}；两人现在的关系：${aff.relation || "没定"}。想不想找TA、找了说什么，都按这个分寸来。`;
 }
 // 自发起念的由头分五种，各有口径：想念不催回复、余韵不求回应、惦记像随口问起、安静太久才是搭话
-const SELF_KIND: Record<string, string> = { thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久" };
+const SELF_KIND: Record<string, string> = { thread: "惦记", done: "刚忙完", miss: "想念", echo: "余韵", quiet: "安静太久", fork: "碰上事" };
 // 沉默无法证明不喜欢：不把未接话次数交给模型当负反馈。
 function fbLine(fb: FbBook | undefined, kind: string): string {
   const rec = fb && Array.isArray(fb[kind]) ? fb[kind] : [0, 0];
@@ -137,7 +138,7 @@ function selfBrief(kind: string, reason: string): string {
 // 曲线不是统一衰减：刚忙完几小时内掉光，约定靠近到点反而涨，想念断得越久越重，安静太久是平的
 const KIND_VAL: Record<string, [number, number, number]> = {
   thread: [0.7, 0.6, 0.7], done: [0.6, 0.5, 0.4], miss: [0.6, 0.9, 0.3], echo: [0.4, 0.7, 0.2],
-  quiet: [0.3, 0.5, 0.2], extra: [0.7, 0.6, 0.6], plan: [0.5, 0.5, 0.4],
+  quiet: [0.3, 0.5, 0.2], extra: [0.7, 0.6, 0.6], plan: [0.5, 0.5, 0.4], fork: [0.8, 0.7, 0.8],
 };
 type FbBook = Record<string, [number, number]>;
 // 只用正反馈：至少 3 次接话后轻微加权，最多 1.2 倍；未回应不会降低已有权重。
@@ -426,12 +427,12 @@ function applyThreads(context: PlanContext, keep: Keep[], settle: string[], nowM
     const due = k.when ? parseWhen(k.when, nowMs, tz) : existing ? (+existing.due || 0) : 0;
     if (existing) {
       if (kind !== "topic" && !due) continue;
-      Object.assign(existing, { text, due, at: nowMs, by: "cloud" }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
+      Object.assign(existing, { ...(k.matterId ? { matterId: k.matterId } : {}), text, due, at: nowMs, by: "cloud" }, k.why == null ? {} : { why: String(k.why).slice(0, 40) });
       notes.push(`更新${THREAD_KIND[kind]}「${text}」`);
       continue;
     }
     if (kind !== "topic" && !due) continue;
-    list.push({ id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by: "cloud", done: false, why: String(k?.why || "").slice(0, 40) });
+    list.push({ ...(k.matterId ? { matterId: k.matterId } : {}), id: "t" + Math.random().toString(36).slice(2, 6), kind, text, due, yearly: kind === "date" && /生日|纪念/.test(text), since: nowMs, at: nowMs, by: "cloud", done: false, why: String(k?.why || "").slice(0, 40) });
     notes.push(`记下${THREAD_KIND[kind]}「${text}」`);
   }
   if (!notes.length) return null;
@@ -548,7 +549,7 @@ function momentsBudget(context: PlanContext, nowMs: number, tzMin: number): { we
   return { weekStart, weekN, ok };
 }
 function lifeRoll(context: PlanContext, nowMs: number): { patch: Record<string, unknown>; post: Outbox | null } | null {
-  const day = context.day && typeof context.day === "object" ? context.day : null;
+  const day = context.day && typeof context.day === "object" ? guanianForkDay(context.day as GuanianDay, nowMs, context.affection) : null;
   if (Number(context.momentsOn) !== 1 || !day) return null;
   const tz = Number(day.tz) || 0;
   const hourKey = Math.floor((nowMs + tz * 60_000) / 3600_000);
@@ -583,9 +584,9 @@ function lifeRoll(context: PlanContext, nowMs: number): { patch: Record<string, 
 }
 
 type Decision = { time?: string; act?: boolean; sem?: string; topic?: string; why?: string; intent?: string; defer?: string };
-type Extra = { time?: string; until?: string; about?: string; intent?: string; why?: string; from?: string };
-type Thread = { subject?: string; status?: string; revision?: number; sourceMessageId?: string; mentionedAt?: number; id: string; kind: string; text: string; due?: number; yearly?: boolean; since?: number; at?: number; by?: string; done?: boolean; nudge?: string; why?: string };
-type Keep = { id?: string; subject?: string; status?: string; sourceMessageId?: string; kind?: string; text?: string; when?: string; why?: string };
+type Extra = { matterId?: string; matterRelation?: string; matterEvidenceId?: string; time?: string; until?: string; about?: string; intent?: string; why?: string; from?: string };
+type Thread = { matterId?: string; matterRelation?: string; matterEvidenceId?: string; subject?: string; status?: string; revision?: number; sourceMessageId?: string; mentionedAt?: number; id: string; kind: string; text: string; due?: number; yearly?: boolean; since?: number; at?: number; by?: string; done?: boolean; nudge?: string; why?: string };
+type Keep = { matterId?: string; matterRelation?: string; matterEvidenceId?: string; id?: string; subject?: string; status?: string; sourceMessageId?: string; kind?: string; text?: string; when?: string; why?: string };
 type Outbox = { id: string; at: number; hint: string; by?: string };
 
 // 门禁默认值，可被 App 上传的 context 里的同名字段覆盖（改设置不用重新部署云函数）。
@@ -752,14 +753,15 @@ function buildJudgeBody(template: JobPayload["request"], prompt: string): Record
 }
 
 /** 模型爱把 JSON 裹在解释或 ``` 里，取最外层的一对花括号。 */
-function parseJudgeJson(text: string): { decisions: Decision[]; extra: Extra[]; keep: Keep[]; settle: string[]; post: string } {
+function parseJudgeJson(text: string): { links: Record<string, unknown>[]; decisions: Decision[]; extra: Extra[]; keep: Keep[]; settle: string[]; post: string } {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) return { decisions: [], extra: [], keep: [], settle: [], post: "" };
+  if (start < 0 || end <= start) return { links: [], decisions: [], extra: [], keep: [], settle: [], post: "" };
   try {
-    const parsed = JSON.parse(text.slice(start, end + 1)) as { decisions?: unknown; extra?: unknown; keep?: unknown; settle?: unknown; post?: unknown };
+    const parsed = JSON.parse(text.slice(start, end + 1)) as { links?: unknown; decisions?: unknown; extra?: unknown; keep?: unknown; settle?: unknown; post?: unknown };
     const post = parsed.post && typeof parsed.post === "object" ? (parsed.post as { hint?: unknown }).hint : null;
     return {
+      links: Array.isArray(parsed.links) ? parsed.links.slice(0, 40) : [],
       decisions: Array.isArray(parsed.decisions) ? parsed.decisions.slice(0, 12) as Decision[] : [],
       extra: Array.isArray(parsed.extra) ? parsed.extra.slice(0, 1) as Extra[] : [],
       keep: Array.isArray(parsed.keep) ? parsed.keep.slice(0, 2) as Keep[] : [],
@@ -767,7 +769,7 @@ function parseJudgeJson(text: string): { decisions: Decision[]; extra: Extra[]; 
       post: typeof post === "string" ? post.trim().slice(0, 120) : "",
     };
   } catch {
-    return { decisions: [], extra: [], keep: [], settle: [], post: "" };
+    return { links: [], decisions: [], extra: [], keep: [], settle: [], post: "" };
   }
 }
 
@@ -824,11 +826,13 @@ type GenKit = {
   existing?: { id?: string; startTime?: string; endTime?: string; title?: string; location?: string; lock?: string }[];
   tplDaily?: string; tplImpulse?: string;
   anchorMorning?: boolean; anchorSleep?: boolean; moodGate?: boolean; kitAt?: number;
+  forkLevel?: number; forkBurst?: boolean;
 };
 type GenDay = {
   wake: string; bed: string; mood: string; moodEmoji: string; energy: number; doing: string; location: string; sleep: string;
   schedule: { time: string; end?: string; title: string; place?: string; note?: string; mood?: string; cost?: number; busy?: boolean }[];
   conds: { mood: string; cause: string; energyDelta: number; intensity: number; halfLifeMin: number; startAt: number }[];
+  forks: any[]; forkSeed?: string;
 };
 const GEN_PLACEHOLDER = "__CUSTOM_APP_INSTRUCTION__";
 const GEN_MAX_TRIES = 3;
@@ -875,8 +879,157 @@ function addMin(hm: string, n: number): string {
   const t = Math.min(+m[1] * 60 + +m[2] + n, 23 * 60 + 59);
   return pad2(Math.floor(t / 60)) + ":" + pad2(t % 60);
 }
+// ── 变数（App 同名 domain/forks.mjs 的带类型副本；push-recheck 和 push-generate 里这一段逐字相同，scripts/check-gua-nian-forks.mjs 对照）
+const GUANIAN_FORK_LEVELS = [{ n: 1, mult: 0.45 }, { n: 2, mult: 1 }, { n: 3, mult: 1.35 }];
+const GUANIAN_FORK_TELL: Record<string, string> = { 忍不住: "burst", 聊到才说: "hint", 憋着: "keep", burst: "burst", hint: "hint", keep: "keep" };
+const GUANIAN_FORK_SAYS = ["keep", "hint", "burst"];
+function guanianForkHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+function guanianForkRoll(seed: unknown): number {
+  return guanianForkHash(String(seed)) % 100;
+}
+function guanianForkHM(v: unknown): string {
+  const m = /(\d{1,2})\s*[:：点时.]\s*(\d{1,2})?/.exec(String(v == null ? "" : v));
+  return m ? String(Math.min(23, +m[1])).padStart(2, "0") + ":" + String(Math.min(59, +(m[2] || 0))).padStart(2, "0") : "";
+}
+function guanianForkMins(t: string): number {
+  return +t.slice(0, 2) * 60 + +t.slice(3, 5);
+}
+function guanianForkHMOf(n: number): string {
+  const t = Math.max(0, Math.min(n, 23 * 60 + 59));
+  return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+}
+function guanianForkInt(v: unknown, lo: number, hi: number, dflt: number): number {
+  const n = Math.round(Number(v));
+  return v !== "" && v != null && Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt;
+}
+function guanianForkLevel(level: unknown): number {
+  return typeof level === "number" && [0, 1, 2].includes(level) ? level : 1;
+}
+function guanianNormalizeForks(raw: unknown, schedule: unknown, level: unknown): any[] {
+  const lv = GUANIAN_FORK_LEVELS[guanianForkLevel(level)];
+  const sched: any[] = (Array.isArray(schedule) ? schedule : []).filter((it: any) => it && typeof it.time === "string");
+  const out: any[] = [];
+  for (const f of (Array.isArray(raw) ? raw : []) as any[]) {
+    if (out.length >= lv.n) break;
+    if (!f || typeof f !== "object") continue;
+    const at = guanianForkHM(f.at), what = String(f.what || "").trim().slice(0, 60);
+    const item = at ? sched.find((it) => it.time === at) : null;
+    if (!item || !what || out.some((x) => x.at === at)) continue;
+    const span = item.end && item.end > at ? guanianForkMins(item.end) - guanianForkMins(at) : 120;
+    const rv = guanianForkHM(f.time);
+    const off = rv && rv >= at ? Math.min(guanianForkMins(rv) - guanianForkMins(at), span) : Math.min(10, span);
+    const reveal = guanianForkHMOf(guanianForkMins(at) + off);
+    const later = (t: unknown): string => {
+      const x = guanianForkHM(t);
+      return x && x >= reveal && x !== at && sched.some((it) => it.time === x) ? x : "";
+    };
+    const titleAt = (t: string): string => String((sched.find((it) => it.time === t) || {}).title || "");
+    let add: any = null;
+    if (f.add && typeof f.add === "object" && String(f.add.title || "").trim()) {
+      const t = guanianForkHM(f.add.time), time = t && t >= reveal ? t : reveal, end = guanianForkHM(f.add.end);
+      add = {
+        time, end: end > time ? end : "", title: String(f.add.title).trim().slice(0, 16),
+        place: String(f.add.place || "").trim().slice(0, 16), cost: guanianForkInt(f.add.cost, -15, 15, 0),
+        busy: f.add.busy === true || /^(true|是|1)$/i.test(String(f.add.busy || "").trim()),
+      };
+    }
+    const move = (Array.isArray(f.move) ? f.move : []).slice(0, 3)
+      .map((m: any) => ({ time: later(m && m.time), to: guanianForkHM(m && (m.newTime || m.to)) }))
+      .filter((m: any) => m.time && m.to > m.time)
+      .map((m: any) => ({ time: m.time, to: m.to, title: titleAt(m.time) }));
+    const drop = (Array.isArray(f.drop) ? f.drop : []).slice(0, 2).map(later)
+      .filter((t: string) => t && !move.some((m: any) => m.time === t))
+      .map((t: string) => ({ time: t, title: titleAt(t) }));
+    out.push({
+      id: "f" + guanianForkHash(at + "|" + item.title + "|" + what).toString(36),
+      at, item: String(item.title || ""), off, what,
+      label: String(f.label || "").trim().slice(0, 10) || what.slice(0, 8),
+      p: Math.max(3, Math.min(90, Math.round(guanianForkInt(f.p, 0, 100, 30) * lv.mult))),
+      mood: String(f.mood || "").trim().slice(0, 24),
+      energy: guanianForkInt(f.energy, -10, 10, 0),
+      tell: GUANIAN_FORK_TELL[String(f.tell || "").trim()] || "hint",
+      add, move, drop, state: "",
+    });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+function guanianForkSay(tell: unknown, score: unknown): string {
+  let i = GUANIAN_FORK_SAYS.indexOf(GUANIAN_FORK_TELL[String(tell || "")] || "hint");
+  if (typeof score === "number" && Number.isFinite(score)) {
+    if (score >= 80) i += 1;
+    else if (score >= 60 && i === 0) i = 1;
+    else if (score < 15) i -= 1;
+    else if (score < 35 && i === 2) i = 1;
+  }
+  return GUANIAN_FORK_SAYS[Math.max(0, Math.min(2, i))];
+}
+function guanianApplyForks(day: any, nowHM: string, opts?: { seed?: string; score?: unknown; at?: (hm: string) => number }): { day: any; revealed: any[] } {
+  const forks: any[] = day && Array.isArray(day.forks) ? day.forks : [];
+  const now = guanianForkHM(nowHM), o = opts || {};
+  if (!now || !forks.some((f) => f && !f.state)) return { day, revealed: [] };
+  let sched: any[] = (Array.isArray(day.schedule) ? day.schedule : []).filter((it: any) => it && typeof it.time === "string").map((it: any) => ({ ...it }));
+  let conds: any[] = Array.isArray(day.conds) ? day.conds.slice() : [];
+  const revealed: any[] = [];
+  const next = forks.map((f) => {
+    if (!f || f.state) return f;
+    const anchor = sched.find((it) => !it.fork && it.title === f.item) || sched.find((it) => !it.fork && it.time === f.at);
+    if (!anchor) {
+      const gone = { ...f, state: "void" };
+      revealed.push(gone);
+      return gone;
+    }
+    const reveal = guanianForkHMOf(guanianForkMins(anchor.time) + (Number(f.off) || 0));
+    if (reveal > now) return f;
+    const done: any = { ...f, at: reveal, state: guanianForkRoll(String(o.seed || "") + "|" + f.id) < (Number(f.p) || 0) ? "hit" : "miss" };
+    revealed.push(done);
+    if (done.state !== "hit") return done;
+    done.say = guanianForkSay(f.tell, o.score);
+    const own = (it: any, t: string) => it !== anchor && !it.fork && it.time === t && t >= reveal;
+    for (const d of f.drop || []) sched = sched.filter((it) => !own(it, d.time));
+    for (const m of f.move || []) {
+      const it = sched.find((x) => own(x, m.time));
+      if (!it) continue;
+      const shift = guanianForkMins(m.to) - guanianForkMins(it.time);
+      if (it.end && it.end > it.time) it.end = guanianForkHMOf(guanianForkMins(it.end) + shift);
+      it.time = m.to;
+      it.moved = true;
+    }
+    if (f.add) {
+      const t = f.add.time > reveal ? f.add.time : reveal;
+      sched.push({ time: t, end: f.add.end > t ? f.add.end : "", title: f.add.title, place: f.add.place, note: "", cost: Number(f.add.cost) || 0, busy: !!f.add.busy, fork: f.id });
+    }
+    sched.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    const ms = f.mood && typeof o.at === "function" ? o.at(reveal) : 0;
+    if (ms) conds = conds.concat([{ mood: f.mood, cause: f.label, energyDelta: Number(f.energy) || 0, intensity: 70, halfLifeMin: 240, startAt: ms }]).slice(-8);
+    return done;
+  });
+  return revealed.length ? { day: { ...day, schedule: sched, conds, forks: next }, revealed } : { day, revealed };
+}
+function guanianForkNotes(day: any): string[] {
+  return (day && Array.isArray(day.forks) ? day.forks : []).filter((f: any) => f && f.state === "hit").slice(-3)
+    .map((f: any) => "今天 " + f.at + " 碰上一件事：" + f.what + (f.say === "keep"
+      ? "。你不想主动提，用户问起或聊到很贴近的事才可能说。"
+      : f.say === "burst"
+        ? "。你憋不住想跟用户说：还没说过的话，找个空当说出来；说过了别重复。"
+        : "。还没跟用户说过的话，聊到相关的自然提起；说过了别重复。"));
+}
+// 云端没有 App 的本地时钟：按日程里的时区换算此刻和揭晓时刻；结果不落库，每次读都重算，和 App 结算的一样
+function guanianForkDay(day: GuanianDay, nowMs: number, affection?: unknown): GuanianDay {
+  if (!day || !Array.isArray(day.forks) || !day.forks.length) return day;
+  const tz = Number(day.tz) || 0;
+  const local = new Date(nowMs + tz * 60_000);
+  const hm = String(local.getUTCHours()).padStart(2, "0") + ":" + String(local.getUTCMinutes()).padStart(2, "0");
+  const base = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - tz * 60_000;
+  const score = affection && typeof affection === "object" ? (affection as { score?: unknown }).score : undefined;
+  return guanianApplyForks(day, hm, { seed: String(day.forkSeed || ""), score, at: (t: string) => base + guanianForkMins(t) * 60_000 }).day;
+}
+// ── 变数副本结束
 // App 同名 parseDayResult
-function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, settings: { quietStart?: string; quietEnd?: string }, nowMs: number): GenDay {
+function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, settings: { quietStart?: string; quietEnd?: string; forkLevel?: number }, nowMs: number): GenDay {
   const schedRaw = pickField(d, ["schedule", "日程", "日程表"]);
   if (!Array.isArray(schedRaw)) throw new Error("日程缺失（模型返回的字段：" + Object.keys(d || {}).slice(0, 10).join("/") + "）");
   const sched: GenDay["schedule"] = schedRaw.slice(0, 10).map((it: any) => ({
@@ -920,6 +1073,7 @@ function parseDayResult(d: any, existing: NonNullable<GenKit["existing"]>, setti
     sleep: String(pickField(d, ["sleep", "睡眠", "昨晚"]) || "").slice(0, 40),
     schedule: sched,
     conds: bodyConds,
+    forks: guanianNormalizeForks(pickField(d, ["forks", "变数", "岔子"]), sched, settings.forkLevel),
   };
 }
 // App 同名 buildImpulseInstruction
@@ -1134,6 +1288,7 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
       quietStart: String(context.quietStart || ""), quietEnd: String(context.quietEnd || ""),
       minGapMin: Number(context.minGapMin) || 0, maxUnanswered: Number(context.maxUnanswered) || 0,
       moodGate: kit.moodGate !== false, anchorMorning: kit.anchorMorning === true, anchorSleep: kit.anchorSleep !== false,
+      forkLevel: kit.forkLevel,
     };
 
     // ── 生成TA的一天（与 App generateDay 同一份指令、同一套归一）
@@ -1143,11 +1298,13 @@ async function generateCloudDay(deps: GenDeps): Promise<void> {
     const raw = await generateJsonWith(tplDaily, instruction, log, record);
     if (!await active()) return;
     const dayFull = parseDayResult(raw, existing, settings, nowMs);
+    dayFull.forkSeed = planDate + "|" + characterId;
     const day: GuanianDay & Record<string, unknown> = {
       tz, mood: dayFull.mood, energy: dayFull.energy, location: dayFull.location, doing: dayFull.doing,
       wake: dayFull.wake, bed: dayFull.bed,
       schedule: dayFull.schedule.map(it => ({ time: it.time, end: it.end || "", title: it.title, place: it.place || "", cost: +(it.cost || 0), mood: it.mood || "", busy: typeof it.busy === "boolean" ? it.busy : undefined })),
       conds: dayFull.conds.map(c => ({ startAt: c.startAt, halfLifeMin: c.halfLifeMin, intensity: c.intensity, energyDelta: c.energyDelta, mood: c.mood, cause: c.cause })),
+      forks: dayFull.forks, forkSeed: dayFull.forkSeed, forkBurst: kit.forkBurst === false ? 0 : 1,
     };
     log("生成今日生活面：" + dayFull.schedule.length + " 条日程（日程表已定 " + existing.length + " 条），作息 " + dayFull.wake + " 起 " + dayFull.bed + " 睡，心情「" + dayFull.mood + "」"
       + (dayFull.sleep ? "，昨晚" + dayFull.sleep : "") + (dayFull.conds.length ? "，身上：" + dayFull.conds.map(c => c.cause).join("、") : "")
@@ -1355,7 +1512,7 @@ Deno.serve(async (req: Request) => {
   const cronSecret = secretRows[0]?.cron_secret || "";
   const payloadKey = secretRows[0]?.payload_key || "";
   if (!cronSecret || String(token) !== cronSecret) return new Response("forbidden", { status: 403 });
-  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1", "promise-tasks-v1", "promise-tasks-v2", "scheduler-state-v1", "history-window-v1"] });
+  if (action === "capabilities") return Response.json({ ok: true, capabilities: ["user-sleep-feedback-v1", "recheck-control-v1", "generation-stop-v1", "judge-task-v1", "promise-tasks-v1", "promise-tasks-v2", "scheduler-state-v1", "history-window-v1", "matter-dedup-v1", "day-forks-v1"] });
   if (!userId || !characterId || !planDate) return new Response("bad request", { status: 400 });
   if (!payloadKey) return new Response("payload_key missing", { status: 200 });
 
@@ -1516,7 +1673,7 @@ Deno.serve(async (req: Request) => {
   // 自发起念：没有新聊天也可以起念，由头是TA自己这一天里的事——刚做完一件有分量的日程，
   // 或者双方安静太久。每一次都是一次裁决调用，所以另有每日上限（selfImpulseCap），
   // 用掉的次数记在 context.selfUsed，App 上传计划时会原样带回来，重新编排才清零。
-  let day = context.day && typeof context.day === "object" ? context.day : null;
+  let day = context.day && typeof context.day === "object" ? guanianForkDay(context.day as GuanianDay, nowMs, context.affection) : null;
   let selfUsed = Number(context.selfUsed) || 0;
   let selfReason = "";
   let threadNudged: { id: string; mark: string; reason: string } | null = null;
@@ -1584,7 +1741,7 @@ Deno.serve(async (req: Request) => {
       clone.merge = { ...(clone.merge || {}), tzOffsetMin: rowTz, cooldownRounds: 0, guanianPromise: { id: t.id, revision: Number(t.revision) || 1 } };
       if (!appendIntentNote(clone.request.body, clone.request.providerKind, `[系统约定任务，非用户消息] ${intent}`)) continue;
       retuneWakeSnapshot(clone.request.body, clone.request.providerKind, intent, Math.max(1, Math.round((fireAt - nowMs) / 60000)));
-      const item = { time: hhmm(fireAt, Number(rowTz) || 0), fireAt, origFireAt: Number(t.due),
+      const item = { ...matterFields(t), matterId: t.matterId || "thread:" + t.id, time: hhmm(fireAt, Number(rowTz) || 0), fireAt, origFireAt: Number(t.due),
         kind: "promise", from: t.id, promiseRevision: Number(t.revision) || 1, source: "约定·" + t.text,
         intent, why: t.why || "按明确约定到点核对", act: true, sem: "约定", wakeId };
       const result = await rest("rpc/push_arm_promise", { method: "POST", body: JSON.stringify({
@@ -1610,7 +1767,7 @@ Deno.serve(async (req: Request) => {
       if (Array.isArray(latest.decisions)) priorDecisions.splice(0, priorDecisions.length, ...latest.decisions.filter(d => d.kind !== "gate"));
     }
   } catch (e) { return failPlan("约定同步失败：" + String(e instanceof Error ? e.message : e)); }
-  day = context.day && typeof context.day === "object" ? context.day : null;
+  day = context.day && typeof context.day === "object" ? guanianForkDay(context.day as GuanianDay, nowMs, context.affection) : null;
   selfUsed = Number(context.selfUsed) || 0;
   if (planWriteFailed) return failPlan("计划保存失败，等待恢复");
   if (planConflict) return new Response("plan changed; retry fresh snapshot", { status: 200 });
@@ -1708,6 +1865,20 @@ Deno.serve(async (req: Request) => {
           selfCurve = Math.min(1, 0.5 + absentDays / 14 * 0.5);
           return "";
         }
+      }
+      // 由头零：刚碰上的变数，TA憋不住想说。App 开着时已经约过、或改成聊到再说的，不再起念
+      const forkDayNow = day as GuanianDay;
+      const forkSince = Number.isFinite(lastRecheckMs)
+        && Math.floor((lastRecheckMs + tzM * 60_000) / 86_400_000) === Math.floor((nowMs + tzM * 60_000) / 86_400_000)
+        ? guanianNow(forkDayNow, lastRecheckMs, qs, qe).hm : "00:00";
+      const burst = Number(forkDayNow.forkBurst) === 1
+        ? (forkDayNow.forks || []).filter((f: any) => f && f.state === "hit" && f.say === "burst" && !f.wakeAt && String(f.at) > forkSince && String(f.at) <= now.hm).pop()
+        : null;
+      const burstMin = burst ? guanianForkMins(now.hm) - guanianForkMins(String(burst.at)) : 0;
+      if (burst && burstMin <= 90) {
+        selfKind = "fork"; selfReason = `刚碰上一件事：${burst.what}，憋不住想跟用户说`;
+        selfCurve = Math.max(0.3, 1 - burstMin / 90);
+        return "";
       }
       // 由头一：上次裁决之后新开始了一条日程（严格模式还要求耗神/回血明显或有情绪余味）
       const tzMs = tzM * 60_000;
@@ -1915,6 +2086,7 @@ Deno.serve(async (req: Request) => {
       ? `此刻的状态：${now.asleep ? "在睡觉" : "在" + (now.doing || "没什么特别的")}${now.step ? "（" + now.step + "）" : ""}，情绪「${now.mood}」，精力 ${now.energy}%${now.next ? "，接下来 " + now.next : ""}。`
       : (context.mood || context.energy ? `今天的状态：心情「${context.mood || "普通"}」，精力「${context.energy || "普通"}」。` : "");
     const prompt = [
+      matterPrompt(items, context.threads || [], cloudHistory.outputs),
       ledgerOnly ? "本轮仅核对角色的新承诺，只有 keep/settle 可非空，decisions/extra/post 必须为空。" : "",
       `你现在是「${characterName}」，在盘算今天剩下的时间要不要主动联系用户。现在是本地时间 ${hhmm(nowMs, offsetMin)}。`,
       context.bias ? `你的性格倾向：${context.bias}` : "",
@@ -1942,16 +2114,16 @@ Deno.serve(async (req: Request) => {
         : "只看刚才聊的内容里有没有值得临时起一个新念头的事：聊到一半没说完的话头、"
           + "约好了要说的、答应了要问的。只是随口聊到、没落实的事不算。",
       "只输出 JSON，不要任何解释：",
-      "{"
+      '{"links":[{"itemId":"已有念头编号","matterId":"归属的已有事项编号","relation":"same或followup","sourceMessageId":"新进展消息编号，无则空"}],'
       + (judge
         ? '"decisions":[{"time":"HH:MM","act":true,"sem":"关心|分享|约定|闲聊","topic":"一句话主题","why":"你为什么这么定","intent":"到点时你想说的事，一句话","defer":"只是这个点不合适、话还想说时填今天更晚的HH:MM，否则空字符串"}]'
         : '"decisions":[]')
       + ","
       + (canImpulse
-        ? '"extra":[{"time":"HH:MM","about":"这个念头的由头（8字内）","intent":"想说的事","why":"为什么现在加","from":"出自账本里某件事就填它的 id，否则空字符串"}]'
+        ? '"extra":[{"matterId":"已有编号或new:1","relation":"new或same或followup","sourceMessageId":"新进展消息编号，无则空","time":"HH:MM","about":"这个念头的由头（8字内）","intent":"想说的事","why":"为什么现在加","from":"出自账本里某件事就填它的 id，否则空字符串"}]'
         : '"extra":[]')
       + (threadsOn && !selfReason
-        ? ',"keep":[{"id":"已有事件的id，新事件留空","subject":"user|character|both","status":"pending|completed|cancelled","sourceMessageId":"证据消息编号","kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"]'
+        ? ',"keep":[{"matterId":"已有编号或new:1","id":"已有事件的id，新事件留空","subject":"user|character|both","status":"pending|completed|cancelled","sourceMessageId":"证据消息编号","kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"]'
         : "")
       + (canPost ? ',"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null' : "")
       + "}",
@@ -2005,10 +2177,14 @@ Deno.serve(async (req: Request) => {
     // 门禁只放行了其中一组时，另一组的返回一律丢掉——提示词里已经要求写 []，
     // 但模型不一定听话，这里是硬拦。
     const judged = parseJudgeJson(judgeText);
+    const matters = prepareMatters(items, context.threads || [], cloudHistory.outputs, judged, nowMs);
+    judged.keep = matters.keep;
+    judged.extra = matters.extra;
     const decisions = judge ? judged.decisions : [];
     const extra = canImpulse ? judged.extra : [];
     // 账本改动（自发起念那轮不让模型记账，只标「这个由头提过了」）
-    let threadsNext: Thread[] | null = threadsOn && !selfReason ? applyThreads(context, judged.keep, judged.settle, nowMs, offsetMin, (s) => console.log("[push-recheck] " + s), cloudHistory.messages) : null;
+    let threadsNext: Thread[] | null = threadsOn && !selfReason ? applyThreads({ ...context, threads: matters.threads }, judged.keep, judged.settle, nowMs, offsetMin, (s) => console.log("[push-recheck] " + s), cloudHistory.messages) : null;
+    if (!threadsNext && JSON.stringify(matters.threads) !== JSON.stringify(context.threads || [])) threadsNext = matters.threads;
     if (threadNudged) {
       const base = threadsNext || (Array.isArray(context.threads) ? context.threads.map(t => ({ ...t })) : []);
       const t = base.find(x => x.id === threadNudged!.id);
@@ -2027,7 +2203,7 @@ Deno.serve(async (req: Request) => {
     }
     const postDecision = post ? { at: nowMs, kind: "post", note: `想发条朋友圈——${post.hint}`, by: "cloud" } : null;
     const ctxDirty = !!selfReason || !!threadsNext || !!post;
-    if (decisions.length === 0 && extra.length === 0 && !threadsNext) {
+    if (decisions.length === 0 && extra.length === 0 && !threadsNext && !judged.links.length) {
       const saved = await touch({
         retry_count: 0, next_retry_at: null, retry_error: null, retry_stopped: false,
         judged_chat_at: Math.max(+plan.judged_chat_at || 0, judgeTask?.chatAt || 0), judged_at: Date.now(),
@@ -2044,8 +2220,19 @@ Deno.serve(async (req: Request) => {
     }
 
     const applied: Record<string, unknown>[] = [];
-    const nextItems = items.map(item => ({ ...item }));
-    let lit = litCount;
+    const nextItems: PlanItem[] = matters.items;
+    const matterThreads = threadsNext || matters.threads;
+    const cancelDuplicates = () => {
+      for (const item of nextItems) {
+        if (!item.act || item.generatedAt || cloudHistory.outputs.some(o => o.trigger_key === "timedwake:" + item.wakeId)) continue;
+        const reason = matterBlock(item, nextItems, matterThreads, cloudHistory.outputs, cloudHistory.messages);
+        if (!reason) continue;
+        item.act = false; item.matterSuppressed = true; item.why = reason;
+        applied.push({ at: nowMs, time: item.time, wakeId: item.wakeId, kind: "dedupe", note: reason, by: "cloud" });
+      }
+    };
+    cancelDuplicates();
+    let lit = ordinaryQuota(nextItems);
 
     // 预约 id 必须带 App 上传的前缀：宿主的 push.cancelWake 只认自家 APP 的 id，
     // 前缀对不上，用户下次打开就撤不掉云端点亮的这条。
@@ -2124,6 +2311,7 @@ Deno.serve(async (req: Request) => {
       }
 
       if (decision.act === true && !item.act) {
+        if (matterBlock(item, nextItems, matterThreads, cloudHistory.outputs, cloudHistory.messages)) continue;
         if (lit >= (context.quota ?? 3)) continue;
         if (inQuiet(item.time) || tooClose(item.fireAt, nextItems, item)) continue;
         const intent = String(decision.intent || `刚${item.source}，想到用户`).slice(0, 200);
@@ -2154,6 +2342,9 @@ Deno.serve(async (req: Request) => {
       if (fireAt <= nowMs + LEAD_MS) continue;
       if (nextItems.some(item => item.kind !== "promise" && item.time === time)) continue;
       if (tooClose(fireAt, nextItems)) continue;
+      const candidate = { ...matterFields(one), kind: "extra", from: one.from || "", act: true, fireAt, intent: String(one.intent || one.about || "") };
+      const duplicate = matterBlock(candidate, nextItems, matterThreads, cloudHistory.outputs, cloudHistory.messages);
+      if (duplicate) { applied.push({ at: nowMs, time, kind: "dedupe", note: duplicate, by: "cloud" }); continue; }
       const intent = String(one.intent || one.about || "").slice(0, 200);
       if (!intent) continue;
       const wakeId = await armJob(fireAt, intent);
@@ -2163,6 +2354,7 @@ Deno.serve(async (req: Request) => {
         ? anchor.fireAt + ((Number(exUhm.split(":")[0]) * 60 + Number(exUhm.split(":")[1])) - anchorLocal) * 60_000
         : 0;
       nextItems.push({
+        ...matterFields(one),
         time,
         fireAt,
         until: exUms > fireAt ? Math.min(exUms, fireAt + 6 * 3600_000) : 0,
@@ -2480,7 +2672,7 @@ function updatePromiseThreads(threads, changes, nowMs, by, messages = null) {
     const text = String(k.text || "").trim().slice(0, 60);
     const subject = promiseSubject(k.subject);
     const old = id ? list.find(t => t.id === id && t.kind === "promise")
-      : list.find(t => t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
+      : list.find(t => t.kind === "promise" && promiseSubject(t.subject) === subject && (t.text === text || k.matterId && t.matterId === k.matterId));
     // Explicit unknown IDs cannot silently create a second event.
     if (id && !old) continue;
     // Model-produced changes need real speaker evidence. Manual edits use their own UI path.
@@ -2506,7 +2698,7 @@ function updatePromiseThreads(threads, changes, nowMs, by, messages = null) {
     if (!(due > 0) || (!text && !old)) continue;
     if (old) {
       const changed = due !== old.due || (k.subject && subject !== promiseSubject(old.subject)) || old.done;
-      Object.assign(old, { text: text || old.text, due, subject: k.subject ? subject : promiseSubject(old.subject),
+      Object.assign(old, { ...(k.matterId ? { matterId: k.matterId, matterRelation: k.matterRelation, matterEvidenceId: k.matterEvidenceId } : {}), text: text || old.text, due, subject: k.subject ? subject : promiseSubject(old.subject),
         sourceMessageId: String(k.sourceMessageId || old.sourceMessageId || "").slice(0, 100),
         status: changed ? "pending" : (old.status || "pending"), done: false, at: nowMs, by,
         revision: (Number(old.revision) || 1) + (changed ? 1 : 0),
@@ -2516,7 +2708,7 @@ function updatePromiseThreads(threads, changes, nowMs, by, messages = null) {
       let n = list.length;
       let newId;
       do { newId = "p" + nowMs.toString(36) + (n++).toString(36); } while (list.some(t => t.id === newId));
-      list.push({ id: newId, kind: "promise", text, due, subject, revision: 1, status: "pending", done: false,
+      list.push({ ...(k.matterId ? { matterId: k.matterId, matterRelation: k.matterRelation, matterEvidenceId: k.matterEvidenceId } : {}), id: newId, kind: "promise", text, due, subject, revision: 1, status: "pending", done: false,
         sourceMessageId: String(k.sourceMessageId || "").slice(0, 100), since: nowMs, at: nowMs, by,
         why: String(k.why || "").slice(0, 40) });
     }
@@ -2527,7 +2719,7 @@ function promiseNeedsTask(t, items, nowMs, endMs) {
   return t.kind === "promise" && !t.done && t.status !== "completed" && t.status !== "cancelled"
     && !(Number(t.mentionedAt) > 0) && !/said:/.test(String(t.nudge || ""))
     && Number(t.due) > nowMs - 86400000 && Number(t.due) < endMs
-    && !items.some(w => w.from === t.id && w.kind === "promise" && w.act
+    && !items.some(w => w.from === t.id && w.kind === "promise" && (w.act || w.matterSuppressed)
       && Number(w.promiseRevision || 1) === Number(t.revision || 1));
 }
 function promiseIntent(t, localDue) {
@@ -2536,3 +2728,135 @@ function promiseIntent(t, localDue) {
     + "时间到了不等于事情已完成；有事实支持才能说到了或做完了，延误就按现在的情况说明，不能照搬旧时间。已改期、取消、完成且交代过则作罢。";
 }
 // END GUANIAN PROMISES
+
+// BEGIN GUANIAN MATTERS
+// Pure shared matter identity and reservation rules. Semantic matching belongs to
+// the existing judgment call; identities/evidence/one active task are checked here.
+function matterItemId(w) {
+  return w.wakeId ? 'wake:' + w.wakeId : 'slot:' + Number(w.origFireAt || w.fireAt || 0) + ':' + String(w.source || '');
+}
+function matterKey(w, threads = []) {
+  const thread = threads.find(t => t.id === w.from);
+  return String(w.matterId || thread?.matterId || (w.from ? 'thread:' + w.from : matterItemId(w)));
+}
+function matterOutputKey(o, items, threads) {
+  const w = items.find(w => o.trigger_key === 'timedwake:' + w.wakeId);
+  if (w) return matterKey(w, threads);
+  const meta = o.meta?.guanianContext;
+  return String(meta?.matterId || (meta?.eventId ? 'thread:' + meta.eventId : 'sent:' + o.id));
+}
+function matterCatalog(items, threads, outputs) {
+  return [
+    ...threads.map(t => ({ matterId: String(t.matterId || 'thread:' + t.id), threadId: t.id, kind: t.kind,
+      text: t.text, done: !!t.done, due: t.due || 0 })),
+    ...items.map(w => ({ itemId: matterItemId(w), matterId: matterKey(w, threads), kind: w.kind || 'ordinary',
+      intent: w.intent || w.source, act: !!w.act, fireAt: w.fireAt, generatedAt: w.generatedAt || 0 })),
+    ...outputs.slice().sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 12).map(o => ({ matterId: matterOutputKey(o, items, threads), sentAt: o.created_at,
+      messageId: 'push-outbox:' + o.id, text: String(o.raw_text || '').slice(0, 4000) })),
+  ];
+}
+function matterPrompt(items, threads, outputs) {
+  return '【事项去重，必须先于 decisions/extra/keep 判断】\n' + JSON.stringify(matterCatalog(items, threads, outputs))
+    + '\n上述包含普通念头、明确约定及实际已生成的正文。按同一个具体沟通目的匹配，不按宽泛话题或相似词猜测；承诺稍后回答不等于已经回答，尚未履行的约定不能因为提过话题就作罢；换时间、标题或说法不是新事项。'
+    + '额外输出 links:[{itemId:"已有念头编号",matterId:"它实际属于的已有事项编号",relation:"same或followup",sourceMessageId:"新进展的真实聊天编号，无则空"}]，把已有重复念头归到同一 matterId；优先使用明确约定的 matterId。'
+    + 'extra 与 keep 每条都增加 matterId：已有事情必须复用上述编号；只有真正新事才用 new:1 或 new:2，同轮同一新事必须用同一编号。'
+    + '同一事项已有待发任务就不再 extra；要改时间用原任务 decisions.defer，约定改期用 keep.id/when。'
+    + '已问过但用户没回答不是新进展，不可重复催问；已经说完、回答、拒绝或取消的事项作罢。'
+    + '发过后确有新进展才可 relation=followup，并提供晚于上次发送的用户消息或线下摘要 sourceMessageId；仅新的角色主动消息、时间流逝不算。'
+    + 'extra 还须带 relation:"new|same|followup"、sourceMessageId。明确约定进入 keep，不同时排 extra。'
+    + '普通念头已经解决用 decisions.act=false 且 defer 为空，约定完成/取消用 keep 的原 id 和 status，必须引用真实证据。';
+}
+function prepareMatters(items, threads, outputs, judgment, nowMs) {
+  const catalog = matterCatalog(items, threads, outputs);
+  const known = new Set(catalog.map(r => r.matterId));
+  const resolve = value => {
+    const id = String(value || '');
+    return known.has(id) ? id : /^new:[12]$/.test(id) ? 'matter:' + nowMs + ':' + id.slice(4) : '';
+  };
+  const next = items.map(w => ({ ...w, matterId: matterKey(w, threads) }));
+  const links = Array.isArray(judgment.links) ? judgment.links.slice(0, 40) : [];
+  // Resolve against the original catalog, then collapse aliases transitively.
+  // Conflicting assignments and cycles are ignored instead of guessing ownership.
+  const aliases = new Map();
+  for (const link of links) {
+    if (!link || !known.has(String(link.matterId || ''))) continue;
+    const w = next.find(w => matterItemId(w) === link.itemId);
+    if (!w || w.matterId === link.matterId) continue;
+    if (aliases.has(w.matterId) && aliases.get(w.matterId) !== link.matterId) aliases.set(w.matterId, '');
+    else aliases.set(w.matterId, link.matterId);
+  }
+  const canonical = id => {
+    const seen = new Set(); let curr = id;
+    while (aliases.has(curr)) {
+      if (seen.has(curr) || !aliases.get(curr)) return id;
+      seen.add(curr); curr = aliases.get(curr);
+    }
+    return curr;
+  };
+  for (const w of next) {
+    w.matterId = canonical(w.matterId);
+    const link = links.find(l => l && l.itemId === matterItemId(w) && canonical(String(l.matterId || '')) === w.matterId);
+    if (link) {
+      w.matterRelation = link.relation === 'followup' ? 'followup' : 'same';
+      w.matterEvidenceId = String(link.sourceMessageId || '').slice(0, 150);
+    }
+  }
+  const enrich = k => {
+    if (!k || typeof k !== 'object') return null;
+    const original = threads.find(t => t.id === String(k.id || k.from || '').replace(/[\[\]\s]/g, ''));
+    const id = original ? String(original.matterId || 'thread:' + original.id) : resolve(k.matterId);
+    const owner = threads.find(t => String(t.matterId || 'thread:' + t.id) === canonical(id) && t.kind === k.kind);
+    return { ...k, ...(owner ? { id: owner.id } : {}), matterId: canonical(id), matterRelation: k.relation === 'followup' ? 'followup' : 'same',
+      matterEvidenceId: String(k.sourceMessageId || '').slice(0, 150) };
+  };
+  return { items: next,
+    threads: threads.map(t => {
+      const id = canonical(String(t.matterId || 'thread:' + t.id));
+      return { ...t, matterId: id };
+    }),
+    keep: (Array.isArray(judgment.keep) ? judgment.keep : []).map(enrich).filter(Boolean),
+    extra: (Array.isArray(judgment.extra) ? judgment.extra : []).map(enrich).filter(k => k?.matterId),
+  };
+}
+function matterBlock(w, items, threads, outputs, messages) {
+  if (w.matterSuppressed) return '已被事项去重撤销的任务';
+  const key = matterKey(w, threads);
+  const sameThreads = threads.filter(t => String(t.matterId || 'thread:' + t.id) === key);
+  if (sameThreads.some(t => t.done || ['completed', 'cancelled'].includes(t.status))) return '同一事项已经了结';
+  // A live promise re-agreed to a new revision (evidence-checked in the ledger) is not
+  // the same send as its earlier revision; only other sends of this matter still block it.
+  const revision = Number(w.promiseRevision || 1);
+  const current = w.kind === 'promise' && sameThreads.some(t => t.id === w.from && t.kind === 'promise' && Number(t.revision || 1) === revision);
+  const earlierRevision = (from, rev) => current && from === w.from && Number(rev || 1) < revision;
+  const ownItem = i => i.kind === 'promise' && earlierRevision(i.from, i.promiseRevision);
+  const ownOutput = o => {
+    const i = items.find(i => o.trigger_key === 'timedwake:' + i.wakeId);
+    const meta = o.meta?.guanianContext;
+    return i ? ownItem(i) : earlierRevision(meta?.eventId, meta?.revision);
+  };
+  // Only genuine generation evidence counts, never a passed scheduled time.
+  const sentAt = Math.max(0, ...items.filter(i => matterKey(i, threads) === key && !ownItem(i)).map(i => Number(i.generatedAt) || 0),
+    ...outputs.filter(o => matterOutputKey(o, items, threads) === key && !ownOutput(o)).map(o => Date.parse(o.created_at) || 0));
+  if (sentAt) {
+    const evidence = messages.find(m => String(m.id || '') === String(w.matterEvidenceId || '') && m.id);
+    const fresh = evidence && (evidence.role === 'user' || evidence.media_type === 'offline_summary')
+      && Number(evidence.t ?? Date.parse(evidence.message_at || '')) > sentAt;
+    if (w.matterRelation !== 'followup' || !fresh) return '同一事项已发过，未核实新的聊天进展';
+  }
+  if (w.kind !== 'promise' && sameThreads.some(t => t.kind === 'promise' && !t.done)) return '同一事项由明确约定负责';
+  const pending = items.filter(i => i.act && !i.generatedAt && matterKey(i, threads) === key
+    && !outputs.some(o => o.trigger_key === 'timedwake:' + i.wakeId));
+  if (!pending.includes(w)) {
+    if (pending.length) return '同一事项已有待发送任务';
+    pending.push(w);
+  }
+  pending.sort((a, b) => Number(b.kind === 'promise') - Number(a.kind === 'promise')
+    || Number(a.fireAt || 0) - Number(b.fireAt || 0) || matterItemId(a).localeCompare(matterItemId(b)));
+  if (pending[0] !== w) return '同一事项已有待发送任务';
+  return '';
+}
+function matterFields(value) {
+  return { matterId: String(value.matterId || ''), matterRelation: String(value.matterRelation || ''),
+    matterEvidenceId: String(value.matterEvidenceId || '') };
+}
+// END GUANIAN MATTERS

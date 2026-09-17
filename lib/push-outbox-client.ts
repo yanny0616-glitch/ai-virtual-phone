@@ -1,13 +1,14 @@
 // 离线推送·回端合并：App 打开/回前台时拉取服务端生成的原始输出，
-// 用客户端同一条解析管线（回复插件 → 输出正则 → parseAndSaveResponse）落进聊天记录。
+// 用客户端同一条解析管线（回复插件 → 思维链提取 → 输出正则 → parseAndSaveResponse）落进聊天记录。
 
+import { parseCloudThinking, resolveCloudThinkingConfig, type CloudThinkingConfig } from "./cloud-reply-thinking";
 import { parseAndSaveResponse, scheduleFollowUp } from "./follow-up-service";
 import { applyOutputRegex } from "./llm-prompt-assembler";
 import type { RegexConfig } from "./settings-types";
 import { stripHallucinatedTimestamps } from "./llm-provider-adapter";
 import { MacroEngine } from "./macro-engine";
 import { getActiveAppTags } from "./content-tag-utils";
-import { loadChatMessages, loadChatSessions, hasPersistedResponseBatch, refreshChatSessionFromDisk } from "./chat-storage";
+import { loadChatMessages, loadChatSessions, hasPersistedResponseBatch, refreshChatSessionFromDisk, upsertImportedChatMessageAsync, type ChatMessage } from "./chat-storage";
 import { settleDeferredReplyDelivery } from "./deferred-reply-cloud";
 import { isPersonalPushCloudActive, loadPersonalPushCloudState, personalPushFetch } from "./personal-push-cloud";
 import { removeTimedWakeSchedule } from "./timed-wake-storage";
@@ -24,6 +25,8 @@ type OutboxEntry = {
     raw_text: string;
     meta: {
         sessionId?: string;
+        onlineThinking?: CloudThinkingConfig;
+        reasoningText?: string;
         followUpIndex?: number;
         prevCount?: number;
         regexes?: RegexConfig[];
@@ -40,6 +43,39 @@ type OutboxEntry = {
     } | null;
     created_at: string;
 };
+
+/** 唤醒后端处理过的事件：事件原文、调过的工具、失败原因（见 companion-server/src/wake.ts） */
+type WakeToolEvent = {
+    id: string;
+    messageId: string;
+    message: string;
+    createdAt: string;
+    actions?: { name: string; ok: boolean; args?: Record<string, unknown>; text?: string }[];
+    error?: string;
+};
+
+/** 按小手机自己处理事件时的样子落库：事件原文是用户消息，每个动作一组 tool_call / tool_result（进上下文、气泡隐藏）+ tool_notice 灰条。
+ *  编号固定，回执失败重收也不会重复。 */
+async function importWakeToolEvent(sessionId: string, event: WakeToolEvent): Promise<void> {
+    const base = Number.isFinite(Date.parse(event.createdAt)) ? Date.parse(event.createdAt) : Date.now();
+    let seq = 0;
+    const put = (msg: Omit<ChatMessage, "sessionId" | "status" | "createdAt">) => upsertImportedChatMessageAsync(
+        { ...msg, sessionId, status: "sent", createdAt: new Date(base + seq++).toISOString() } as ChatMessage,
+        { insertByCreatedAt: true },
+    );
+    if (event.message) await put({ id: event.messageId, role: "user", content: event.message });
+    for (const [index, action] of (event.actions || []).entries()) {
+        const id = `${event.messageId}_act${index}`;
+        const text = String(action.text || "");
+        await put({ id: `${id}_call`, role: "assistant", content: `[执行动作:${action.name}(${JSON.stringify(action.args || {})})]`, mediaType: "tool_call" });
+        await put({
+            id: `${id}_result`, role: "tool", mediaType: "tool_result",
+            content: `以下是系统处理结果：\n${action.ok ? `<action_result name="${action.name}">${text}</action_result>` : `<action_result name="${action.name}" error="${text || "未知错误"}"></action_result>`}`,
+        });
+        await put({ id: `${id}_notice`, role: "system", mediaType: "tool_notice", content: action.ok ? `✓ ${action.name} 执行成功（VPS 后端）` : `✗ ${action.name}: ${text.slice(0, 120)}（VPS 后端）` });
+    }
+    if (event.error) await put({ id: `${event.messageId}_error`, role: "system", mediaType: "tool_notice", content: `⚠️ 唤醒后端处理失败：${event.error}` });
+}
 
 let consuming = false;
 let lastConsumeAt = 0;
@@ -118,7 +154,7 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
 
                     if ((meta as { kind?: string }).kind === "bridge") {
                         const bridgeMeta = meta as Record<string, unknown> & {
-                            reply?: { sessionId?: string; regexes?: RegexConfig[]; characterName?: string; userName?: string; appId?: string; appTags?: string[] } | null;
+                            reply?: { onlineThinking?: CloudThinkingConfig; reasoningText?: string; sessionId?: string; regexes?: RegexConfig[]; characterName?: string; userName?: string; appId?: string; appTags?: string[] } | null;
                             screenChat?: boolean;
                             screenChatCharacterId?: string;
                             screenChatSequence?: number;
@@ -137,6 +173,8 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                             const alreadyImported = await hasPersistedResponseBatch(replySessionId, responseBatchId);
                             if (!alreadyImported) {
                                 let text = await transformOutboxResponse(entry.raw_text, replySessionId, replyMeta?.appId, entry.id);
+                                const thinking = parseCloudThinking(text, resolveCloudThinkingConfig(replySessionId, replyMeta?.appId, replyMeta?.onlineThinking));
+                                text = thinking.text;
                                 const regexes = Array.isArray(replyMeta?.regexes) ? replyMeta.regexes : [];
                                 if (regexes.length > 0) {
                                     const macroEngine = new MacroEngine(replyMeta?.characterName ?? "", replyMeta?.userName ?? "用户");
@@ -154,6 +192,8 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                                         silent: options?.silent !== false,
                                         responseBatchId,
                                         createdAt: bridgeMeta.screenChatAssistantAt,
+                                        rawResponseText: entry.raw_text,
+                                        reasoningText: thinking.reasoningText ?? replyMeta?.reasoningText,
                                     },
                                 );
                                 if (hasVisible && newCount < 10) scheduleFollowUp(replySessionId, newCount, stateValues);
@@ -209,6 +249,9 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         markIdleReconnectFired(idleMeta.ruleId, typeof idleMeta.firedAt === "number" ? idleMeta.firedAt : Date.now());
                     }
 
+                    const toolEvent = (meta as { toolEvent?: WakeToolEvent }).toolEvent;
+                    if (toolEvent?.messageId) await importWakeToolEvent(sessionId, toolEvent);
+
                     const followUpIndex = typeof meta.followUpIndex === "number" ? meta.followUpIndex : undefined;
                     const existingMessages = loadChatMessages(sessionId);
                     // 回执确认失败时可能再次拉到同一条；先查持久批次，避免插件重复结算好感。
@@ -221,6 +264,8 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                         continue;
                     }
                     let text = await transformOutboxResponse(entry.raw_text, sessionId, meta.appId, entry.id);
+                    const thinking = parseCloudThinking(text, resolveCloudThinkingConfig(sessionId, meta?.appId, meta?.onlineThinking));
+                    text = thinking.text;
                     const regexes = Array.isArray(meta.regexes) ? meta.regexes : [];
                     if (regexes.length > 0) {
                         const macroEngine = new MacroEngine(meta.characterName ?? "", meta.userName ?? "用户");
@@ -251,6 +296,8 @@ export async function consumeServerOutbox(options?: { silent?: boolean; force?: 
                             durable: true,
                             silent: options?.silent !== false,
                             suppressReply: meta.silentUpdate === true,
+                            rawResponseText: entry.raw_text,
+                            reasoningText: thinking.reasoningText ?? meta.reasoningText,
                             responseBatchId,
                             // 补收时间不是角色发送时间；无效旧数据交给解析器使用本地时间兜底。
                             createdAt: Number.isFinite(Date.parse(entry.created_at)) ? entry.created_at : undefined,

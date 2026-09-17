@@ -28,6 +28,19 @@ export type DIYTemplateSlot = {
   right: number;
 };
 
+/** 作者声明的「用户可填字段」：用户在组件上填表，值进 WidgetInstance.config，代码里用 api.getConfig(key) 读。 */
+export type DIYFieldType = "text" | "number" | "date" | "time" | "color" | "select";
+
+export type DIYTemplateField = {
+  key: string;
+  label: string;
+  type: DIYFieldType;
+  placeholder?: string;
+  defaultValue?: string | number;
+  options?: string[];
+  multiline?: boolean;
+};
+
 export type DIYWidgetTemplate = {
   id: string; // e.g., "diy-17012345"
   name: string;
@@ -36,6 +49,7 @@ export type DIYWidgetTemplate = {
   bgAssetId?: string; // IndexedDB ID for PNG
   slots?: DIYTemplateSlot[];
   htmlString?: string;
+  fields?: DIYTemplateField[];
 };
 
 export type WidgetSize =

@@ -3,12 +3,15 @@
 // App 被杀则由服务端 cron 到点接管生成并推送。组装用的就是前台同一条
 // buildChatPromptMessages → buildProviderRequest 链路，零新逻辑。
 
+import { isGuanianServerWake } from "./guanian-wake-ownership";
 import { bgSetInterval } from "./bg-timer";
 import { buildChatPromptMessages } from "./chat-engine";
 import { buildProviderRequest, toLlmRequestMessages, type LlmRequestPayload } from "./llm-provider-adapter";
 import { loadChatMessages, loadChatSessions, loadFollowUpSchedule, type ChatMessage, type ChatSession } from "./chat-storage";
 import { hasAccountPushSubscription, isWithinPushQuietHours, loadPushQuietHours, peekAccountPushSubscribed } from "./push-client";
-import { isPersonalPushCloudActive, pushJobsFetch, personalPushFetch } from "./personal-push-cloud";
+import { isPersonalPushCloudActive, personalPushFetch } from "./personal-push-cloud";
+// 挂、撤、心跳都经分流：按「离线执行」开关寄个人云或后端，同一条任务只挂一边
+import { offlineJobsFetch as pushJobsFetch } from "./offline-jobs-client";
 import {
     buildOfflineShortcutContinuation,
     maybeAppendShortcutCapability,
@@ -16,12 +19,15 @@ import {
     type OfflineShortcutContinuation,
 } from "./offline-shortcut-capability";
 import {
+    EVE_REMINDER_GRACE_MS,
+    getMenstrualEveReminder,
     getMenstrualPeriodCareEvent,
     hasMenstrualPeriodCareTriggered,
     loadMenstrualConfig,
     loadMenstrualRecords,
+    type MenstrualPeriodCareEvent,
 } from "./menstrual-storage";
-import { isGuanianTemplateWake, loadTimedWakeSchedules, type TimedWakeSchedule } from "./timed-wake-storage";
+import { isGuanianTemplateWake, loadTimedWakeSchedules, removeTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
 import {
     IDLE_RECONNECT_MAX_CONSECUTIVE,
     loadIdleReconnectRules,
@@ -133,6 +139,7 @@ export async function armReplyBailout(params: {
     signal?: AbortSignal;
     allowSilence?: boolean;
     silenceThinkingTag?: string;
+    onlineThinking?: { enabled: boolean; tag: string };
 }): Promise<ReplyBailoutHandle | null> {
     if (!bailoutEnabled()) return null;
     if (!(await hasAccountPushSubscription())) return null;
@@ -166,6 +173,7 @@ export async function armReplyBailout(params: {
                 notify: { title: params.characterName, url: "/", ...(notifyCharacterId ? { characterId: notifyCharacterId } : {}) },
                 merge: {
                     sessionId: params.sessionId,
+                    onlineThinking: params.onlineThinking,
                     prevCount: 0,
                     regexes: params.regexes,
                     characterName: params.characterName,
@@ -319,6 +327,7 @@ export async function armFollowUpBailout(
                     ...(shortcutContinuation ? { shortcutContinuation } : {}),
                     merge: {
                         sessionId,
+                        onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                         followUpIndex: count,
                         prevCount,
                         regexes,
@@ -472,6 +481,7 @@ export async function armIdleReconnectBailout(rule: IdleReconnectRule): Promise<
             shortcutContinuation,
             merge: {
                 sessionId: session.id,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                 prevCount: 0,
                 regexes,
                 characterName: character.name,
@@ -501,6 +511,13 @@ export async function armIdleReconnectBailout(rule: IdleReconnectRule): Promise<
 /** 定时唤醒（稍后主动联系）兜底：创建/刷新时把到点生成预约到服务端。
  *  "已过X分钟"的语境按预定触发时刻精确烤入。 */
 export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<BailoutArmResult> {
+    const serverOwned = (): boolean => {
+        if (!isGuanianServerWake(schedule)) return false;
+        // 只退掉本地登记，不删除云端任务/发送凭据，也避免切回本机时复活旧预约。
+        removeTimedWakeSchedule(schedule.id);
+        return true;
+    };
+    if (serverOwned()) return { ok: false, reason: "挂念已由 VPS 接管" };
     if (!bailoutEnabled()) return { ok: false, reason: "当前环境不支持服务端离线预约" };
     try {
         const templateOnly = isGuanianTemplateWake(schedule);
@@ -525,6 +542,8 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
             const req = buildProviderRequest(config, preset, toLlmRequestMessages(messages));
             return { url: req.url, headers: req.headers, body: req.body, providerKind: req.providerKind };
         }, config.enableImageRecognition === true);
+        // 组装快照期间可能刚完成交接，写云端前再次核对。
+        if (serverOwned()) return { ok: false, reason: "挂念已由 VPS 接管" };
         const posted = await postBailoutJob({
             triggerKey: `timedwake:${schedule.id}`,
             kind: "timed_task",
@@ -536,6 +555,7 @@ export async function armTimedWakeBailout(schedule: TimedWakeSchedule): Promise<
             shortcutContinuation,
             merge: {
                 sessionId: session.id,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                 prevCount: 0,
                 regexes,
                 characterName: character.name,
@@ -598,6 +618,7 @@ export async function armTemplateBailout(input: {
             notifyCharacterId: character.id,
             merge: {
                 sessionId: input.session.id,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                 regexes,
                 characterName: character.name,
                 userName: userIdentity?.name ?? "用户",
@@ -613,7 +634,67 @@ export async function armTemplateBailout(input: {
     }
 }
 
-/** 经期关怀兜底：预测未来 7 天内的关怀日，为选中的角色各挂一单（每周期幂等）。 */
+/** 挂念后端的聊天模板：意图和「多久前决定的」留占位，后端到点替换成真实值。 */
+export const COMPANION_INTENT_PLACEHOLDER = "__GUANIAN_INTENT__";
+export const COMPANION_ELAPSED_MARK = 424242;
+/** 来电能力占位：后端到点按 20 小时频控换成「可以打电话」说明或「照常发消息」（companion-server/src/delivery.ts） */
+export const COMPANION_CALL_INVITE_PLACEHOLDER = "__GUANIAN_CALL_INVITE__";
+
+/**
+ * 聊天模板：和定时唤醒同款（聊天 APP、带完整聊天记录），但不到点发送，只给 VPS 上的挂念后端当发消息的底稿。
+ * 同一 triggerKey 重复冻结即覆盖。
+ */
+export async function armCompanionChatTemplate(input: { triggerKey: string; session: ChatSession }): Promise<BailoutArmResult> {
+    if (!bailoutEnabled()) return { ok: false, reason: "当前环境不支持服务端离线预约" };
+    try {
+        if (!(await hasAccountPushSubscription())) return { ok: false, reason: "当前账号没有可用的离线推送订阅" };
+        const history = loadChatMessages(input.session.id);
+        const appTags = ["chat", "text", "timed_wake"];
+        const { llmMessages, character, config, preset, regexes, userIdentity } = await buildChatPromptMessages(
+            input.session,
+            history,
+            { appTags, timedWakeElapsedMinutes: COMPANION_ELAPSED_MARK, timedWakeIntent: COMPANION_INTENT_PLACEHOLDER },
+        );
+        // 与定时唤醒同样的离线能力：来电（频控由后端到点决定，这里只留占位）、快捷动作、改送真实微信
+        llmMessages.push({ role: "system", content: COMPANION_CALL_INVITE_PLACEHOLDER });
+        maybeAppendShortcutCapability(llmMessages, { continuationAvailable: true });
+        const weixinBotId = maybeAppendWeixinChannel(llmMessages, character.id);
+        const request = buildProviderRequest(config, preset, toLlmRequestMessages(llmMessages));
+        const shortcutContinuation = buildOfflineShortcutContinuation(llmMessages, messages => {
+            const req = buildProviderRequest(config, preset, toLlmRequestMessages(messages));
+            return { url: req.url, headers: req.headers, body: req.body, providerKind: req.providerKind };
+        }, config.enableImageRecognition === true);
+        const posted = await postBailoutJob({
+            triggerKey: input.triggerKey,
+            kind: "template",
+            executeAtMs: Date.now() + TEMPLATE_BAILOUT_TTL_MS,
+            request,
+            notifyTitle: character.name,
+            notifyCharacterId: character.id,
+            weixinBotId,
+            shortcutContinuation,
+            merge: {
+                sessionId: input.session.id,
+                onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
+                regexes,
+                characterName: character.name,
+                userName: userIdentity?.name ?? "用户",
+                appId: "chat",
+                appTags,
+                tzOffsetMin: -new Date().getTimezoneOffset(),
+                template: true,
+                intentPlaceholder: COMPANION_INTENT_PLACEHOLDER,
+                elapsedMark: COMPANION_ELAPSED_MARK,
+            },
+        });
+        return posted ? { ok: true } : { ok: false, reason: "服务端预约接口没有确认成功" };
+    } catch (err) {
+        console.warn("[PushBailout] companion chat template arm failed:", err);
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+}
+
+/** 经期关怀兜底：未来 7 天内最近的关怀日和前一晚提醒，为选中的角色各挂一单（每周期幂等）。 */
 export async function armPeriodCareBailouts(): Promise<void> {
     if (!bailoutEnabled()) return;
     try {
@@ -623,6 +704,7 @@ export async function armPeriodCareBailouts(): Promise<void> {
 
         const records = loadMenstrualRecords();
         const now = new Date();
+        const planned: { event: MenstrualPeriodCareEvent; executeAtMs: number }[] = [];
         for (let dayOffset = 0; dayOffset <= 7; dayOffset += 1) {
             const target = new Date(now.getTime() + dayOffset * 86_400_000);
             const targetDate = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
@@ -632,8 +714,16 @@ export async function armPeriodCareBailouts(): Promise<void> {
             // 当天 09:30 触发；已过则 10 分钟后
             const fireAt = new Date(target.getFullYear(), target.getMonth(), target.getDate(), 9, 30).getTime();
             const executeAtMs = Math.max(fireAt, Date.now() + 10 * 60_000);
-            if (isWithinPushQuietHours(executeAtMs)) return;
+            if (!isWithinPushQuietHours(executeAtMs)) planned.push({ event, executeAtMs });
+            break; // 只挂最近的一个关怀日
+        }
+        const eve = getMenstrualEveReminder(records, config, now);
+        if (eve && eve.fireAtMs - Date.now() <= 7 * 86_400_000 && Date.now() < eve.fireAtMs + EVE_REMINDER_GRACE_MS) {
+            const executeAtMs = Math.max(eve.fireAtMs, Date.now() + 10 * 60_000);
+            if (!isWithinPushQuietHours(executeAtMs)) planned.push({ event: eve, executeAtMs });
+        }
 
+        for (const { event, executeAtMs } of planned) {
             const sessions = loadChatSessions()
                 .filter(session => !session.isGroup && config.periodCareCharacterIds.includes(session.contactId))
                 .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -665,6 +755,7 @@ export async function armPeriodCareBailouts(): Promise<void> {
                     shortcutContinuation,
                     merge: {
                         sessionId: session.id,
+                        onlineThinking: { enabled: preset?.online_thinking_enabled === true, tag: preset?.online_thinking_tag?.trim() || "thinking" },
                         prevCount: 0,
                         regexes,
                         characterName,
@@ -672,12 +763,11 @@ export async function armPeriodCareBailouts(): Promise<void> {
                         appId: "chat",
                         appTags: ["chat", "text", "period_care"],
                         tzOffsetMin: -new Date().getTimezoneOffset(),
-                armAt: new Date(executeAtMs).toISOString(),
+                        armAt: new Date(executeAtMs).toISOString(),
                         periodCare: { characterId: session.contactId, cycleKey: event.cycleKey },
                     },
                 });
             }
-            return; // 只挂最近的一个关怀日
         }
     } catch (err) {
         console.warn("[PushBailout] period care arm failed:", err);

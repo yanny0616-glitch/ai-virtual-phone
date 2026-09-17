@@ -6,9 +6,7 @@ import type { MemoryEntry } from "./memory-types";
 import { DEFAULT_SUMMARIZATION_PROMPT } from "./memory-types";
 import {
     loadMemoryConfig,
-    loadMemoryEntries,
     saveMemoryBatch,
-    deleteMemoryEntries,
     getEventCounter,
     resetEventCounter,
     consumeEventCounter,
@@ -91,7 +89,7 @@ async function summarizeUnlocked(characterId: string, characterName: string, opt
     // 进度水位线取「过滤后」最后一条的时间，因此关掉的来源不会把水位线推过头，
     // 但已被水位线越过的内容重新打开后也不会回补——这一点在设置里已注明。
     const allEntries = filterTimelineByAllowedSources(
-        loadNativeTimeline(characterId, afterTimestamp ? { afterTimestamp } : undefined),
+        loadNativeTimeline(characterId, { ...(afterTimestamp ? { afterTimestamp } : {}), callSummaries: true }),
         config.shortTermAllowedSources,
     );
 
@@ -112,6 +110,7 @@ async function summarizeUnlocked(characterId: string, characterName: string, opt
         .replace(/\{\{earliest\}\}/gi, () => earliest)
         .replace(/\{\{latest\}\}/gi, () => latest)
         .replace(/\{\{events\}\}/gi, () => eventsText)
+        .replace(/\{\{count\}\}/gi, () => String(allEntries.length))
         + (/\{\{events\}\}/i.test(promptTemplate) ? "" : `\n事件记录：\n${eventsText}`);
 
     // Call LLM for summarization — compatible with all providers
@@ -184,12 +183,8 @@ async function summarizeUnlocked(characterId: string, characterName: string, opt
     setLastSummarizedTimestamp(characterId, previousWatermark && previousWatermark > latest ? previousWatermark : latest);
     consumeEventCounter(characterId, counterAtStart);
 
-    // Enforce long-term limit
-    const allLongTerm = (await loadMemoryEntries(characterId)).filter(entry => entry.type === "long_term");
-    if (allLongTerm.length > config.maxLongTermEntries) {
-        const excess = allLongTerm.slice(0, allLongTerm.length - config.maxLongTermEntries);
-        await deleteMemoryEntries(excess.map(e => e.id));
-    }
+    // 长期记忆不再按条数删最旧的（原来超过 maxLongTermEntries=500 会直接删）：
+    // 带不进提示词只影响注入，删了就真的忘了。
 
     incrementCoreMemoryCounter(characterId);
     try { await maybeRunCoreMemoryPipeline(characterId, characterName); }

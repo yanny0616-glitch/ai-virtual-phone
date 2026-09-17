@@ -113,3 +113,36 @@ export function setQaMaxRounds(rounds: number | null): void {
         // ignore
     }
 }
+
+// 采样温度：工坊不走聊天预设，温度自己管。默认 0.8（写代码/排障要稳）；
+// 存 "" 表示显式不传 temperature（部分推理模型/中转不接受该参数）。
+// localStorage 键 ai_phone_qa_temperature 覆盖（调参/测试用）。
+export const QA_DEFAULT_TEMPERATURE = 0.8;
+export const QA_TEMPERATURE_MIN = 0;
+export const QA_TEMPERATURE_MAX = 2;
+
+export function getQaTemperature(): number | null {
+    try {
+        const stored = localStorage.getItem("ai_phone_qa_temperature");
+        if (stored === "") return null; // 显式不传
+        const raw = Number(stored);
+        if (stored != null && Number.isFinite(raw) && raw >= QA_TEMPERATURE_MIN && raw <= QA_TEMPERATURE_MAX) return raw;
+    } catch {
+        // ignore
+    }
+    return QA_DEFAULT_TEMPERATURE;
+}
+
+/** 设置采样温度：null = 恢复默认；"omit" = 显式不传该参数 */
+export function setQaTemperature(value: number | null | "omit"): void {
+    try {
+        if (value == null) localStorage.removeItem("ai_phone_qa_temperature");
+        else if (value === "omit") localStorage.setItem("ai_phone_qa_temperature", "");
+        else {
+            const clamped = Math.min(QA_TEMPERATURE_MAX, Math.max(QA_TEMPERATURE_MIN, value));
+            localStorage.setItem("ai_phone_qa_temperature", String(Math.round(clamped * 100) / 100));
+        }
+    } catch {
+        // ignore
+    }
+}

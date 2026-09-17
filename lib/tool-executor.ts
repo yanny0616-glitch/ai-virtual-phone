@@ -1,3 +1,4 @@
+import { normalizeMcpArguments } from "./mcp-arguments";
 import type {
     CompositeToolConfig,
     CompositeToolPackageConfig,
@@ -120,6 +121,7 @@ export type MediaAttachment = {
     type: "audio" | "image" | "video" | "file";
     url: string;
     title?: string;
+    contextText?: string;
 };
 
 // Internal structured payload survives presentation limits; symbols are omitted by JSON serialization.
@@ -139,6 +141,8 @@ export type ToolResult = {
     pendingApproval?: boolean;
     pendingRequest?: MemoryWriteRequest;
     mediaAttachments?: MediaAttachment[];
+    visionAttachments?: MediaAttachment[];
+    xhsCards?: import("./xhs-note").XhsNoteSnapshot[];
 };
 
 import { extractBase64Blocks, storeMediaBase64, storeMediaBlob, detectMediaType, MEDIA_STORE_PROTOCOL } from "./media-cache-storage";
@@ -445,6 +449,27 @@ export function parseToolCalls(text: string): { cleanText: string; toolCalls: To
 export async function executeToolCalls(toolCalls: ToolCall[], context?: ToolExecutionContext): Promise<ToolResult[]> {
     throwIfAborted(context?.signal);
     return Promise.all(toolCalls.map(call => executeSingleToolCall(call, context, { depth: 0 })));
+}
+
+/** 工坊按 id 定点调用工具箱工具：不走按名字的全表匹配，同名工具不会串到别的条目上。 */
+export async function executeWorkshopToolboxTool(
+    target: { kind: "rest" | "composite" | "custom_app"; id: string; name: string },
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext,
+): Promise<ToolResult> {
+    throwIfAborted(context?.signal);
+    if (target.kind === "rest") {
+        const tool = loadRestTools().find(t => t.id === target.id && t.enabled);
+        if (!tool) return { name: target.name, success: false, error: "REST 工具不存在或已关闭" };
+        return executeRestTool(tool, args, context?.signal);
+    }
+    if (target.kind === "composite") {
+        const tool = loadCompositeTools().find(t => t.id === target.id && t.enabled);
+        if (!tool) return { name: target.name, success: false, error: "组合工具不存在或已关闭" };
+        return executeCompositeTool(tool, args, context, 0);
+    }
+    const result = await executeCustomAppToolCall({ name: target.name, args }, context, buildToolNameMacroContext(context));
+    return result ?? { name: target.name, success: false, error: "自定义 APP 工具不存在或已关闭" };
 }
 
 type ToolExecutionHint = {
@@ -3835,6 +3860,7 @@ async function ensureTokenFresh(server: McpServerConfig, signal?: AbortSignal): 
 
         if (tokenRes.status === 200) {
             const data = JSON.parse(tokenRes.text);
+            if (typeof data.access_token !== "string" || !data.access_token.trim()) return;
             server.accessToken = data.access_token;
             if (data.refresh_token) server.refreshToken = data.refresh_token;
             server.tokenExpiresAt = data.expires_in ? Date.now() + data.expires_in * 1000 : undefined;
@@ -3851,7 +3877,7 @@ function bearerAuthValue(accessToken: string): string {
     return `Bearer ${accessToken.replace(/^bearer\s+/i, "")}`;
 }
 
-function buildMcpAuthHeaders(server: McpServerConfig): Record<string, string> {
+export function buildMcpAuthHeaders(server: McpServerConfig): Record<string, string> {
     const headers: Record<string, string> = cleanHeaders(server.headers);
     if (server.accessToken) {
         headers["Authorization"] = bearerAuthValue(server.accessToken);
@@ -4112,6 +4138,10 @@ export async function completePendingMcpOAuthCallback(): Promise<{ completed: bo
         }
 
         const tokenData = JSON.parse(tokenRes.text);
+        if (typeof tokenData.access_token !== "string" || !tokenData.access_token.trim()) {
+            clearMcpOAuthFlow();
+            return { completed: true, success: false, error: "OAuth服务器未返回有效access_token，授权未完成", serverName: pending.serverName };
+        }
         const servers = loadMcpServers();
         const idx = servers.findIndex(s => s.id === pending.serverId);
         const now = Date.now();
@@ -4159,47 +4189,30 @@ export async function completePendingMcpOAuthCallback(): Promise<{ completed: bo
 
 // ── MCP Tool Execution (with handshake) ───────
 
+/** Shared transport for character calls and automatic card reads. */
+export async function callConfiguredMcpTool(server: McpServerConfig, toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    if (!server.enabled) throw new Error("小红书 MCP 已关闭，请在聊天工具箱开启");
+    throwIfAborted(signal);
+    const init = await mcpInitialize(server, signal);
+    if (!init.success) throw new Error(init.error || "MCP 初始化失败");
+    const normalizedArgs = normalizeMcpArguments(args, server.discoveredTools?.find(tool => tool.name === toolName)?.inputSchema);
+    const request = () => mcpRequest(server.url, "tools/call", { name: toolName, arguments: normalizedArgs }, getMcpSessionHeaders(server), false, isSseUrl(server.url), signal, server.directFetch);
+    let res = await request();
+    if (res.error?.code === 401 || res.error?.code === 404) {
+        server.sessionId = undefined;
+        _mcpSessions.delete(server.id);
+        _mcpSseEndpoints.delete(server.id);
+        const reinit = await mcpInitialize(server, signal);
+        if (!reinit.success) throw new Error(reinit.error || "MCP 重新初始化失败");
+        res = await request();
+    }
+    if (res.error) throw new Error(`MCP tools/call（${res.error.code}）：${res.error.message}`);
+    return res.result;
+}
+
 async function executeMcpTool(server: McpServerConfig, toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     try {
-        throwIfAborted(signal);
-        // Ensure initialized
-        const init = await mcpInitialize(server, signal);
-        if (!init.success) {
-            return { name: toolName, success: false, error: init.error || "MCP 初始化失败" };
-        }
-
-        const useSse = isSseUrl(server.url);
-        const requestUrl = server.url;
-        const res = await mcpRequest(requestUrl, "tools/call", {
-            name: toolName,
-            arguments: args,
-        }, getMcpSessionHeaders(server), false, useSse, signal, server.directFetch);
-
-        // Session expired — retry once
-        if (res.error?.code === 401 || res.error?.code === 404) {
-            server.sessionId = undefined;
-            _mcpSessions.delete(server.id);
-            _mcpSseEndpoints.delete(server.id);
-            const reinit = await mcpInitialize(server, signal);
-            if (!reinit.success) {
-                return { name: toolName, success: false, error: reinit.error || "MCP 重新初始化失败" };
-            }
-            const retry = await mcpRequest(server.url, "tools/call", {
-                name: toolName,
-                arguments: args,
-            }, getMcpSessionHeaders(server), false, useSse, signal, server.directFetch);
-
-            if (retry.error) {
-                return { name: toolName, success: false, error: retry.error.message };
-            }
-            return await extractMcpToolResult(toolName, retry.result, signal);
-        }
-
-        if (res.error) {
-            return { name: toolName, success: false, error: res.error.message };
-        }
-
-        return await extractMcpToolResult(toolName, res.result, signal);
+        return await extractMcpToolResult(toolName, await callConfiguredMcpTool(server, toolName, args, signal), signal);
     } catch (err) {
         if (isAbortError(err)) throw err;
         return { name: toolName, success: false, error: String(err) };
@@ -4208,6 +4221,11 @@ async function executeMcpTool(server: McpServerConfig, toolName: string, args: R
 
 async function extractMcpToolResult(toolName: string, result: unknown, signal?: AbortSignal): Promise<ToolResult> {
     throwIfAborted(signal);
+    const envelope = result as { isError?: boolean; content?: { type?: string; text?: string }[] } | undefined;
+    if (envelope?.isError) return { name: toolName, success: false, error: truncate(envelope.content?.map(item => item.text || "").join("\n") || "MCP工具执行失败") };
+    const { extractXhsMcpPresentation } = await import("./xhs-mcp-result");
+    const xhs = await extractXhsMcpPresentation(result, signal);
+    if (xhs) return { name: toolName, success: true, data: xhs.data, visionAttachments: xhs.images, xhsCards: xhs.cards };
     const r = result as { content?: { type?: string; text?: string; data?: string; mimeType?: string }[] } | undefined;
     const textParts: string[] = [];
     const mcpAttachments: MediaAttachment[] = [];
@@ -4384,12 +4402,13 @@ export async function startMcpOAuth(server: McpServerConfig): Promise<{ success:
             protocolVersion: MCP_PROTOCOL_VERSION,
             capabilities: {},
             clientInfo: MCP_CLIENT_INFO,
-        });
+        }, undefined, false, isSseUrl(server.url), undefined, server.directFetch);
 
-        if (probe.error?.code !== 401) {
+        // Public initialize/tools/list are not proof of account authorization.
+        // An explicit OAuth action must complete the actual authorization flow.
+        if (probe.error && probe.error.code !== 401) {
             popup.close();
-            const init = await mcpInitialize(server);
-            return init;
+            return { success: false, error: probe.error.message };
         }
 
         // Step 2: Discover OAuth metadata. Notion MCP follows RFC 9470 protected
@@ -4504,6 +4523,10 @@ export async function startMcpOAuth(server: McpServerConfig): Promise<{ success:
         }
 
         const tokenData = JSON.parse(tokenRes.text);
+        if (typeof tokenData.access_token !== "string" || !tokenData.access_token.trim()) {
+            clearMcpOAuthFlow();
+            return { success: false, error: "OAuth服务器未返回有效access_token，授权未完成" };
+        }
         server.accessToken = tokenData.access_token;
         server.refreshToken = tokenData.refresh_token;
         server.tokenExpiresAt = tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : undefined;

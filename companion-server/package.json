@@ -1,0 +1,23 @@
+{
+  "name": "float-companion-server",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --no-warnings src/main.ts",
+    "test": "node --no-warnings --test \"test/*.test.ts\"",
+    "diagnose": "node --no-warnings src/cli.ts diagnose",
+    "push-test": "node --no-warnings src/cli.ts push-test",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "@types/web-push": "^3.6.4",
+    "typescript": "^5.9.3"
+  }
+}

@@ -101,7 +101,7 @@ const home = (() => {
     $("btn-stop").onclick = async () => { await session.stop(); render(); const open = openNight(); if (open) openWakeSheet(open); };
     $("btn-dim").onclick = () => { const on = !$("sleep").classList.contains("dim"); $("sleep").classList.toggle("dim", on); saveSettings({ dimLevel: on ? 1 : 0 }); };
     const mic = $("btn-mic");
-    mic.addEventListener("pointerdown", e => { e.preventDefault(); session.listen(); });
+    mic.addEventListener("pointerdown", e => { e.preventDefault(); mic.setPointerCapture(e.pointerId); session.listen(); });
     mic.addEventListener("pointerup", () => session.stopListening());
     mic.addEventListener("pointercancel", () => session.stopListening());
     on("nights", renderRows); on("view", v => { if (v === "home") render(); }); on("character", render);

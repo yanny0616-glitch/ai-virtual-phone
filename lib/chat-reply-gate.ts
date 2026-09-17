@@ -40,18 +40,23 @@ export type ReplyGate = {
     sleep?: { bed: string; wake: string; mode: 0 | 1 | 2; wakeProb: number; bufferMin: number };
     /** 只对 date 这天生效的忙时段；peekMin=0 表示忙着也照常回 */
     busy?: { date: string; windows: ReplyGateBusyWindow[]; peekMin: number; adaptive?: boolean; focusedPeekProb?: number };
+    /** 此刻手上在做、但不算忙的事（做饭、看剧）：等一小会儿就回、话短；连发 pullCount 条就放下手里的事（0 = 不会被拽走） */
+    distracted?: { title: string; minSec: number; maxSec: number; pullCount: number };
     updatedAt: number;
 };
 
 export type ReplyGateDecision =
     | { kind: "now"; note?: string }
-    | { kind: "delay"; until: number; note: string; reason: "sleep" | "busy"; busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean };
+    | { kind: "delay"; until: number; note: string; reason: "sleep" | "busy" | "distracted"; what?: string; busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean };
 
 export type DeferredReply = {
-    cloud?: { key: string; projectUrl: string; revision: number; syncedRevision: number; acceptedMessageId?: string; attempted: boolean; cancelRequested?: boolean; state: "syncing" | "active" | "running" | "error" | "done" | "failed" | "cancelled" };
+    /** line：这一轮建在哪边（server = companion-server），建好后不随开关搬家 */
+    cloud?: { key: string; line?: "server"; projectUrl: string; revision: number; syncedRevision: number; acceptedMessageId?: string; attempted: boolean; cancelRequested?: boolean; state: "syncing" | "active" | "running" | "error" | "done" | "failed" | "cancelled" };
     until: number; note: string; firedAt?: number;
     characterId?: string; reason?: "sleep" | "busy";
     busyWindowKey?: string; busyUntil?: number; busyAvailableUntil?: number; busyCheck?: boolean;
+    /** 分神的短等待：不上云、到点不重判，直接回 */
+    distracted?: boolean;
 };
 
 type Store = Record<string, Record<string, ReplyGate>>;
@@ -131,7 +136,16 @@ export function normalizeReplyGate(input: unknown): ReplyGate | null {
             ...(busy.focusedPeekProb != null ? { focusedPeekProb: clampInt(busy.focusedPeekProb, 0, 100, 0) } : {}),
         };
     }
-    return gate.sleep || gate.busy ? gate : null;
+    const distracted = raw.distracted as Record<string, unknown> | undefined;
+    if (distracted && typeof distracted === "object") {
+        const minSec = clampInt(distracted.minSec, 0, 600, 30);
+        gate.distracted = {
+            title: typeof distracted.title === "string" ? distracted.title.trim().slice(0, 40) : "",
+            minSec, maxSec: clampInt(distracted.maxSec, minSec, 900, Math.max(minSec, 120)),
+            pullCount: clampInt(distracted.pullCount, 0, 20, 3),
+        };
+    }
+    return gate.sleep || gate.busy || gate.distracted ? gate : null;
 }
 
 export function setCustomAppReplyGate(appId: string, characterId: string, gate: ReplyGate | null): void {
@@ -240,7 +254,8 @@ export function isUrgentReplyText(text: string, gate?: ReplyGate | null): boolea
     return gate?.urgentBypass !== false && URGENT_RE.test(String(text || "").replace(/\s+/g, ""));
 }
 
-export function evaluateReplyGate(gate: ReplyGate | null, text: string, nowMs = Date.now()): ReplyGateDecision {
+/** pendingCount：上次TA回复之后你发了几条（分神时连发够数就放下手里的事） */
+export function evaluateReplyGate(gate: ReplyGate | null, text: string, nowMs = Date.now(), pendingCount = 1): ReplyGateDecision {
     if (!gate || (gate.expiresAt != null && nowMs >= gate.expiresAt) || (gate.startsAt != null && nowMs < gate.startsAt)) return { kind: "now" };
     if (isUrgentReplyText(text, gate)) return { kind: "now" };
     const now = new Date(nowMs);
@@ -288,7 +303,16 @@ export function evaluateReplyGate(gate: ReplyGate | null, text: string, nowMs = 
         } else if (busy.adaptive) {
             note += "把等待期间对方发来的几条消息合起来回复，不必逐条点名，也别每次都重复解释自己在忙。";
         }
-        return { kind: "delay", until, reason: "busy", note, busyWindowKey: busyWindowKey(gate, win), busyUntil: end, busyAvailableUntil, busyCheck };
+        return { kind: "delay", until, reason: "busy", note, what: win.title || undefined, busyWindowKey: busyWindowKey(gate, win), busyUntil: end, busyAvailableUntil, busyCheck };
+    }
+    const distracted = gate.distracted;
+    if (distracted) {
+        const what = distracted.title ? `正在${distracted.title}` : "手上正做着事";
+        if (distracted.pullCount > 0 && pendingCount >= distracted.pullCount) {
+            return { kind: "now", note: `你本来${what}，对方一连发了好几条，你放下手里的事，认真回。` };
+        }
+        const sec = distracted.minSec + Math.random() * (distracted.maxSec - distracted.minSec);
+        return { kind: "delay", until: nowMs + sec * 1000, reason: "distracted", what: distracted.title || undefined, note: `你${what}，一边做一边看手机：回得快但短，可能只接对方最后一句，偶尔带出手上在做的事。` };
     }
     return { kind: "now" };
 }
@@ -328,7 +352,7 @@ export function takeDueDeferredReplies(nowMs = Date.now()): string[] {
                 && (!rec.busyAvailableUntil || nowMs < rec.busyAvailableUntil);
             if (!sameWindow) {
                 const decision = evaluateReplyGate(gate, "", nowMs);
-                if (decision.kind === "delay") {
+                if (decision.kind === "delay" && decision.reason !== "distracted") {
                     writeDeferredReply(sessionId, {
                         until: decision.until, note: decision.note, characterId: rec.characterId,
                         reason: decision.reason, busyWindowKey: decision.busyWindowKey, busyUntil: decision.busyUntil,

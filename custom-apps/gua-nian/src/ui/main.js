@@ -78,7 +78,7 @@
     v.innerHTML = HEART_PANELS.filter((p) => p.when(ctx)).map((p) => p.html(ctx)).join("");
     bindPanels(cx, v);
     const slots = cx.plan && cx.plan.items || [];
-    if (cloudCfg() && !cx._heartReceipts && slots.some(w => w.act && w.wakeId && (!receiptFor(w, cx) || Date.now() - receiptFor(w, cx).checkedAt >= 60000))) {
+    if (cloudCfg() && !serverBrainOn() && !cx._heartReceipts && slots.some(w => w.act && w.wakeId && (!receiptFor(w, cx) || Date.now() - receiptFor(w, cx).checkedAt >= 60000))) {
       cx._heartReceipts = true;
       refreshReceipts(cx, slots).then(() => {
         if (cur() === cx && S.tab === "heart") renderHeart();
@@ -96,6 +96,17 @@
     if (S.sub === "usage") renderUsage(); else renderDiag();
   }
   function bindPanels(cx, v) {
+    v.querySelectorAll(".tl-vchip").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const open = S._forkOpen = S._forkOpen || {}, id = b.dataset.fid;
+        open[id] = !open[id];
+        b.classList.toggle("on", open[id]);
+        const box = b.closest(".tl-item").querySelector('.tl-var[data-fid="' + id + '"]');
+        if (box) box.hidden = !open[id];
+      };
+    });
+    v.querySelectorAll(".tl-var").forEach((el) => { el.onclick = (e) => e.stopPropagation(); });
     v.querySelectorAll(".tl-item.sched").forEach((el) => {
       el.onclick = () => { const i = +el.dataset.si; if (i >= 0) openSchedDetail(i); };
     });
@@ -115,7 +126,7 @@
       };
     });
     v.querySelectorAll(".th-row button").forEach((el) => {
-      el.onclick = () => editThreadLedger(cx, async () => {
+      el.onclick = () => serverBrainOn() ? serverThreadButton(cx, el) : editThreadLedger(cx, async () => {
         const id = el.closest(".th-row").dataset.tid, act = el.dataset.act, list = (cx.threads || []).slice();
         const t = list.find((x) => x.id === id); if (!t) return false;
         if (act === "drop" && !confirm("删掉「" + t.text + "」？删了就找不回来了。")) return false;
@@ -147,6 +158,11 @@
       const when = thAdd.when.value.trim(), now = Date.now(), due = parseWhen(when, now);
       if (when && !due) { toast("时间没看懂：写 9/10、2026-09-10 或 15:00"); return; }
       const kind = !due ? "topic" : (/\d{1,2}:\d{2}/.test(when) ? "promise" : "date");
+      if (serverBrainOn()) {
+        S._thAdd = false;
+        await serverThread(cx, { op: "add", thread: { kind: kind, text: text, due: due, subject: thAdd.subject.value } }, "记下了");
+        return;
+      }
       await editThreadLedger(cx, async () => {
         const t = newThread(kind, text, due, now, "user", "你手动记的");
         if (kind === "promise") Object.assign(t, { subject: thAdd.subject.value, revision: 1, status: "pending" });
@@ -165,6 +181,14 @@
     const hw = $("#hero-who");
     if (hw) hw.onclick = (e) => { if (!e.target.closest("button")) openSheet(); };
     bindCommon();
+  }
+  function serverThreadButton(cx, el) {
+    const id = el.closest(".th-row").dataset.tid, act = el.dataset.act;
+    const t = (cx.threads || []).find((x) => x.id === id); if (!t) return;
+    if (act === "drop" && !confirm("删掉「" + t.text + "」？删了就找不回来了。")) return;
+    S._thOpen = "";
+    if (act === "undone") S._thDone = false;
+    return serverThread(cx, { op: act, id: id }, act === "done" ? "已了结，可以在「已了结」里恢复" : act === "undone" ? "放回去了，TA会重新惦记着" : "删掉了");
   }
   function switchTab(tab) {
     if (S.tab === tab) return;
@@ -258,7 +282,7 @@
       '><div class="num">' + n + '</div><div class="cap">' + cap + "</div></div>";
     return '<div class="card"><div class="sec-head"><span class="t">今 日 心 动</span>' +
       '<button class="act" id="btn-replan"' + (cx.busy ? " disabled" : "") + ">" + (cx.busy ? "处理中…" : replanLabel()) + "</button></div>" +
-      (c.plan ? "" : '<div class="archive-note" style="padding-bottom:10px">'
+      (c.plan ? "" : serverBrainOn() ? '<div class="archive-note" style="padding-bottom:10px">后端还没读到今天的念头。TA白天想起你时会自己排。</div>' : '<div class="archive-note" style="padding-bottom:10px">'
         + (liveMode()
           ? "今天的念头由TA随时起，早上不预先排。点右上角「♥ 重置今天」把计划寄到云上，云端才接得上手。"
           : "今天还没编排过。点右上角「♥ 重新编排」，看看TA会在哪些时刻想起你。") + "</div>") +
@@ -270,15 +294,24 @@
       '<div class="stats four" style="margin:12px 0 2px">' +
       stat(fired.length, "已发出") + stat(wait.length, "待处理", 60) +
       stat(skipped.length, "作 罢", 120) + stat(GuaNianPromises.ordinaryQuota(items) + "/" + quota, "普通配额", 180) + "</div>" +
-      '<div class="strip">' +
-      tag(wait.length ? (reach.length === wait.length ? "待发的都离线可达" : "离线可达 " + reach.length + " / " + wait.length) : "没有待发", wait.length && reach.length === wait.length ? "ok" : (wait.length ? "warn" : "")) +
+      '<div class="strip">' + (serverBrainOn() ? serverPulseTags(c, adj, imp) : pulseTags(c, wait, reach, adj, imp)) + "</div></div>";
+  }
+  function serverPulseTags(c, adj, imp) {
+    const sv = S._server || {}, st = cur().server || {};
+    return tag(sv.error ? "后端读取失败" : "VPS 后端 · " + (sv.mode === "live" ? "真发" : "影子"), sv.error || sv.mode !== "live" ? "warn" : "ok") +
+      tag(sv.lastTickAt ? "上一轮 " + esc(fmtHM(sv.lastTickAt)) : "后端还没跑过", "") +
+      (st.lastError ? tag("上一轮出错", "warn") : "") +
+      (c.day && c.day.by === "server" ? tag("今天由后端生成", "cool") : "") +
+      (adj.length || imp.length ? tag([adj.length ? "改动 " + adj.length + " 处" : "", imp.length ? "临时念头 " + imp.length : ""].filter(Boolean).join(" · "), "cool") : "");
+  }
+  function pulseTags(c, wait, reach, adj, imp) {
+    return tag(wait.length ? (reach.length === wait.length ? "待发的都离线可达" : "离线可达 " + reach.length + " / " + wait.length) : "没有待发", wait.length && reach.length === wait.length ? "ok" : (wait.length ? "warn" : "")) +
       tag(cloudRecheckOn() ? "云端复核 · 每 5 分钟" : (cloudCfg() ? "云端复核关着" : "没配云"), cloudRecheckOn() ? "ok" : "") +
       (+S.settings.impulseMode === 1 && !cloudRecheckOn() ? tag("随用随判要配云，先按早上定完跑", "warn") : "") +
       (() => { const t = usageTotals(); return tag("模型调用 " + t.calls + (t.capCalls ? "/" + t.capCalls : "") + " · " + fmtTok(t.tokens) + (t.capTokens ? "/" + fmtTok(t.capTokens) : "") + " token", usageOver() ? "warn" : ""); })() +
       (c.day && c.day.by === "cloud" ? tag("今天由云端生成", "cool") : (cloudGenOn() ? tag("明天云端生成 " + esc(S.settings.autoGenAt || SET_DEF.autoGenAt), "") : "")) +
       tag(c.plan && c.plan.recheckAt ? "本机复核 " + esc(fmtHM(c.plan.recheckAt)) : "本机还没复核过", "") +
-      (adj.length || imp.length ? tag([adj.length ? "复核改了 " + adj.length + " 处" : "", imp.length ? "临时念头 " + imp.length : ""].filter(Boolean).join(" · "), "cool") : "") +
-      "</div></div>";
+      (adj.length || imp.length ? tag([adj.length ? "复核改了 " + adj.length + " 处" : "", imp.length ? "临时念头 " + imp.length : ""].filter(Boolean).join(" · "), "cool") : "");
   }
 
   function panelThreads(c) {
@@ -327,10 +360,10 @@
     }
     if (items.length && !nowInserted) tl += nowLine;
     return '<div class="card"><div class="sec-head"><span class="t">时 刻</span></div>' +
-      '<div class="tl">' + (tl || '<div class="nt" style="padding:8px 0;color:var(--tx3)">' + (liveMode() ? "还没有念头。TA白天想起来了会自己排。" : "还没编排。点上面「♥ 重新编排」。") + "</div>") + "</div></div>";
+      '<div class="tl">' + (tl || '<div class="nt" style="padding:8px 0;color:var(--tx3)">' + (liveMode() || serverBrainOn() ? "还没有念头。TA白天想起来了会自己排。" : "还没编排。点上面「♥ 重新编排」。") + "</div>") + "</div></div>";
   }
   // 随用随判模式下「编排」不再排念头，只把计划重新寄到云上，按钮跟着改名
-  function replanLabel() { return liveMode() ? "♥ 重置今天" : "♥ 重新编排"; }
+  function replanLabel() { return serverBrainOn() ? "♥ 立刻判一次" : liveMode() ? "♥ 重置今天" : "♥ 重新编排"; }
   // 随用随判的念头全在云端起，没配云就只能退回早上定完
   function liveMode() { return +S.settings.impulseMode === 1 && cloudRecheckOn(); }
   function panelTimeline(c) {
@@ -363,12 +396,18 @@
       } else {
         {
           const steps = Array.isArray(m.it.steps) ? m.it.steps.length : 0;
-          tl += '<div class="tl-item sched' + (past ? " past" : "") + (cur ? " cur" : "") + '" data-si="'
+          // 变数默认收着：那件事后面一个小标记，点开才是整段；还没揭晓的只有开了「提前看」才露
+          const fks = m.it.fork ? [] : (c.day.forks || []).filter((f) => f && f.item === m.it.title && (f.state === "hit" || (!f.state && S.settings.forkPeek)));
+          const open = S._forkOpen || {};
+          tl += '<div class="tl-item sched' + (past ? " past" : "") + (cur ? " cur" : "") + (m.it.fork ? " inserted" : "") + '" data-si="'
             + ((cx.day && cx.day.schedule) || []).indexOf(m.it) + '" ' + delay + '><span class="dot"></span>'
-            + '<div class="row1"><span class="tm">' + esc(m.time) + (m.it.end ? '<span class="tm-end">–' + esc(m.it.end) + "</span>" : "") + '</span><span class="tt">' + esc(m.it.title) + "</span></div>"
+            + '<div class="row1"><span class="tm">' + esc(m.time) + (m.it.end ? '<span class="tm-end">–' + esc(m.it.end) + "</span>" : "") + '</span><span class="tt">' + esc(m.it.title) + "</span>"
+            + fks.map((f) => '<button class="tl-vchip' + (f.state ? "" : " pre") + (open[f.id] ? " on" : "") + '" data-fid="' + esc(f.id) + '">' + (f.state ? "✦ 变数" : "可能有岔子") + "</button>").join("")
+            + (m.it.moved ? '<span class="tl-tag">推迟过</span>' : "") + "</div>"
             + (m.it.note ? '<div class="nt">' + esc(m.it.note) + "</div>" : "")
             + (steps ? '<div class="nt more">…点开看这段时间里的 ' + steps + " 件事</div>"
-               : m.it.detail ? '<div class="nt more">…点开看细化的部分</div>' : "") + "</div>";
+               : m.it.detail ? '<div class="nt more">…点开看细化的部分</div>' : "")
+            + fks.map((f) => forkBlock(f, m.it, !!open[f.id])).join("") + "</div>";
         }
       }
     }
@@ -402,6 +441,7 @@
     if (w.held && w.fireAt >= Date.now()) return '<span class="badge cool">押后 ' + esc(fmtHM(w.fireAt)) + "</span>";
     if (w.adj === "cooled") return '<span class="badge cool">降温</span>';
     if (w.adj === "extra") return '<span class="badge cool">临时起念</span>';
+    if (w.adj === "fork") return '<span class="badge cool">变数</span>';
     if (w.adj === "recheck") return '<span class="badge cool">复核调整</span>';
     if (w.adj === "cloud") return '<span class="badge cool">云端复核</span>';
     return "";

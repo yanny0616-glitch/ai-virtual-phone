@@ -1,4 +1,5 @@
 import type { ImageGenerationSettings, NovelAiPreset } from "./settings-types";
+import type { LookStyle } from "./image-prompt-extras";
 import { loadImageGenerationSettings, DEFAULT_NOVELAI_PRESET } from "./settings-storage";
 import JSZip from "jszip";
 import { getChatImageFromIndexedDB } from "./chat-asset-storage";
@@ -54,6 +55,30 @@ function mergePrompt(description: string, extraPrompt: string): string {
   const main = description.trim();
   const extra = extraPrompt.trim();
   return extra ? `${main}\n\n${extra}` : main;
+}
+
+// 设置页按尺寸往附加提示词末尾追加的构图提示，单张改正向时要保住它
+const RATIO_HINT_RE = /\s*【画面比例】[^\n]*/g;
+
+function activeOpenAiSettings(settings: ImageGenerationSettings): ImageGenerationSettings {
+  const preset = settings.openaiPresets?.find(item => item.id === settings.activeOpenAiPresetId) || settings.openaiPresets?.[0];
+  return preset ? { ...settings, ...preset } : settings;
+}
+
+function activeNovelAiPreset(settings: ImageGenerationSettings): NovelAiPreset {
+  const presets = settings.novelai?.presets && settings.novelai.presets.length > 0
+    ? settings.novelai.presets
+    : [DEFAULT_NOVELAI_PRESET];
+  return presets.find(p => p.id === settings.novelai?.activePresetId) || presets[0];
+}
+
+/** 当前生图方案自带的正向/负向，编辑面板拿它当默认值；OpenAI 没有负向 */
+export function imagePromptDefaults(settings = loadImageGenerationSettings()): { positive: string; negative: string; style: LookStyle; provider: "novelai" | "openai" } {
+  if (settings.provider === "novelai") {
+    const preset = activeNovelAiPreset(settings);
+    return { positive: preset.positivePrompt?.trim() || "", negative: preset.negativePrompt?.trim() || "", style: "tag", provider: "novelai" };
+  }
+  return { positive: activeOpenAiSettings(settings).extraPrompt.replace(RATIO_HINT_RE, "").trim(), negative: "", style: "natural", provider: "openai" };
 }
 
 function base64ToBlob(b64: string, mimeType: string): Blob {
@@ -730,22 +755,37 @@ export async function generateImageFromConfiguredApi(params: {
   useReferenceImage?: boolean;
   settings?: ImageGenerationSettings;
   signal?: AbortSignal;
+  /** 这一张单独的正向/负向，不传就用当前方案的 */
+  positive?: string;
+  negative?: string;
+  /** 出镜时的长相；不传就取人设提取的缓存 */
+  appearance?: string;
 }): Promise<ImageGenerationResult | null> {
   const settings = params.settings ?? loadImageGenerationSettings();
   if (!settings.enabled) return null;
 
-  const description = params.description.trim();
-  if (!description) return null;
+  const rawDescription = params.description.trim();
+  if (!rawDescription) return null;
+  const withLook = async (style: LookStyle): Promise<string> => {
+    if (!params.useReferenceImage || !params.characterId || settings.appearanceOn === false) return rawDescription;
+    const extras = await import("./image-prompt-extras");
+    const look = params.appearance ?? await extras.resolveCharacterLook(params.characterId, style, params.signal);
+    throwIfAborted(params.signal);
+    return extras.withAppearance(rawDescription, look, style);
+  };
 
   // NovelAI 模式
   if (settings.provider === "novelai") {
     const naiApiKey = settings.novelai?.apiKey?.trim();
     if (!naiApiKey) return null;
 
-    const presets = settings.novelai?.presets && settings.novelai.presets.length > 0
-      ? settings.novelai.presets
-      : [DEFAULT_NOVELAI_PRESET];
-    const activePreset = presets.find(p => p.id === settings.novelai?.activePresetId) || presets[0];
+    const basePreset = activeNovelAiPreset(settings);
+    const activePreset: NovelAiPreset = {
+      ...basePreset,
+      positivePrompt: params.positive ?? basePreset.positivePrompt,
+      negativePrompt: params.negative ?? basePreset.negativePrompt,
+    };
+    const description = await withLook("tag");
 
     const positiveParts: string[] = [];
     if (activePreset.positivePrompt?.trim()) positiveParts.push(activePreset.positivePrompt.trim());
@@ -773,8 +813,10 @@ export async function generateImageFromConfiguredApi(params: {
     };
   }
 
-  // OpenAI 兼容模式
-  if (!settings.apiKey.trim() || !settings.baseUrl.trim() || !settings.model.trim()) return null;
+  // OpenAI 兼容模式：使用当前激活预设（旧配置由存储层迁移后仍保持兼容）
+  const openaiSettings = activeOpenAiSettings(settings);
+  if (!openaiSettings.apiKey.trim() || !openaiSettings.baseUrl.trim() || !openaiSettings.model.trim()) return null;
+  const description = await withLook("natural");
 
   const reference = params.characterId ? settings.characterReferences[params.characterId] : undefined;
   const rawReferenceImageDataUrl = params.useReferenceImage && reference?.assetId
@@ -785,11 +827,18 @@ export async function generateImageFromConfiguredApi(params: {
     ? await normalizeReferenceImageForEdit(rawReferenceImageDataUrl)
     : null;
   throwIfAborted(params.signal);
-  const prompt = mergePrompt(description, settings.extraPrompt);
+  let extraPrompt = openaiSettings.extraPrompt;
+  if (params.positive !== undefined) {
+    const ratioHint = openaiSettings.extraPrompt.match(RATIO_HINT_RE)?.[0]?.trim() || "";
+    extraPrompt = [params.positive.trim(), ratioHint].filter(Boolean).join("\n");
+  }
+  const negative = params.negative?.trim();
+  // OpenAI 兼容接口没有负向字段，只能写成一句话
+  const prompt = mergePrompt(description, extraPrompt) + (negative ? `\n\n不要出现：${negative}` : "");
 
-  const data = settings.requestMode === "direct"
-    ? await generateImageDirect({ settings, prompt, referenceImageDataUrl, signal: params.signal })
-    : await generateImageViaServerOrProxy({ settings, prompt, referenceImageDataUrl, signal: params.signal });
+  const data = openaiSettings.requestMode === "direct"
+    ? await generateImageDirect({ settings: openaiSettings, prompt, referenceImageDataUrl, signal: params.signal })
+    : await generateImageViaServerOrProxy({ settings: openaiSettings, prompt, referenceImageDataUrl, signal: params.signal });
 
   throwIfAborted(params.signal);
   const mimeType = data.mimeType || "image/png";

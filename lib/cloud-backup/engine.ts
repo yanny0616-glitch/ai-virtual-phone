@@ -352,6 +352,10 @@ export type CloudBackupOptions = {
 
 let cloudOperationRunning: "backup" | "restore" | null = null;
 
+export function getCloudOperationRunning(): "backup" | "restore" | null {
+  return cloudOperationRunning;
+}
+
 async function withCloudOperationLock<T>(kind: "backup" | "restore", task: () => Promise<T>): Promise<T> {
   if (cloudOperationRunning) throw new Error("已有云端备份或恢复正在运行，请等待它完成。");
   cloudOperationRunning = kind;

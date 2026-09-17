@@ -6,27 +6,36 @@ import { isAndroidBrowser } from "./voice-input-platform";
 
 // ── Photo Input Modal ─────────────────────────────
 
+const MAX_PHOTOS_PER_SEND = 9;
+
 interface PhotoInputModalProps {
-    onSend: (description: string, imageDataUrl?: string) => void;
+    /** 选了几张就发几条消息；描述只跟着第一张走。 */
+    onSend: (description: string, imageDataUrls: string[]) => void;
     onClose: () => void;
 }
 
 export function PhotoInputModal({ onSend, onClose }: PhotoInputModalProps) {
     const [desc, setDesc] = useState("");
-    const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
+    const [images, setImages] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-            setImageDataUrl(reader.result as string);
-        };
-        reader.readAsDataURL(file);
+        const picked = Array.from(e.target.files || []);
+        e.target.value = "";
+        if (!picked.length) return;
+        picked.forEach(file => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const url = reader.result as string;
+                setImages(prev => (prev.length >= MAX_PHOTOS_PER_SEND ? prev : [...prev, url]));
+            };
+            reader.readAsDataURL(file);
+        });
     };
 
-    const canSend = !!imageDataUrl;
+    const removeImage = (index: number) => setImages(prev => prev.filter((_, i) => i !== index));
+
+    const canSend = images.length > 0;
 
     return (
         <div className="modal-overlay" onClick={onClose}>
@@ -34,32 +43,41 @@ export function PhotoInputModal({ onSend, onClose }: PhotoInputModalProps) {
                 onClick={e => e.stopPropagation()}
                 className="modal-dialog"
             >
-                <div className="ts-16 font-semibold text-center text-[var(--c-text)]">发送照片</div>
+                <div className="ts-16 font-semibold text-center text-[var(--c-text)]">发送照片{images.length > 1 ? ` · ${images.length} 张` : ""}</div>
+                {images.length > 0 && (
+                    <div className="photo-modal-grid">
+                        {images.map((url, i) => (
+                            <div key={`${i}-${url.slice(-16)}`} className="photo-modal-thumb">
+                                <img src={url} alt="" />
+                                <button
+                                    type="button"
+                                    className="ui-close-sm photo-modal-thumb-remove"
+                                    aria-label={`移除第 ${i + 1} 张`}
+                                    onClick={e => { e.stopPropagation(); removeImage(i); }}
+                                >×</button>
+                            </div>
+                        ))}
+                    </div>
+                )}
                 <div
                     className="w-full rounded-xl flex items-center justify-center ui-placeholder-gradient overflow-hidden cursor-pointer relative"
-                    style={{ minHeight: imageDataUrl ? "auto" : "120px" }}
+                    style={{ minHeight: "120px" }}
                     onClick={() => fileInputRef.current?.click()}
                 >
-                    {imageDataUrl ? (
-                        <img
-                            src={imageDataUrl}
-                            alt="preview"
-                            className="w-full h-auto rounded-xl"
-                            style={{ maxHeight: "240px", objectFit: "contain" }}
-                        />
-                    ) : (
-                        <div className="flex flex-col items-center gap-2 py-6">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--c-icon)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                                <line x1="12" y1="5" x2="12" y2="19" />
-                                <line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                            <span className="ts-12 text-[var(--c-icon)]">点击上传图片</span>
-                        </div>
-                    )}
+                    <div className="flex flex-col items-center gap-2 py-6">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--c-icon)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        <span className="ts-12 text-[var(--c-icon)]">
+                            {images.length ? `继续添加，最多 ${MAX_PHOTOS_PER_SEND} 张` : "点击上传图片，可多选"}
+                        </span>
+                    </div>
                     <input
                         ref={fileInputRef}
                         type="file"
                         accept="image/*"
+                        multiple
                         className="hidden"
                         onChange={handleFileChange}
                     />
@@ -70,7 +88,7 @@ export function PhotoInputModal({ onSend, onClose }: PhotoInputModalProps) {
                         className="ui-btn ui-btn-ghost ui-btn-bordered-ghost flex-1"
                     >取消</button>
                     <button
-                        onClick={() => { if (canSend) onSend(desc.trim(), imageDataUrl!); }}
+                        onClick={() => { if (canSend) onSend(desc.trim(), images); }}
                         disabled={!canSend}
                         className="ui-btn ui-btn-success flex-1"
                     >发送</button>

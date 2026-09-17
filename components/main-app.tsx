@@ -5,17 +5,21 @@ import { ArrowRight } from "lucide-react";
 
 import { AccountGate } from "@/components/auth/account-gate";
 import { CloudBackupScheduler } from "@/components/cloud-backup-scheduler";
+import { ToolEventScheduler } from "@/components/tool-event-scheduler";
 import { RealityBridgeScheduler } from "@/components/reality-bridge-scheduler";
 import { MediaMaintenanceScheduler } from "@/components/media-maintenance-scheduler";
 import { DesktopShell } from "./desktop-shell";
 import { OfflinePushRevampAnnouncement } from "./offline-push-revamp-announcement";
-import { SplashAnimation } from "./splash-animation";
+import { SplashVariant } from "./splash-variants";
+import { readSplashVariant, type SplashVariantId } from "@/lib/splash-config";
 import { MusicProvider } from "@/lib/music-context";
 import { hydrateKvDb, isKvHydrated } from "@/lib/kv-db";
 import { getThemeAssetMap, readThemeProfile } from "@/lib/theme-storage";
 import { resolveActiveIconSkins, type ThemeProfile } from "@/lib/theme-types";
 import { hasPendingMcpOAuthCallback } from "@/lib/tool-executor";
 import { shouldRequestPwaFullscreen } from "@/lib/pwa-display-mode";
+import { StorageHealthBanner } from "@/components/storage-health-banner";
+import { ChangelogPopup } from "@/components/changelog-sheet";
 
 const TEXT = {
   loading: "\u52A0\u8F7D\u4E2D...",
@@ -150,6 +154,11 @@ async function warmBuiltinFonts(shouldStop: () => boolean): Promise<void> {
 }
 
 function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: () => void }) {
+  // 开屏在 KV 水合前就渲染，所以选择存在 localStorage，挂载时同步读一次即可
+  const [variant] = useState<SplashVariantId>(() => readSplashVariant());
+  useEffect(() => {
+    if (variant === "none" && ready) onEnter?.();
+  }, [variant, ready, onEnter]);
   return (
     <main className="app-root splash-root">
       <section
@@ -159,7 +168,7 @@ function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: (
         <div className="phone-case">
           <div className="phone-frame">
             <div className="phone-shell splash-phone-screen">
-              <SplashAnimation />
+              <SplashVariant variant={variant} />
               <button
                 type="button"
                 className={ready ? "splash-enter-button splash-enter-button-show" : "splash-enter-button"}
@@ -320,7 +329,10 @@ export function MainApp() {
             <OfflinePushRevampAnnouncement />
             <CloudBackupScheduler />
             <RealityBridgeScheduler />
+            <ToolEventScheduler />
             <MediaMaintenanceScheduler />
+            <StorageHealthBanner />
+            <ChangelogPopup />
           </MusicProvider>
         </main>
       )}

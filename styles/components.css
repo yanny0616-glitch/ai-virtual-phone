@@ -3086,6 +3086,39 @@
   box-shadow: none;
 }
 
+.chat-info-section-chev {
+  opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+
+.chat-info-section-head[aria-expanded="true"] .chat-info-section-chev {
+  transform: rotate(90deg);
+}
+
+.chat-info-section-body {
+  background: color-mix(in srgb, var(--c-text) 5%, transparent);
+}
+
+.chat-info-menu .chat-info-section-body .menu-item {
+  padding: 14px 24px 14px 32px;
+}
+
+.chat-info-section-body .chat-info-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.chat-info-section-body .chat-info-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-info-section-chev {
+    transition: none;
+  }
+}
+
 .profile-settings-menu .menu-label-group > .menu-label {
   font-weight: 600;
 }
@@ -5841,4 +5874,56 @@
   .mascot-review-sheet { width: min(92vw, 720px); max-height: 86dvh; border-radius: 20px; }
   .mascot-review-grab { display: none; }
   .mascot-review-header { padding-top: 14px; }
+}
+
+/* ── MCP 事件唤醒折叠卡 ── */
+.tool-event-fold {
+  border-radius: var(--ui-radius);
+  background: color-mix(in srgb, var(--c-text) 4%, transparent);
+  overflow: hidden;
+}
+.tool-event-fold > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.tool-event-fold > summary::-webkit-details-marker { display: none; }
+.tool-event-fold > summary::before {
+  content: "›";
+  color: var(--c-icon);
+  font-size: calc(14px*var(--app-text-scale,1));
+  line-height: 1;
+  transition: transform 0.16s ease;
+}
+.tool-event-fold[open] > summary::before { transform: rotate(90deg); }
+.tool-event-fold-title {
+  font-size: calc(12.6px*var(--app-text-scale,1));
+  font-weight: 600;
+  color: var(--c-text-title);
+}
+.tool-event-fold-meta { margin-left: auto; display: inline-flex; gap: 4px; }
+.tool-event-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+.tool-event-field { display: flex; flex-direction: column; gap: 4px; }
+.tool-event-field > .menu-desc { margin-left: 4px; }
+.tool-event-hint { opacity: 0.75; }
+.tool-event-error { color: var(--c-danger); }
+.tool-event-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.tool-event-btn { padding: 8px 12px; border-radius: 10px; font-size: calc(11.7px*var(--app-text-scale,1)); }
+.tool-event-ingress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--c-text) 8%, transparent);
 }

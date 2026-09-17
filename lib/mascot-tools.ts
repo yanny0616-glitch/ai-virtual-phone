@@ -103,6 +103,31 @@ const OVERWRITE_CSS_SCHEMA = {
     additionalProperties: false,
 };
 
+const PROPOSE_CSS_SCHEMA = {
+    type: "object",
+    properties: {
+        location: { type: "string", enum: CSS_LOCATION_ENUM, description: "CSS 位置" },
+        title: { type: "string", description: "给这份主题起个短名字，显示在卡片标题上，比如「深夜蓝聊天室」" },
+        css: { type: "string", description: "完整的新 CSS（和 patches 二选一）。原来是空的、或者大改时用这个" },
+        patches: {
+            type: "array",
+            description: "局部补丁（和 css 二选一）。只改几处时用这个，不用重发整份 CSS",
+            items: {
+                type: "object",
+                properties: {
+                    find: { type: "string", description: "要替换的原文，必须在当前 CSS 里恰好出现一次" },
+                    replace: { type: "string", description: "替换成的新文字，可以为空字符串表示删掉" },
+                },
+                required: ["find", "replace"],
+                additionalProperties: false,
+            },
+        },
+        sessionName: { type: "string", description: SESSION_NAME_DESC },
+    },
+    required: ["location", "title"],
+    additionalProperties: false,
+};
+
 const CLEAR_CSS_SCHEMA = {
     type: "object",
     properties: {
@@ -959,9 +984,10 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
     {
         id: "css_pack",
         label: "CSS样式套件",
-        description: "查看 / 覆写 / 清除 各页面的自定义 CSS。工作流：先 读取CSS 拿到当前内容和可用选择器，再把（要保留的旧内容 + 要修改的部分）拼成完整新内容，最后 覆写CSS 写回。",
+        description: "查看 / 出主题 / 覆写 / 清除 各页面的自定义 CSS。工作流：先 读取CSS 拿到当前内容、主题地图和可用选择器，再用 出主题 出一份方案（小改动传 patches，大改传完整 css），用户在卡片上自己点 预览 / 应用 / 撤销 / 只存进主题库。",
         subTools: [
             { name: "读取CSS", description: "读取指定位置的当前 CSS 内容 + 该位置可用的选择器/变量参考。修改前必读。不传 location 时返回 5 个位置的状态概览。", parameterSchema: READ_CSS_SCHEMA },
+            { name: "出主题", description: "出一份 CSS 方案交给用户过目，不直接改页面：用户在卡片上点 预览 / 应用 / 撤销 / 只存进主题库。只改几处传 patches（find 必须在当前 CSS 里恰好出现一次），大改或原来是空的传完整 css。默认走这个。", parameterSchema: PROPOSE_CSS_SCHEMA },
             { name: "覆写CSS", description: "用新内容替换该位置的全部 CSS。需要小卷自己把（保留的旧规则 + 改动）拼成完整内容再写入。", parameterSchema: OVERWRITE_CSS_SCHEMA },
             { name: "清除CSS", description: "清空指定位置的所有自定义 CSS。", parameterSchema: CLEAR_CSS_SCHEMA },
         ],
@@ -1230,6 +1256,7 @@ function numberOption(value: unknown, fallback: number): number {
 const MASCOT_NATIVE_TOOL_NAMES: Record<string, string> = {
     "导航": "mascot_navigate",
     "读取CSS": "mascot_read_css",
+    "出主题": "mascot_propose_css",
     "覆写CSS": "mascot_write_css",
     "清除CSS": "mascot_clear_css",
     "读取线上状态栏": "mascot_read_status_bar",
@@ -1407,6 +1434,7 @@ export async function executeMascotToolCall(call: ToolCall, ctx: MascotToolConte
         switch (call.name) {
             // ─── CSS ───
             case "读取CSS": return await handleReadCss(call.args, ctx);
+            case "出主题": return await handleProposeCss(call.args, ctx);
             case "覆写CSS": return await handleOverwriteCss(call.args, ctx);
             case "清除CSS": return await handleClearCss(call.args, ctx);
             // ─── 线上聊天状态栏 ───
@@ -1808,6 +1836,7 @@ async function handleReadCss(args: Record<string, unknown>, ctx: MascotToolConte
     if (result.displayName) parts.push(`会话：${result.displayName}`);
     if (result.note) parts.push(`注意：${result.note}`);
     parts.push(`\n=== 当前 CSS ===\n${result.css || "(空)"}`);
+    parts.push(`\n=== 主题地图（按顺序编号，写 patches 的 find 时照这里抄定位片段）===\n${buildCssThemeMap(result.css)}`);
     parts.push(`\n=== 可用选择器和变量参考 ===\n${reference}`);
     return { name: "读取CSS", success: true, data: parts.join("\n") };
 }
@@ -1952,6 +1981,82 @@ async function handlePreviewStatusBar(args: Record<string, unknown>, ctx: Mascot
     });
     if (!handled) return { name: NAME, success: false, error: "预览弹窗当前不可用（桌宠界面未挂载）" };
     return { name: NAME, success: true, data: `已弹出「${displayName}」的状态栏预览，用户可直接查看效果。` };
+}
+
+/** 把当前 CSS 拆成顶层块，给小卷一张「第几块是什么」的地图，好照着写 find 定位片段。 */
+function buildCssThemeMap(css: string): string {
+    const trimmed = css.trim();
+    if (!trimmed) return "(当前没有 CSS，直接写新的就行)";
+    const blocks: { selector: string; lines: number }[] = [];
+    let depth = 0, start = 0, selectorStart = 0;
+    for (let i = 0; i < trimmed.length; i++) {
+        const ch = trimmed[i];
+        if (ch === "{") {
+            if (depth === 0) { start = i; }
+            depth++;
+        } else if (ch === "}") {
+            depth--;
+            if (depth === 0) {
+                const selector = trimmed.slice(selectorStart, start).trim().replace(/\s+/g, " ");
+                const body = trimmed.slice(start, i + 1);
+                if (selector) blocks.push({ selector: selector.slice(0, 120), lines: body.split("\n").length });
+                selectorStart = i + 1;
+            }
+        }
+    }
+    const vars = [...new Set(trimmed.match(/--[A-Za-z0-9_-]+(?=\s*:)/g) || [])];
+    const lines = blocks.length
+        ? blocks.map((b, i) => `[${i + 1}] ${b.selector}（${b.lines} 行）`)
+        : ["(没解析出完整的块，可能有未闭合的括号)"];
+    return `${lines.join("\n")}\n已声明的变量：${vars.length ? vars.join("、") : "（无）"}`;
+}
+
+async function handleProposeCss(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
+    const NAME = "出主题";
+    const location = args.location as string;
+    const sessionName = args.sessionName as string | undefined;
+    const title = ((args.title as string) || "").trim().slice(0, 40) || "小卷的主题";
+    const css = typeof args.css === "string" ? args.css : undefined;
+    const patches = Array.isArray(args.patches) ? (args.patches as { find: string; replace: string }[]) : undefined;
+    if (!location || !CSS_LOCATION_LABELS[location]) return { name: NAME, success: false, error: `未知位置：${location}` };
+    if (!!css === !!patches) return { name: NAME, success: false, error: "css 和 patches 必须二选一：小改动用 patches，大改或原来是空的用 css" };
+
+    const current = await readCssAt(location, ctx, sessionName);
+    if (current.note) {
+        return {
+            name: NAME,
+            success: false,
+            error: current.choices ? `${current.note}。可选会话：${current.choices.map((c) => `「${c}」`).join("、")}` : current.note,
+        };
+    }
+
+    const { applyCssPatches, createCssPlan } = await import("./mascot-css-plan");
+    let after: string;
+    try {
+        after = patches ? applyCssPatches(current.css, patches) : (css as string);
+    } catch (e) {
+        return { name: NAME, success: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    if (after.trim() === current.css.trim()) return { name: NAME, success: false, error: "改完和原来一模一样，别出这份方案" };
+
+    const plan = createCssPlan({
+        location,
+        sessionId: current.sessionId,
+        displayName: current.displayName,
+        title,
+        before: current.css,
+        after,
+    });
+    const { requestCssPlanReview } = await import("./mascot-events");
+    const opened = requestCssPlanReview(plan.id);
+    const where = `${CSS_LOCATION_LABELS[location].label}${current.displayName ? `（${current.displayName}）` : ""}`;
+    return {
+        name: NAME,
+        success: true,
+        data: opened
+            ? `已把「${title}」的方案交给用户过目（${where}，${after.length} 字符）。页面还没改，等用户在卡片上点 预览 / 应用 / 只存进主题库。`
+            : `方案「${title}」已存好（${where}），但卡片没能弹出来。让用户去「小卷修改记录」里找这份主题方案。`,
+    };
 }
 
 async function handleOverwriteCss(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {

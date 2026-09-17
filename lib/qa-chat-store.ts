@@ -1,3 +1,4 @@
+import { estimateQaEntryChars, shouldCompactBeforeQaTurn } from "./qa-context-budget";
 import { callQaAgent, compactQaContext, formatQaErrorMessage, type QaContextEntry } from "./qa-agent-engine";
 import { QA_TOOLS, formatQaToolSubtitle, type QaCreatedContent, type QaProposedCommit } from "./qa-agent-tools";
 import { loadQaGithubConfig } from "./qa-github";
@@ -109,14 +110,7 @@ function getContextBudget(): number {
     return DEFAULT_CONTEXT_BUDGET_CHARS;
 }
 
-function entryChars(entry: QaContextEntry): number {
-    let total = entry.content.length;
-    for (const file of entry.files ?? []) total += file.name.length + file.content.length;
-    for (const call of entry.toolCalls ?? []) {
-        total += call.name.length + JSON.stringify(call.args ?? {}).length;
-    }
-    return total;
-}
+const entryChars = estimateQaEntryChars;
 
 /** 旧会话没有 context 字段：用可见消息引导出初始上下文 */
 function sessionContext(session: QaSession): QaContextEntry[] {
@@ -535,6 +529,20 @@ export function editAndResendQaMessage(
     return { ok: true };
 }
 
+/** 重新生成最后一条回复：等价于把上一条用户消息原样重发。只允许最后一轮，且该轮没有工具副作用。 */
+export function regenerateQaMessage(sessionId: string, assistantMsgId: string): QaMessageEditResult {
+    const session = sessions.find((candidate) => candidate.id === sessionId);
+    if (!session) return { ok: false, reason: "会话已不存在。" };
+    const index = session.messages.findIndex((message) => message.id === assistantMsgId);
+    if (index < 0) return { ok: false, reason: "消息已不存在。" };
+    if (index !== session.messages.length - 1) return { ok: false, reason: "只能重新生成最后一条回复。" };
+    const userMsg = session.messages[index - 1];
+    if (!userMsg || userMsg.role !== "user") return { ok: false, reason: "这轮回复没有对应的用户消息（续接轮次），无法重来。" };
+    const blocked = getQaEditAndResendBlockReason(sessionId, userMsg.id);
+    if (blocked) return { ok: false, reason: blocked.replace("；你仍可以保存文字修改", "，请新开一轮描述需求") };
+    return editAndResendQaMessage(sessionId, userMsg.id, userMsg.content, userMsg.images, userMsg.files);
+}
+
 function updateSession(sessionId: string, updater: (session: QaSession) => QaSession, options?: { persist?: boolean }) {
     sessions = sessions
         .map((s) => (s.id === sessionId ? updater(s) : s))
@@ -574,9 +582,11 @@ export async function sendQaMessage(
         images: images?.length ? images : undefined,
         files: files?.length ? files : undefined,
     };
-    // 当前内容加上新消息将触顶时，先压缩再开新轮。
-    const nextUsage = contextUsageOf(session) + entryChars(nextEntry) / getContextBudget();
-    if (nextUsage >= 1) {
+    // Avoid counting binary transport bytes as text, and don't summarize twice per turn.
+    let attemptedPreCompaction = false;
+    const currentChars = sessionContext(session).reduce((sum,entry)=>sum+entryChars(entry),0);
+    if (shouldCompactBeforeQaTurn(currentChars,entryChars(nextEntry),getContextBudget())) {
+        attemptedPreCompaction = true;
         await compactSessionContext(sessionId);
     }
 
@@ -772,7 +782,7 @@ export async function sendQaMessage(
             await applyQaCommit(assistantMsg.id);
         }
         // 本轮结束后触顶：立即压缩（进度条回到低位）
-        if (contextUsageOf(sessions.find((s) => s.id === sessionId) ?? null) >= 1) {
+        if (!attemptedPreCompaction && contextUsageOf(sessions.find((s) => s.id === sessionId) ?? null) >= 1) {
             await compactSessionContext(sessionId);
         }
     } catch (error) {

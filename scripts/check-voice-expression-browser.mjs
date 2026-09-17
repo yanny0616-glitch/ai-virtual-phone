@@ -92,6 +92,9 @@ const cssLinks = cssFiles.map(name => `<link rel="stylesheet" href="${name}">`).
 await fs.writeFile(path.join(out, "index.html"), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>语音 API 配置预览</title>${cssLinks}<div id="root" class="p-4"></div><script src="bundle.js"></script>`);
 const profile = await fs.mkdtemp(path.join(out, "profile-"));
 const child = spawn("chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-proxy-server", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+// 脚本中途抛错或被打断也要把子进程带走，不然孤儿 Chromium 会一直吃 CPU
+process.on('exit', () => { try { child.kill('SIGKILL'); } catch {} });
+if (!globalThis.__exitHooksInstalled) { globalThis.__exitHooksInstalled = true; process.on('uncaughtException', e => { console.error(e); process.exit(1); }); process.on('unhandledRejection', e => { console.error(e); process.exit(1); }); process.on('SIGINT', () => process.exit(130)); process.on('SIGTERM', () => process.exit(143)); }
 let socket;
 try {
   let port;

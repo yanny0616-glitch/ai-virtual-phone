@@ -12,7 +12,7 @@
     const states = { sent: "已发布", pending: "待发布", failed: "发布失败", skipped: "未发布" };
     return '<details class="skip-fold moment-history"><summary>朋友圈记录 · ' + records.length + ' 条</summary>' +
       records.map(r => '<div class="d-why"><strong>' + esc(states[r.status] || "待确认") + '</strong> · ' +
-        esc(fmtHM(r.at)) + ' · ' + (r.by === "cloud" ? "云端起意" : "本地起意") +
+        esc(fmtHM(r.at)) + ' · ' + (r.by === "cloud" ? "云端起意" : r.by === "server" ? "后端起意" : "本地起意") +
         '<div>「' + esc(r.hint) + '」</div><div class="archive-note">' + esc(r.note || "") +
         (r.postId ? ' · 帖子编号 ' + esc(r.postId) : '') + '</div></div>').join("") + '</details>';
   }
@@ -79,6 +79,8 @@
           (plan && plan.chatUsed ? '<span class="chip">💬 判断时读了 ' + plan.chatUsed + " 句聊天</span>" : "") +
           "</div>";
       }
+      const hits = forkHits(day, cx.character.id);
+      if (hits.length) body += hits.map((f) => '<div class="arc-fork"><b>✦ ' + esc(f.at) + "</b>" + esc(f.what) + '<span class="say">' + esc(FORK_SAY[f.say] || "") + "</span></div>").join("");
       if (items.length) {
         // 起念的时刻是主角，逐条展开讲；未起念的只是「日程里没被选中的时刻」，
         // 折叠成一行，免得整张卡片读起来像把日程复读一遍
@@ -102,7 +104,7 @@
         '<span class="arr">▶</span></summary>' +
         '<div class="day-body">' + body + "</div></details>";
     });
-    html += '<div class="archive-note">发送状态按对应预约回执确认；旧记录、仅在线发送或回执缺失显示「待确认」。不再根据普通聊天推算发送和回复率。点任意时刻可刷新回执。</div>';
+    html += serverBrainOn() ? '<div class="archive-note">发送状态以后端的执行记录为准。点任意时刻能看那一条的完整轨迹。</div>' : '<div class="archive-note">发送状态按对应预约回执确认；旧记录、仅在线发送或回执缺失显示「待确认」。不再根据普通聊天推算发送和回复率。点任意时刻可刷新回执。</div>';
     v.innerHTML = html;
     v.querySelectorAll(".dec").forEach((el) => {
       el.onclick = () => {

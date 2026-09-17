@@ -4,6 +4,7 @@
 
 import type { ApiConfig } from "./settings-types";
 import { pushApiLog } from "./api-log-store";
+import { correctApiBaseUrl } from "./api-url";
 
 const SIMPLE_ANTHROPIC_AUTO_MAX_TOKENS = 8192;
 
@@ -13,7 +14,7 @@ const SIMPLE_ANTHROPIC_AUTO_MAX_TOKENS = 8192;
  * Supports all 11 UI providers + Custom (relies on baseUrl field).
  */
 export function determineBaseUrl(config: { provider: string; baseUrl?: string }): string {
-    if (config.baseUrl) return config.baseUrl;
+    if (config.baseUrl?.trim()) return correctApiBaseUrl(config.provider, config.baseUrl);
     switch (config.provider) {
         case "OpenAI":      return "https://api.openai.com/v1";
         case "Anthropic":   return "https://api.anthropic.com/v1";
@@ -107,7 +108,7 @@ export function isNativeGoogleApi(config: ApiConfig): boolean {
 export async function simpleLLMCall(
     config: ApiConfig,
     messages: { role: string; content: string }[],
-    options?: { temperature?: number; max_tokens?: number; signal?: AbortSignal; label?: string },
+    options?: { temperature?: number; max_tokens?: number; signal?: AbortSignal; label?: string; onDelta?: (delta: string) => void },
 ): Promise<{ content: string | null; error?: string; finishReason?: string; wasTruncated?: boolean }> {
     const baseUrl = determineBaseUrl(config);
     if (!baseUrl || !config.apiKey) {
@@ -166,6 +167,10 @@ export async function simpleLLMCall(
             });
         }
 
+        if (options?.onDelta) {
+            if (isNativeGoogleApi(config)) fetchUrl = fetchUrl.replace(":generateContent?", ":streamGenerateContent?alt=sse&");
+            else body = JSON.stringify({ ...JSON.parse(body), stream: true });
+        }
         const bodySize = body.length;
         const bodyTokenEstimate = Math.ceil(bodySize / 3);
         console.log("[simpleLLMCall] Request:", { url: fetchUrl.slice(0, 80), bodySize, bodyTokenEstimate, model: config.defaultModel });
@@ -186,11 +191,14 @@ export async function simpleLLMCall(
             return { content: null, error: `API 错误 ${res.status}: ${errText.slice(0, 200)}` };
         }
 
-        const data = await res.json();
+        const streamed = options?.onDelta && res.headers.get("content-type")?.includes("text/event-stream")
+            ? await readSimpleLLMStream(res, config, options.onDelta)
+            : undefined;
+        const data = streamed ? { choices: [{ message: { content: streamed.content } }] } : await res.json();
 
         // Extract content — try multiple response formats for maximum compatibility
         const content = extractLLMContent(data, config.provider);
-        const finishReason = extractFinishReason(data);
+        const finishReason = streamed ? streamed.finishReason : extractFinishReason(data);
         const wasTruncated = isTruncationFinishReason(finishReason);
         pushApiLog({
             characterName: options?.label,
@@ -198,12 +206,21 @@ export async function simpleLLMCall(
             model: config.defaultModel,
             messages: messages.map(m => ({ role: m.role, content: m.content })),
             rawResponse: content ?? describeEmptyLLMResponse(data, finishReason, wasTruncated, config),
-            usage: extractUsage(data),
+            usage: streamed ? streamed.usage : extractUsage(data),
             failed: !content,
         });
         if (!content) {
             console.warn("[simpleLLMCall] Empty response. Keys:", JSON.stringify(Object.keys(data || {})),
                 "Full:", JSON.stringify(data).slice(0, 500));
+            // 有些中转站只认流式：非流式请求返回 200 但正文是空的。这时改用流式重试一次，
+            // 不然总结、朋友圈、小剧场这些后台调用会全程静默失败。截断的不重试（重试也一样截断）。
+            if (!options?.onDelta && !wasTruncated) {
+                const retried = await simpleLLMCall(config, messages, { ...options, onDelta: () => {} });
+                if (retried.content) {
+                    console.warn("[simpleLLMCall] 非流式空回复，改用流式重试成功");
+                    return retried;
+                }
+            }
             return { content: null, error: describeEmptyLLMResponse(data, finishReason, wasTruncated, config), finishReason, wasTruncated };
         }
 
@@ -220,6 +237,46 @@ export async function simpleLLMCall(
         });
         return { content: null, error: `请求失败: ${err instanceof Error ? err.message : String(err)}` };
     }
+}
+
+/** Reuse the host provider parsers, preserving simpleLLMCall's request parameters and final metadata. */
+async function readSimpleLLMStream(response: Response, config: ApiConfig, onDelta: (delta: string) => void) {
+    // Lazy import avoids a static cycle: the provider adapter also uses API URL helpers above.
+    const { parseProviderStreamDelta, mergeLlmUsage } = await import("./llm-provider-adapter");
+    const { createSseJsonParser } = await import("./sse-json");
+    if (!response.body) throw new Error("流式响应没有 body。");
+    const kind = isNativeAnthropicApi(config) ? "anthropic" : isNativeGoogleApi(config) ? "gemini" : "openai-compatible";
+    const reader = response.body.getReader(), decoder = new TextDecoder(), parser = createSseJsonParser();
+    let buffer = "", content = "", finishReason: string | undefined;
+    let usage: ReturnType<typeof extractUsage>;
+    const consume = (value: unknown) => {
+        const data = value && typeof value === "object" ? value as Record<string, unknown> : {};
+        if (data.error) throw new Error(`流式 API 错误：${JSON.stringify(data.error)}`);
+        const part = parseProviderStreamDelta(kind, data);
+        usage = mergeLlmUsage(usage, part.usage, kind);
+        const delta = data.delta && typeof data.delta === "object" ? data.delta as Record<string, unknown> : {};
+        finishReason = extractFinishReason(data) ?? (typeof delta.stop_reason === "string" ? delta.stop_reason : undefined) ?? finishReason;
+        if (part.content) { content += part.content; onDelta(part.content); }
+    };
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
+            let boundary: number;
+            while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+                for (const parsed of parser.pushEvent(buffer.slice(0, boundary))) consume(parsed);
+                buffer = buffer.slice(boundary + 2);
+            }
+            if (done) break;
+        }
+        if (buffer.trim()) for (const parsed of parser.pushEvent(buffer)) consume(parsed);
+        for (const parsed of parser.flush()) consume(parsed);
+        return { content, finishReason, usage };
+    } catch (error) {
+        await reader.cancel().catch(() => {});
+        throw error;
+    } finally { reader.releaseLock(); }
 }
 
 export function extractUsage(data: Record<string, unknown>): { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined {

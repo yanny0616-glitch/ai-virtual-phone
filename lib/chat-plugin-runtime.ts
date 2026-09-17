@@ -10,7 +10,9 @@
 //  - URL 加 ?plugin-safe-mode=1 手动进入安全模式（逃生舱）
 
 import { kvGet, kvSet, kvRemove, hydrateKvDb } from "./kv-db";
-import { hydrateChatStorage, loadChatMessages, loadChatSessions, loadChatContacts, pushChatMessage, updateChatMessage, type ChatMessage } from "./chat-storage";
+import { CHAT_OFFLINE_MODE_CHANGED_EVENT, CHAT_OFFLINE_MODE_PREFIX, CHAT_REQUEST_REPLY_EVENT, hydrateChatStorage, loadChatMessages, loadChatSessions, loadChatContacts, pushChatMessage, updateChatMessage, type ChatMessage } from "./chat-storage";
+import { loadChatOfflineTurns } from "./chat-offline-storage";
+import { cancelPluginTimedWake, schedulePluginTimedWake } from "./chat-plugin-wake";
 import { isMediaStoreRef, loadMediaBlob } from "./media-cache-storage";
 import { loadCharacters } from "./character-storage";
 import { loadApiConfigs, loadBindingConfig } from "./settings-storage";
@@ -270,6 +272,10 @@ class ChatPluginRuntime {
 
     // ── UI 注册表查询（供 PluginSlot / message-bubble / 菜单使用） ──
 
+    getPluginName(pluginId: string): string {
+        return this.active.get(pluginId)?.installed.manifest.name || pluginId;
+    }
+
     getSlotRegistrations(name: ChatPluginSlotName, pluginId?: string): SlotRegistration[] {
         const all = this.slots.get(name) ?? [];
         return pluginId ? all.filter(r => r.pluginId === pluginId) : all;
@@ -416,6 +422,29 @@ class ChatPluginRuntime {
             prompts: {
                 set: (text, opts) => setChatPluginPromptFragment(pluginId, text, opts?.sessionId),
                 clear: (opts) => setChatPluginPromptFragment(pluginId, "", opts?.sessionId),
+            },
+
+            chat: {
+                requestReply: (sessionId) => {
+                    window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, {
+                        detail: { source: "chat_plugin", pluginId, sessionId, handled: false },
+                    }));
+                },
+                offline: {
+                    get: (sessionId) => kvGet(CHAT_OFFLINE_MODE_PREFIX + sessionId) === "1",
+                    set: (sessionId, on) => {
+                        kvSet(CHAT_OFFLINE_MODE_PREFIX + sessionId, on ? "1" : "0");
+                        window.dispatchEvent(new CustomEvent(CHAT_OFFLINE_MODE_CHANGED_EVENT, { detail: { sessionId, on } }));
+                    },
+                    turns: (sessionId) => loadChatOfflineTurns(sessionId).map(turn => ({
+                        userContent: turn.userContent,
+                        assistantContent: turn.assistantContent,
+                        summary: turn.summary,
+                        createdAt: turn.createdAt,
+                    })),
+                },
+                scheduleWake: (input) => schedulePluginTimedWake(pluginId, input),
+                cancelWake: (key) => cancelPluginTimedWake(pluginId, key),
             },
 
             ui: {

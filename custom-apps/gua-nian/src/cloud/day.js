@@ -21,6 +21,26 @@
     } finally { cx._genStopping = false; renderCloudSync(); }
   }
 
+  /* ---- VPS 后端接管：本机只寄模板（判断 / 生成一天 / 聊天），其余全由后端做 ---- */
+  function serverBrainOn() { return !!(S.settings && S.settings.serverBrain); }
+  // 登记到宿主后，TA每次回复、小手机切到后台都会自动重冻，不用等挂念被打开
+  async function freezeServerTemplates(cx) {
+    if (!AiPhone.push || !AiPhone.push.freeze || !cx.character) return;
+    const specs = [
+      { key: "judge", appTags: ["companion", "impulse"] },
+      { key: "daily", appTags: ["companion", "daily"] },
+      { key: "chat", chatSnapshot: true },
+    ];
+    const failed = [];
+    for (const spec of specs) {
+      try {
+        const r = await AiPhone.push.freeze(Object.assign({ characterId: cx.character.id }, spec));
+        if (!r || !r.armed) failed.push(spec.key + "（" + ((r && r.reason) || "服务端未确认") + "）");
+      } catch (e) { failed.push(spec.key + "（" + (e && e.message || e) + "）"); }
+    }
+    await log(cx, failed.length ? "后端模板没寄全：" + failed.join("、") : "后端模板已寄到个人云（判断 / 生成一天 / 聊天）");
+  }
+
   /* ---- 云端生成TA的一天：浏览器关着时由 push-recheck 到点生成 + 编排，App 打开时接管 ---- */
   function cloudGenOn() {
     return !!(cloudCfg() && S.settings && S.settings.autoGen && S.settings.cloudGen);
@@ -81,17 +101,19 @@
         const remote = await cloudFetchBounded("recheck-plan", { method: "GET" }, { characterId: cx.character.id, planDate: date });
         if (remote.plan && remote.plan.context && remote.plan.context.generatedBy === "cloud") continue;
         const expectedVersion = remote.plan ? remote.plan.state_version : 0;
-        const existing = fixedCalendarItems(await readCalendarOn(cx, date));
+        const routine = await routineFor(cx, date);
+        const existing = withRoutine(fixedCalendarItems(await readCalendarOn(cx, date)), routine);
         const cal = calendarReality(dateOf(date));
         const past = await recentDaysBrief(cx, 7, date);
         const ctx = cloudContext(cx);
         ctx.day = null; // 还没生成的那天不该拿今天的生活面去自发起念
         ctx.genKit = {
-          date: date, instruction: buildDayInstruction(cal, at, past, existing, S.settings.threadsOn ? threadLines(cx, dateOf(date).getTime() + 8 * 3600000) : []),
+          date: date, instruction: buildDayInstruction(cal, at, past, existing, S.settings.threadsOn ? threadLines(cx, dateOf(date).getTime() + 8 * 3600000) : [], routine),
           existing: existing.map((it) => ({ id: it.id, startTime: it.startTime, endTime: it.endTime || "", title: it.title, location: it.location || "", lock: it.lock || "" })),
           autoGenAt: at, tz: -new Date().getTimezoneOffset(),
           tplDaily: tpl.daily, tplImpulse: tpl.impulse,
           anchorMorning: !!S.settings.anchorMorning, anchorSleep: !!S.settings.anchorSleep, moodGate: !!S.settings.moodGate,
+          forkLevel: GuaNianForks.forkLevel(S.settings.forkLevel), forkBurst: !!S.settings.forkBurst,
           kitAt: Date.now(),
         };
         if (!cloudGenOn()) return;
@@ -127,7 +149,7 @@
     try {
       const genAt = +ctx.genAt || Date.now();
       cx.day = await upsert("days", (x) => x.date === todayStr() && x.characterId === cx.character.id,
-        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull, { cloudAdopting: true }));
+        Object.assign({ date: todayStr(), characterId: cx.character.id, by: "cloud" }, ctx.dayFull, routineSleep(await routineFor(cx, todayStr())), { cloudAdopting: true }));
       const existing = await readTodayCalendar(cx);
       const wrote = await syncCalendar(cx, existing);
       const items = (Array.isArray(p.items) ? p.items : []).map((w) => ({

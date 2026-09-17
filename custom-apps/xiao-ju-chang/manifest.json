@@ -1,0 +1,28 @@
+{
+  "sdkVersion": "1.0",
+  "id": "float.xiaojuchang",
+  "name": "小剧场",
+  "version": "0.1.1",
+  "author": "Float",
+  "description": "给角色点一下出一篇小剧场：前置要求、提示词库、随机池、随机宏自由组合；AI 直接写整段 HTML/JS 在沙盒里渲染，可全屏、可收藏、可再来一条。四套主题。",
+  "icon": "icon.svg",
+  "entry": "index.html",
+  "permissions": [
+    "app.data.read",
+    "app.data.write",
+    "characters.read",
+    "user.profile.read",
+    "ai.generate",
+    "ai.chat",
+    "chat.read",
+    "memory.write",
+    "media.pick",
+    "media.save",
+    "ui.toast",
+    "user.persona.read",
+    "memory.readCore",
+    "memory.readLongTerm",
+    "memory.readShortTerm"
+  ],
+  "primaryTags": []
+}

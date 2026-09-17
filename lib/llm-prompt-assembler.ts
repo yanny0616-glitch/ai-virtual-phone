@@ -1,3 +1,4 @@
+import { compactToolHistory } from "./tool-history-compact";
 // lib/llm-prompt-assembler.ts
 
 import { Character } from "./character-types";
@@ -6,11 +7,13 @@ import type { StateValue } from "./chat-storage";
 import { PresetConfig, Prompt, PromptOrderEntry, WorldBookConfig, RegexConfig, WorldBookEntry } from "./settings-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
 import { MacroEngine, postProcessTrim } from "./macro-engine";
+import type { MacroVarStore } from "./chat-variables";
 import type { RecentBlock, UnifiedRecentItem } from "./short-term-assembler";
 import { readDwellingLayoutCache } from "./dwelling-storage";
 import { formatDwellingContext } from "./dwelling-engine";
 import { matchesActiveTags, isWorldBookEntryInScope } from "./content-tag-utils";
 import { formatXiaohongshuShareForPrompt } from "./chat-share";
+import { formatXhsNoteSnapshot } from "./xhs-note";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
 import { formatPromptTimestamp, getPromptTimestampOptionsForTimeContext, resolvePromptTimeAware, type PromptTimestampOptions } from "./prompt-time";
 import { formatCharacterRelationsForPrompt } from "./character-world-storage";
@@ -42,6 +45,8 @@ export type LLMMessage = {
 };
 
 export interface AssemblerInput {
+    /** The current SDK task must survive a preset that disables history. */
+    requiredTask?: ChatMessage;
     character: Character;
     history: ChatMessage[];
     preset: PresetConfig | null;
@@ -94,6 +99,10 @@ export interface AssemblerInput {
     statusRegionExampleLine?: string;        // {{statusRegionExampleLine}} — 主动消息输出示例中的状态区行
     statusRegionComposition?: string;        // {{statusRegionComposition}} — 文字聊天模式【输出构成】行
     statusRegionFullExample?: string;        // {{statusRegionFullExample}} — 完整示例中的状态值+内心行
+    chatVariables?: string;                  // {{chatVariables}} — 交给 AI 按规则维护的聊天变量
+    replyStyle?: string;                     // {{replyStyle}} — 聊天信息里设的回复长度/气泡/动作描写
+    callExtras?: string;                     // {{callExtras}} — 通话里的旁白、挂断、立绘场景
+    macroVarStore?: MacroVarStore | null;    // 绑了会话时 {{setvar}} 存进变量池
     offlineBilingualInstruction?: string;    // offline-mode bilingual output rule for {{offlineBilingualInstruction}}
     offlineSummaryTag?: string;              // XML tag used for offline-mode summary output
     checkPhoneBilingualInstruction?: string; // checkphone bilingual output rule for {{checkPhoneBilingualInstruction}}
@@ -147,6 +156,7 @@ type PromptBlock = {
     fromHistory?: boolean;
     historyRole?: ChatMessage["role"];
     imageUrl?: string;      // vision: image URL/data URL attached to this prompt block
+    imageUrls?: Array<{ url: string; index: number }>; // One shared note retains its ordered image set.
     reasoning?: string;
     openRouterReasoningDetails?: unknown[];
     toolCalls?: LLMToolCallPayload[];
@@ -192,6 +202,11 @@ function getPromptVisionImageUrl(msg: ChatMessage): string | undefined {
     return undefined;
 }
 
+function getXhsPromptImages(msg: ChatMessage): Array<{ url: string; index: number }> | undefined {
+    if (msg.mediaType !== "xhs_link" || msg.isRetracted) return undefined;
+    return msg.mediaData?.xhsNote?.note?.images.flatMap((image, index) => image.ref?.startsWith("data:image/") ? [{ url: image.ref, index: index + 1 }] : []);
+}
+
 function formatDirectVisionBody(msg: ChatMessage, userName: string, charName: string): string {
     if (msg.mediaType === "sticker") return formatRichMediaForHistory(msg, userName, charName);
     return isImageGenerationMediaMessage(msg)
@@ -215,6 +230,10 @@ function formatAnnotatedVisionBody(msg: ChatMessage, body: string): string {
 }
 
 function formatAssistantImageHistoryText(msg: ChatMessage, body: string, showTs: boolean, ts: string): string {
+    if (msg.mediaType === "xhs_link") {
+        const text = `系统记录：这是${msg.senderName || "你"}此前分享给用户的小红书笔记及其配图。\n${body}`;
+        return showTs ? `${ts}\n${text}` : text;
+    }
     if (isImageGenerationMediaMessage(msg)) {
         const originalOutput = body.trim() || formatImageGenerationDirective(msg);
         const text = `系统记录：这是你上一轮发送给用户的图片。\n原始输出：${originalOutput}`;
@@ -384,6 +403,12 @@ function isPromptEnabled(prompt: Prompt, promptOrder?: PromptOrderEntry[]): bool
 }
 
 
+/** 预设里这个标记条目存在且开着（不看标签过滤）。给记忆占用统计判断某层有没有真的进提示词。 */
+export function presetMarkerEnabled(preset: PresetConfig | null | undefined, identifier: string): boolean {
+    const prompt = preset?.prompts.find(p => p.identifier === identifier);
+    return Boolean(prompt && isPromptEnabled(prompt, preset!.prompt_order));
+}
+
 // ── Helper: sanitize identifier into valid XML tag name ──
 function toXmlTag(identifier: string): string {
     // Replace non-alphanumeric (except _ and -) with underscore, ensure starts with letter
@@ -530,6 +555,8 @@ function pushChronologicalShortTermBlocks(params: {
             || msg.mediaType === "tool_notice"
             || isNativeToolResultMessage(msg)
             || msg.mediaType === "memory_write_request") return;
+        // 角色拉黑/删了用户时发出的消息，角色根本没收到
+        if (msg.rejectedBy) return;
 
         const promptRole = resolveHistoryPromptRole(msg);
         const ts = (timeAware && msg.createdAt) ? formatChatTimestamp(msg.createdAt, timestampOptions) : "";
@@ -553,7 +580,7 @@ function pushChronologicalShortTermBlocks(params: {
 
         if (!body.trim() && !imageUrl) return;
 
-        const isAssistantImage = imageUrl && msg.role === "assistant" && msg.mediaType === "media_file";
+        const isAssistantImage = msg.role === "assistant" && ((imageUrl && msg.mediaType === "media_file") || (visionEnabled && msg.mediaType === "xhs_link" && getXhsPromptImages(msg)?.length));
         const text = isAssistantImage
             ? formatAssistantImageHistoryText(msg, body, Boolean(showTs), ts)
             : (showTs ? `${ts}\n${body}` : body);
@@ -566,6 +593,7 @@ function pushChronologicalShortTermBlocks(params: {
             fromHistory: true,
             historyRole: msg.role,
             imageUrl,
+            imageUrls: visionEnabled ? getXhsPromptImages(msg) : undefined,
         });
 
         if (msg.isRetracted) {
@@ -612,7 +640,7 @@ function isWBAtDepthPosition(entry: WorldBookEntry): boolean {
  * 预设里没有的东西一律不注入——不存在人设/世界书/记忆的硬编码兜底。
  */
 export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
-    input = { ...input, history: input.history.filter(message => !message.silentUpdate) };
+    input = { ...input, history: compactToolHistory(input.history.filter(message => !message.silentUpdate)) };
     const { character, history, preset, worldBooks, regexes, userIdentity, userName = "User",
         longTermMemories, coreMemories, scheduleSummary } = input;
     const appId = input.appId ?? "chat";
@@ -695,6 +723,10 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
         engine.statusRegionExampleLine = input.statusRegionExampleLine ?? "";
         engine.statusRegionComposition = input.statusRegionComposition ?? "";
         engine.statusRegionFullExample = input.statusRegionFullExample ?? "";
+        engine.chatVariables = input.chatVariables ?? "";
+        engine.replyStyle = input.replyStyle ?? "";
+        engine.callExtras = input.callExtras ?? "";
+        engine.varStore = input.macroVarStore ?? null;
         engine.offlineBilingualInstruction = input.offlineBilingualInstruction ?? "";
         engine.offlineSummaryTag = input.offlineSummaryTag ?? "summary";
         engine.checkPhoneBilingualInstruction = input.checkPhoneBilingualInstruction ?? "";
@@ -1018,7 +1050,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
             }
 
             if (!body.trim() && !imageUrl) return;
-            const isAssistantImage = imageUrl && msg.role === "assistant" && msg.mediaType === "media_file";
+            const isAssistantImage = msg.role === "assistant" && ((imageUrl && msg.mediaType === "media_file") || (visionEnabled && msg.mediaType === "xhs_link" && getXhsPromptImages(msg)?.length));
             const text = isAssistantImage
                 ? formatAssistantImageHistoryText(msg, body, Boolean(showTs), ts)
                 : (showTs ? `${ts}\n${body}` : body);
@@ -1031,6 +1063,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 fromHistory: true,
                 historyRole: msg.role,
                 imageUrl,
+                imageUrls: visionEnabled ? getXhsPromptImages(msg) : undefined,
             });
 
             // Retracted: keep the original message above, then append a system notice
@@ -1048,6 +1081,11 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 });
             }
         });
+    }
+
+    if (!historyInjectionEnabled && input.requiredTask) {
+        blocks.push({ text: input.requiredTask.content, role: "user", depth: 0,
+            order: Number.MAX_SAFE_INTEGER, marker: "Custom APP task" });
     }
 
     // --- Sort: depth descending, then order ascending ---
@@ -1079,11 +1117,15 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                !finalPayload[finalPayload.length - 1].toolCalls?.length &&
                finalPayload[finalPayload.length - 1].role !== "tool");
 
-        if (b.imageUrl) {
+        if (b.imageUrl || b.imageUrls?.length) {
             // Vision message: build multi-part content with image (never merged)
             const parts: LLMContentPart[] = [];
             if (processedText) parts.push({ type: "text", text: processedText });
-            parts.push({ type: "image_url", image_url: { url: b.imageUrl, detail: "low" } });
+            if (b.imageUrl) parts.push({ type: "image_url", image_url: { url: b.imageUrl, detail: "low" } });
+            for (const image of b.imageUrls || []) {
+                parts.push({ type: "text", text: `小红书配图 ${image.index}：` });
+                parts.push({ type: "image_url", image_url: { url: image.url, detail: "high" } });
+            }
             finalPayload.push({
                 role: b.role,
                 content: parts,
@@ -1223,6 +1265,8 @@ export function formatRichMediaForHistory(msg: ChatMessage, userName: string, ch
                 body: d?.xiaohongshuBody,
                 description: d?.xiaohongshuDescription,
             });
+        case "xhs_link":
+            return msg.isRetracted ? "[小红书分享已撤回]" : d?.xhsNote ? formatXhsNoteSnapshot(d.xhsNote) : msg.content;
         case "accept_red_packet":
             if (isGroup && d?.claimer && d?.owner) return `[${d.claimer}领取了${d.owner}的红包]`;
             return "[领取红包]";
@@ -1725,7 +1769,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
             imageUrl = visionImageUrl;
         }
 
-        const isAssistantImage = imageUrl && msg.role === "assistant" && msg.mediaType === "media_file";
+        const isAssistantImage = msg.role === "assistant" && ((imageUrl && msg.mediaType === "media_file") || (visionEnabled && msg.mediaType === "xhs_link" && getXhsPromptImages(msg)?.length));
         const text = isAssistantImage
             ? formatAssistantImageHistoryText(msg, body, Boolean(showTs), ts)
             : (showTs ? `${ts}\n${body}` : body);
@@ -1738,6 +1782,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
             fromHistory: true,
             historyRole: msg.role,
             imageUrl,
+            imageUrls: visionEnabled ? getXhsPromptImages(msg) : undefined,
         });
     });
 
@@ -1756,6 +1801,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
  * and the AI is asked to respond as all characters simultaneously.
  */
 export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessage[] {
+    input = { ...input, history: compactToolHistory(input.history) };
     const {
         members, history, preset, regexes, userIdentity,
         userName = "User", groupName, memberNames,
@@ -2208,7 +2254,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 imageUrl = visionImageUrl;
             }
 
-            const isAssistantImage = imageUrl && msg.role === "assistant" && msg.mediaType === "media_file";
+            const isAssistantImage = msg.role === "assistant" && ((imageUrl && msg.mediaType === "media_file") || (groupVisionEnabled && msg.mediaType === "xhs_link" && getXhsPromptImages(msg)?.length));
             const text = isAssistantImage
                 ? formatAssistantImageHistoryText(msg, body, Boolean(showTs), ts)
                 : (showTs ? `${ts}\n${body}` : body);
@@ -2222,6 +2268,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 fromHistory: true,
                 historyRole: msg.role,
                 imageUrl,
+                imageUrls: groupVisionEnabled ? getXhsPromptImages(msg) : undefined,
             });
         });
     }
@@ -2248,11 +2295,15 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
             !finalPayload[finalPayload.length - 1].toolCalls?.length &&
             finalPayload[finalPayload.length - 1].role !== "tool";
 
-        if (b.imageUrl) {
+        if (b.imageUrl || b.imageUrls?.length) {
             // Vision message: build multi-part content with image (never merged)
             const parts: LLMContentPart[] = [];
             if (processedText) parts.push({ type: "text", text: processedText });
-            parts.push({ type: "image_url", image_url: { url: b.imageUrl, detail: "low" } });
+            if (b.imageUrl) parts.push({ type: "image_url", image_url: { url: b.imageUrl, detail: "low" } });
+            for (const image of b.imageUrls || []) {
+                parts.push({ type: "text", text: `小红书配图 ${image.index}：` });
+                parts.push({ type: "image_url", image_url: { url: image.url, detail: "high" } });
+            }
             finalPayload.push({
                 role: b.role,
                 content: parts,

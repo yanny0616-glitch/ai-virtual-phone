@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import type { DIYWidgetTemplate, DIYTemplateSlot, WidgetSize, WidgetType } from "@/lib/widget-types";
+import type { DIYWidgetTemplate, DIYTemplateSlot, DIYTemplateField, DIYFieldType, WidgetSize, WidgetType } from "@/lib/widget-types";
+import { DIY_FIELD_TYPES, DIY_FIELD_TYPE_LABELS, MAX_DIY_FIELDS, normalizeDIYFields } from "@/lib/widget-fields";
 import { WIDGET_SIZE_CELLS } from "@/lib/widget-types";
 import { saveThemeAssetFromBlob, getThemeAssetMap } from "@/lib/theme-storage";
 
@@ -25,6 +26,7 @@ export function DIYWidgetEditor({ template, onSave, onClose }: DIYWidgetEditorPr
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Code Mode State
+  const [fields, setFields] = useState<DIYTemplateField[]>(template?.fields || []);
   const [htmlString, setHtmlString] = useState(
     template?.htmlString || `<style>\n  body { margin: 0; padding: 12px; font-family: sans-serif; color: white; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); }\n  h1 { font-size: calc(24px*var(--app-text-scale,1)); }\n</style>\n<body>\n  <h1 id="time">00:00</h1>\n  <script>\n    setInterval(() => {\n      document.getElementById('time').innerText = new Date().toLocaleTimeString();\n    }, 1000);\n  </script>\n</body>`
   );
@@ -40,12 +42,14 @@ export function DIYWidgetEditor({ template, onSave, onClose }: DIYWidgetEditorPr
        } else {
          setHtmlString(template.htmlString || "");
        }
+       setFields(template.fields || []);
     } else {
        setMode("image");
        setSize("2x2");
        setName("DIY组件");
        setBgAssetId(undefined);
        setSlots([]);
+       setFields([]);
     }
   }, [template]);
 
@@ -83,8 +87,26 @@ export function DIYWidgetEditor({ template, onSave, onClose }: DIYWidgetEditorPr
       newTemplate.slots = slots;
     } else {
       newTemplate.htmlString = htmlString;
+      const cleanFields = normalizeDIYFields(fields);
+      if (cleanFields.length < fields.length) {
+        window.alert("有字段的 key 不合法或重复（key 只能用字母数字下划线、不能数字开头，下拉必须有选项），这些字段没有保存。");
+      }
+      if (cleanFields.length) newTemplate.fields = cleanFields;
     }
     onSave(newTemplate);
+  }
+
+  function addField() {
+    if (fields.length >= MAX_DIY_FIELDS) return;
+    // 删过中间的字段之后，按个数取名会撞上已有的 key，保存时被去重悄悄丢掉。
+    const used = new Set(fields.map(f => f.key));
+    let n = fields.length + 1;
+    while (used.has(`field${n}`)) n++;
+    setFields([...fields, { key: `field${n}`, label: `字段 ${n}`, type: "text" }]);
+  }
+
+  function updateField(index: number, patch: Partial<DIYTemplateField>) {
+    setFields(fields.map((f, i) => (i === index ? { ...f, ...patch } : f)));
   }
 
   function addSlot() {
@@ -310,6 +332,94 @@ export function DIYWidgetEditor({ template, onSave, onClose }: DIYWidgetEditorPr
                   onChange={e => setHtmlString(e.target.value)}
                   spellCheck={false}
                 />
+              </div>
+
+              {/* User-fillable fields */}
+              <div className="bg-white/60 backdrop-blur-md rounded-2xl p-5 border border-white flex flex-col gap-4 shadow-sm">
+                <div className="flex justify-between items-center gap-4">
+                  <div className="flex-1">
+                    <h4 className="text-[calc(13px*var(--app-text-scale,1))] font-bold text-gray-800">用户可填字段</h4>
+                    <p className="text-[calc(11px*var(--app-text-scale,1))] text-gray-500 mt-1 font-medium leading-snug">
+                      声明后，用户在桌面编辑模式点组件左上角的 ✎ 就能填表，不用改代码。<br />
+                      代码里用 <code className="bg-blue-50 border border-blue-100 px-1 rounded text-blue-600 font-mono text-[calc(10px*var(--app-text-scale,1))]">AiPhoneWidget.getConfig(&quot;key&quot;, &quot;默认&quot;)</code> 读。
+                    </p>
+                  </div>
+                  <button
+                    className="shrink-0 bg-[#1c1c1e] text-white font-bold shadow-md px-4 py-2 rounded-xl text-[calc(12px*var(--app-text-scale,1))] flex items-center justify-center gap-1 hover:shadow-lg active:scale-95 transition-all disabled:opacity-40"
+                    disabled={fields.length >= MAX_DIY_FIELDS}
+                    onClick={addField}
+                  >
+                    <span>+</span> 新增字段
+                  </button>
+                </div>
+
+                {fields.length ? (
+                  <div className="flex flex-col gap-3">
+                    {fields.map((field, index) => (
+                      <div key={index} className="bg-black/5 rounded-2xl p-4 flex flex-col gap-3 border border-black/5 shadow-inner">
+                        <div className="flex gap-2 items-center">
+                          <input
+                            className="flex-1 min-w-0 bg-white rounded-lg px-3 py-1.5 text-[calc(12px*var(--app-text-scale,1))] font-bold text-gray-800 outline-none border border-black/5"
+                            value={field.label}
+                            placeholder="显示名称"
+                            onChange={e => updateField(index, { label: e.target.value })}
+                          />
+                          <input
+                            className="w-[110px] shrink-0 bg-white rounded-lg px-3 py-1.5 text-[calc(12px*var(--app-text-scale,1))] font-mono text-gray-600 outline-none border border-black/5"
+                            value={field.key}
+                            placeholder="key"
+                            onChange={e => updateField(index, { key: e.target.value.trim() })}
+                          />
+                          <button
+                            className="shrink-0 text-xs font-bold text-red-500 bg-red-50/80 px-3 py-2 rounded-lg hover:bg-red-100 transition-all"
+                            onClick={() => setFields(fields.filter((_, i) => i !== index))}
+                          >
+                            删除
+                          </button>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                          <select
+                            className="shrink-0 bg-white rounded-lg px-2 py-1.5 text-[calc(12px*var(--app-text-scale,1))] font-bold text-gray-700 outline-none border border-black/5"
+                            value={field.type}
+                            onChange={e => updateField(index, { type: e.target.value as DIYFieldType, options: e.target.value === "select" ? (field.options || ["选项一"]) : undefined })}
+                          >
+                            {DIY_FIELD_TYPES.map(t => (
+                              <option key={t} value={t}>{DIY_FIELD_TYPE_LABELS[t]}</option>
+                            ))}
+                          </select>
+                          {field.type === "select" ? (
+                            <input
+                              className="flex-1 min-w-0 bg-white rounded-lg px-3 py-1.5 text-[calc(12px*var(--app-text-scale,1))] text-gray-700 outline-none border border-black/5"
+                              value={(field.options || []).join("，")}
+                              placeholder="选项，用逗号隔开"
+                              onChange={e => updateField(index, { options: e.target.value.split(/[，,]/).map(o => o.trim()).filter(Boolean) })}
+                            />
+                          ) : (
+                            <input
+                              className="flex-1 min-w-0 bg-white rounded-lg px-3 py-1.5 text-[calc(12px*var(--app-text-scale,1))] text-gray-700 outline-none border border-black/5"
+                              value={field.defaultValue === undefined ? "" : String(field.defaultValue)}
+                              placeholder="默认值（可留空）"
+                              onChange={e => {
+                                const raw = e.target.value;
+                                updateField(index, { defaultValue: field.type === "number" ? (raw.trim() ? Number(raw) : undefined) : raw });
+                              }}
+                            />
+                          )}
+                          {field.type === "text" && (
+                            <label className="shrink-0 flex items-center gap-1 text-[calc(11px*var(--app-text-scale,1))] font-bold text-gray-600">
+                              <input type="checkbox" checked={!!field.multiline} onChange={e => updateField(index, { multiline: e.target.checked })} />
+                              多行
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-5 border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center bg-white/30">
+                    <p className="text-[calc(12px*var(--app-text-scale,1))] font-bold text-gray-400 tracking-wide">没有字段，组件内容全写在代码里</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

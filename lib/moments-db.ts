@@ -5,6 +5,7 @@
 // array on every like/comment). Same pattern as chat-db.ts.
 
 import Dexie from "dexie";
+import "./storage-health";
 import type { MomentPost, MomentComment } from "./moments-types";
 
 class MomentsDatabase extends Dexie {

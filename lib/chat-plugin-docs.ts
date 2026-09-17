@@ -85,6 +85,7 @@ export default {
 
 官方「忙碌回复」1.1.0 还使用 prompt.system：宿主只在普通单聊文字回复提供 replyText（整段待回应用户消息），插件可设 allowSilence=true 并在 hint 中写情境规则；宿主注入并消费 [本轮不回复] 协议，前台、后台与个人云成功结束本轮，无气泡或补回。data.replyGate.silenceVersion=1 表示支持该协议。
 官方「忙碌回复」使用 chat.replyGate：挂念 0.9.21 只上传 availabilityOnly 作息（bed/wake、忙碌时段、breaks）；插件定义 peekMin、adaptive、focusedPeekProb、sleep.mode/wakeProb/bufferMin 和 urgentBypass。首次从 legacyReplySettings 导入旧设置，之后 APP 更新不覆盖插件设置。手动忙碌可读变量池 presenceOverride 的 state/at/label，以 startsAt/expiresAt 限定一次性有效期；跨午夜的云端快照使用绝对时间。没有作息和手动状态就返回 null。
+忙碌回复 1.2.0 起：变量池角色维度的 \`routine\`（{ items: [{ id, title, from, to, days, kind }] }，kind = sleep / focus / busy / distracted，days 空＝每天）是固定作息，\`routineExceptions\` 是今天的例外（剧情里的 [作息:推迟|…] / [作息:取消|…] / [作息:加|…] 标记或手动添加，until 过了就失效）；优先级为手动状态 › 例外 › 固定作息 › APP 作息。gate 可带 distracted { title, minSec, maxSec, pullCount }：宿主本机短等待、不上云，上次回复后用户连发 pullCount 条就立刻回。插件间 bus：\`availability.query\`（{ characterId, nowMs } → result { state, label, origin, authoritative, until }）、\`routine.agenda\`、\`routine.exception\`，「在线状态」面板用它们显示和加例外。
 
 
 ### transform（可修改数据，按 priority 升序串行，返回修改后的 payload；也可原地改后 return payload）
@@ -103,6 +104,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 | message.beforeReveal | 角色一轮回复切成多条气泡后、每条气泡展示前（前台与后台回复均接入；云端回端先原子保存整批，再按插件延迟展示。取消在保存前处理，等待期间显示「对方正在输入」） | { sessionId, isGroup, characterId?, responseBatchId, index, total, content, mediaType?, streamed, delayMs, cancelled } —— 改 delayMs 即改这条气泡放出前的等待毫秒数（宿主默认：第一条 0、其余 800、streamed 时全 0；上限 120000）；cancelled=true 这条不展示不落库。要做"一句句慢慢发"的节奏就挂这里，宿主在 transform 返回后才开始等，处理函数本身不要 sleep |
 | moments.beforePost | 朋友圈定时发帖到点、真正生成前（手动「立即发帖」不经过） | { characterId, lastPostTime, cancelled, retryAfterMs?, hint } —— cancelled=true 这次不发、retryAfterMs 后再问（默认 1 小时）；hint 追加到「请发一条朋友圈。」后面当由头 |
 | chat.replyGate | 回复等待判定前（**同步**），插件输出纯数据规则供本机和个人云执行 | { characterId, nowMs, source, gate } —— source 是 APP 作息只读快照；改 gate 设置等待，null 不延后。停用已接管的插件后不恢复旧 APP 规则 |
+| call.beforeConnect | 你打给单聊角色、接通前（宿主默认 3 秒接通） | { sessionId, characterId, kind: "voice" \| "video", outcome, ringMs, reason? } —— outcome 改成 noAnswer（响满 ringMs 没人接）或 reject（响 ringMs 后被挂，reason 如「在开会」显示在记录里）；ringMs 500～60000。没接通时宿主在对方名下记一条未接 / 拒接（30 分钟内的未接合并成 ×N），不写「发起了通话」 |
 | moments.schedule | 朋友圈算下次到点时间时（**同步**）；reason: init 首次建档 / afterPost 发完一条 / postponed 被插件押后 | { characterId, reason, lastPostTime, nextPostAfter } —— 改 nextPostAfter 即改时机 |
 
 ### on（只读事件广播，处理函数可 async）
@@ -119,6 +121,7 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 | llm.streamChunk | 流式回复分片（高频，勿做重活） | { chunk, sessionId?, purpose } |
 | plugins.changed | 插件列表/启停变化 | {} |
 | variables.changed | 共享变量池有写入（插件或自定义 APP 都算） | { name, scope, targetId? } |
+| call.ended | 单聊通话结束 | { sessionId, characterId, kind, outcome: "answer" \| "noAnswer" \| "reject" \| "cancel", durationSec } —— cancel 是你没等接通就挂了 |
 
 ## ctx.data —— 数据
 
@@ -144,11 +147,17 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 
 \`ctx.prompts.set(text, { sessionId? })\`：设置一段持续注入系统提示词的文本（不传 sessionId 为全局，传则只对该会话生效）；text 传空串或 \`ctx.prompts.clear()\` 清除。与 prompt.system transform 的区别：这个是持久的、无需每次拦截。
 
+## ctx.chat —— 会话动作
+
+- \`ctx.chat.requestReply(sessionId)\` —— 让这个会话的角色现在回一轮（聊天室开着由它接，没开走后台生成）。发完卡片想让TA马上回应时用
+- \`ctx.chat.offline.get(sessionId)\` / \`.set(sessionId, on)\` —— 读/切线下模式，聊天室开着会立刻切过去；\`.turns(sessionId)\` → 线下剧情记录 [{ userContent, assistantContent, summary, createdAt }]
+- \`await ctx.chat.scheduleWake({ characterId, fireAt, intent, key })\` —— 到点让角色主动发一条，intent 写TA到点时想着什么；App 关着走离线推送（返回 { id, armed, reason }，armed=false 表示只在 App 开着时生效）。同一插件同一 key 只留一条；fireAt 1 分钟～7 天内。\`ctx.chat.cancelWake(key)\` 取消
+
 ## ctx.ui —— 界面
 
 - \`ctx.ui.toast(text, opts?)\` 聊天顶部轻提示，默认约 2.4s 消失。做"识别中/加载中"这类进行中提示时传 \`{ durationMs: 0 }\` 让它常驻，用返回的 \`close()\` 在完成时手动关闭：\`const t = ctx.ui.toast("处理中…", { durationMs: 0 }); try { …await… } finally { t.close(); }\`
 - \`ctx.ui.slot(坑位名, (el, props) => { ...; return 可选清理函数 })\` —— 认领一块 **React 不管辖的裸 DOM 容器**，随便渲染：
-  - "chat.header"：聊天标题栏下方（props: { sessionId, isGroup }）
+  - "chat.header"：聊天标题栏下方（props: { sessionId, isGroup, offlineMode }；切线下/线上时重挂载）
   - "chat.presence"：聊天页标题名字下面那一行，只在单聊出现（props: { sessionId, characterId }）
   - "list.avatar"：聊天列表每行头像上的角标层，只在单聊行出现（props: { sessionId, characterId }）；容器盖满头像且 pointer-events:none，自己 absolute 定位放点或徽章
   - "chat.inputToolbar"：输入栏"+"面板的网格里，和内置按钮排在一起（props: { sessionId, isGroup }）。想和内置按钮长得一样，用这段结构：\`<div class="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer"><div class="chat-plus-icon-box">图标</div><span class="ts-11">标签</span></div>\`
@@ -156,6 +165,9 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
   - "message.panel"：整条消息行下方、内置状态卡片旁的独立区域（props: { sessionId, message }），用于原位展开卡片，不受气泡裁切；可与 message.side 按钮联动
   - "message.side"：每条文本气泡旁边，贴着气泡垂直居中（对方消息在右、自己的在左），只放一个小图标之类；气泡本身有长按菜单，图标的 pointerdown 记得 stopPropagation
   - "settings.section"：插件管理页的自定义设置区
+  - "chatInfo.section"：聊天信息页里本插件的一栏，宿主按分类折叠，标题用插件名（props: { sessionId, isGroup, characterId }）；放这个角色单独的设置，别放全局设置。在容器上写 \`el.dataset.summary = "一句话"\`，折叠时显示在标题下；什么都不画（比如群聊里 return 掉）这一栏就不出现
+  - "float.panel"：手机壳里的悬浮小窗，**聊天之外也在**（桌面、任意 APP 页面都跟着）。宿主给标题栏、拖动、收起和位置记忆，你只管窗体内容；没插件认领时整个窗不出现
+  - "app.panel"：任意 APP 页面底部的浮层（props: { appId }）。按 appId 判断当前在哪个 APP（"music" / "calendar" / "story" / 自定义 APP 的 id 等），不该出现时什么都别画
 - \`ctx.ui.messageAction({ id, label, filter?, onSelect })\` —— 消息长按菜单加一项；onSelect(msg, { updateMessage, toast })
 - \`ctx.ui.messageKind(kind, (el, msg) => {})\` —— 注册自定义消息类型；配合 \`ctx.data.messages.push({ ..., mediaType: "plugin:" + kind, mediaData: {...} })\` 发出由你渲染的卡片消息
 - \`ctx.ui.injectCSS(css)\` —— 注入全局样式（禁用自动移除）
@@ -169,6 +181,8 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 - \`ctx.system.fetch(url, init)\` —— 网络请求
 - \`ctx.system.settings.get(key)\` / \`.all()\` / \`.set(key, value)\` / \`.onChange(fn)\` —— 读写 manifest.settings 声明的用户设置（set 用于"拉取模型后自动填入"这类场景）
 - \`ctx.system.log(...)\` —— 日志（进管理页日志面板）
+
+插件在 App 一启动就全部加载（不是进聊天才活），所以 \`ctx.system.timers\` 的后台轮询、\`ctx.chat.scheduleWake\` 的定时唤醒在桌面和别的 APP 里照常跑；要在聊天之外露面，用 "float.panel" / "app.panel" 两个坑位。
 
 ## 规则与建议
 

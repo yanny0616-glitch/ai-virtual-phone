@@ -214,15 +214,26 @@ export function MascotEditReview({ initialPlan, onClose }: { initialPlan: EditPl
   </MascotReviewDialog>;
 }
 
-export function MascotEditHistory({ onClose, onSelect }: { onClose: () => void; onSelect: (plan: EditPlan) => void }) {
-  const rows = readEditJournal().slice().reverse();
+/** CSS 主题方案由宿主读好传进来，这个文件就不用依赖出主题那条管线。 */
+export type CssHistoryRow = { id: string; title: string; createdAt: string; tone: 'draft' | 'applied' | 'undone'; statusText: string; subtitle: string };
+
+export function MascotEditHistory({ onClose, onSelect, cssRows = [], onSelectCssPlan }: { onClose: () => void; onSelect: (plan: EditPlan) => void; cssRows?: CssHistoryRow[]; onSelectCssPlan?: (planId: string) => void }) {
+  const rows = [
+    ...readEditJournal().map(plan => ({ kind: 'edit' as const, id: plan.id, createdAt: plan.createdAt, plan })),
+    ...(onSelectCssPlan ? cssRows.map(row => ({ kind: 'css' as const, id: row.id, createdAt: row.createdAt, row })) : []),
+  ].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return <MascotReviewDialog title="小卷修改记录" onClose={onClose}>
-    <p className="mascot-review-note">保留最近 20 项，总计最多 8MB。点开可以预览、应用或撤销。</p>
+    <p className="mascot-review-note">保留最近 20 项，总计最多 8MB。点开可以预览、应用或撤销。小卷出的主题方案也在这里。</p>
     {rows.length === 0 ? <p className="mascot-review-empty">还没有修改记录</p> : <div className="mascot-review-history">
-      {rows.map(plan => <button type="button" key={plan.id} onClick={() => onSelect(plan)} className="mascot-review-history-row">
-        <span><strong>{plan.title}</strong><small>{new Date(plan.createdAt).toLocaleString()} · {plan.deltas.length} 处改动</small></span>
-        <span className="mascot-review-status" data-tone={plan.status}>{plan.status === 'draft' ? '草稿' : plan.status === 'applied' ? '已应用' : '已撤销'}</span>
-      </button>)}
+      {rows.map(item => item.kind === 'edit'
+        ? <button type="button" key={item.id} onClick={() => onSelect(item.plan)} className="mascot-review-history-row">
+            <span><strong>{item.plan.title}</strong><small>{new Date(item.plan.createdAt).toLocaleString()} · {item.plan.deltas.length} 处改动</small></span>
+            <span className="mascot-review-status" data-tone={item.plan.status}>{item.plan.status === 'draft' ? '草稿' : item.plan.status === 'applied' ? '已应用' : '已撤销'}</span>
+          </button>
+        : <button type="button" key={item.id} onClick={() => onSelectCssPlan?.(item.id)} className="mascot-review-history-row">
+            <span><strong>{item.row.title}</strong><small>{new Date(item.row.createdAt).toLocaleString()} · {item.row.subtitle}</small></span>
+            <span className="mascot-review-status" data-tone={item.row.tone}>{item.row.statusText}</span>
+          </button>)}
     </div>}
   </MascotReviewDialog>;
 }

@@ -37,10 +37,13 @@ vm.runInContext(script.replace(/  init\(\);\s*\}\)\(\);\s*$/, `
     if (req.method === 'POST') h.posts.push(JSON.parse(req.body));
     return {};
   };
-  globalThis.api = { S, SET_DEF, ctxOf, generateDay, uploadGenKitCloud };
+  globalThis.api = { S, SET_DEF, DEFAULT_DAY_PROMPT, buildDayInstruction, ctxOf, generateDay, uploadGenKitCloud };
 })();`), context);
 const a = context.api;
 a.S.settings = { ...a.SET_DEF, threadsOn: false, userSleepOn: false };
+assert.ok(a.DEFAULT_DAY_PROMPT.includes('角色能独立决定和执行'));
+assert.ok(a.buildDayInstruction({label:'今天',season:'秋'},'09:00',{lines:[],residue:[]},[],[]).includes(a.DEFAULT_DAY_PROMPT));
+a.S.settings.dayPrompt='自定义日程：下午独自读书，不安排用户行动。';
 const cx = a.ctxOf({ id: 'c', name: '角色' });
 const manual = { id: 'manual-1', startTime: '10:00', title: '复诊', location: '医院', source: 'manual' };
 const external = { id: 'calendar-2', startTime: '12:00', title: '既定午餐', source: 'generated' };
@@ -51,6 +54,7 @@ for (const [time, title, removedTitle] of [['19:00', '河畔观察候鸟', '旧�
   assert.deepEqual(h.errors, []);
   const instruction = h.requests.at(-1).instruction;
   assert.ok(!instruction.includes(removedTitle));
+  assert.ok(instruction.includes(a.S.settings.dayPrompt));
   assert.ok(instruction.includes('复诊') && instruction.includes('既定午餐'));
   assert.deepEqual(Array.from(cx.day.schedule, it => it.title), ['复诊', '既定午餐', title]);
   assert.equal(cx.day.schedule.find(it => it.title === title).note, '新的具体细节');
@@ -64,6 +68,7 @@ assert.ok(h.writes.some(req => req.operation === 'delete' && req.itemId === 'gua
 await a.uploadGenKitCloud(cx, true);
 assert.equal(h.posts.length, 1);
 const kit = h.posts[0].context.genKit;
+assert.ok(kit.instruction.includes(a.S.settings.dayPrompt));
 assert.deepEqual(Array.from(kit.existing, it => it.id), ['manual-1', 'calendar-2']);
 assert.ok(!kit.instruction.includes('整理旧版诗集'));
 assert.ok(kit.instruction.includes('复诊') && kit.instruction.includes('既定午餐'));

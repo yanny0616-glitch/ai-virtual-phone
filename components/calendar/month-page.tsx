@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { ChevronLeft, Palette } from "lucide-react";
 import type { CalendarScheduleItem } from "@/lib/calendar-types";
 import type { MenstrualDayState } from "@/lib/menstrual-storage";
+import { shiftDate } from "@/lib/menstrual-predict";
 import { formatIsoDate } from "@/lib/calendar-utils";
 import { getLunarInfoByIso } from "@/lib/lunar";
 
@@ -154,20 +155,33 @@ export function CalendarMonthPage({
                 {week.map(cell => {
                   const items = itemsByDate.get(cell.iso);
                   const cycle = cycleMap?.get(cell.iso) ?? null;
+                  const inWindow = cycle?.type === "predicted_period";
+                  const joinPrev = inWindow && cell.weekday !== 0 && cycleMap?.get(shiftDate(cell.iso, -1))?.type === "predicted_period";
+                  const joinNext = inWindow && cell.weekday !== 6 && cycleMap?.get(shiftDate(cell.iso, 1))?.type === "predicted_period";
                   return (
                     <button
                       key={cell.iso}
                       type="button"
                       className="calendar-month-cell"
                       data-today={cell.iso === todayIso ? "true" : undefined}
+                      data-cycle-peak={cycle?.peak ? "true" : undefined}
                       style={{ gridColumnStart: cell.weekday + 1 }}
                       aria-label={`${block.month + 1}月${cell.day}日${items?.length ? `，${items.length}个日程` : ""}`}
                       onClick={() => onPickDay(cell.iso)}
                     >
+                      {inWindow ? (
+                        <span
+                          className="calendar-cycle-band"
+                          data-join-prev={joinPrev ? "true" : undefined}
+                          data-join-next={joinNext ? "true" : undefined}
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      {cycle?.peak ? <span className="calendar-cycle-peak" aria-hidden="true" /> : null}
                       <span className="calendar-month-num">{cell.day}</span>
                       <span className={`calendar-month-lunar${cell.lunarFirst ? " is-first" : ""}`}>{cell.lunarLabel}</span>
                       <span className="calendar-month-dots" aria-hidden="true">
-                        {cycle ? <i className="calendar-cycle-dot" data-type={cycle.type} /> : null}
+                        {cycle && !inWindow ? <i className="calendar-cycle-dot" data-type={cycle.type} /> : null}
                         {items && items.length > 0 ? <i className="calendar-event-dot" data-color={items[0].colorKey} /> : null}
                       </span>
                     </button>

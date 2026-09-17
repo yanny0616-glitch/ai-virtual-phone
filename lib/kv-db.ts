@@ -3,6 +3,7 @@
 // Replaces all localStorage usage to avoid the ~5-10MB quota limit.
 
 import Dexie from "dexie";
+import "./storage-health";
 
 class KvDatabase extends Dexie {
     entries!: Dexie.Table<{ key: string; value: string }, string>;

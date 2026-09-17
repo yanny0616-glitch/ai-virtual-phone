@@ -32,7 +32,8 @@ export function startGuanianPresenceSync():()=>void {
     const result=new Map<string,Target>();
     for(const app of loadInstalledCustomApps()){
       if(app.manifest.id!=='gua.nian'||!app.permissions.includes('chat.context'))continue;
-      const settings=readCustomAppCollection(app.id,'settings')[0];if(!settings)continue;
+      // 交给 VPS 后端的由 guanian-server-sync 从后端取
+      const settings=readCustomAppCollection(app.id,'settings')[0];if(!settings||settings.serverBrain)continue;
       const ids=Array.isArray(settings.characterIds)?settings.characterIds:[settings.characterId];
       const days=readCustomAppCollection(app.id,'days');
       const plans=readCustomAppCollection(app.id,'plans');

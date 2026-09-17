@@ -40,7 +40,7 @@ export function updatePromiseThreads(threads, changes, nowMs, by, messages = nul
     const text = String(k.text || "").trim().slice(0, 60);
     const subject = promiseSubject(k.subject);
     const old = id ? list.find(t => t.id === id && t.kind === "promise")
-      : list.find(t => t.kind === "promise" && promiseSubject(t.subject) === subject && t.text === text);
+      : list.find(t => t.kind === "promise" && promiseSubject(t.subject) === subject && (t.text === text || k.matterId && t.matterId === k.matterId));
     // Explicit unknown IDs cannot silently create a second event.
     if (id && !old) continue;
     // Model-produced changes need real speaker evidence. Manual edits use their own UI path.
@@ -66,7 +66,7 @@ export function updatePromiseThreads(threads, changes, nowMs, by, messages = nul
     if (!(due > 0) || (!text && !old)) continue;
     if (old) {
       const changed = due !== old.due || (k.subject && subject !== promiseSubject(old.subject)) || old.done;
-      Object.assign(old, { text: text || old.text, due, subject: k.subject ? subject : promiseSubject(old.subject),
+      Object.assign(old, { ...(k.matterId ? { matterId: k.matterId, matterRelation: k.matterRelation, matterEvidenceId: k.matterEvidenceId } : {}), text: text || old.text, due, subject: k.subject ? subject : promiseSubject(old.subject),
         sourceMessageId: String(k.sourceMessageId || old.sourceMessageId || "").slice(0, 100),
         status: changed ? "pending" : (old.status || "pending"), done: false, at: nowMs, by,
         revision: (Number(old.revision) || 1) + (changed ? 1 : 0),
@@ -76,7 +76,7 @@ export function updatePromiseThreads(threads, changes, nowMs, by, messages = nul
       let n = list.length;
       let newId;
       do { newId = "p" + nowMs.toString(36) + (n++).toString(36); } while (list.some(t => t.id === newId));
-      list.push({ id: newId, kind: "promise", text, due, subject, revision: 1, status: "pending", done: false,
+      list.push({ ...(k.matterId ? { matterId: k.matterId, matterRelation: k.matterRelation, matterEvidenceId: k.matterEvidenceId } : {}), id: newId, kind: "promise", text, due, subject, revision: 1, status: "pending", done: false,
         sourceMessageId: String(k.sourceMessageId || "").slice(0, 100), since: nowMs, at: nowMs, by,
         why: String(k.why || "").slice(0, 40) });
     }
@@ -87,7 +87,7 @@ export function promiseNeedsTask(t, items, nowMs, endMs) {
   return t.kind === "promise" && !t.done && t.status !== "completed" && t.status !== "cancelled"
     && !(Number(t.mentionedAt) > 0) && !/said:/.test(String(t.nudge || ""))
     && Number(t.due) > nowMs - 86400000 && Number(t.due) < endMs
-    && !items.some(w => w.from === t.id && w.kind === "promise" && w.act
+    && !items.some(w => w.from === t.id && w.kind === "promise" && (w.act || w.matterSuppressed)
       && Number(w.promiseRevision || 1) === Number(t.revision || 1));
 }
 export function promiseIntent(t, localDue) {

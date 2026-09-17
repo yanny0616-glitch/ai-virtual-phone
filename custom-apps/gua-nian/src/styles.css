@@ -149,6 +149,26 @@
   .tl-item.sched { cursor: pointer; border-radius: var(--r-sm); }
   .tl-item.sched:active { background: rgba(160, 110, 100, .07); }
   .tl-item .more { color: var(--tx3); opacity: .55; font-size: 11px; }
+  .tl-vchip { display: inline-flex; align-items: center; gap: 3px; border: 0; border-radius: 999px; padding: 1px 7px; font: inherit; font-size: 10.5px; font-weight: 600; line-height: 1.6; cursor: pointer; background: color-mix(in srgb, var(--acc2) 12%, transparent); color: var(--acc2); }
+  .tl-vchip::after { content: "›"; font-size: 12px; line-height: 1; transition: transform .2s; }
+  .tl-vchip.on::after { transform: rotate(90deg); }
+  .tl-vchip.pre { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tx3) 45%, transparent); color: var(--tx3); font-weight: 500; }
+  .tl-var { margin: 7px 0 3px; padding: 8px 10px 9px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--acc2) 7%, transparent); border: 1px solid color-mix(in srgb, var(--acc2) 20%, transparent); cursor: default; }
+  .tl-var .vh { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--acc2); }
+  .tl-var .vh i { font-style: normal; font-weight: 500; color: var(--tx3); margin-left: auto; }
+  .tl-var .vt { font-size: 12.5px; line-height: 1.6; margin-top: 3px; overflow-wrap: anywhere; }
+  .tl-var .vf { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; font-size: 11px; color: var(--tx2); }
+  .tl-var .say { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--acc2) 14%, transparent); color: var(--acc2); font-weight: 600; }
+  .tl-var.pre { background: transparent; border-style: dashed; border-color: color-mix(in srgb, var(--tx3) 45%, transparent); }
+  .tl-var.pre .vh { color: var(--tx3); }
+  .tl-item.past:has(.tl-var:not([hidden])) { opacity: 1; }
+  .tl-item.inserted .dot { border-style: dashed; }
+  .tl-tag { font-size: 10.5px; font-weight: 500; padding: 0 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--tx3) 45%, transparent); color: var(--tx3); line-height: 1.6; }
+  .arc-fork { font-size: 12px; line-height: 1.6; color: var(--tx2); margin: 4px 0; }
+  .arc-fork b { color: var(--acc2); font-weight: 700; margin-right: 6px; font-variant-numeric: tabular-nums; }
+  .arc-fork .say { margin-left: 6px; font-size: 10.5px; color: var(--tx3); }
+  .seg + .tgl-row { margin-top: 10px; }
+  .seg button small { display: block; font-size: 10.5px; font-weight: 400; opacity: .7; margin-top: 1px; }
   .sd-ask { margin-top: 14px; }
   .sd-ask input {
     width: 100%; box-sizing: border-box; padding: 10px 12px; font: inherit; font-size: 13px;
@@ -240,7 +260,7 @@
     transform: translateY(105%); transition: transform .3s cubic-bezier(.22, 1, .36, 1);
     max-height: 78vh; overflow-y: auto;
   }
-  .sheet-open .sheet-mask, .dsheet-open .sheet-mask { opacity: 1; pointer-events: auto; }
+  .sheet-open #sheet-mask, .dsheet-open #sheet-mask { opacity: 1; pointer-events: auto; }
   .sheet-open #sheet { transform: none; }
   .dsheet-open #dsheet { transform: none; }
   .sheet-hd { display: flex; align-items: center; margin-bottom: 16px; }
@@ -534,3 +554,15 @@
   details.fold[open] > summary .cv { transform: rotate(90deg); }
   details.fold[open] > summary { margin-bottom: 4px; }
   .rule-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--line); }
+
+  /* 提示词编辑沿用设置抽屉，独立遮罩保留设置页草稿。 */
+  .day-prompt-mask { z-index: 44; }
+  .day-prompt-sheet { z-index: 45; display: flex; flex-direction: column; overflow: hidden; }
+  .day-prompt-open #day-prompt-mask { opacity: 1; pointer-events: auto; }
+  .day-prompt-open #day-prompt-sheet { transform: none; }
+  .day-prompt-caption { color: var(--tx2); font-size: 12px; line-height: 1.7; margin: -4px 0 12px; }
+  #day-prompt-input { min-height: 150px; height: 38vh; height: 38dvh; flex: 1 1 auto; resize: none; line-height: 1.85; padding: 14px; }
+  .day-prompt-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
+  .day-prompt-tools span { color: var(--tx3); font-size: 11px; line-height: 1.6; }
+  .day-prompt-tools .mini, .day-prompt-edit { min-height: 36px; padding: 7px 12px; font-family: inherit; cursor: pointer; }
+  .day-prompt-sheet .sheet-hd, .day-prompt-sheet .big-btn { flex: none; }

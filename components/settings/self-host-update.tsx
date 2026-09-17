@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import { DownloadCloud, Loader2, RefreshCw } from "lucide-react";
+import { DownloadCloud, Info, Loader2, RefreshCw } from "lucide-react";
 import { BINDING_ACCENTS } from "@/lib/ui-accent-colors";
+import { fetchLocalChangelog, normalizeChangelog, type ChangelogItem } from "@/lib/changelog";
+import { getCloudOperationRunning } from "@/lib/cloud-backup/engine";
+import { ChangelogLines } from "../changelog-sheet";
 
 type UpdateInfo = {
     ok: boolean;
@@ -10,8 +13,12 @@ type UpdateInfo = {
     latest: { sha: string; tag: string; publishedAt: string } | null;
     building: boolean;
     updateAvailable: boolean;
+    changelog?: unknown;
     error?: string;
 };
+
+const BACKUP_WAIT_MS = 2000;
+const BACKUP_WAIT_LIMIT_MS = 10 * 60_000;
 
 const updateIconStyle = {
     "--icon-color": BINDING_ACCENTS.api,
@@ -22,6 +29,8 @@ export function SelfHostUpdateCard({ onNotice }: { onNotice: (msg: string) => vo
     const [checking, setChecking] = useState(false);
     const [updating, setUpdating] = useState(false);
     const [updated, setUpdated] = useState(false);
+    const [waitingBackup, setWaitingBackup] = useState(false);
+    const [pending, setPending] = useState<ChangelogItem[]>([]);
     const pollRef = useRef<number | null>(null);
 
     const check = useCallback(async (): Promise<UpdateInfo | null> => {
@@ -29,6 +38,14 @@ export function SelfHostUpdateCard({ onNotice }: { onNotice: (msg: string) => vo
             const res = await fetch("/api/self-host/update", { cache: "no-store" });
             const data = await res.json() as UpdateInfo;
             setInfo(data);
+            const remote = normalizeChangelog(data.changelog);
+            if (data.updateAvailable && remote.length) {
+                const local = await fetchLocalChangelog();
+                const newestLocal = local[0]?.id ?? "";
+                setPending(remote.filter(e => e.id > newestLocal).flatMap(e => e.items).slice(0, 8));
+            } else {
+                setPending([]);
+            }
             return data;
         } catch {
             // 部署重启窗口内请求会失败，轮询方负责重试
@@ -61,6 +78,18 @@ export function SelfHostUpdateCard({ onNotice }: { onNotice: (msg: string) => vo
         if (updating || !info?.latest) return;
         const target = info.latest.sha;
         setUpdating(true);
+        // 部署会重启服务、刷新页面，备份做到一半会被打断
+        const waitStarted = Date.now();
+        while (getCloudOperationRunning() && Date.now() - waitStarted < BACKUP_WAIT_LIMIT_MS) {
+            setWaitingBackup(true);
+            await new Promise(resolve => window.setTimeout(resolve, BACKUP_WAIT_MS));
+        }
+        setWaitingBackup(false);
+        if (getCloudOperationRunning()) {
+            onNotice("备份或恢复还没做完，等它结束再更新");
+            setUpdating(false);
+            return;
+        }
         try {
             const res = await fetch("/api/self-host/update", { method: "POST" });
             const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
@@ -97,13 +126,15 @@ export function SelfHostUpdateCard({ onNotice }: { onNotice: (msg: string) => vo
 
     const desc = updated
         ? `已更新到 ${info.current}，刷新页面生效`
+        : waitingBackup
+            ? "等云端备份做完再更新…"
         : updating
             ? "更新中…下载、切换、重启服务，约 1 分钟"
             : info.updateAvailable && info.latest
                 ? `当前 ${info.current || "未知"} → 最新构建 ${info.latest.sha}`
                 : `当前 ${info.current || "未知"}${info.building ? " · GitHub 有新提交在构建" : " · 已是最新"}`;
 
-    return (
+    const card = (
         <div className="app-card card-featured settings-toggle-card">
             <span className="card-icon" style={updateIconStyle}>
                 <DownloadCloud size={22} strokeWidth={1.75} />
@@ -123,6 +154,23 @@ export function SelfHostUpdateCard({ onNotice }: { onNotice: (msg: string) => vo
                     {checking ? <Loader2 size={14} className="animate-spin" /> : <span className="inline-flex items-center gap-1"><RefreshCw size={13} />检查更新</span>}
                 </button>
             )}
+        </div>
+    );
+
+    if (!info.updateAvailable || updated) return card;
+    return (
+        <div className="flex flex-col gap-2">
+            {card}
+            {pending.length > 0 && (
+                <div className="dg-pend">
+                    <h5>还没更新到</h5>
+                    <ChangelogLines items={pending} />
+                </div>
+            )}
+            <div className="dg-note is-warn mx-2">
+                <Info size={12} />
+                <span>更新前建议先备份。正在云端备份或恢复时，「立即更新」会等它做完。</span>
+            </div>
         </div>
     );
 }

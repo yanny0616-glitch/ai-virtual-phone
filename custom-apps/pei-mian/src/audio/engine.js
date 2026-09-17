@@ -89,6 +89,7 @@ const engine = (() => {
       const ref = await putWav(samples);
       if (seq !== renderSeq) { try { await api.media.delete({ ref }); } catch { /* ignore */ } return; }
       await api.voice.play({ channel: "ambience", dataUrl: ref, loop: true, volume: 1 });
+      if (seq !== renderSeq) { try { await api.media.delete({ ref }); } catch { /* ignore */ } return; }
       playing = true; renderedSig = sig; emit("engine", { busy: false, playing: true });
       await swapRef(ref);
     } finally { if (seq === renderSeq) emit("engine", { busy: false }); }
@@ -96,17 +97,27 @@ const engine = (() => {
   async function stop() {
     renderSeq += 1; const was = playing; playing = false; renderedSig = "";
     if (was) emit("engine", { busy: false, playing: false });
-    try { await api.voice.stopPlayback({ channel: "ambience" }); } catch { /* ignore */ }
+    await api.voice.stopPlayback({ channel: "ambience" });
     if (currentRef) { const ref = currentRef; currentRef = null; try { await api.media.delete({ ref }); } catch { /* ignore */ } }
   }
   // 渐弱：把循环体做成一段递减的尾巴，非循环播放；播完 resolve，声音自然结束。
   async function fadeOut(seconds) {
     if (!playing || !lastLoop) { await stop(); return; }
-    const tail = PmMixer.fadeTail(lastLoop, seconds);
-    const ref = await putWav(tail);
-    playing = false; renderedSig = "";
-    try { await api.voice.play({ channel: "ambience", dataUrl: ref, loop: false, volume: 1 }); }
-    finally { try { await api.media.delete({ ref }); } catch { /* ignore */ } await stop(); }
+    const seq = ++renderSeq;
+    const loop = lastLoop;
+    try {
+      for (let offset = 0; offset < seconds; offset += 20) {
+        if (seq !== renderSeq) return;
+        const ref = await putWav(PmMixer.fadeSegment(loop, seconds, offset));
+        try {
+          if (seq !== renderSeq) return;
+          await api.voice.play({ channel: "ambience", dataUrl: ref, loop: false, volume: 1 });
+        } finally { try { await api.media.delete({ ref }); } catch { /* ignore */ } }
+      }
+    } finally {
+      // 失败也关闭旧循环；过期渐弱绝不停止新会话。
+      if (seq === renderSeq) await stop();
+    }
   }
   // 单个声音试听 10 秒
   async function preview(sound) {
@@ -117,5 +128,6 @@ const engine = (() => {
     await api.voice.play({ channel: "ambience", dataUrl: PmWav.wavDataUrl(out, PmMixer.MIX_SAMPLE_RATE), loop: false, volume: 1 });
   }
   function hashKey(s) { let h = 2166136261; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  on("reset", () => { decoded.clear(); lastLoop = null; });
   return { decode, play, stop, fadeOut, preview, isPlaying: () => playing, forget: key => decoded.delete(key) };
 })();

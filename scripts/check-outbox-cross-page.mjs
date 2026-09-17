@@ -10,11 +10,14 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 async function moduleCode(file,expose){const src=stripTypeScriptTypes(await fs.readFile(path.join(root,file),'utf8')).replace(/^import\s[\s\S]*?;\s*$/gm,'').replace(/\bexport\s+(?=(?:async\s+)?function|const |class )/g,'');return `(()=>{${src}\nreturn {${expose}};})()`;}
 const db=await moduleCode('lib/chat-db.ts','chatDb,dbReadChatSession,dbHasResponseBatch,dbPutMessage,dbPutMessages,dbPutSessions,dbPutMessageBatch,dbReplaceSessions');
 const storage=await moduleCode('lib/chat-storage.ts','refreshChatSessionFromDisk,hasPersistedResponseBatch,createChatMessageBatch,loadChatMessages,loadChatSessions,persistChatMessages,seed(s){_sessionsCache=[s];_messagesCache=[];_hydrated=true;}');
+const thinking=await moduleCode('lib/cloud-reply-thinking.ts','parseCloudThinking,resolveCloudThinkingConfig');
 const consumer=await moduleCode('lib/push-outbox-client.ts','consumeServerOutbox');
 const child=`<!doctype html><script>window.onerror=(m,u,l)=>{parent.h.error=String(m)+":"+l};</script><script src="/dexie.js"></script><script>
 Object.assign(window,${db});
 const registerKvMigration=()=>{},kvGet=()=>null,resolveUserIdentity=()=>({name:'User'}),loadCharacters=()=>[],emitChatPluginEvent=()=>{},runChatPluginTransformSync=(_p,v)=>v;
 const store=${storage};Object.assign(window,store);
+const loadBindingConfig=()=>({}),resolveBinding=()=>({}),loadPresets=()=>[];
+Object.assign(window,${thinking});
 const session={id:'s',contactId:'c',isGroup:true,participantIds:[],unreadCount:0,updatedAt:'2026-09-07T08:00:00Z'};store.seed(session);
 const isPersonalPushCloudActive=()=>true,getChatPluginRuntime=()=>({ensureStarted:async()=>{}}),stripHallucinatedTimestamps=s=>s;
 const runChatPluginTransform=async(_p,v)=>{parent.h.transforms++;return v;};
@@ -74,6 +77,9 @@ const server=createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/d
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;
 const base=path.join(root,'out/review-outbox-lock');await fs.mkdir(base,{recursive:true});const profile=await fs.mkdtemp(path.join(base,'profile-'));
 const proc=spawn('chromium',['--headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-proxy-server','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
+// 脚本中途抛错或被打断也要把子进程带走，不然孤儿 Chromium 会一直吃 CPU
+process.on('exit', () => { try { proc.kill('SIGKILL'); } catch {} });
+if (!globalThis.__exitHooksInstalled) { globalThis.__exitHooksInstalled = true; process.on('uncaughtException', e => { console.error(e); process.exit(1); }); process.on('unhandledRejection', e => { console.error(e); process.exit(1); }); process.on('SIGINT', () => process.exit(130)); process.on('SIGTERM', () => process.exit(143)); }
 let socket;
 try{
  let debug;for(let i=0;i<100;i++){try{debug=Number((await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);break;}catch{await new Promise(r=>setTimeout(r,100));}}if(!debug)throw Error('Chromium did not start');

@@ -14,7 +14,7 @@
     } finally { cx._judgeFinishing = false; }
   }
   async function recheck(cx, trigger) {
-    if (cx.busy || cx._planLock || !owns(cx)) return;
+    if (cx.busy || cx._planLock || !owns(cx) || serverBrainOn()) return;
     if (!S.settings || !(S.settings.recheckMin > 0)) return;
     if (!cx.character || !cx.day || !cx.plan || !Array.isArray(cx.plan.items)) return;
     const over = usageOver();
@@ -56,7 +56,7 @@
         }
         return;
       } // 没有新信息，维持原判断
-      const items = cx.plan.items.slice();
+      const items = cx.plan.items.map(w => ({ ...w }));
       let changed = 0, added = 0;
 
       if (cooling && !fresh.length) {
@@ -78,7 +78,7 @@
         const lastAttempt = Math.max(+cx.plan.recheckAttemptAt || 0, +cx.plan.recheckAt || 0, +cx.plan.judgedAt || 0);
         if (lastAttempt && nowMs - lastAttempt < (promiseUpdate ? 1 : Math.max(1, S.settings.recheckMin)) * 60000) return;
         if (cloudRecheckOn()) {
-          await requireRecheckFeatures(["judge-task-v1"]);
+          await requireRecheckFeatures(["judge-task-v1", "matter-dedup-v1"]);
           const task = { characterId: cx.character.id, planDate: todayStr(), token: "app-" + nowMs + "-" + Math.random().toString(36).slice(2), chatAt: Math.max(...evidence.fresh.map(m => m.t)) };
           const claim = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...task, op: "claim" }) });
           if (!claim.claimed) { await log(cx, "本机复核跳过：云端正在处理或已判断过这段聊天"); return; }
@@ -96,6 +96,13 @@
         cx.plan = await upsert("plans", (x) => x.date === todayStr() && x.characterId === cx.character.id,
           { recheckAttemptAt: nowMs });
         await log(cx, "本机复核开始（" + trigger + "）：读取 " + fresh.length + " 条新聊天消息（含角色承诺）");
+        let matterOutputs = [];
+        if (cloudCfg()) {
+          const sessionId = await cloudSessionId(cx);
+          const history = await cloudFetchBounded("guanian-history", { method: "GET" }, { sessionId });
+          if (history.sessionId !== sessionId || !Array.isArray(history.entries)) throw new Error("事项去重读取实际发送记录失败，请更新个人云后重试");
+          matterOutputs = history.entries;
+        }
         const lines = chatExcerpt(chat);
         const remaining = items.filter((w) => w.kind !== "promise" && w.fireAt > nowMs + 2 * 60000);
         const usedQuota = GuaNianPromises.ordinaryQuota(items);
@@ -104,6 +111,7 @@
           characterId: cx.character.id,
           appTags: ["companion", "impulse"],
           instruction: [
+            GuaNianMatters.matterPrompt(items, cx.threads || [], matterOutputs),
             ledgerOnly ? "本轮只核对角色刚说的明确约定，只有 keep/settle 可以非空；不新增普通念头。" : null,
             "【后台系统任务，不是聊天：不要以角色口吻说话、不要写消息内容，只输出 JSON】",
             canJudge
@@ -116,7 +124,7 @@
             biasText() || null,
             canJudge ? "还没到点的时刻（act 是之前的判断）：" : null,
             canJudge ? JSON.stringify(remaining.map((w) => ({ time: w.time, source: w.source, act: !!w.act, intent: w.intent || "", energy: energyAt(cx.day, w.fireAt) }))) : null,
-            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"time":"HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念","from":"如果这条出自账本里某件事，填它的 id，否则空字符串"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-15到15的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"id":"已有事件id","subject":"user|character|both","status":"pending|completed|cancelled","sourceMessageId":"证据消息编号","kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
+            '输出严格 JSON，第一个字符必须是 {，字段名一字不差：{"links":[{"itemId":"已有念头编号","matterId":"归属的已有事项编号","relation":"same或followup","sourceMessageId":"新进展消息编号，无则空"}],"decisions":[{"time":"HH:MM","act":true或false,"sem":"接触类型：问候/关心/追话题/分享/惦记 选一","topic":"这次想聊的话题（8字内）","why":"维持或改变的理由（20字内）","intent":"act为true时TA的第一人称动机（40字内，不写台词）","defer":"只是这个点不合适、话还想说时，改约到今天更晚的HH:MM；不改约就空字符串"}],"extra":[{"matterId":"已有编号或new:1","relation":"new或same或followup","sourceMessageId":"新进展消息编号，无则空","time":"HH:MM","about":"没聊完的话头或约好的事（8字内）","intent":"第一人称动机","why":"为什么值得临时起念","from":"如果这条出自账本里某件事，填它的 id，否则空字符串"}],"feel":{"mood":"这段聊天下来TA此刻的情绪（8字内，具体，不要「心情不错」这种空话）","cause":"因为什么（12字内）","energy":这段聊天对精力的影响-20到20的整数,"intensity":这个情绪有多强0到100的整数,"hours":大概几小时淡一半（1到12的整数）},"sched":[{"op":"add或move或drop","time":"HH:MM（move/drop 填这条日程原来的时间；add 不用）","newTime":"HH:MM（add 是新日程的时间，move 是挪去的时间）","title":"日程标题（8字内，add 必填）","note":"一句具体的细节","mood":"做完之后的情绪（8字内）","cost":这件事对精力的影响-15到15的整数,"why":"聊天里的依据（15字内）"}],"keep":[{"matterId":"已有编号或new:1","id":"已有事件id","subject":"user|character|both","status":"pending|completed|cancelled","sourceMessageId":"证据消息编号","kind":"topic或promise或date","text":"一句话（20字内）","when":"promise/date 必填：YYYY-MM-DD HH:MM、HH:MM 或 MM-DD；topic 留空","why":"为什么记它（15字内）"}],"settle":["已了结的账本 id"],"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null}',
             "feel 描述的是聊天带来的情绪变化，不是今天的底色：被安慰/被逗笑/聊得投入给正 energy，被冷落/吵架/说累了给负；聊得平淡就把 intensity 给低分。",
             (S.settings.chatEditsDay
               ? "sched 只在聊天里确实出现了会改变TA今天安排的事才给：约好了几点做什么、临时被叫走、说了某件事不去了。最多 2 条，时间必须晚于现在（" + fmtHM(nowMs) + "）；只是随口聊到、没有落实的事不要写进来，没有就给空数组。"
@@ -141,6 +149,21 @@
           const renewed = await cloudFetchBounded("judge-task", { method: "POST", body: JSON.stringify({ ...lease, op: "renew" }) });
           if (!renewed.claimed) throw new Error("复核任务租约已失效，本轮结果未应用");
         }
+        const matters = GuaNianMatters.prepareMatters(items, cx.threads || [], matterOutputs, parsed, nowMs);
+        items.splice(0, items.length, ...matters.items);
+        parsed.keep = matters.keep; parsed.extra = matters.extra;
+        if (JSON.stringify(matters.threads) !== JSON.stringify(cx.threads || [])) await saveThreads(cx, matters.threads);
+        // Apply promises first: a promise and an impulse from the same result cannot both reserve a task.
+        await applyThreads(cx, parsed, nowMs, "app", items, chat);
+        for (const w of items) {
+          if (!w.act || w.generatedAt || matterOutputs.some(o => o.trigger_key === "timedwake:" + w.wakeId)) continue;
+          const reason = GuaNianMatters.matterBlock(w, items, cx.threads || [], matterOutputs, chat);
+          if (!reason) continue;
+          if (w.wakeId) await AiPhone.push.cancelWake(w.wakeId);
+          w.act = false; w.matterSuppressed = true; w.why = reason;
+          (w.hist = w.hist || []).push({ at: nowMs, kind: "dedupe", note: reason });
+          changed++;
+        }
         const feel = parsed && parsed.feel;
         if (feel && String(feel.mood || "").trim()) {
           await pushCond(cx, {
@@ -156,7 +179,8 @@
         const decs = Array.isArray(parsed.decisions) ? parsed.decisions : [];
         const byTime = {};
         decs.forEach((d) => { const hm = normHM(d && d.time); if (hm) byTime[hm] = d; });
-        for (const w of remaining) {
+        for (const w of items.filter(w => w.kind !== "promise" && w.fireAt > nowMs + 2 * 60000)) {
+          if (GuaNianMatters.matterBlock(w, items, cx.threads || [], matterOutputs, chat)) continue;
           const d = byTime[w.time]; if (!d) continue;
           if (d.sem) w.sem = String(d.sem);
           if (d.topic) w.topic = String(d.topic);
@@ -220,10 +244,14 @@
           if (GuaNianPromises.ordinaryQuota(items) >= S.settings.quota) { await log(cx, "复核：临时起念 " + hm + " 被今日额度挡下"); continue; }
           const gap = (S.settings.minGapMin || 0) * 60000;
           if (gap && items.some((w) => w.kind !== "promise" && w.act && Math.abs(w.fireAt - ms) < gap)) { await log(cx, "复核：临时起念 " + hm + " 离已有起念太近，放弃"); continue; }
+          const candidate = { ...GuaNianMatters.matterFields(x), kind: "extra", from: x.from || "", act: true, fireAt: ms };
+          const duplicate = GuaNianMatters.matterBlock(candidate, items, cx.threads || [], matterOutputs, chat);
+          if (duplicate) { await log(cx, "临时起念被事项去重拦下：" + duplicate); continue; }
           try {
             const res = await AiPhone.push.wake({ characterId: cx.character.id, fireAt: ms, intent: String(x.intent || "有句话没说完，想找用户"), source: "tool", cooldownRounds: S.settings.maxUnanswered });
             const xUms = timeToMs(normHM(x.until) || "");
             items.push({
+              ...GuaNianMatters.matterFields(x),
               time: hm, fireAt: ms, until: xUms && xUms > ms ? Math.min(xUms, ms + 6 * 3600000) : 0,
               source: "临时·" + String(x.about || "未完话题").slice(0, 10),
               act: true, adj: "extra", why: String(x.why || ""), intent: String(x.intent || ""),
@@ -239,7 +267,6 @@
           } catch (e) { await log(cx, "复核临时起念预约失败：" + (e && e.message || e)); }
         }
         await applyChatSchedEdits(cx, parsed.sched, nowMs);
-        await applyThreads(cx, parsed, nowMs, "app", items, chat);
         const postHint = canPost && parsed.post && typeof parsed.post === "object" ? String(parsed.post.hint || "") : "";
         if (postHint) await postMoment(cx, postHint, nowMs, "app");
       }

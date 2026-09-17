@@ -2,11 +2,13 @@
 
 import { Info, ShieldAlert, Heart } from "lucide-react";
 import { SelfHostUpdateCard } from "./self-host-update";
+import { ChangelogHistoryRow } from "../changelog-sheet";
 
 export function AboutDeclaration({ onNotice }: { onNotice?: (msg: string) => void }) {
     return (
         <div className="flex flex-col gap-5 h-full">
             <SelfHostUpdateCard onNotice={onNotice ?? (() => { })} />
+            <ChangelogHistoryRow />
 
             <p className="card-section-label m-0 mx-2">免责声明</p>
 

@@ -9,6 +9,10 @@ import { resolveUserIdentity } from "@/lib/settings-storage";
 import { saveChatImageToIndexedDB, getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 
+const MAX_PHOTOS = 9;
+
+type ComposePhoto = { key: string; preview: string; assetId: string | null };
+
 type Props = {
     onClose: () => void;
     onPublished: () => void;
@@ -16,8 +20,8 @@ type Props = {
 
 export function MomentsCompose({ onClose, onPublished }: Props) {
     const [text, setText] = useState("");
-    const [photoAssetId, setPhotoAssetId] = useState<string | null>(null);
-    const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+    // 多图：一条朋友圈最多 9 张，assetId 落库后才允许发表
+    const [photos, setPhotos] = useState<ComposePhoto[]>([]);
     const [photoDesc, setPhotoDesc] = useState("");
     const [location, setLocation] = useState("");
     const [locationDraft, setLocationDraft] = useState("");
@@ -87,9 +91,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
 
     const handleImageSelect = () => fileRef.current?.click();
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+    const addOneFile = (file: File, key: string) => {
         const img = new Image();
         const objectUrl = URL.createObjectURL(file);
         img.onload = () => {
@@ -103,29 +105,56 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
             canvas.width = w;
             canvas.height = h;
             const ctx = canvas.getContext("2d");
-            if (!ctx) return;
+            if (!ctx) {
+                URL.revokeObjectURL(objectUrl);
+                setPhotos(prev => prev.filter(p => p.key !== key));
+                return;
+            }
             ctx.drawImage(img, 0, 0, w, h);
             canvas.toBlob(blob => {
                 URL.revokeObjectURL(objectUrl);
-                if (!blob) return;
-                // Preview from blob URL (no localStorage cost)
-                setPhotoPreview(URL.createObjectURL(blob));
-                // Persist to IndexedDB
+                if (!blob) {
+                    setPhotos(prev => prev.filter(p => p.key !== key));
+                    return;
+                }
+                const preview = URL.createObjectURL(blob);
+                setPhotos(prev => prev.map(p => (p.key === key ? { ...p, preview } : p)));
                 saveChatImageToIndexedDB(blob).then(assetId => {
-                    setPhotoAssetId(assetId);
+                    setPhotos(prev => prev.map(p => (p.key === key ? { ...p, assetId } : p)));
                 });
             }, "image/jpeg", 0.8);
         };
+        img.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            setPhotos(prev => prev.filter(p => p.key !== key));
+        };
         img.src = objectUrl;
-        e.target.value = "";
     };
 
-    const handleRemovePhoto = () => {
-        if (photoPreview) URL.revokeObjectURL(photoPreview);
-        setPhotoAssetId(null);
-        setPhotoPreview(null);
-        setPhotoDesc("");
-        if (fileRef.current) fileRef.current.value = "";
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const picked = Array.from(e.target.files || []);
+        e.target.value = "";
+        if (!picked.length) return;
+        setPhotos(prev => {
+            const room = MAX_PHOTOS - prev.length;
+            const taking = picked.slice(0, Math.max(0, room));
+            const placeholders = taking.map((file, i) => {
+                const key = `cp_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`;
+                addOneFile(file, key);
+                return { key, preview: "", assetId: null };
+            });
+            return [...prev, ...placeholders];
+        });
+    };
+
+    const handleRemovePhoto = (key: string) => {
+        setPhotos(prev => {
+            const hit = prev.find(p => p.key === key);
+            if (hit?.preview) URL.revokeObjectURL(hit.preview);
+            const next = prev.filter(p => p.key !== key);
+            if (!next.length) setPhotoDesc("");
+            return next;
+        });
     };
 
     const handleConfirmLocation = () => {
@@ -166,11 +195,17 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
             .filter(([, v]) => v)
             .map(([k]) => k);
 
+        const photoRefs = photos
+            .map(p => p.assetId)
+            .filter((id): id is string => !!id)
+            .map(id => `asset://${id}`);
+
         const post = addMomentPost({
             authorType: "user",
             authorId: "user",
             content,
-            photoUrl: photoAssetId ? `asset://${photoAssetId}` : undefined,
+            photoUrl: photoRefs[0],
+            photoUrls: photoRefs.length > 1 ? photoRefs : undefined,
             photoDescription: photoDesc.trim() || undefined,
             visibility: visibleCharIds,
             location: location || undefined,
@@ -182,7 +217,9 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
         onPublished();
     };
 
-    const canPublish = text.trim().length > 0;
+    // 还在压缩 / 落库的图不能丢，处理完才让发
+    const photosPending = photos.some(p => !p.assetId);
+    const canPublish = text.trim().length > 0 && !photosPending;
 
     // Get char name/avatar helpers
     const getCharName = (charId: string) => chars.find(c => c.id === charId)?.name ?? "未知";
@@ -223,13 +260,14 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
 
                     {/* Photo block */}
                     <div className="compose-media-grid">
-                        {photoPreview ? (
-                            <div className="compose-photo-block-preview">
-                                <img src={photoPreview} alt="" />
-                                <button onClick={handleRemovePhoto} className="ui-close-sm compose-photo-remove">×</button>
+                        {photos.map(photo => (
+                            <div key={photo.key} className="compose-photo-block-preview" data-loading={photo.assetId ? undefined : ""}>
+                                {photo.preview ? <img src={photo.preview} alt="" /> : <span className="compose-photo-loading">处理中…</span>}
+                                <button onClick={() => handleRemovePhoto(photo.key)} className="ui-close-sm compose-photo-remove">×</button>
                             </div>
-                        ) : (
-                            <button onClick={handleImageSelect} className="compose-photo-block">
+                        ))}
+                        {photos.length < MAX_PHOTOS && (
+                            <button onClick={handleImageSelect} className="compose-photo-block" aria-label="添加图片">
                                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                     <line x1="12" y1="5" x2="12" y2="19" />
                                     <line x1="5" y1="12" x2="19" y2="12" />
@@ -237,7 +275,10 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
                             </button>
                         )}
                     </div>
-                    {!photoPreview && (
+                    {photosPending && (
+                        <div className="ts-12 text-[var(--c-icon)] mt-2">图片处理中，好了就能发</div>
+                    )}
+                    {!photos.length && (
                         <input
                             value={photoDesc || ""}
                             onChange={e => setPhotoDesc(e.target.value)}
@@ -246,7 +287,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
                             style={{ display: 'none' }} // Assuming mostly image flows for real, hidden to keep UI clean unless needed
                         />
                     )}
-                    <input ref={fileRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+                    <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleFileChange} className="hidden" />
                 </div>
 
                 {/* ── Action Rows (Location, Mention, Visibility) ── */}

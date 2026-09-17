@@ -2,6 +2,7 @@
 // RPG Map Mode — IndexedDB storage
 
 import Dexie from "dexie";
+import "./storage-health";
 import { applyWorldSettingEdit, planWorldSettingEdit, worldSettingVersion, type WorldSettingPlan } from "./adventure-world-edit";
 import type { MapWorld, GameSave, CharacterAgent, StoryDirector, CharStats } from "./map-types";
 import { formatChatTimestamp } from "./llm-prompt-assembler";

@@ -15,13 +15,16 @@ import { isVoiceExpressionEnabled, resolveVoiceExpressionText, splitVoiceExpress
 import { isCallRecordingSupported, resolveCloudSttConfig } from "@/lib/stt-cloud";
 import { useHoldToTalk } from "./use-hold-to-talk";
 import { suspendKeepAliveForCall, resumeKeepAliveAfterCall } from "@/lib/use-weixin-bridge";
-import { BilingualTextBlock } from "./message-bubble";
 import type { Character } from "@/lib/character-types";
 import { useCallKeyboardOffsetStyle } from "./use-call-keyboard-offset";
 import { CallSttWarningDialog, hideCallSttWarningPermanently, isCallSttWarningHidden } from "./call-stt-warning-dialog";
 import { isAndroidBrowser, isIOSDevice } from "./voice-input-platform";
 import { CallVolumeControl } from "./call-volume-control";
 import { startIncomingCallVibration } from "@/lib/call-vibration";
+import { emitCallEnded, recordUnansweredCall, resolveCallConnect } from "@/lib/call-connect";
+import type { CallBeforeConnectPayload } from "@/lib/chat-plugin-types";
+import { stripNarration, takeCallDirectives } from "@/lib/call-directives";
+import { CallScreenStyle, CallSubtitleText, useCallExtras } from "./use-call-extras";
 
 // ── Types ───────────────────────────────────────────
 
@@ -45,11 +48,17 @@ type VoiceCallScreenProps = {
     onEnd: () => void;
     onConnect?: () => void;
     initiator?: "user" | "character";
+    /** 通话是否处于缩小的悬浮窗状态：暂停麦克风监听/计时/语音播放，仅显示背景+名字 */
+    minimized?: boolean;
+    /** 点击左上角返回键：请求缩小为悬浮窗（通话逻辑冻结，不挂断） */
+    onMinimize?: () => void;
+    /** 点击悬浮窗：请求恢复为全屏通话界面 */
+    onRestore?: () => void;
 };
 
 // ── Component ───────────────────────────────────────
 
-export function VoiceCallScreen({ session, character, onEnd, onConnect, initiator = "user" }: VoiceCallScreenProps) {
+export function VoiceCallScreen({ session, character, onEnd, onConnect, initiator = "user", minimized = false, onMinimize, onRestore }: VoiceCallScreenProps) {
     // iOS 保留 Web Speech 免提 + Web Audio 播放（麦克风会话共存的老方案）；
     // 其余设备改「按住说话 + 云端转写」，播放走媒体元素（音量键可控、无静音拨键坑）。
     // 没配 OpenAI 兼容识别时回落旧行为（安卓=文字输入）。
@@ -64,6 +73,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const playCallAudio = iosDevice ? playAudioBlob : playAudioBlobViaMediaElement;
     const keyboardOffsetStyle = useCallKeyboardOffsetStyle();
     const [callState, setCallState] = useState<CallState>("CONNECTING");
+    const [endNote, setEndNote] = useState("");
     const hasConnectedRef = useRef(false);
     const [callDuration, setCallDuration] = useState(0);
     const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
@@ -78,6 +88,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const audioAbortRef = useRef<(() => void) | null>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const callStartRef = useRef<number>(0);
+    const pausedAtRef = useRef<number | null>(null);
+    const minimizedRef = useRef(false);
     const stateRef = useRef<string>("CONNECTING");
     const interimTextRef = useRef<string>("");  // ref 版本，闭包安全
     const sttWarningShownRef = useRef(false);
@@ -85,9 +97,23 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const messagesRef = useRef<ChatMessage[]>([]);
     const _initUi = resolveUserIdentity(session.contactId, "chat");
     const userNameRef = useRef<string>(_initUi?.name || "你");
+    const userName = _initUi?.name || "你";
+    const { flags: callFlags, applyArt, sceneUrl } = useCallExtras(session, character.id, "voice");
+    const backdrop = sceneUrl || bgImageResolved;
+    const endCallRef = useRef<(by: "user" | "char") => void>(() => {});
 
     // Keep refs in sync
     useEffect(() => { stateRef.current = callState; }, [callState]);
+    useEffect(() => { minimizedRef.current = minimized; }, [minimized]);
+
+    // 缩小为悬浮窗：冻结通话——停止监听、打断在播放的语音
+    useEffect(() => {
+        if (!minimized) return;
+        if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
+        setInterimText("");
+        if (audioAbortRef.current) { audioAbortRef.current(); audioAbortRef.current = null; }
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+    }, [minimized]);
 
     // 来电等待接听：循环振动（开关在聊天主页，iOS 网页不支持自动无效果）
     useEffect(() => {
@@ -167,6 +193,18 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             callStartRef.current = Date.now();
         }
 
+        // 缩小为悬浮窗：冻结计时显示，不再推进
+        if (minimized) {
+            if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+            if (pausedAtRef.current === null) pausedAtRef.current = Date.now();
+            return;
+        }
+        // 从悬浮窗恢复：把冻结期间流逝的时间补回起点，避免时长跳变
+        if (pausedAtRef.current !== null) {
+            callStartRef.current += Date.now() - pausedAtRef.current;
+            pausedAtRef.current = null;
+        }
+
         timerRef.current = setInterval(() => {
             setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000));
         }, 1000);
@@ -174,7 +212,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
-    }, [callState]);
+    }, [callState, minimized]);
 
     // ── Connecting animation (3s fake dial) ─────────
 
@@ -188,31 +226,21 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         // Load existing messages for context
         messagesRef.current = loadChatMessages(session.id);
 
-        // Insert system message (skip if already exists from strict mode remount)
-        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
-        const initRole = initiator === "character" ? "assistant" : "user";
-        if (!lastMsg || !(lastMsg.content.includes("发起了语音通话"))) {
-            const callMsg = initiator === "character"
-                ? `[我向${userNameRef.current}发起了语音通话]`
-                : `[我向${character.name}发起了语音通话]`;
-            const sysMsg = pushChatMessage({
-                sessionId: session.id,
-                role: initRole,
-                content: callMsg,
-            });
-            messagesRef.current = [...messagesRef.current, sysMsg];
-        }
-
-        // User-initiated: auto-connect after 3s fake dial
-        // Character-initiated: wait for user to accept
+        // 角色打来：等你接。你打过去：先问插件（睡着 / 开会 / 忙）接不接、响多久，默认 3 秒接通
         let connectTimer: NodeJS.Timeout | undefined;
-        if (initiator !== "character") {
+        let disposed = false;
+        if (initiator === "character") pushStartMessage();
+        else void resolveCallConnect(session.id, session.contactId, "voice").then(decision => {
+            if (disposed) return;
             connectTimer = setTimeout(() => {
-                setCallState("IDLE");
-            }, 3000);
-        }
+                if (stateRef.current === "ENDED") return;
+                if (decision.outcome === "answer") { pushStartMessage(); setCallState("IDLE"); return; }
+                endUnanswered(decision);
+            }, decision.ringMs);
+        });
 
         return () => {
+            disposed = true;
             if (connectTimer) clearTimeout(connectTimer);
             if (timerRef.current) clearInterval(timerRef.current);
         };
@@ -243,7 +271,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             case "USER_SPEAKING": return "正在聆听...";
             case "PROCESSING": return "对方正在思考...";
             case "AI_SPEAKING": return "对方正在说话...";
-            case "ENDED": return "通话已结束";
+            case "ENDED": return endNote || "通话已结束";
         }
     };
 
@@ -334,17 +362,28 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             if (stateRef.current === "ENDED") return;
 
             // 4. Process response
-            const { cleanParts } = processAIResponse(aiResponseText);
+            const directives = takeCallDirectives(aiResponseText);
+            applyArt(directives);
+            const hangupAfter = directives.hangup && callFlags.hangup;
+            const { cleanParts } = processAIResponse(directives.text);
             const displayText = stripVoiceExpression(cleanParts.join("\n"));
 
             if (!displayText) {
-                setCallState("IDLE");
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
                 return;
             }
 
             // 5. Add AI subtitle
             const subtitleId = `ai-${Date.now()}`;
             setSubtitles(prev => [...prev, { id: subtitleId, role: "assistant", text: displayText }]);
+
+            // 缩小为悬浮窗期间收到的回复：只静默记录文字，不播放语音
+            if (minimizedRef.current) {
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
+                return;
+            }
 
             // 6. TTS
             setCallState("AI_SPEAKING");
@@ -357,7 +396,9 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                         : [cleanParts.join("\n")];
                     for (const segment of segments) {
                         if (stateRef.current === "ENDED") return;
-                        const speechText = resolveVoiceExpressionText(stripVoiceExpression(segment), segment, "call");
+                        const spoken = stripNarration(segment);
+                        if (!spoken) continue;
+                        const speechText = resolveVoiceExpressionText(stripVoiceExpression(spoken), spoken, "call");
                         const audioBlob = await synthesizeChatSpeech(speechText, voiceConfig);
                         if (stateRef.current === "ENDED") return;
 
@@ -374,7 +415,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             }
 
             if (stateRef.current !== "ENDED") {
-                setCallState("IDLE");
+                if (hangupAfter) endCallRef.current("char");
+                else setCallState("IDLE");
             }
         } catch (error: any) {
             console.error("[VoiceCall] Error:", error);
@@ -387,7 +429,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 setCallState("IDLE");
             }
         }
-    }, [session, processAIResponse, playCallAudio]);
+    }, [session, processAIResponse, playCallAudio, applyArt, callFlags.hangup]);
 
     // ── Auto-listen: 进入 IDLE 自动开始监听 ────────
 
@@ -478,10 +520,10 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             sttRef.current = null;
             setInterimText("");
         }
-        if (!androidTextInputOnly && inputMode === "voice" && callState === "IDLE" && !isMuted) {
+        if (!androidTextInputOnly && inputMode === "voice" && callState === "IDLE" && !isMuted && !minimized) {
             // 短暂延迟让 UI 过渡完成
             const timer = setTimeout(() => {
-                if (stateRef.current === "IDLE") {
+                if (stateRef.current === "IDLE" && !minimizedRef.current) {
                     startListening();
                 }
             }, 500);
@@ -492,7 +534,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             sttRef.current.abort();
             sttRef.current = null;
         }
-    }, [androidTextInputOnly, holdToTalk, callState, isMuted, inputMode, startListening]);
+    }, [androidTextInputOnly, holdToTalk, callState, isMuted, inputMode, minimized, startListening]);
 
     const handleInputModeToggle = useCallback(() => {
         if (androidTextInputOnly) {
@@ -529,6 +571,16 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         runConversationTurn(text);
     }, [typedText, callState, runConversationTurn]);
 
+    // 输入框左侧的"重回"键：不发送新内容，直接让对方基于当前上下文重新回复一次
+    const handleRegenerate = useCallback(() => {
+        if (callState !== "IDLE") return;
+        if (sttRef.current) {
+            sttRef.current.abort();
+            sttRef.current = null;
+        }
+        runConversationTurn();
+    }, [callState, runConversationTurn]);
+
     // 按住说话（非 iOS）：按下录音，松开转写后走对话轮
     const holdInput = useHoldToTalk({
         characterId: session.contactId,
@@ -550,8 +602,28 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
     // ── Hangup ──────────────────────────────────────
 
-    const handleHangup = useCallback(() => {
+    // 只在真接通（或角色打来）时记「发起了通话」；没接通的另记一条未接 / 拒接
+    const pushStartMessage = () => {
+        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
+        if (lastMsg && lastMsg.content.includes("发起了语音通话")) return;
+        const callMsg = initiator === "character"
+            ? `[我向${userNameRef.current}发起了语音通话]`
+            : `[我向${character.name}发起了语音通话]`;
+        const sysMsg = pushChatMessage({ sessionId: session.id, role: initiator === "character" ? "assistant" : "user", content: callMsg });
+        messagesRef.current = [...messagesRef.current, sysMsg];
+    };
+
+    const endUnanswered = (decision: CallBeforeConnectPayload) => {
+        setEndNote(decision.outcome === "reject" ? `对方已拒接${decision.reason ? " · " + decision.reason : ""}` : "对方无应答");
         setCallState("ENDED");
+        recordUnansweredCall(session.id, "voice", decision.outcome === "reject" ? "reject" : "noAnswer", decision.reason);
+        emitCallEnded({ sessionId: session.id, characterId: session.contactId, kind: "voice", outcome: decision.outcome, durationSec: 0 });
+        setTimeout(() => onEnd(), 1800);
+    };
+
+    const endCall = useCallback((by: "user" | "char") => {
+        setCallState("ENDED");
+        if (by === "char") setEndNote(`${character.name}挂断了`);
 
         // Stop any ongoing STT
         if (sttRef.current) {
@@ -570,42 +642,82 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             window.speechSynthesis.cancel();
         }
 
+        // 没等接通就挂了：记成取消，不留时长
+        const cancelled = by === "user" && !hasConnectedRef.current && initiator !== "character";
+        if (cancelled) pushStartMessage();
         const endMsg = pushChatMessage({
             sessionId: session.id,
-            role: "user",
-            content: `[我挂断了语音通话]`,
-            mediaData: { callDuration: formatTime(callDuration) },
+            role: by === "char" ? "assistant" : "user",
+            content: cancelled ? `[我取消了语音通话]` : `[我挂断了语音通话]`,
+            mediaData: cancelled ? undefined : { callDuration: formatTime(callDuration) },
         });
         messagesRef.current = [...messagesRef.current, endMsg];
+        emitCallEnded({ sessionId: session.id, characterId: session.contactId, kind: "voice", outcome: cancelled ? "cancel" : "answer", durationSec: cancelled ? 0 : callDuration });
 
         // Delay then close
-        setTimeout(() => onEnd(), 1500);
-    }, [session.id, callDuration, onEnd]);
+        setTimeout(() => onEnd(), by === "char" ? 2200 : 1500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session.id, session.contactId, callDuration, onEnd, initiator, character.name]);
+    const handleHangup = useCallback(() => endCall("user"), [endCall]);
+    useEffect(() => { endCallRef.current = endCall; }, [endCall]);
 
     // ── Render ──────────────────────────────────────
 
+    if (minimized) {
+        return (
+            <button
+                type="button"
+                className="call-mini-window"
+                style={{ backgroundImage: `url(${backdrop || character.avatar || ""})` }}
+                onClick={onRestore}
+                aria-label={`返回与${character.name}的语音通话`}
+                title="点击返回通话"
+            >
+                <span className="call-mini-window-overlay" />
+                <span className="call-mini-window-name">{character.name}</span>
+            </button>
+        );
+    }
+
     return (
         <div
-            className="absolute inset-0 z-[100] flex flex-col text-white overflow-hidden call-bg-default call-keyboard-shift"
-            style={bgImageResolved ? { ...keyboardOffsetStyle, background: `url(${bgImageResolved}) center/cover no-repeat` } : keyboardOffsetStyle}
+            className="absolute inset-0 z-[100] flex flex-col text-white overflow-hidden call-bg-default call-keyboard-shift call-screen"
+            data-call-screen="voice"
+            style={keyboardOffsetStyle}
         >
+            <CallScreenStyle css={session.callCSS} />
+            {backdrop && <div className="call-scene" aria-hidden="true" style={{ backgroundImage: `url(${backdrop})` }} />}
             {/* Dark overlay for readability */}
             <div
                 className="call-overlay absolute inset-0 z-0"
-                {...(bgImageResolved ? { "data-has-image": "" } : {})}
+                {...(backdrop ? { "data-has-image": "" } : {})}
             />
 
             <CallVolumeControl />
 
+            {onMinimize && callState !== "ENDED" && (
+                <button
+                    type="button"
+                    className="call-back-btn"
+                    onClick={onMinimize}
+                    aria-label="缩小通话"
+                    title="缩小通话"
+                >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M15 18l-6-6 6-6" />
+                    </svg>
+                </button>
+            )}
+
             {/* Content wrapper — force white text so themes don't override call UI */}
             <div className="voicecall-controls gcall-body">
                 {/* Top: Duration + Status */}
-                <div className="gcall-topbar">
-                    <div className="gcall-topbar-title">
+                <div className="gcall-topbar call-topbar">
+                    <div className="gcall-topbar-title call-name">
                         {character.name}
                     </div>
                     <div
-                        className="gcall-topbar-sub"
+                        className="gcall-topbar-sub call-timer"
                         {...(callState === "CONNECTING" || callState === "PROCESSING" ? { "data-anim": "" } : {})}
                     >
                         {callState !== "CONNECTING" && callState !== "ENDED" ? `${formatTime(callDuration)} · ` : ""}
@@ -617,7 +729,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 <div className="flex-none flex justify-center items-center pt-[30px] pb-5">
                     <div className="relative flex items-center justify-center">
                         <div
-                            className="voicecall-avatar"
+                            className="voicecall-avatar call-avatar"
                             {...(callState === "AI_SPEAKING" ? { "data-speaking": "" } : {})}
                         >
                             {character.avatar ? (
@@ -660,16 +772,17 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 {/* Subtitle area — top fade via mask */}
                 <div
                     ref={subtitleScrollRef}
-                    className="voicecall-subtitle-mask flex-1 min-h-0 overflow-auto px-5 py-[10px] flex flex-col gap-2 relative"
+                    className="voicecall-subtitle-mask flex-1 min-h-0 overflow-auto px-5 py-[10px] flex flex-col gap-2 relative call-subs"
                     {...(inputMode === "text" && callState !== "CONNECTING" && callState !== "ENDED" ? { "data-text-input": "" } : {})}
                 >
                     {subtitles.map((sub) => (
                         <div
                             key={sub.id}
-                            className="call-subtitle"
+                            className="call-subtitle call-sub"
                             data-role={sub.role}
+                            data-name={sub.role === "user" ? userName : character.name}
                         >
-                            <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
+                            <CallSubtitleText text={sub.text} expanded={session.collapseBilingualTranslation === false} />
                         </div>
                     ))}
 
@@ -683,12 +796,26 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
                 {inputMode === "text" && callState !== "CONNECTING" && callState !== "ENDED" && (
                     <form
-                        className="call-text-input-panel voicecall-text-input-panel"
+                        className="call-text-input-panel voicecall-text-input-panel call-text-input-row"
                         onSubmit={(e) => {
                             e.preventDefault();
                             handleTextSubmit();
                         }}
                     >
+                        <button
+                            type="button"
+                            onClick={handleRegenerate}
+                            className="call-regenerate-btn"
+                            disabled={callState !== "IDLE"}
+                            aria-label="让对方重新回复"
+                            title="让对方重新回复"
+                        >
+                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M23 4v6h-6" />
+                                <path d="M1 20v-6h6" />
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                            </svg>
+                        </button>
                         <div className="call-text-input-shell">
                             <input
                                 value={typedText}
@@ -723,7 +850,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
                 {/* Bottom controls */}
                 <div
-                    className="flex justify-center items-center gap-[40px] p-5"
+                    className="flex justify-center items-center gap-[40px] p-5 call-controls"
                     style={{ paddingBottom: "max(30px, env(safe-area-inset-bottom))" }}
                 >
                     {callState !== "ENDED" && callState !== "CONNECTING" ? holdToTalk ? (
@@ -773,7 +900,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                             {/* Hangup */}
                             <button
                                 onClick={handleHangup}
-                                className="ui-call-btn ui-call-btn-danger"
+                                className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                                 aria-label="挂断"
                             >
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -785,7 +912,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                     ) : androidTextInputOnly ? (
                         <button
                             onClick={handleHangup}
-                            className="ui-call-btn ui-call-btn-danger"
+                            className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                             aria-label="挂断"
                         >
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -846,7 +973,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                             {/* Hangup button */}
                             <button
                                 onClick={handleHangup}
-                                className="ui-call-btn ui-call-btn-danger"
+                                className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                             >
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
@@ -866,7 +993,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                                     });
                                     onEnd();
                                 }}
-                                className="ui-call-btn ui-call-btn-danger"
+                                className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                             >
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
@@ -894,7 +1021,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                                 });
                                 onEnd();
                             }}
-                            className="ui-call-btn ui-call-btn-danger"
+                            className="ui-call-btn ui-call-btn-danger" data-call-hangup=""
                         >
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />

@@ -1,5 +1,7 @@
 "use client";
 
+import { ToolEventSettings } from "./tool-event-settings";
+import { XhsAccountSettings } from "./xhs-account-settings";
 import { useState, useEffect, useRef, useContext } from "react";
 import type { ChangeEvent } from "react";
 import { Plus, Trash2, Search, Wrench, AlertCircle, MoreHorizontal, Upload, Download, ChevronDown, ChevronRight } from "lucide-react";
@@ -1564,6 +1566,7 @@ export function ToolboxSettings() {
                 return (
                     <ContentDialog title={isNewMcp ? "添加 MCP 服务器" : "MCP 服务器"} confirmLabel={isNewMcp ? "创建" : "完成"} onConfirm={onConfirm} onCancel={onCancel}>
                         <div className="flex flex-col gap-3">
+                            {typeof window !== "undefined" && editMcp.url === `${window.location.origin}/api/xhs-mcp` && <XhsAccountSettings />}
                             <div className="flex flex-col gap-1">
                                 <label className="menu-desc ml-1">名称</label>
                                 <Input value={editMcp.name} onChange={e => setM({ name: e.target.value })} />
@@ -1663,6 +1666,7 @@ export function ToolboxSettings() {
                                     )}
                                 </>
                             )}
+                            {!isNewMcp && <ToolEventSettings key={editMcp.id} server={editMcp} />}
                         </div>
                     </ContentDialog>
                 );

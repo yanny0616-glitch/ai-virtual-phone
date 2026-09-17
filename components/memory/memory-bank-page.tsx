@@ -5,6 +5,7 @@ import { Trash2, Zap, Clock, Users, Archive, AlertCircle, Search, Brain, FileTex
 import { ConfirmDialog } from "@/components/ui/modal";
 import { MemoryTimeline } from "./memory-timeline";
 import { ShiguangPanel } from "./shiguang-panel";
+import { MemoryUsageHint } from "./memory-usage-hint";
 import { Toggle } from "@/components/ui/form";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -47,6 +48,10 @@ const MEMORY_TOKEN_BUDGET_STEP: Record<MemoryBudgetKey, number> = {
     longTermTokenBudget: 1000,
 };
 const MANUAL_MEMORY_CONTENT_LIMIT = 3000;
+const LONG_TERM_RECALL_MODES: { value: MemoryConfig["longTermRecallMode"]; label: string }[] = [
+    { value: "all", label: "全部放入" },
+    { value: "relevant", label: "按话题挑" },
+];
 // 详情页时间线最多解析渲染的条数：全量历史可能有几万条，
 // 一次性解析+渲染会把 iOS Safari 的单页内存顶爆（灰屏杀页）
 const MEMORY_TIMELINE_ENTRY_CAP = 2000;
@@ -399,7 +404,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
 
             const result = await runCoreMemoryPipeline(selectedCharId, selectedChar?.name ?? "");
             if (result.success) {
-                showNotice(result.rebuiltCount ? `核心记忆已重建（${result.rebuiltCount}条）` : "核心记忆已重建");
+                showNotice(result.rebuiltCount === 0 ? "这段长期记忆里没有需要写进核心的内容" : result.rebuiltCount ? `核心记忆已重建（${result.rebuiltCount}条）` : "核心记忆已重建");
                 loadDetailData(selectedCharId);
                 loadCharacterList();
             } else {
@@ -678,6 +683,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                 {/* Content */}
                 <div className="memory-detail-scroll flex-1 overflow-y-auto flex flex-col gap-2 min-h-0">
                     <MemoryDetailBoundary>
+                    {!loading && <MemoryUsageHint key={selectedChar.id} characterId={selectedChar.id} />}
                     {loading ? (
                         <p className="text-center ts-14 mt-10 text-secondary">
                             加载中...
@@ -1011,6 +1017,55 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                     </div>
                 </div>
 
+                <p className="menu-group-desc mx-2">长期记忆怎么放进提示词</p>
+                <div className="menu-group">
+                    <div className="menu-item">
+                        <MemorySettingsIcon icon={Filter} color={BINDING_ACCENTS.memory} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">注入方式</span>
+                            <span className="menu-desc">
+                                {config.longTermRecallMode === "relevant"
+                                    ? "每轮只挑和眼下话题相关的几条，按发生先后排，前面标上日期；配了向量模型会一起参与挑选"
+                                    : "按「长期记忆」预算从新到旧塞满，原来的做法"}
+                            </span>
+                            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                                {LONG_TERM_RECALL_MODES.map(mode => (
+                                    <button
+                                        key={mode.value}
+                                        type="button"
+                                        className="ui-chip"
+                                        {...(config.longTermRecallMode === mode.value ? { "data-selected": "" } : {})}
+                                        onClick={() => {
+                                            const next = { ...config, longTermRecallMode: mode.value };
+                                            setConfig(next);
+                                            saveMemoryConfig(next);
+                                        }}
+                                    >
+                                        {mode.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                    {config.longTermRecallMode === "relevant" && (
+                        <MemorySettingsSliderItem
+                            icon={Search}
+                            color={BINDING_ACCENTS.embedding}
+                            label="每轮最多几条"
+                            desc="挑出来的同时不超过下面的「长期记忆」预算"
+                            value={config.longTermRecallTopK}
+                            min={1}
+                            max={20}
+                            step={1}
+                            onChange={value => {
+                                const next = { ...config, longTermRecallTopK: value };
+                                setConfig(next);
+                                saveMemoryConfig(next);
+                            }}
+                        />
+                    )}
+                </div>
+
                 {/* Token budget sliders */}
                 <ShiguangPanel />
                 <p className="menu-group-desc mx-2">控制截断量</p>
@@ -1085,7 +1140,8 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         <div className="menu-label-group">
                             <span className="menu-label">长期记忆总结提示词</span>
                             <span className="menu-desc">
-                                变量：{"{{char}}"} 角色、{"{{earliest}}"} 起始时间、{"{{latest}}"} 结束时间、{"{{events}}"} 记录集合
+                                变量：{"{{char}}"} 角色、{"{{earliest}}"} 起始时间、{"{{latest}}"} 结束时间、{"{{events}}"} 记录集合、{"{{count}}"} 本批条数
+                                {!isDefault && "。你改过这份提示词，不会自动换成新版默认；点「恢复默认」会换成新版并覆盖你改的内容"}
                             </span>
                         </div>
                         {!isDefault && (
@@ -1121,6 +1177,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                             <span className="menu-label">核心记忆总结提示词</span>
                             <span className="menu-desc">
                                 变量：{"{{char}}"} 角色、{"{{earliest}}"} 起始时间、{"{{latest}}"} 结束时间、{"{{events}}"} 长期记忆集合
+                                {!isCoreDefault && "。你改过这份提示词，不会自动换成新版默认；点「恢复默认」会换成新版并覆盖你改的内容"}
                             </span>
                         </div>
                         {!isCoreDefault && (

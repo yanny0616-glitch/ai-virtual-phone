@@ -42,7 +42,7 @@
   /* ================= 核心：生成今天 ================= */
   // 到点自动生成。一天只试一次：失败了留给用户手动按，别每分钟烧一次模型调用。
   async function maybeAutoGen(cx) {
-    if (!S.settings || !S.settings.autoGen || !cx.character || cx.day || cx.busy || !owns(cx)) return;
+    if (!S.settings || serverBrainOn() || !S.settings.autoGen || !cx.character || cx.day || cx.busy || !owns(cx)) return;
     const at = S.settings.autoGenAt || SET_DEF.autoGenAt;
     if (fmtHM(Date.now()) < at) return;
     if (cx._autoGenDay === todayStr()) return;

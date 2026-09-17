@@ -124,6 +124,50 @@ export type ThemeProfile = {
    [data-ui="toggle"]        — 开关控件
    [data-ui="progress"]      — 进度条
 
+   ── 语境属性（组件自动挂，写 CSS 时当选择器用；lib/ui-context-attrs.ts） ──
+   根容器（手机屏幕）和聊天室外层 `.session-{id}`：
+   data-time-of-day  — morning 5–10 / day 11–16 / evening 17–20 / night 21–4，每分钟校一次
+   data-hour         — 0–23 当前小时
+   data-color-scheme — light / dark，跟随系统
+   会话 CSS 里写 `:root[data-time-of-day="night"] .chat-bubble-role-user { … }`，
+   `:root` 会被改写成本会话的作用域选择器。
+
+   聊天列表项 .minimal-list-item：
+   data-unread       — 0 / 1 / few（2–9）/ many（≥10）
+   data-unread-count — 实际条数
+   data-pinned / data-muted / data-group — 0 或 1
+   data-last-type    — 最后一条的类型：text、image、voice-call、red-packet…（mediaType 的连字符写法）
+   data-last-role    — user / assistant / system
+   data-length       — short（≤8 字）/ medium（≤24 字）/ long
+   data-hour、data-time-slot — 最后一条消息的时间落在哪一档
+   变量：--item-index（第几行，从 0 起）、--item-unread（未读条数）、
+        --item-avatar-url（头像 url()，base64 头像太大不挂）
+
+   朋友圈帖子 .feed-post：
+   data-author（user/character）、data-has-img、data-img-count、data-photo-status、
+   data-liked、data-like-count、data-hour、data-time-slot
+
+   通知横幅：
+   [data-notif-kind="message"] — 新消息横幅，另有 data-group、data-session
+   [data-notif-kind="call"]    — 来电横幅，另有 data-call-type（voice/video）、data-group
+
+   ── 通知横幅版式变量（换布局，不只是换色；styles/chat.css） ──
+   新消息横幅和来电横幅都认这一套（两者默认值不同，只有写了的项才共用）。
+   --notif-layout       : row      — row / row-reverse / column（column + 大头像 = 拍立得）
+   --notif-align        : center   — 交叉轴对齐
+   --notif-justify      : space-between
+   --notif-gap          : 12px
+   --notif-top / --notif-left / --notif-right / --notif-width / --notif-margin — 位置与宽度
+   --notif-min-height   : 66px
+   --notif-padding      : 11px 12px
+   --notif-radius       : 18px
+   --notif-text-align   : left
+   --notif-info-layout / --notif-info-align / --notif-info-gap — 头像与文字那一块
+   --notif-avatar-w / --notif-avatar-h / --notif-avatar-radius — 头像尺寸（撑成大图就设 100%）
+   --notif-text-width   : auto
+   --notif-action-order / --notif-action-align — 「查看」按钮的位置
+   --notif-duration     : 6s       — 横幅停留多久（1.2–30s，新消息横幅按它自动收起）
+
    ── 用户自定义变量钩子 ──
    --user-glass-tint     : transparent  — 混入毛玻璃背景色
    --user-border-width   : 0.5px        — 毛玻璃边框宽度

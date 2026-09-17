@@ -33,8 +33,8 @@ function getInitialAnchor(): FloatingDockPosition | null {
         const stored = localStorage.getItem(ANCHOR_STORAGE_KEY);
         if (stored) {
             const parsed = JSON.parse(stored);
-            if (typeof parsed?.left === "number" && typeof parsed?.top === "number") {
-                return parsed;
+            if (Number.isFinite(parsed?.left) && Number.isFinite(parsed?.top)) {
+                return { left: parsed.left, top: parsed.top, dockSide: parsed.dockSide === "left" ? "left" : "right" };
             }
         }
     } catch {
@@ -115,15 +115,15 @@ export function setFloatingDockAnchor(pos: FloatingDockPosition | null): void {
  * 把持久化的停靠坐标夹回当前视口。坐标是以绝对像素存的，在宽屏上贴过边再到窄屏打开，
  * 球会落在屏幕外且无法再拖回来；这里按停靠边重新贴边、纵向夹在可视范围内。
  */
-export function clampFloatingDockAnchor(parentWidth: number, parentHeight: number): void {
+export function clampFloatingDockAnchor(parentWidth: number, parentHeight: number, safeTop = 72): void {
     const pos = _dockState.anchorPosition;
-    if (!pos || !(parentWidth > 0) || !(parentHeight > 0)) return;
+    if (!pos || !(parentWidth >= 86) || !(parentHeight >= safeTop + 56 + 12)) return;
     const size = 56;
     const edge = 18;
     const margin = 12;
     const side: DockSide = pos.dockSide ?? (pos.left + size / 2 < parentWidth / 2 ? "left" : "right");
     const left = side === "left" ? edge : Math.max(edge, parentWidth - size - edge);
-    const top = Math.min(Math.max(pos.top, margin), Math.max(margin, parentHeight - size - margin));
+    const top = Math.min(Math.max(pos.top, safeTop), Math.max(safeTop, parentHeight - size - margin));
     if (left === pos.left && top === pos.top && side === _dockState.dockSide) return;
     setFloatingDockAnchor({ left, top, dockSide: side });
 }

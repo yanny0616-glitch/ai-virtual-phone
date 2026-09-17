@@ -1,13 +1,14 @@
   // 发送凭据只按预约键关联，不通过聊天时间猜测。缓存仅用于展示，不回写计划或账本。
   function receiptFor(w, cx) {
     cx = cx || cur();
+    if (serverBrainOn()) return null;
     if (cx._receiptSource !== (cloudCfg() || {}).url) return null;
     const cache = cx._receipts;
     return w.wakeId && cache && cache[w.wakeId] || null;
   }
   function refreshReceipts(cx, items, force) {
     const run = async () => {
-      if (!cloudCfg()) return;
+      if (!cloudCfg() || serverBrainOn()) return;
       const source = cloudCfg().url;
       if (cx._receiptSource !== source) { cx._receipts = {}; cx._receiptSource = source; }
       const cache = cx._receipts = cx._receipts || {};

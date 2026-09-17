@@ -1,3 +1,4 @@
+import { reconcileXhsMcpServers } from "./xhs-mcp-config";
 import type {
     CompositeToolConfig,
     CompositeToolPackageConfig,
@@ -319,9 +320,12 @@ export function loadMcpServers(): McpServerConfig[] {
     if (typeof window === "undefined") return [];
     try {
         const raw = kvGet(MCP_SERVERS_KEY);
-        return raw ? JSON.parse(raw) : [];
+        const current = raw ? JSON.parse(raw) : [];
+        const next = reconcileXhsMcpServers(Array.isArray(current) ? current : [], window.location.origin);
+        if (JSON.stringify(next) !== JSON.stringify(current)) kvSet(MCP_SERVERS_KEY, JSON.stringify(next));
+        return next;
     } catch {
-        return [];
+        return reconcileXhsMcpServers([], window.location.origin);
     }
 }
 

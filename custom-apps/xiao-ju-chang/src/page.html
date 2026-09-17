@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>小剧场</title><style>{{STYLES}}</style></head>
+<body><div id="app" data-theme="magazine" data-view="stage">
+  <header class="topbar">
+    <div class="kicker"><span id="hdr-no">No. 001</span><span id="hdr-date"></span></div>
+    <h1>小剧场<small>THÉÂTRE DE POCHE</small></h1>
+  </header>
+
+  <div class="main" id="main">
+    <!-- 舞台 -->
+    <section class="view view-stage" data-view="stage">
+      <div class="lead" id="lead"></div>
+      <div class="pick" id="pick"></div>
+      <div id="result-host"></div>
+      <div class="sec-t" id="recent-title">最近</div>
+      <div class="recent" id="recent"></div>
+    </section>
+
+    <!-- 小剧场库 -->
+    <section class="view view-library" data-view="library">
+      <div class="seg" id="lib-seg">
+        <button type="button" class="on" data-lt="combo">小剧场<small id="cnt-combo"></small></button>
+        <button type="button" data-lt="prompts">提示词<small id="cnt-prompts"></small></button>
+        <button type="button" data-lt="random">随机<small id="cnt-random"></small></button>
+        <button type="button" data-lt="pre">前置<small id="cnt-pre"></small></button>
+      </div>
+      <div class="lpane on" data-lpane="combo"><div class="list" id="combo-list"></div><button class="fab" id="btn-new-combo" type="button">新建小剧场</button></div>
+      <div class="lpane" data-lpane="prompts"><div class="chips filters" id="prompt-filters"></div><div class="rows" id="prompt-list"></div><div class="row2"><button class="fab" id="btn-new-prompt" type="button">新增提示词</button><button class="fab ghost" id="btn-import-prompts" type="button">批量导入</button></div></div>
+      <div class="lpane" data-lpane="random"><div class="sec-t">随机池 · 生成时按规则抽</div><div class="rows" id="random-list"></div><div class="sec-t">随机宏 · 写在提示词里用</div><div class="rows" id="macro-list"></div><div class="row2"><button class="fab" id="btn-new-random" type="button">新增随机条目</button><button class="fab ghost" id="btn-new-macro" type="button">新增宏</button></div></div>
+      <div class="lpane" data-lpane="pre"><div class="rows" id="pre-list"></div><div class="row2"><button class="fab" id="btn-new-pre" type="button">新增前置要求</button></div><p class="small hint">默认走宿主链路：只带人设、性格、关系、世界书和你选的记忆段，前置要求排在它们后面。小剧场里可开「纯裸通道」，整段 system 由前置要求全权决定。</p></div>
+    </section>
+
+    <!-- 编辑组合 -->
+    <section class="view view-compose" data-view="compose"><div id="compose"></div></section>
+
+    <!-- 收藏 -->
+    <section class="view view-fav" data-view="fav">
+      <div class="chips filters" id="fav-filters"></div>
+      <div id="fav-list"></div>
+    </section>
+
+    <!-- 设置 -->
+    <section class="view view-settings" data-view="settings">
+      <div class="cats" id="set-cats"><button type="button" class="on" data-p="look">外观</button><button type="button" data-p="gen">生成</button><button type="button" data-p="data">数据</button></div>
+      <div class="pane on" data-pane="look" id="pane-look"></div>
+      <div class="pane" data-pane="gen" id="pane-gen"></div>
+      <div class="pane" data-pane="data" id="pane-data"></div>
+    </section>
+  </div>
+
+  <div class="actions" id="actions">
+    <button class="pri" id="btn-gen" type="button">生成一篇</button>
+    <div class="sub"><button id="btn-random" type="button">随机</button><button id="btn-ai" type="button">AI 自选</button></div>
+  </div>
+
+  <nav class="tabbar" id="tabbar">
+    <button type="button" class="on" data-v="stage" data-k="1"><span class="g">◐</span>舞台</button>
+    <button type="button" data-v="library" data-k="2"><span class="g">▤</span>小剧场</button>
+    <button type="button" data-v="fav" data-k="3"><span class="g">♡</span>收藏</button>
+    <button type="button" data-v="settings" data-k="4"><span class="g">⚙</span>设置</button>
+  </nav>
+
+  <div class="sheet-mask" id="sheet-mask"></div>
+  <div class="sheet" id="sheet"><div class="sheet-hd"><h3 id="sheet-title"></h3><button class="sheet-x" id="sheet-close" type="button" aria-label="关闭">✕</button></div><div id="sheet-content"></div></div>
+
+  <div class="fullscreen" id="fullscreen" hidden><div class="fs-bar"><button type="button" id="fs-close">‹ 退出全屏</button><span id="fs-title" class="grow"></span><button type="button" id="fs-again">再来一条</button></div><div class="fs-body" id="fs-body"></div></div>
+
+  <div id="toast"></div>
+</div>
+<script>{{SCRIPTS}}</script></body></html>

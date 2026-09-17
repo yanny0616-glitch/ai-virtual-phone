@@ -1,0 +1,2391 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>小剧场</title><style>/* ============ APP 通用骨架 ============ */
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:var(--paper,#f6f1e8)}
+#app{position:fixed;inset:0;overflow:hidden;display:flex;flex-direction:column;font-size:calc(var(--fs,12.5px) * var(--fs-scale,1));line-height:var(--lh,1.55);color:var(--ink);background:var(--paper);-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+#app *{box-sizing:border-box}
+#app button{cursor:pointer;touch-action:manipulation}
+button{font:inherit;color:inherit;background:none;border:0;padding:0}
+input,textarea,select{font:inherit;color:inherit}
+.topbar{flex:none;padding:var(--ai-phone-app-bar-top,56px) var(--ai-phone-app-bar-clear-right,96px) 0 18px;min-height:calc(var(--ai-phone-app-bar-top,56px) + 40px)}
+.topbar .kicker{display:flex;gap:10px}
+.main{flex:1;overflow-y:auto;overflow-x:hidden;padding:0 18px calc(110px + var(--ai-phone-app-safe-bottom,0px));scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.main::-webkit-scrollbar{display:none}
+.view{display:none}
+#app[data-view="stage"] .view-stage,#app[data-view="library"] .view-library,#app[data-view="fav"] .view-fav,#app[data-view="settings"] .view-settings,#app[data-view="compose"] .view-compose{display:block}
+.tabbar{position:absolute;left:0;right:0;bottom:0;z-index:20;display:flex;justify-content:space-around;align-items:center;padding:10px 12px calc(10px + var(--ai-phone-app-safe-bottom,16px))}
+.tabbar button{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10.5px;opacity:.55}
+.tabbar button.on{opacity:1}
+.tabbar .g{font-size:15px;line-height:1}
+.small{font-size:10.5px;opacity:.7}
+.row{display:flex;align-items:center;gap:8px}
+.grow{flex:1;min-width:0}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.chip b{font-weight:600;opacity:.65;margin-right:3px}
+.ava{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;flex:none}
+.ava.c1{background:linear-gradient(135deg,#4a3f8f,#8d7bff)}.ava.c2{background:linear-gradient(135deg,#8f3f5f,#ff7bb0)}.ava.c3{background:linear-gradient(135deg,#2f6f6f,#5fd0c0)}
+.lead{display:flex;align-items:center;gap:12px;padding:12px 14px;margin:8px 0 14px}
+.lead .ava{width:44px;height:44px;font-size:16px}
+.lead .nm{font-size:15px;font-weight:600;line-height:1.2;margin-bottom:3px}
+.lead .sw{font-size:11px;opacity:.6;padding:6px 0 6px 10px}
+.sec-t{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;opacity:.6;margin:16px 0 8px}
+.pick{padding:12px 14px;margin-bottom:12px}
+.pick .name{font-size:15px;font-weight:600;margin-bottom:6px}
+.actions{position:absolute;left:14px;right:14px;bottom:calc(66px + var(--ai-phone-app-safe-bottom,16px));z-index:19;display:none;gap:8px;padding:8px;background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 28px rgba(0,0,0,.14)}
+#app[data-view="stage"] .actions{display:flex}
+#app[data-view="stage"] .main{padding-bottom:calc(190px + var(--ai-phone-app-safe-bottom,0px))}
+.actions .pri{flex:1.5;min-height:42px;font-size:14px;font-weight:600;letter-spacing:.08em;white-space:nowrap}
+.actions .pri:disabled{opacity:.55}
+.actions .sub{flex:1;display:flex;gap:6px}
+.actions .sub button{flex:1;min-height:42px;font-size:12px;opacity:.85;padding:0 4px;white-space:nowrap}
+.result{padding:14px 14px 12px;margin-bottom:14px}
+.result .kind{font-size:10.5px;letter-spacing:.1em;opacity:.65}
+.result .fs{font-size:11px;line-height:1;letter-spacing:0;opacity:1;padding:4px 10px;border:1px solid var(--acc);border-radius:999px;color:var(--acc);font-weight:600;white-space:nowrap;flex:none}
+.result h2{font-size:17px;line-height:1.3;margin:6px 0 10px;font-weight:600}
+.result p{margin:0 0 9px;font-size:12.5px;line-height:1.75;text-align:justify}
+.result .meta{font-size:10.5px;opacity:.6;margin-top:8px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.ph-note{font-size:10px;opacity:.5;border:1px dashed currentColor;padding:3px 8px;margin:0 0 10px;border-radius:3px}
+.result .ops{display:flex;gap:16px;margin-top:10px;font-size:12px;font-weight:600}
+.recent .item{display:flex;align-items:baseline;gap:8px;padding:9px 0;border-bottom:1px solid var(--line)}
+.recent .item .t{font-weight:600}
+.badge{font-size:9.5px;padding:0 5px;border-radius:3px;border:1px solid var(--line);letter-spacing:.06em}
+.seg{display:flex;gap:2px;margin:8px 0 14px;overflow-x:auto;scrollbar-width:none}
+.seg button{white-space:nowrap;padding:5px 10px;font-size:12px;opacity:.6}
+.seg button.on{opacity:1;font-weight:600}
+.seg small{font-size:10px;opacity:.6;margin-left:2px}
+.card{padding:12px 14px;margin-bottom:10px}
+.card .t{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
+.card .t .badge{font-weight:400}
+.card .chips{margin:7px 0 6px}
+.card .foot{display:flex;justify-content:space-between;font-size:10.5px;opacity:.6}
+.fab{display:block;width:100%;min-height:40px;margin-top:6px;font-weight:600;font-size:12.5px}
+.filters{margin:4px 0 12px}
+.fav-item{padding:12px 14px;margin-bottom:10px}
+.fav-item .t{font-size:14px;font-weight:600}
+.fav-item .who{font-size:10.5px;opacity:.65;margin-top:2px}
+.info{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:11px;margin:10px 0 8px;padding-top:8px;border-top:1px dashed var(--line)}
+.info dt{opacity:.55}.info dd{margin:0}
+.fav-item .ops{display:flex;gap:14px;font-size:12px;font-weight:600;margin-top:6px}
+.cats{display:flex;gap:2px;margin:6px 0 14px}
+.cats button{flex:1;padding:6px 0;font-size:12px;opacity:.55;white-space:nowrap}
+.cats button.on{opacity:1;font-weight:600}
+.pane{display:none}.pane.on{display:block}
+.set{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.set .l{flex:1}.set .l b{display:block;font-weight:500;font-size:12.5px}.set .l span{font-size:10.5px;opacity:.6}
+.tog{width:34px;height:20px;border-radius:999px;background:var(--line);position:relative;flex:none}
+.tog::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff}
+.tog.on{background:var(--acc)}.tog.on::after{left:17px}
+.mini{display:flex;gap:1px;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.mini button{padding:3px 9px;font-size:11px;opacity:.6}.mini button.on{opacity:1;background:var(--line);font-weight:600}
+.themes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 6px}
+.themes .th{padding:8px;border:1px solid var(--line);border-radius:8px;text-align:left}
+.themes .th.on{outline:2px solid var(--acc);outline-offset:-1px}
+.themes .th .pv{height:58px;border-radius:5px;margin-bottom:6px;position:relative;overflow:hidden}
+.themes .th b{font-size:12px;display:block}.themes .th span{font-size:10px;opacity:.6}
+.pv-mag{background:#f6f1e8}.pv-mag::before{content:"";position:absolute;left:8px;right:8px;top:10px;height:9px;background:#1c1a17}.pv-mag::after{content:"";position:absolute;left:8px;right:40px;top:26px;height:1px;background:#8b2e2e;box-shadow:0 8px 0 #c9c1b4,0 14px 0 #c9c1b4,0 20px 0 #c9c1b4}
+.pv-stk{background:#ece6da}.pv-stk::before{content:"";position:absolute;left:8px;top:8px;width:34px;height:30px;background:#ffe37a;transform:rotate(-4deg);box-shadow:44px 6px 0 #ffb4c8,22px 26px 0 #b8ecd0}
+.pv-trm{background:#0b0e0c}.pv-trm::before{content:"> _";position:absolute;left:8px;top:6px;color:#7ee787;font:10px monospace}.pv-trm::after{content:"";position:absolute;left:8px;right:8px;top:24px;height:1px;background:#264a34;box-shadow:0 6px 0 #264a34,0 12px 0 #264a34,0 18px 0 #264a34}
+.pv-scr{background:#fbfbf9}.pv-scr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:8px;border-right:1px solid #ddd}.pv-scr::after{content:"";position:absolute;left:34px;right:34px;top:14px;height:5px;background:#333;box-shadow:-14px 12px 0 #999,-14px 20px 0 #999,10px 30px 0 #c0392b}
+.danger{color:#b3261e}
+.lpane{display:none}.lpane.on{display:block}
+.rows{display:flex;flex-direction:column}
+.entry{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.entry .et{font-size:13px;font-weight:600;line-height:1.3}
+.entry .ex{font-size:11px;opacity:.65;margin-top:3px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.entry .tags{display:flex;flex-direction:column;gap:3px;align-items:flex-end;flex:none}
+.tag{font-size:9.5px;padding:0 5px;border:1px solid var(--line);border-radius:3px;letter-spacing:.04em;white-space:nowrap}
+.entry.sel .et::before{content:"● ";color:var(--acc)}
+.entry.pick2{align-items:center;padding:8px 0}
+.entry .hd{opacity:.35;font-size:12px;letter-spacing:-2px}
+.row2{display:flex;gap:8px}
+.fab.ghost{opacity:.7}
+.hint{margin:12px 0 0;line-height:1.6}
+.chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.chip.add{opacity:.6}
+.cbar{display:flex;align-items:center;gap:8px;padding:2px 0 10px;font-size:12px}
+.field{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.field label{font-size:11px;opacity:.6;width:32px;flex:none}
+.field .inp{font-size:14px;font-weight:600}
+.grp h3{font-size:11px;letter-spacing:.12em;opacity:.7;margin:16px 0 2px;font-weight:600}
+.grp h3 .small{letter-spacing:0;font-weight:400;margin-left:6px}
+.set .chips{justify-content:flex-end}
+
+/* ============ 主题一 · 杂志 ============ */
+#app[data-theme="magazine"]{--paper:#f6f1e8;--ink:#1c1a17;--acc:#8b2e2e;--line:#d9d1c3;--fs:12.5px;font-family:-apple-system,"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+[data-theme="magazine"] .serif,[data-theme="magazine"] .topbar h1,[data-theme="magazine"] .result h2,[data-theme="magazine"] .pick .name,[data-theme="magazine"] .card .t,[data-theme="magazine"] .fav-item .t{font-family:"Songti SC","Noto Serif CJK SC","Noto Serif SC",Georgia,serif}
+[data-theme="magazine"] .topbar{padding-right:18px;padding-top:50px;border-bottom:2px solid var(--ink);margin:0 18px;padding-left:0;padding-bottom:8px}
+[data-theme="magazine"] .topbar .kicker{font-size:9.5px;letter-spacing:.3em;text-transform:uppercase;display:flex;justify-content:space-between;padding-right:86px}
+[data-theme="magazine"] .topbar h1{font-size:30px;line-height:1;margin:6px 0 0;font-weight:700;letter-spacing:.02em}
+[data-theme="magazine"] .topbar h1 small{font-size:10.5px;font-family:inherit;font-weight:400;letter-spacing:.2em;margin-left:10px;vertical-align:middle;opacity:.7}
+[data-theme="magazine"] .main{padding-top:6px}
+[data-theme="magazine"] .pick{padding:0 0 12px;border-bottom:1px solid var(--line)}
+[data-theme="magazine"] .pick .name{font-size:19px}
+[data-theme="magazine"] .pick .name::before{content:"本期 · ";font-size:10px;letter-spacing:.2em;font-family:-apple-system,"PingFang SC",sans-serif;opacity:.55;vertical-align:middle}
+[data-theme="magazine"] .chip{border-radius:0;border:0;padding:0;font-size:10.5px}
+[data-theme="magazine"] .chip+.chip::before{content:"·";margin:0 6px 0 0;opacity:.5}
+[data-theme="magazine"] .result{padding:4px 0 0}
+[data-theme="magazine"] .result .kind{color:var(--acc);font-weight:600}
+[data-theme="magazine"] .result .fs{border-radius:0;border-width:1px}
+[data-theme="magazine"] .result h2{font-size:24px;line-height:1.2;margin:4px 0 12px;font-weight:700}
+[data-theme="magazine"] .result p:first-of-type::first-letter{float:left;font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:40px;line-height:.85;padding:5px 6px 0 0;color:var(--acc)}
+[data-theme="magazine"] .result .meta{border-top:1px solid var(--ink);padding-top:6px;display:flex;justify-content:space-between}
+[data-theme="magazine"] .result .ops{gap:0}
+[data-theme="magazine"] .result .ops button{font-weight:500;letter-spacing:.08em;text-decoration:underline;text-underline-offset:3px;margin-right:16px}
+[data-theme="magazine"] .sec-t{font-weight:700;color:var(--ink);opacity:1;border-top:2px solid var(--ink);padding-top:6px}
+[data-theme="magazine"] .recent .item .t{font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:13.5px}
+[data-theme="magazine"] .recent .item .small{margin-left:auto;font-variant-numeric:tabular-nums}
+[data-theme="magazine"] .badge{border:0;padding:0;color:var(--acc)}
+[data-theme="magazine"] .tabbar{background:var(--paper);border-top:1px solid var(--ink);padding-top:8px}
+[data-theme="magazine"] .tabbar .g{display:none}
+[data-theme="magazine"] .tabbar button{font-size:11px;letter-spacing:.24em;font-weight:500}
+[data-theme="magazine"] .tabbar button.on::before{content:"";display:block;width:5px;height:5px;background:var(--acc);margin-bottom:3px}
+[data-theme="magazine"] .tabbar button::before{content:"";display:block;width:5px;height:5px;margin-bottom:3px}
+[data-theme="magazine"] .seg{border-bottom:1px solid var(--ink);gap:0;margin-top:0}
+[data-theme="magazine"] .seg button{padding:6px 12px 6px 0;margin-right:10px;letter-spacing:.06em;border-bottom:2px solid transparent;margin-bottom:-1px}
+[data-theme="magazine"] .seg button.on{border-bottom-color:var(--acc)}
+[data-theme="magazine"] .card{padding:12px 0;border-bottom:1px solid var(--line);margin:0;display:grid;grid-template-columns:28px 1fr;column-gap:10px}
+[data-theme="magazine"] .card::before{content:counter(mag);counter-increment:mag;font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:22px;line-height:1;color:var(--acc);grid-row:span 3;padding-top:2px}
+[data-theme="magazine"] .view-library{counter-reset:mag}
+[data-theme="magazine"] .card .t{font-size:16px}
+[data-theme="magazine"] .fab{border:1px solid var(--ink);margin-top:16px;letter-spacing:.2em;font-weight:500}
+[data-theme="magazine"] .fav-item{padding:12px 0;border-bottom:1px solid var(--line);margin:0}
+[data-theme="magazine"] .fav-item .t{font-size:17px}
+[data-theme="magazine"] .fav-item .ops button{text-decoration:underline;text-underline-offset:3px;font-weight:500}
+[data-theme="magazine"] .cats{border-bottom:2px solid var(--ink);gap:0;margin-top:0}
+[data-theme="magazine"] .cats button{letter-spacing:.2em;font-size:11.5px;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-2px}
+[data-theme="magazine"] .cats button.on{border-bottom-color:var(--acc)}
+[data-theme="magazine"] .pane h3,[data-theme="magazine"] .grp h3{font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:12px;letter-spacing:.2em;margin:14px 0 2px;opacity:.7;font-weight:600}
+[data-theme="magazine"] .tog::after{background:var(--paper)}
+[data-theme="magazine"] .themes .th{border-radius:0}
+
+/* ============ 主题二 · 便签墙 ============ */
+#app[data-theme="sticky"]{--paper:#ebe5d9;--ink:#2b2622;--acc:#e0572f;--line:rgba(43,38,34,.14);--fs:12.5px;background:radial-gradient(circle at 20% 10%,#f3eee4,transparent 40%),radial-gradient(circle at 80% 90%,#e2dacb,transparent 45%),#ebe5d9;font-family:-apple-system,"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;font-weight:500}
+[data-theme="sticky"] .topbar{padding-top:58px;min-height:92px}
+[data-theme="sticky"] .topbar .kicker{display:none}
+[data-theme="sticky"] .topbar h1{display:inline-block;font-size:18px;font-weight:800;margin:0;padding:4px 14px;background:#fff8c2;transform:rotate(-2deg);box-shadow:0 2px 0 rgba(0,0,0,.06);position:relative}
+[data-theme="sticky"] .topbar h1::before{content:"";position:absolute;left:50%;top:-8px;width:44px;height:14px;margin-left:-22px;background:rgba(255,255,255,.55);transform:rotate(3deg);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+[data-theme="sticky"] .topbar h1 small{display:none}
+[data-theme="sticky"] .main{padding-top:4px}
+[data-theme="sticky"] .pick{background:#ffe37a;box-shadow:0 5px 12px rgba(0,0,0,.12);transform:rotate(.8deg);position:relative;margin:14px 4px 16px}
+[data-theme="sticky"] .pick::before{content:"";position:absolute;left:50%;top:-9px;width:60px;height:16px;margin-left:-30px;background:rgba(255,255,255,.5);transform:rotate(-2deg)}
+[data-theme="sticky"] .pick .name{font-size:16px;font-weight:800}
+[data-theme="sticky"] .chip{background:rgba(255,255,255,.55);border:0;font-weight:500}
+[data-theme="sticky"] .chip.on{background:var(--ink);color:#fff}
+[data-theme="sticky"] .result{background:#fff;box-shadow:0 6px 16px rgba(0,0,0,.12);transform:rotate(-.6deg);margin:6px 2px 18px;}
+[data-theme="sticky"] .result .kind{display:flex;align-items:center;gap:8px;background:none;padding:0;font-weight:700;opacity:1}
+[data-theme="sticky"] .result .kind .grow{flex:0 1 auto;background:#b8ecd0;padding:0 6px;border-radius:3px}
+[data-theme="sticky"] .result .fs{background:#ffb4c8;border-color:transparent;color:#2b2118}
+[data-theme="sticky"] .result h2{font-size:17px;font-weight:800;margin:6px 0 8px}
+[data-theme="sticky"] .result p{margin:0 0 8px}
+[data-theme="sticky"] .result .ops button{background:#ffb4c8;border-radius:999px;padding:3px 11px;font-size:11.5px}
+[data-theme="sticky"] .result .ops button:nth-child(2){background:#b8ecd0}
+[data-theme="sticky"] .result .ops button:nth-child(3){background:#bfe3ff}
+[data-theme="sticky"] .sec-t{font-weight:800;letter-spacing:.04em;text-transform:none;font-size:11.5px}
+[data-theme="sticky"] .recent{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+[data-theme="sticky"] .recent .item{flex-direction:column;align-items:flex-start;gap:2px;padding:10px 10px;background:#fff;border:0;box-shadow:0 2px 6px rgba(0,0,0,.08);transform:rotate(-1deg)}
+[data-theme="sticky"] .recent .item:nth-child(2){transform:rotate(1.2deg);background:#fff8c2}
+[data-theme="sticky"] .recent .item:nth-child(3){transform:rotate(.5deg);background:#e6f0ff}
+[data-theme="sticky"] .badge{border:0;background:rgba(43,38,34,.08)}
+[data-theme="sticky"] .tabbar{left:22px;right:22px;bottom:calc(14px + var(--ai-phone-app-safe-bottom,8px));padding-bottom:8px;background:#2b2622;color:#fff;border-radius:999px;padding:8px 14px;box-shadow:0 10px 24px rgba(0,0,0,.25)}
+[data-theme="sticky"] .tabbar button{opacity:.55}
+[data-theme="sticky"] .tabbar button.on{opacity:1;background:var(--acc);border-radius:999px;padding:3px 12px}
+[data-theme="sticky"] .seg{gap:6px}
+[data-theme="sticky"] .seg button{background:#fff;border-radius:999px;box-shadow:0 1px 0 rgba(0,0,0,.1);opacity:.8}
+[data-theme="sticky"] .seg button.on{background:#2b2622;color:#fff;opacity:1}
+[data-theme="sticky"] .view-library .list{display:grid;grid-template-columns:1fr 1fr;gap:12px 10px}
+[data-theme="sticky"] .card{background:#fff8c2;box-shadow:0 4px 10px rgba(0,0,0,.12);margin:0;transform:rotate(-1.2deg);position:relative;min-height:150px}
+[data-theme="sticky"] .card:nth-child(2){background:#ffd9e3;transform:rotate(1.4deg)}
+[data-theme="sticky"] .card:nth-child(3){background:#cdeedb;transform:rotate(.7deg)}
+[data-theme="sticky"] .card:nth-child(4){background:#d6e7ff;transform:rotate(-.9deg)}
+[data-theme="sticky"] .card::before{content:"";position:absolute;left:50%;top:-7px;width:40px;height:12px;margin-left:-20px;background:rgba(255,255,255,.55);transform:rotate(-3deg)}
+[data-theme="sticky"] .card .t{font-size:13.5px;font-weight:800;flex-wrap:wrap}
+[data-theme="sticky"] .card .chips{flex-direction:column;gap:2px}
+[data-theme="sticky"] .card .chip{background:none;padding:0;font-size:10.5px}
+[data-theme="sticky"] .card .foot{flex-direction:column;gap:0;margin-top:4px}
+[data-theme="sticky"] .fab{border-radius:999px;background:var(--acc);color:#fff;margin-top:16px;box-shadow:0 3px 0 rgba(0,0,0,.15)}
+[data-theme="sticky"] .fav-item{background:#fff;box-shadow:0 4px 10px rgba(0,0,0,.1);transform:rotate(-.5deg);margin-bottom:14px}
+[data-theme="sticky"] .fav-item:nth-child(3){transform:rotate(.8deg)}
+[data-theme="sticky"] .fav-item .ops button{background:#ffe37a;border-radius:999px;padding:3px 11px;font-size:11.5px}
+[data-theme="sticky"] .cats{gap:8px}
+[data-theme="sticky"] .cats button{background:#fff;border-radius:12px;box-shadow:0 2px 0 rgba(0,0,0,.08);opacity:.8;transform:rotate(-1deg)}
+[data-theme="sticky"] .cats button:nth-child(2){transform:rotate(1deg)}
+[data-theme="sticky"] .cats button.on{background:#ffe37a;opacity:1}
+[data-theme="sticky"] .pane .grp,[data-theme="sticky"] .view-compose .grp{background:#fff;padding:4px 14px;margin:12px 0;box-shadow:0 3px 8px rgba(0,0,0,.08);transform:rotate(-.3deg)}
+[data-theme="sticky"] .pane .grp:nth-child(even),[data-theme="sticky"] .view-compose .grp:nth-child(even){transform:rotate(.4deg)}
+[data-theme="sticky"] .pane h3,[data-theme="sticky"] .grp h3{font-size:11.5px;font-weight:800;margin:10px 0 0}
+[data-theme="sticky"] .tog{background:rgba(43,38,34,.15)}
+[data-theme="sticky"] .themes .th{background:#fff;border:0;box-shadow:0 3px 8px rgba(0,0,0,.08)}
+
+/* ============ 主题三 · 终端 ============ */
+#app[data-theme="terminal"]{--paper:#0b0e0c;--ink:#cfe7d4;--acc:#7ee787;--amb:#f2c94c;--line:#213528;--fs:12px;font-family:ui-monospace,Menlo,Consolas,"DejaVu Sans Mono","Noto Sans Mono CJK SC",monospace;font-weight:400}
+#app[data-theme="terminal"]::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(transparent 0 2px,rgba(0,0,0,.18) 2px 3px);mix-blend-mode:multiply}
+[data-theme="terminal"] .topbar{padding:52px 96px 0 14px;min-height:88px}
+[data-theme="terminal"] .topbar .kicker{font-size:10px;color:var(--acc);opacity:.8;letter-spacing:0;text-transform:none;display:flex;gap:10px}
+[data-theme="terminal"] .topbar .kicker span:last-child{display:none}
+[data-theme="terminal"] .topbar h1{font-size:13px;font-weight:400;margin:6px 0 0;color:var(--amb)}
+[data-theme="terminal"] .topbar h1::before{content:"┌─ "}
+[data-theme="terminal"] .topbar h1::after{content:" ─────────────────────";letter-spacing:-.02em;opacity:.55}
+[data-theme="terminal"] .topbar h1 small{display:none}
+[data-theme="terminal"] .main{padding:0 14px 110px}
+#app[data-theme="terminal"][data-view="stage"] .main{padding-bottom:calc(190px + var(--ai-phone-app-safe-bottom,0px))}
+[data-theme="terminal"] .sec-t{color:var(--amb);opacity:1;letter-spacing:0;text-transform:none;font-size:11px}
+[data-theme="terminal"] .sec-t::before{content:"## "}
+[data-theme="terminal"] .pick{border:1px solid var(--line);padding:10px 12px;position:relative;margin-top:6px}
+[data-theme="terminal"] .pick::before{content:"[ 已选 ]";position:absolute;top:-8px;left:10px;background:var(--paper);padding:0 4px;font-size:10px;color:var(--acc)}
+[data-theme="terminal"] .pick .name{font-size:14px;font-weight:400;color:#fff}
+[data-theme="terminal"] .pick .name::before{content:"$ ";color:var(--acc)}
+[data-theme="terminal"] .chip{border:0;padding:0;font-size:11px;opacity:.75}
+[data-theme="terminal"] .chip b{color:var(--acc);opacity:1;font-weight:400}
+[data-theme="terminal"] .chip b::after{content:"="}
+[data-theme="terminal"] .chips{gap:2px 12px}
+[data-theme="terminal"] .result{border:1px solid var(--line);position:relative;margin-top:4px;padding:14px 12px 10px}
+[data-theme="terminal"] .result::before{content:"stdout · 23:41:07 · 812 chars";position:absolute;top:-8px;left:10px;background:var(--paper);padding:0 4px;font-size:10px;color:var(--amb)}
+[data-theme="terminal"] .result .kind{color:var(--acc);opacity:1;letter-spacing:0}
+[data-theme="terminal"] .result .fs{border-radius:0;padding:2px 8px}
+[data-theme="terminal"] .result .fs::before{content:"[ "}
+[data-theme="terminal"] .result .fs::after{content:" ]"}
+[data-theme="terminal"] .result .kind::before{content:"# "}
+[data-theme="terminal"] .result h2{font-size:15px;font-weight:400;color:#fff;margin:4px 0 8px}
+[data-theme="terminal"] .result h2::before{content:"== "}
+[data-theme="terminal"] .result h2::after{content:" =="}
+[data-theme="terminal"] .result p{font-size:12px;line-height:1.7;text-align:left;opacity:.9}
+[data-theme="terminal"] .result p::before{content:"│ ";color:var(--line)}
+[data-theme="terminal"] .result .meta{opacity:.5;font-size:10.5px}
+[data-theme="terminal"] .result .ops{gap:12px;font-weight:400;font-size:11.5px}
+[data-theme="terminal"] .result .ops button{color:var(--acc)}
+[data-theme="terminal"] .result .ops button::before{content:"[r] "}
+[data-theme="terminal"] .result .ops button:nth-child(2)::before{content:"[f] "}
+[data-theme="terminal"] .result .ops button:nth-child(3)::before{content:"[c] "}
+[data-theme="terminal"] .recent .item{border-bottom:1px dashed var(--line);font-size:11.5px;padding:6px 0}
+[data-theme="terminal"] .recent .item::before{content:"·";color:var(--acc)}
+[data-theme="terminal"] .badge{border:0;padding:0;color:var(--amb)}
+[data-theme="terminal"] .badge::before{content:"<"}.badge::after{content:""}
+[data-theme="terminal"] .badge::after{content:">"}
+[data-theme="terminal"] .tabbar{background:#070907;border-top:1px solid var(--line);padding:9px 8px calc(10px + var(--ai-phone-app-safe-bottom,16px));justify-content:flex-start;gap:6px}
+[data-theme="terminal"] .tabbar .g{display:none}
+[data-theme="terminal"] .tabbar button{flex-direction:row;gap:5px;font-size:11px;opacity:.55;padding:3px 8px}
+[data-theme="terminal"] .tabbar button::before{content:"F" attr(data-k);color:var(--amb);border:1px solid var(--line);padding:0 3px;font-size:9.5px}
+[data-theme="terminal"] .tabbar button.on{opacity:1;color:var(--acc);background:rgba(126,231,135,.08)}
+[data-theme="terminal"] .seg{gap:0;border:1px solid var(--line)}
+[data-theme="terminal"] .seg button{border-right:1px solid var(--line);font-size:11.5px;padding:5px 9px}
+[data-theme="terminal"] .seg button:last-child{border-right:0}
+[data-theme="terminal"] .seg button.on{background:var(--acc);color:#04120a;font-weight:400;opacity:1}
+[data-theme="terminal"] .card{border:1px solid var(--line);position:relative;margin-bottom:14px;padding:12px}
+[data-theme="terminal"] .card::before{content:"#" counter(trm,decimal-leading-zero);counter-increment:trm;position:absolute;top:-8px;left:10px;background:var(--paper);padding:0 4px;font-size:10px;color:var(--amb)}
+[data-theme="terminal"] .view-library{counter-reset:trm}
+[data-theme="terminal"] .card .t{font-weight:400;color:#fff;font-size:13.5px}
+[data-theme="terminal"] .card .foot{opacity:.5}
+[data-theme="terminal"] .fab{border:1px dashed var(--acc);color:var(--acc);font-weight:400}
+[data-theme="terminal"] .fab::before{content:"+ "}
+[data-theme="terminal"] .fav-item{border-left:2px solid var(--line);padding:6px 12px;margin-bottom:14px}
+[data-theme="terminal"] .fav-item.open{border-left-color:var(--acc)}
+[data-theme="terminal"] .fav-item .t{font-weight:400;color:#fff}
+[data-theme="terminal"] .info{border-top:0;font-size:11px;gap:1px 10px}
+[data-theme="terminal"] .info dt{color:var(--amb);opacity:.9}
+[data-theme="terminal"] .info dt::after{content:":"}
+[data-theme="terminal"] .fav-item .ops button{color:var(--acc);font-weight:400;font-size:11.5px}
+[data-theme="terminal"] .fav-item .ops button::before{content:"> "}
+[data-theme="terminal"] .cats{gap:0;border-bottom:1px solid var(--line)}
+[data-theme="terminal"] .cats button{font-size:11.5px}
+[data-theme="terminal"] .cats button.on{color:var(--acc);font-weight:400;box-shadow:inset 0 -2px 0 var(--acc)}
+[data-theme="terminal"] .pane h3,[data-theme="terminal"] .grp h3{font-size:11px;color:var(--amb);font-weight:400;margin:14px 0 0}
+[data-theme="terminal"] .pane h3::before,[data-theme="terminal"] .grp h3::before{content:"[";opacity:.5}
+[data-theme="terminal"] .pane h3::after,[data-theme="terminal"] .grp h3::after{content:"]";opacity:.5}
+[data-theme="terminal"] .set{border-bottom:1px dashed var(--line)}
+[data-theme="terminal"] .tog{width:36px;height:18px;border-radius:0;background:transparent;border:1px solid var(--line)}
+[data-theme="terminal"] .tog::after{width:12px;height:10px;top:3px;left:3px;border-radius:0;background:var(--line)}
+[data-theme="terminal"] .tog.on{background:transparent;border-color:var(--acc)}
+[data-theme="terminal"] .tog.on::after{left:19px;background:var(--acc)}
+[data-theme="terminal"] .mini{border-radius:0}
+[data-theme="terminal"] .mini button.on{background:var(--acc);color:#04120a}
+[data-theme="terminal"] .themes .th{border-radius:0;background:#0f1411}
+[data-theme="terminal"] .themes .th.on{outline-color:var(--acc)}
+[data-theme="terminal"] .danger{color:#ff7b72}
+
+/* ============ 主题四 · 剧本 ============ */
+#app[data-theme="script"]{--paper:#fbfbf9;--ink:#141414;--acc:#c0392b;--line:#dcdcd6;--fs:12.5px;font-family:"Courier Prime","Courier New",Courier,"Liberation Mono","Noto Sans Mono CJK SC",monospace}
+#app[data-theme="script"]::before{content:"";position:absolute;left:0;top:0;bottom:0;width:26px;border-right:1px solid #e3e3dd;background:radial-gradient(circle at 13px 200px,#d6d6d0 5px,transparent 6px),radial-gradient(circle at 13px 420px,#d6d6d0 5px,transparent 6px),radial-gradient(circle at 13px 640px,#d6d6d0 5px,transparent 6px)}
+[data-theme="script"] .topbar{padding:54px 100px 0 40px;min-height:96px;text-align:left}
+[data-theme="script"] .topbar .kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;opacity:.55}
+[data-theme="script"] .topbar .kicker span:last-child::before{content:"— "}
+[data-theme="script"] .topbar h1{font-size:15px;font-weight:700;margin:6px 0 0;letter-spacing:.35em;text-transform:uppercase}
+[data-theme="script"] .topbar h1 small{display:block;font-size:10px;letter-spacing:.1em;font-weight:400;margin:2px 0 0;opacity:.6}
+[data-theme="script"] .main{padding:0 18px 110px 40px}
+#app[data-theme="script"][data-view="stage"] .main{padding-bottom:calc(190px + var(--ai-phone-app-safe-bottom,0px))}
+[data-theme="script"] .sec-t{text-align:center;letter-spacing:.3em;font-weight:700;opacity:.8;color:var(--ink)}
+[data-theme="script"] .pick{padding:10px 0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);text-align:center}
+[data-theme="script"] .pick .name{font-size:14px;letter-spacing:.2em;font-weight:700}
+[data-theme="script"] .pick .name::before{content:"第 3 场 · ";font-weight:400;opacity:.6}
+[data-theme="script"] .pick .chips{justify-content:center}
+[data-theme="script"] .chip{border:0;padding:0;font-size:10.5px;opacity:.7}
+[data-theme="script"] .chip+.chip::before{content:"/";margin-right:5px;opacity:.5}
+[data-theme="script"] .result{padding:0;margin-top:8px;position:relative}
+[data-theme="script"] .result .kind{display:flex;text-align:right;color:var(--acc);font-style:italic;letter-spacing:0;opacity:1;font-size:11px}
+[data-theme="script"] .result .kind::before{content:"✎ "}
+[data-theme="script"] .result .fs{border-radius:0;font-style:normal;letter-spacing:.06em}
+[data-theme="script"] .result h2{text-align:center;font-size:13px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;margin:6px 0 14px}
+[data-theme="script"] .result h2::before{content:"内景 · 便利店 · 夜";display:block;font-size:11px;letter-spacing:.15em;margin-bottom:4px;opacity:.7}
+[data-theme="script"] .result p{text-align:left;line-height:1.75;font-size:12.5px}
+[data-theme="script"] .result p.dlg{padding:0 34px;margin-top:0}
+[data-theme="script"] .result p.dlg::before{content:attr(data-who);display:block;text-align:center;letter-spacing:.3em;font-weight:700;margin-bottom:1px}
+[data-theme="script"] .result p.par{padding:0 46px;font-size:11px;opacity:.7;text-align:center;margin:-6px 0 8px}
+[data-theme="script"] .result .meta{text-align:center;font-size:10px;letter-spacing:.1em;border-top:1px solid var(--line);padding-top:6px}
+[data-theme="script"] .result .ops{justify-content:center;gap:24px;font-weight:400;letter-spacing:.1em}
+[data-theme="script"] .result .ops button{border-bottom:1px solid var(--ink)}
+[data-theme="script"] .recent .item .t{letter-spacing:.05em}
+[data-theme="script"] .recent .item .small{margin-left:auto}
+[data-theme="script"] .badge{border-radius:0;border-color:var(--ink);font-size:9px}
+[data-theme="script"] .tabbar{background:var(--paper);padding:8px 18px calc(10px + var(--ai-phone-app-safe-bottom,16px)) 40px;justify-content:space-between;border-top:1px solid var(--line)}
+[data-theme="script"] .tabbar .g{display:none}
+[data-theme="script"] .tabbar button{font-size:11px;letter-spacing:.3em;opacity:.45}
+[data-theme="script"] .tabbar button.on{opacity:1;font-weight:700}
+[data-theme="script"] .tabbar button.on::after{content:"";display:block;width:100%;height:2px;background:var(--acc);margin-top:2px}
+[data-theme="script"] .seg{gap:0;justify-content:space-between}
+[data-theme="script"] .seg button{letter-spacing:.12em;padding:6px 4px;font-size:11.5px}
+[data-theme="script"] .seg button.on{border-bottom:2px solid var(--acc)}
+[data-theme="script"] .card{padding:10px 0;border-bottom:1px solid var(--line);margin:0;display:grid;grid-template-columns:44px 1fr;column-gap:8px}
+[data-theme="script"] .card::before{content:"第 " counter(scr) " 场";counter-increment:scr;font-size:10px;letter-spacing:.1em;opacity:.55;padding-top:3px;grid-row:span 3;white-space:nowrap}
+[data-theme="script"] .view-library{counter-reset:scr}
+[data-theme="script"] .card .t{letter-spacing:.1em;font-size:13.5px}
+[data-theme="script"] .card .chip b{display:none}
+[data-theme="script"] .fab{border:1px dashed var(--ink);letter-spacing:.3em;font-weight:400;margin-top:16px}
+[data-theme="script"] .fav-item{padding:10px 0;border-bottom:1px solid var(--line);margin:0;position:relative}
+[data-theme="script"] .fav-item.open::before{content:"★";position:absolute;left:-22px;top:10px;color:var(--acc);font-size:11px}
+[data-theme="script"] .fav-item .t{letter-spacing:.12em;font-size:13.5px}
+[data-theme="script"] .info dt{letter-spacing:.1em}
+[data-theme="script"] .fav-item .ops button{border-bottom:1px solid var(--ink);font-weight:400;letter-spacing:.1em}
+[data-theme="script"] .cats{justify-content:center;gap:24px;border-bottom:1px solid var(--ink);margin-top:0}
+[data-theme="script"] .cats button{flex:0 0 auto;letter-spacing:.3em;padding:6px 2px;font-size:12px}
+[data-theme="script"] .cats button.on{border-bottom:2px solid var(--acc);margin-bottom:-1px}
+[data-theme="script"] .pane h3,[data-theme="script"] .grp h3{text-align:center;font-size:11px;letter-spacing:.35em;margin:16px 0 0;font-weight:700;opacity:.75}
+[data-theme="script"] .tog{border-radius:0;background:#fff;border:1px solid var(--ink)}
+[data-theme="script"] .tog::after{border-radius:0;background:var(--ink);top:2px;left:2px;width:13px;height:13px}
+[data-theme="script"] .tog.on{background:#fff}.tog.on::after{}
+[data-theme="script"] .tog.on::after{left:17px;background:var(--acc)}
+[data-theme="script"] .mini{border-radius:0;border-color:var(--ink)}
+[data-theme="script"] .mini button.on{background:var(--ink);color:#fff}
+[data-theme="script"] .themes .th{border-radius:0;border-color:var(--ink)}
+
+/* ---- 主演卡 + 按钮（按主题） ---- */
+[data-theme="magazine"] .lead{padding:12px 0;border-bottom:1px solid var(--line)}
+[data-theme="magazine"] .lead .ava{border-radius:2px}
+[data-theme="magazine"] .lead .nm{font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:18px}
+[data-theme="magazine"] .lead .sw{letter-spacing:.1em;text-decoration:underline;text-underline-offset:3px}
+[data-theme="magazine"] .actions{border-radius:0;border:1px solid var(--ink);box-shadow:0 8px 20px rgba(28,26,23,.12)}
+[data-theme="magazine"] .actions .pri{background:var(--ink);color:var(--paper);letter-spacing:.3em}
+[data-theme="magazine"] .actions .sub button{border:1px solid var(--ink);letter-spacing:.1em;font-weight:500}
+[data-theme="sticky"] .lead{background:#fff;box-shadow:0 4px 10px rgba(0,0,0,.1);transform:rotate(-.6deg);margin:10px 2px 16px}
+[data-theme="sticky"] .lead .ava{border-radius:8px}
+[data-theme="sticky"] .lead .nm{font-weight:800}
+[data-theme="sticky"] .lead .sw{background:#ffe37a;border-radius:999px;padding:4px 10px;opacity:1;font-weight:700}
+[data-theme="sticky"] .actions{background:transparent;border:0;box-shadow:none;padding:0;left:22px;right:22px;bottom:calc(86px + var(--ai-phone-app-safe-bottom,8px))}
+[data-theme="sticky"] .actions .pri{background:var(--acc);color:#fff;border-radius:999px;box-shadow:0 3px 0 rgba(0,0,0,.15),0 8px 18px rgba(0,0,0,.14)}
+[data-theme="sticky"] .actions .sub button{background:#fff;border-radius:999px;box-shadow:0 2px 0 rgba(0,0,0,.1);font-weight:700}
+[data-theme="terminal"] .lead{border:1px solid var(--line);padding:10px 12px;position:relative;margin-top:4px}
+[data-theme="terminal"] .lead::before{content:"[ 主演 ]";position:absolute;top:-8px;left:10px;background:var(--paper);padding:0 4px;font-size:10px;color:var(--acc)}
+[data-theme="terminal"] .lead .ava{border-radius:0;width:38px;height:38px}
+[data-theme="terminal"] .lead .nm{color:#fff;font-weight:400}
+[data-theme="terminal"] .lead .sw{color:var(--acc);opacity:1}
+[data-theme="terminal"] .actions{border-radius:0;background:#070907;border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.5);bottom:calc(64px + var(--ai-phone-app-safe-bottom,16px))}
+[data-theme="terminal"] .actions .pri{background:var(--acc);color:#04120a;font-weight:400}
+[data-theme="terminal"] .actions .pri::before{content:"▶ "}
+[data-theme="terminal"] .actions .sub button{border:1px solid var(--line);font-weight:400;color:var(--acc)}
+[data-theme="script"] .lead{padding:10px 0;border-bottom:1px solid var(--ink)}
+[data-theme="script"] .lead .ava{border-radius:0}
+[data-theme="script"] .lead .nm{letter-spacing:.25em;font-size:14px}
+[data-theme="script"] .lead .sw{letter-spacing:.1em;border-bottom:1px solid var(--ink);padding-bottom:1px}
+[data-theme="script"] .actions{border-radius:0;border:1px solid var(--ink);box-shadow:none;left:40px;right:18px;bottom:calc(64px + var(--ai-phone-app-safe-bottom,16px))}
+[data-theme="script"] .actions .pri{background:var(--ink);color:#fff;letter-spacing:.4em;font-weight:400}
+[data-theme="script"] .actions .sub button{border:1px solid var(--ink);letter-spacing:.15em;font-weight:400}
+
+/* ============ APP 专有：表单、抽屉、结果框、全屏、状态 ============ */
+.inp,.ta,.sel{width:100%;min-height:36px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--ink);font-size:12.5px;outline:none}
+.ta{min-height:96px;resize:vertical;line-height:1.6}
+.inp:focus,.ta:focus,.sel:focus{border-color:var(--acc)}
+.sel{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:30px}
+.frm{display:flex;flex-direction:column;gap:10px}
+.frm label.lb{display:block;font-size:10.5px;letter-spacing:.08em;opacity:.6;margin-bottom:4px}
+.frm .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btns{display:flex;gap:8px;margin-top:6px}
+.btns button{flex:1;min-height:38px;border:1px solid var(--line);border-radius:6px;font-weight:600;font-size:12.5px}
+.btns button.pri{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btns button.warn{color:#b3261e;border-color:#b3261e}
+.sheet-mask{position:absolute;inset:0;background:rgba(0,0,0,.35);opacity:0;visibility:hidden;transition:opacity .25s,visibility 0s .25s;z-index:40}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:41;background:var(--paper);color:var(--ink);border-radius:18px 18px 0 0;border-top:1px solid var(--line);padding:16px 18px calc(18px + var(--ai-phone-app-safe-bottom,0px));transform:translateY(105%);visibility:hidden;transition:transform .3s cubic-bezier(.22,1,.36,1),visibility 0s .3s;max-height:86%;overflow-y:auto;scrollbar-width:none}
+.sheet::-webkit-scrollbar{display:none}
+#app.sheet-open .sheet-mask{opacity:1;visibility:visible;transition:opacity .25s}
+#app.sheet-open .sheet{transform:none;visibility:visible;transition:transform .3s cubic-bezier(.22,1,.36,1)}
+.sheet-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.sheet-hd h3{margin:0;font-size:14px;font-weight:600}
+.sheet-x{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);font-size:12px}
+.pickrow{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.pickrow .cb{width:16px;height:16px;border:1px solid var(--line);border-radius:3px;flex:none;margin-top:2px;position:relative}
+.pickrow.on .cb{background:var(--acc);border-color:var(--acc)}
+.pickrow.on .cb::after{content:"";position:absolute;left:5px;top:2px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.pickrow .et{font-size:13px;font-weight:600;line-height:1.3}
+.pickrow .ex{font-size:11px;opacity:.65;margin-top:3px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;word-break:break-word}
+.pickrow .ex.full{display:block;-webkit-line-clamp:unset;overflow:visible;opacity:.85}
+.pickrow .path{font-size:9.5px;opacity:.4;margin-top:3px;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+.loose-top{margin:4px 0 10px}
+.small-btn{font-size:11px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
+[data-theme="magazine"] .small-btn,[data-theme="terminal"] .small-btn,[data-theme="script"] .small-btn{border-radius:0}
+.search{margin-bottom:8px}
+.result{position:relative}
+.frame-wrap{position:relative;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#fff}
+.frame-wrap iframe{display:block;width:100%;border:0;height:200px;background:transparent}
+.result .ops button:disabled{opacity:.4}
+.busy{display:flex;flex-direction:column;align-items:center;gap:12px;padding:26px 0 18px;font-size:12px}
+.busy .row{gap:8px;opacity:.75}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite;flex:none}
+.sec{font-weight:600;font-variant-numeric:tabular-nums;opacity:.8}
+.busy .cancel,.result~.cancel{font-size:11px;padding:5px 14px;border:1px solid var(--line);border-radius:999px;opacity:.8}
+.result~.cancel{display:block;margin:-6px auto 14px}
+.result .status{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--acc);margin:-4px 0 8px;font-variant-numeric:tabular-nums}
+.result.writing .ops{opacity:.35;pointer-events:none}
+.result .status .spin{width:10px;height:10px;border-width:1.5px}
+[data-theme="magazine"] .busy .cancel,[data-theme="terminal"] .busy .cancel,[data-theme="script"] .busy .cancel,[data-theme="magazine"] .result~.cancel,[data-theme="terminal"] .result~.cancel,[data-theme="script"] .result~.cancel{border-radius:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{padding:22px 0;text-align:center;font-size:12px;opacity:.55;line-height:1.7}
+.err{padding:10px 12px;border:1px solid #b3261e;color:#b3261e;border-radius:6px;font-size:11.5px;line-height:1.6;white-space:pre-wrap;word-break:break-all}
+.fullscreen{position:absolute;inset:0;z-index:70;background:var(--paper);display:flex;flex-direction:column}
+.fullscreen[hidden]{display:none}
+.fs-bar{flex:none;display:flex;align-items:center;gap:10px;padding:calc(var(--ai-phone-app-bar-top,56px) - 6px) var(--ai-phone-app-bar-clear-right,96px) 8px 14px;font-size:12px;border-bottom:1px solid var(--line)}
+.fs-bar button{font-weight:600}
+.fs-bar #fs-title{font-size:11px;opacity:.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-body{flex:1;overflow:hidden;background:#fff}
+.fs-body iframe{width:100%;height:100%;border:0;display:block}
+.lead .ava img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.ava{overflow:hidden}
+.pick .name.none{opacity:.5;font-weight:400}
+.recent .item{cursor:pointer}
+.recent .item .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.entry{cursor:pointer}
+.entry .ops2{display:flex;gap:10px;font-size:11px;font-weight:600;flex:none;padding-top:2px}
+.card{cursor:pointer}
+.card .t .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .w{font-size:10.5px;opacity:.6}
+.stepper{display:flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.stepper button{width:30px;height:28px;font-size:14px}
+.stepper span{min-width:30px;text-align:center;font-size:12px;font-variant-numeric:tabular-nums}
+.tagin{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.tagin .chip.x::after{content:" ×";opacity:.6}
+.tagin input{border:0;outline:0;background:transparent;font-size:11px;min-width:60px;flex:1;padding:2px 0}
+.order{display:flex;flex-direction:column;gap:2px;flex:none}
+.order button{width:22px;height:16px;font-size:10px;line-height:1;opacity:.6;border:1px solid var(--line);border-radius:3px}
+#toast{position:absolute;left:50%;bottom:calc(var(--ai-phone-app-safe-bottom,0px) + 92px);transform:translate(-50%,12px);background:var(--ink);color:var(--paper);padding:8px 14px;border-radius:999px;font-size:11.5px;line-height:1.5;opacity:0;pointer-events:none;transition:all .25s;z-index:80;max-width:86%;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+.fav-item{cursor:pointer}
+.fav-item .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:11px}
+.kv dt{opacity:.55}.kv dd{margin:0;word-break:break-all}
+.note-box{font-size:11px;opacity:.7;line-height:1.6;padding:8px 10px;border:1px dashed var(--line);border-radius:6px;margin:8px 0}
+@media (prefers-reduced-motion:reduce){#app *{transition:none!important;animation:none!important}}
+#app[data-motion="off"] *{transition:none!important;animation:none!important}
+[data-theme="terminal"] .inp,[data-theme="terminal"] .ta,[data-theme="terminal"] .sel,[data-theme="terminal"] .btns button,[data-theme="terminal"] .frame-wrap,[data-theme="terminal"] .stepper,[data-theme="terminal"] .sheet{border-radius:0}
+[data-theme="terminal"] .btns button.pri{background:var(--acc);color:#04120a;border-color:var(--acc)}
+[data-theme="terminal"] .frame-wrap,[data-theme="terminal"] .fs-body{background:#0f1411}
+[data-theme="terminal"] #toast{background:var(--acc);color:#04120a}
+[data-theme="script"] .inp,[data-theme="script"] .ta,[data-theme="script"] .sel,[data-theme="script"] .btns button,[data-theme="script"] .frame-wrap,[data-theme="script"] .stepper,[data-theme="script"] .sheet{border-radius:0}
+[data-theme="script"] .inp,[data-theme="script"] .ta,[data-theme="script"] .sel,[data-theme="script"] .btns button{border-color:var(--ink)}
+[data-theme="script"] .sheet{margin-left:26px}
+[data-theme="sticky"] .btns button{border:0;background:#fff;box-shadow:0 2px 0 rgba(0,0,0,.1);border-radius:999px}
+[data-theme="sticky"] .btns button.pri{background:var(--acc);color:#fff}
+[data-theme="sticky"] .sheet{border-radius:22px 22px 0 0}
+[data-theme="sticky"] .frame-wrap{border:0;box-shadow:0 6px 16px rgba(0,0,0,.12)}
+[data-theme="magazine"] .btns button{border-radius:0}
+[data-theme="magazine"] .frame-wrap{border-radius:0;border-color:var(--ink)}
+</style></head>
+<body><div id="app" data-theme="magazine" data-view="stage">
+  <header class="topbar">
+    <div class="kicker"><span id="hdr-no">No. 001</span><span id="hdr-date"></span></div>
+    <h1>小剧场<small>THÉÂTRE DE POCHE</small></h1>
+  </header>
+
+  <div class="main" id="main">
+    <!-- 舞台 -->
+    <section class="view view-stage" data-view="stage">
+      <div class="lead" id="lead"></div>
+      <div class="pick" id="pick"></div>
+      <div id="result-host"></div>
+      <div class="sec-t" id="recent-title">最近</div>
+      <div class="recent" id="recent"></div>
+    </section>
+
+    <!-- 小剧场库 -->
+    <section class="view view-library" data-view="library">
+      <div class="seg" id="lib-seg">
+        <button type="button" class="on" data-lt="combo">小剧场<small id="cnt-combo"></small></button>
+        <button type="button" data-lt="prompts">提示词<small id="cnt-prompts"></small></button>
+        <button type="button" data-lt="random">随机<small id="cnt-random"></small></button>
+        <button type="button" data-lt="pre">前置<small id="cnt-pre"></small></button>
+      </div>
+      <div class="lpane on" data-lpane="combo"><div class="list" id="combo-list"></div><button class="fab" id="btn-new-combo" type="button">新建小剧场</button></div>
+      <div class="lpane" data-lpane="prompts"><div class="chips filters" id="prompt-filters"></div><div class="rows" id="prompt-list"></div><div class="row2"><button class="fab" id="btn-new-prompt" type="button">新增提示词</button><button class="fab ghost" id="btn-import-prompts" type="button">批量导入</button></div></div>
+      <div class="lpane" data-lpane="random"><div class="sec-t">随机池 · 生成时按规则抽</div><div class="rows" id="random-list"></div><div class="sec-t">随机宏 · 写在提示词里用</div><div class="rows" id="macro-list"></div><div class="row2"><button class="fab" id="btn-new-random" type="button">新增随机条目</button><button class="fab ghost" id="btn-new-macro" type="button">新增宏</button></div></div>
+      <div class="lpane" data-lpane="pre"><div class="rows" id="pre-list"></div><div class="row2"><button class="fab" id="btn-new-pre" type="button">新增前置要求</button></div><p class="small hint">默认走宿主链路：只带人设、性格、关系、世界书和你选的记忆段，前置要求排在它们后面。小剧场里可开「纯裸通道」，整段 system 由前置要求全权决定。</p></div>
+    </section>
+
+    <!-- 编辑组合 -->
+    <section class="view view-compose" data-view="compose"><div id="compose"></div></section>
+
+    <!-- 收藏 -->
+    <section class="view view-fav" data-view="fav">
+      <div class="chips filters" id="fav-filters"></div>
+      <div id="fav-list"></div>
+    </section>
+
+    <!-- 设置 -->
+    <section class="view view-settings" data-view="settings">
+      <div class="cats" id="set-cats"><button type="button" class="on" data-p="look">外观</button><button type="button" data-p="gen">生成</button><button type="button" data-p="data">数据</button></div>
+      <div class="pane on" data-pane="look" id="pane-look"></div>
+      <div class="pane" data-pane="gen" id="pane-gen"></div>
+      <div class="pane" data-pane="data" id="pane-data"></div>
+    </section>
+  </div>
+
+  <div class="actions" id="actions">
+    <button class="pri" id="btn-gen" type="button">生成一篇</button>
+    <div class="sub"><button id="btn-random" type="button">随机</button><button id="btn-ai" type="button">AI 自选</button></div>
+  </div>
+
+  <nav class="tabbar" id="tabbar">
+    <button type="button" class="on" data-v="stage" data-k="1"><span class="g">◐</span>舞台</button>
+    <button type="button" data-v="library" data-k="2"><span class="g">▤</span>小剧场</button>
+    <button type="button" data-v="fav" data-k="3"><span class="g">♡</span>收藏</button>
+    <button type="button" data-v="settings" data-k="4"><span class="g">⚙</span>设置</button>
+  </nav>
+
+  <div class="sheet-mask" id="sheet-mask"></div>
+  <div class="sheet" id="sheet"><div class="sheet-hd"><h3 id="sheet-title"></h3><button class="sheet-x" id="sheet-close" type="button" aria-label="关闭">✕</button></div><div id="sheet-content"></div></div>
+
+  <div class="fullscreen" id="fullscreen" hidden><div class="fs-bar"><button type="button" id="fs-close">‹ 退出全屏</button><span id="fs-title" class="grow"></span><button type="button" id="fs-again">再来一条</button></div><div class="fs-body" id="fs-body"></div></div>
+
+  <div id="toast"></div>
+</div>
+<script>(function () {
+"use strict";
+const api = window.AiPhone;
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+/** 尾随节流：窗口内只留最后一次；cancel 后待发的一次作废 */
+function throttle(fn, ms) {
+  let timer = 0, last;
+  const run = v => { last = v; if (timer) return; timer = setTimeout(() => { timer = 0; fn(last); }, ms); };
+  run.cancel = () => { if (timer) clearTimeout(timer); timer = 0; };
+  return run;
+}
+const uid = p => `${p || "x"}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+const clone = v => JSON.parse(JSON.stringify(v));
+const state = {
+  settings: null, characters: [], character: null, userName: "用户",
+  combos: [], prompts: [], randoms: [], macros: [], preambles: [], favorites: [], recents: [],
+  view: "stage", libTab: "combo", currentComboId: "", busy: false, result: null, compose: null,
+};
+
+let toastTimer = 0;
+function toast(text, ms = 2200) {
+  const node = $("toast"); node.textContent = text; node.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove("show"), ms);
+  if (api && api.ui && api.ui.toast) api.ui.toast(text).catch?.(() => {});
+}
+function fail(error) { const msg = error && error.message ? error.message : String(error); toast(msg, 3400); console.warn("[小剧场]", error); }
+
+let sheetOnClose = null;
+function openSheet(title, build, onClose) {
+  const box = $("sheet-content"); box.innerHTML = "";
+  $("sheet-title").textContent = title || "";
+  sheetOnClose = onClose || null;
+  build(box);
+  $("app").classList.add("sheet-open");
+  $("sheet").scrollTop = 0;
+}
+function closeSheet() {
+  $("app").classList.remove("sheet-open");
+  const fn = sheetOnClose; sheetOnClose = null; if (fn) fn();
+  setTimeout(() => { if (!$("app").classList.contains("sheet-open")) $("sheet-content").innerHTML = ""; }, 300);
+}
+$("sheet-mask").onclick = closeSheet; $("sheet-close").onclick = closeSheet;
+
+function confirmSheet(title, text, okLabel, onOk, danger) {
+  openSheet(title, box => {
+    box.appendChild(el("p", "note-box", text));
+    const btns = el("div", "btns");
+    const cancel = el("button", "", "取消"); cancel.type = "button"; cancel.onclick = closeSheet;
+    const ok = el("button", danger ? "warn" : "pri", okLabel || "确定"); ok.type = "button";
+    ok.onclick = () => { closeSheet(); Promise.resolve().then(onOk).catch(fail); };
+    btns.append(cancel, ok); box.appendChild(btns);
+  });
+}
+
+const viewHooks = {};
+function switchView(name, arg) {
+  state.view = name;
+  $("app").dataset.view = name;
+  document.querySelectorAll("#tabbar [data-v]").forEach(b => b.classList.toggle("on", b.dataset.v === (name === "compose" ? "library" : name)));
+  $("main").scrollTop = 0;
+  if (viewHooks[name]) viewHooks[name](arg);
+}
+document.querySelectorAll("#tabbar [data-v]").forEach(b => { b.onclick = () => switchView(b.dataset.v); });
+
+const pad2 = n => String(n).padStart(2, "0");
+const fmtTime = iso => { const d = new Date(iso); if (Number.isNaN(d.getTime())) return ""; const now = new Date(); const same = d.toDateString() === now.toDateString(); const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; if (same) return hm; const y = new Date(now); y.setDate(y.getDate() - 1); if (d.toDateString() === y.toDateString()) return `昨天 ${hm}`; return `${d.getMonth() + 1}-${d.getDate()} ${hm}`; };
+const fmtFull = iso => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const splitTags = s => String(s || "").split(/[,，、\s]+/).map(t => t.trim()).filter(Boolean).filter((t, i, a) => a.indexOf(t) === i);
+const byId = (list, id) => list.find(x => x.id === id) || null;
+const charName = c => (c && c.name) || "角色";
+
+/** 标签输入：chips + 输入框，回车/逗号加标签，点 chip 删 */
+function tagInput(initial, onChange) {
+  const wrap = el("div", "tagin inp");
+  let tags = [...(initial || [])];
+  const input = el("input"); input.placeholder = tags.length ? "" : "输入后回车添加标签";
+  const render = () => {
+    wrap.querySelectorAll(".chip").forEach(c => c.remove());
+    tags.forEach(t => { const c = el("span", "chip x", t); c.onclick = () => { tags = tags.filter(x => x !== t); render(); onChange(tags); }; wrap.insertBefore(c, input); });
+  };
+  const commit = () => { const add = splitTags(input.value); if (!add.length) return; tags = [...new Set([...tags, ...add])]; input.value = ""; render(); onChange(tags); };
+  input.onkeydown = e => { if (e.key === "Enter" || e.key === "," || e.key === "，") { e.preventDefault(); commit(); } else if (e.key === "Backspace" && !input.value && tags.length) { tags.pop(); render(); onChange(tags); } };
+  input.onblur = commit;
+  wrap.appendChild(input); render();
+  return wrap;
+}
+
+/** 单选段：options=[{v,l}] */
+function miniSeg(options, value, onChange) {
+  const box = el("div", "mini");
+  const paint = v => box.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === String(v)));
+  options.forEach(o => { const b = el("button", "", o.l); b.type = "button"; b.dataset.v = String(o.v); b.onclick = () => { paint(o.v); onChange(o.v); }; box.appendChild(b); });
+  paint(value);
+  return box;
+}
+function toggle(value, onChange) {
+  const t = el("div", "tog" + (value ? " on" : "")); t.setAttribute("role", "switch");
+  t.onclick = () => { const on = !t.classList.contains("on"); t.classList.toggle("on", on); onChange(on); };
+  return t;
+}
+function setRow(label, sub, control) {
+  const row = el("div", "set"); const l = el("div", "l"); l.appendChild(el("b", "", label)); if (sub) l.appendChild(el("span", "", sub));
+  row.append(l, control); return row;
+}
+function stepper(value, min, max, onChange) {
+  const box = el("div", "stepper"); let v = value;
+  const minus = el("button", "", "−"); minus.type = "button"; const num = el("span", "", String(v)); const plus = el("button", "", "+"); plus.type = "button";
+  const set = n => { v = Math.max(min, Math.min(max, n)); num.textContent = String(v); onChange(v); };
+  minus.onclick = () => set(v - 1); plus.onclick = () => set(v + 1);
+  box.append(minus, num, plus); return box;
+}
+
+// ── 宏：宿主只展开自己预设里的宏，APP 传出去的文字要自己展开。语法与宿主一致，另加随机词 / 随机数 ──
+const WEEKDAYS = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+function pickOne(list) { return list[Math.floor(Math.random() * list.length)]; }
+function shuffle(list) { const a = [...list]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+/**
+ * ctx: { user, char, length, macros:[{name,kind,values|min,max}] }
+ * 支持：{{user}} {{char}} {{time}} {{date}} {{weekday}} {{篇幅}} {{random::a::b}} {{random:a,b}}
+ *      {{随机词:名字}} {{随机词:名字:数量}} {{随机数:名字}} {{roll:1d6}}
+ */
+function expandMacros(text, ctx) {
+  let out = String(text ?? "");
+  for (let pass = 0; pass < 3 && /\{\{/.test(out); pass++) {
+    out = out.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, body) => {
+      const b = body.trim();
+      if (b === "user") return ctx.user || "用户";
+      if (b === "char") return ctx.char || "角色";
+      if (b === "篇幅" || b === "length") return ctx.length || "篇幅不限";
+      const now = new Date();
+      if (b === "time") return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      if (b === "date") return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      if (b === "weekday") return WEEKDAYS[now.getDay()];
+      if (b.startsWith("random::")) { const items = b.slice(8).split("::").map(s => s.trim()).filter(Boolean); return items.length ? pickOne(items) : ""; }
+      if (b.startsWith("random:")) { const items = b.slice(7).split(/[,\n，]/).map(s => s.trim()).filter(Boolean); return items.length ? pickOne(items) : ""; }
+      let m = b.match(/^roll:\s*(\d+)d(\d+)$/i);
+      if (m) { let sum = 0; for (let i = 0; i < Math.min(50, Number(m[1])); i++) sum += 1 + Math.floor(Math.random() * Math.max(1, Number(m[2]))); return String(sum); }
+      m = b.match(/^(?:随机词|pick)[:：]\s*([^:：]+?)\s*(?:[:：]\s*(\d+))?$/);
+      if (m) {
+        const def = (ctx.macros || []).find(x => x.kind === "words" && x.name === m[1]);
+        if (!def) return whole;
+        const n = Math.max(1, Math.min(20, Number(m[2] || 1)));
+        return shuffle(def.values || []).slice(0, n).join("、");
+      }
+      m = b.match(/^(?:随机数|num)[:：]\s*([^:：]+?)\s*$/);
+      if (m) {
+        const def = (ctx.macros || []).find(x => x.kind === "number" && x.name === m[1]);
+        if (!def) return whole;
+        const lo = Number(def.min ?? 1), hi = Number(def.max ?? 10);
+        return String(lo + Math.floor(Math.random() * (Math.max(lo, hi) - lo + 1)));
+      }
+      return whole;
+    });
+  }
+  return out;
+}
+
+// ── 首次安装的内置内容：两套前置、一批提示词、随机池、宏、几份组合。用户可随意改删 ──
+const MOBILE_HTML_RULES = "HTML 规则：输出一段完整、可直接渲染的 HTML 片段（可含 style 与 script 标签），不要 markdown 围栏、不要解释文字；宽度 100%，不要给根元素或 body 设 100vh / position:fixed / overflow:hidden，高度由内容自然撑开；不引用任何外部资源（图片用 CSS 或 emoji 代替）；字号以手机竖屏阅读为准，正文 13～14px。";
+
+const DEFAULT_PREAMBLES = [
+  { id: "pre_strict", name: "重约束版 · 只交成品", builtin: true, content:
+`这一次不是聊天，是一次交付。你要按 <Brief> 里的规格，把手上的材料做成一件能直接看的成品。
+
+前面给到的人设、性格、关系、世界书、记忆和聊天记录都是原料。读懂人物怎么说话、彼此之间有什么分寸，然后把这些拆开重新用。不要整段搬运原料，不要接着聊天记录往下续写，那不是这次要的东西。
+
+<Brief> 是唯一的规格书，也是唯一的交付物。要 HTML 就给能直接渲染的 HTML；要特定格式的文本就严格照那个格式走。除了成品本身，不写开场白、不写说明、不解释你做了什么、不在结尾加任何提示。` },
+  { id: "pre_lite", name: "简洁版", builtin: true, content:
+`用前面给出的人设、世界观和记忆理解人物，然后只输出 <Brief> 里要的东西。不复述设定，不续写聊天，不加解释。` },
+];
+
+const DEFAULT_PROMPTS = [
+  { id: "p_scene_store", title: "深夜便利店", tags: ["场景", "日常"], content: "场景：雨夜，24 小时便利店。{{user}} 在关东煮前排队，{{char}} 刚下班进门，肩膀被雨打湿。灯管有一根在闪。店员在打瞌睡。" },
+  { id: "p_scene_trip", title: "出差第三天", tags: ["场景", "日常"], content: "场景：{{char}} 出差第三天，两地时差三小时。{{user}} 这边已经深夜，{{char}} 那边刚开完会。今天两人只发过三条消息。" },
+  { id: "p_scene_live", title: "深夜直播", tags: ["场景", "搞笑"], content: "场景：{{char}} 深夜开了一场直播（游戏 / 聊天 / 做饭随你定），{{user}} 在观众席里，弹幕里有人认出了 {{user}} 的 ID。" },
+  { id: "p_scene_tarot", title: "深巷塔罗屋", tags: ["场景", "神秘"], content: "场景：一条没有路灯的巷子尽头有间塔罗屋，{{user}} 推门进去，坐在牌桌后面的是 {{char}}。只抽三张牌，每张都对应着两个人真实发生过的事。" },
+  { id: "p_if_wait", title: "B 线 · TA 一直在等我", tags: ["if 线"], content: "前提改写：{{char}} 其实早就知道 {{user}} 今晚会来，之前的每一次偶遇都不是偶遇。不要点破，只在细节里留痕迹。" },
+  { id: "p_if_stranger", title: "A 线 · TA 没认出我", tags: ["if 线"], content: "前提改写：{{char}} 因为某个原因暂时没认出 {{user}}，用陌生人的方式对待 {{user}}。让 {{user}} 在这种陌生里发现一点熟悉。" },
+  { id: "p_form_novel", title: "小说体", tags: ["形式", "文字"], content: "形式：小说体。第三人称有限视角，跟随 {{char}} 或 {{user}} 其中一人。分段短，对白用「」。总长 {{篇幅}}。结尾停在一个未完成的动作上，不要总结、不要升华。" },
+  { id: "p_form_extra", title: "番外短篇", tags: ["形式", "文字"], content: "形式：一篇番外短篇，写正文里没发生过、但完全符合两人关系的一件小事。有一个具体的物件贯穿全篇。总长 {{篇幅}}。" },
+  { id: "p_form_inner", title: "内心 OS", tags: ["形式", "文字"], content: "形式：{{char}} 的内心独白，第一人称。只写 {{char}} 想说没说的话，允许语无伦次，允许自我否定。不超过 {{篇幅}}。" },
+  { id: "p_form_phone", title: "手机聊天体", tags: ["形式", "前端"], content: "形式：模拟手机信息界面的 HTML。顶部是联系人 {{char}} 与在线状态，气泡左右分列（{{char}} 在左、{{user}} 在右），有已读 / 撤回 / 输入中之类的细节，时间戳围绕 {{time}} 前后半小时。总共 12～25 条消息。\n" + MOBILE_HTML_RULES },
+  { id: "p_form_danmaku", title: "弹幕体", tags: ["形式", "前端"], content: "形式：HTML。一个 16:9 的深色播放器画面（用 CSS 画出画面主体，不用图片），画面上方是从右往左飘的弹幕层，30～60 条弹幕，用 CSS 动画实现，弹幕密度随剧情起伏；画面下方一行标题与在线人数。弹幕内容要有路人、粉丝、黑粉、认出 {{user}} 的人。\n" + MOBILE_HTML_RULES },
+  { id: "p_form_status", title: "状态栏 + 正文", tags: ["形式", "前端"], content: "形式：HTML。顶部一张状态卡（时间 / 地点 / 天气 / {{char}} 当前心情 / 对 {{user}} 的好感变化 {{random:+1,+2,+3,-1}}），用网格排版；下面是正文纯文字，分段。正文总长 {{篇幅}}。\n" + MOBILE_HTML_RULES },
+  { id: "p_form_forum", title: "论坛帖", tags: ["形式", "前端"], content: "形式：HTML，一个论坛 / 贴吧帖子页面。楼主发帖讲述目击到 {{char}} 和 {{user}} 的一件事，下面 8～15 层回复，有盖楼、有反驳、有当事人小号。每层带用户名、楼层号、时间。\n" + MOBILE_HTML_RULES },
+  { id: "p_form_hot", title: "微博热搜", tags: ["形式", "前端"], content: "形式：HTML，一个热搜榜页面。榜单 8～10 条，其中 2～3 条与 {{char}} 和 {{user}} 有关（用化名或 ID），点开第一条是话题页：3～5 条博文 + 评论。\n" + MOBILE_HTML_RULES },
+  { id: "p_form_tarot", title: "塔罗牌（可交互）", tags: ["形式", "前端", "交互"], content: "形式：可交互的 HTML。三张背面朝上的牌横排，点击翻面（CSS 3D 翻转），每张翻开后显示牌面（用 CSS 画）、牌名、正逆位和一段与 {{char}} 和 {{user}} 关系有关的解读。三张全翻开后，底部出现 {{char}} 说的一句话。\n" + MOBILE_HTML_RULES },
+];
+
+const DEFAULT_RANDOMS = [
+  { id: "r_au", title: "平行世界 AU", tags: ["AU", "番外"], content: "把这一段放到「{{随机词:世界}}」的设定里重演，人物性格与关系不变，只换世界。" },
+  { id: "r_detail", title: "今天的一个小细节", tags: ["细节"], content: "写一个正文里没出现、但一定发生过的小动作或小物件。" },
+  { id: "r_bystander", title: "旁观者视角", tags: ["番外"], content: "用店员 / 路人 / 宠物 / 出租车司机的视角看这两个人。" },
+  { id: "r_unsaid", title: "TA 没说出口的话", tags: ["内心"], content: "只写 {{char}} 想说没说的那三句，以及为什么没说。" },
+  { id: "r_tenyears", title: "十年后", tags: ["番外", "AU"], content: "十年后的某一天，两人因为同一件小事又想起了今天。" },
+  { id: "r_weather", title: "天气插曲", tags: ["细节"], content: "今天的天气是「{{随机词:天气}}」，让它实际影响一件事。" },
+];
+
+const DEFAULT_MACROS = [
+  { id: "m_world", name: "世界", kind: "words", values: ["妖怪共居", "赛博义体", "蒸汽飞艇", "深海城邦", "荒原公路", "修仙宗门", "民国戏班", "海盗船", "旧马戏团", "末日避难所", "时间循环", "记忆对调", "身份对调", "武侠江湖", "星际货运", "异能事务所", "凶宅民宿", "剧本杀现场", "动物拟人", "平行婚姻"] },
+  { id: "m_weather", name: "天气", kind: "words", values: ["暴雨", "小雪", "起雾", "闷热", "台风前夜", "初春回暖", "深秋大风"] },
+  { id: "m_affinity", name: "好感", kind: "number", min: 1, max: 5 },
+];
+
+const DEFAULT_COMBOS = [
+  { id: "c_store", name: "深夜便利店偶遇", tags: ["日常", "心动", "雨"], preambleId: "pre_strict", promptIds: ["p_scene_store", "p_if_wait", "p_form_novel"], random: { count: 1, include: ["细节"], exclude: [] }, output: { mode: "text", wrapTag: "theater", length: "default", customChars: 900, style: "free" }, memory: { mode: "host", rounds: 12 }, writeBack: false, who: "persona", whoText: "", rawChannel: false, weight: 3 },
+  { id: "c_live", name: "直播间翻车现场", tags: ["搞笑", "弹幕"], preambleId: "pre_strict", promptIds: ["p_scene_live", "p_form_danmaku"], random: { count: 0, include: [], exclude: [] }, output: { mode: "html", wrapTag: "", length: "default", customChars: 900, style: "free" }, memory: { mode: "recent", rounds: 8 }, writeBack: false, who: "persona", whoText: "", rawChannel: false, weight: 2 },
+  { id: "c_call", name: "未接来电", tags: ["虐", "手机"], preambleId: "pre_strict", promptIds: ["p_scene_trip", "p_form_phone"], random: { count: 1, include: ["细节"], exclude: ["AU"] }, output: { mode: "html", wrapTag: "", length: "default", customChars: 900, style: "free" }, memory: { mode: "recent", rounds: 30 }, writeBack: false, who: "persona", whoText: "", rawChannel: false, weight: 1 },
+  { id: "c_au", name: "平行世界抽卡", tags: ["AU", "随机"], preambleId: "pre_lite", promptIds: ["p_form_extra"], random: { count: 2, include: ["AU", "番外"], exclude: [] }, output: { mode: "text", wrapTag: "theater", length: "default", customChars: 900, style: "free" }, memory: { mode: "none", rounds: 12 }, writeBack: false, who: "persona", whoText: "", rawChannel: false, weight: 2 },
+  { id: "c_tarot", name: "塔罗屋", tags: ["神秘", "交互"], preambleId: "pre_strict", promptIds: ["p_scene_tarot", "p_form_tarot"], random: { count: 0, include: [], exclude: [] }, output: { mode: "html", wrapTag: "", length: "default", customChars: 900, style: "free" }, memory: { mode: "host", rounds: 12 }, writeBack: false, who: "persona", whoText: "", rawChannel: false, weight: 2 },
+];
+
+const DEFAULT_SETTINGS = Object.freeze({
+  theme: "magazine", fontScale: 1, lineHeight: "mid", motion: true,
+  lengthLimit: true, defaultLength: "medium", defaultWho: "persona", defaultMemory: "host", defaultRounds: 12,
+  writeBackDefault: false, randomIncludesAi: true, defaultStyle: "free", stagedDefault: false, streamPreview: true, recentKeep: 10,
+  characterId: "", currentComboId: "c_store", issueNo: 1, seeded: false,
+});
+const LENGTH_CHARS = { short: 400, medium: 900, long: 1800 };
+const LENGTH_LABEL = { short: "短", medium: "中", long: "长", custom: "自定", default: "跟设置" };
+
+// 写入前校验完整包；旧库坏行隔离保留，避免一条坏数据拖垮所有页面。
+function validateRow(name, input) {
+  const object = (v, at) => { if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error(`${at} 必须是对象。`); };
+  object(input, name);
+  const r = clone(input);
+  const string = (obj, key, required = false) => {
+    if (obj[key] === undefined && !required) return;
+    if (typeof obj[key] !== "string" || (required && !obj[key].trim())) throw new Error(`${name}.${key} 必须是${required ? "非空" : ""}文本。`);
+  };
+  const strings = (obj, key) => {
+    if (obj[key] === undefined) { obj[key] = []; return; }
+    if (!Array.isArray(obj[key]) || obj[key].some(v => typeof v !== "string")) throw new Error(`${name}.${key} 必须是文本数组。`);
+  };
+  const number = (obj, key, min, max) => {
+    if (obj[key] !== undefined && (typeof obj[key] !== "number" || !Number.isFinite(obj[key]) || obj[key] < min || obj[key] > max)) throw new Error(`${name}.${key} 数值无效。`);
+  };
+  const choice = (obj, key, values) => { if (obj[key] !== undefined && !values.includes(obj[key])) throw new Error(`${name}.${key} 选项无效。`); };
+  for (const key of ["id", "createdAt", "updatedAt"]) string(r, key);
+  if (["prompts", "randoms"].includes(name)) { string(r, "title", true); string(r, "content", true); strings(r, "tags"); }
+  if (name === "preambles") { string(r, "name", true); string(r, "content", true); }
+  if (name === "macros") {
+    string(r, "name", true); choice(r, "kind", ["words", "number"]);
+    if (!r.kind) throw new Error("宏缺少类型。");
+    if (r.kind === "words") { strings(r, "values"); if (!r.values.length) throw new Error("词表不能为空。"); }
+    else { number(r, "min", -1e9, 1e9); number(r, "max", -1e9, 1e9); if ((r.min ?? 1) > (r.max ?? 10)) throw new Error("宏最小值不能大于最大值。"); }
+  }
+  if (name === "combos") {
+    string(r, "name", true); strings(r, "tags"); strings(r, "promptIds"); string(r, "preambleId"); string(r, "whoText");
+    choice(r, "who", ["persona", "custom", "observer"]);
+    for (const key of ["rawChannel", "writeBack"]) if (r[key] !== undefined && typeof r[key] !== "boolean") throw new Error(`${key} 必须是开关。`);
+    r.random ??= { count: 0 }; object(r.random, "random"); strings(r.random, "include"); strings(r.random, "exclude"); number(r.random, "count", 0, 5);
+    r.output ??= { mode: "text", length: "default" }; object(r.output, "output");
+    choice(r.output, "mode", ["text", "html", "mixed"]); choice(r.output, "length", ["default", "short", "medium", "long", "custom"]); choice(r.output, "style", ["free", "vars", "strict"]);
+    string(r.output, "wrapTag"); if (r.output.wrapTag && !/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(r.output.wrapTag)) throw new Error("包裹标签名称无效。");
+    number(r.output, "customChars", 0, 1e6);
+    if (r.output.staged !== undefined && typeof r.output.staged !== "boolean") throw new Error("分两步出必须是开关。");
+    r.memory ??= { mode: "host", rounds: 12 }; object(r.memory, "memory"); choice(r.memory, "mode", ["host", "recent", "none"]); number(r.memory, "rounds", 1, 50);
+    number(r, "weight", 0, 9); number(r, "useCount", 0, Number.MAX_SAFE_INTEGER);
+    if (r.plays !== undefined) { object(r.plays, "plays"); for (const v of Object.values(r.plays)) if (!Number.isFinite(v) || v < 0) throw new Error("角色计数无效。"); }
+    if (r._virtualPrompts !== undefined) { if (!Array.isArray(r._virtualPrompts)) throw new Error("虚拟提示词必须是数组。"); r._virtualPrompts = r._virtualPrompts.map(p => validateRow("prompts", p)); }
+    if (r._dependencies !== undefined) {
+      const d = r._dependencies; object(d, "dependencies");
+      if (d.preamble != null) d.preamble = validateRow("preambles", d.preamble);
+      for (const key of ["prompts", "randoms", "macros"]) { if (!Array.isArray(d[key])) throw new Error(`快照 ${key} 必须是数组。`); d[key] = d[key].map(v => validateRow(key, v)); }
+      if (d.length != null) { object(d.length, "length"); number(d.length, "chars", 1, 1e6); string(d.length, "label"); }
+    }
+  }
+  if (["favorites", "recents"].includes(name)) {
+    for (const key of ["title", "raw", "characterId", "characterName", "comboId", "comboName", "favoriteId", "recentId", "favoritedAt", "model"]) string(r, key);
+    r.segments ??= []; if (!Array.isArray(r.segments)) throw new Error("正文段落必须是数组。");
+    for (const seg of r.segments) { object(seg, "segment"); string(seg, "content", true); choice(seg, "type", ["text", "html"]); }
+    r.snapshot ??= {}; object(r.snapshot, "snapshot");
+    for (const key of ["randoms", "prompts"]) strings(r.snapshot, key);
+    for (const key of ["output", "memory"]) if (r.snapshot[key] !== undefined) object(r.snapshot[key], key);
+    if (r.comboCopy) r.comboCopy = validateRow("combos", r.comboCopy);
+  }
+  return r;
+}
+function validateBundle(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || input.app !== "float.xiaojuchang") throw new Error("不是小剧场导出包。");
+  if (input.version !== undefined && input.version !== 1) throw new Error("暂不支持此导出包版本。");
+  const data = clone(input);
+  for (const name of ["preambles", "prompts", "randoms", "macros", "combos", "favorites"]) {
+    if (data[name] === undefined) { data[name] = []; continue; }
+    if (!Array.isArray(data[name])) throw new Error(`${name} 必须是数组。`);
+    data[name] = data[name].map(r => validateRow(name, r));
+    const ids = data[name].map(r => r.id).filter(Boolean);
+    if (new Set(ids).size !== ids.length) throw new Error(`${name} 包含重复 ID。`);
+  }
+  const promptIds = new Set([...(state.prompts || []), ...data.prompts].map(r => r.id));
+  const preambleIds = new Set([...(state.preambles || []), ...data.preambles].map(r => r.id));
+  for (const combo of data.combos) {
+    if (combo._dependencies) continue;
+    if (combo.promptIds.some(id => !promptIds.has(id))) throw new Error(`「${combo.name}」引用了不存在的提示词。`);
+    if (combo.preambleId && !preambleIds.has(combo.preambleId)) throw new Error(`「${combo.name}」引用了不存在的前置要求。`);
+  }
+  return data;
+}
+
+// 不认识的 JSON（酒馆预设、角色卡、别人的生成器导出）递归扫一遍，把「名字 + 一大段文字」列出来让用户挑
+const SCAN_NAME_KEYS = ["name", "title", "comment", "label", "identifier", "key", "名称", "标题", "名字"];
+const SCAN_SKIP_KEYS = new Set(["id", "avatar", "image", "img", "src", "url", "href", "base64", "dataUrl", "dataURL", "createdAt", "updatedAt", "create_date", "spec", "spec_version", "chat", "chat_metadata", "extensions"]);
+const SCAN_MIN_LEN = 24, SCAN_MAX = 400, SCAN_DEPTH = 12;
+const looksLikeProse = s => s.length >= SCAN_MIN_LEN && !/^(data:|https?:\/\/)/.test(s) && (/\s/.test(s) || /[　-鿿]/.test(s));
+function scanLooseJson(root) {
+  const out = [], seen = new Set();
+  const push = (name, content, path) => {
+    const text = content.trim();
+    if (seen.has(text) || out.length >= SCAN_MAX) return;
+    seen.add(text);
+    out.push({ name: String(name || "").trim().slice(0, 60) || `第 ${out.length + 1} 段`, content: text, path });
+  };
+  const nameOf = obj => { for (const k of SCAN_NAME_KEYS) { const v = obj[k]; if (typeof v === "string" && v.trim() && v.length <= 80) return [k, v.trim()]; } return ["", ""]; };
+  const walk = (node, path, parentKey, depth) => {
+    if (depth > SCAN_DEPTH || node == null) return;
+    if (typeof node === "string") { if (looksLikeProse(node)) push(parentKey, node, path); return; }
+    if (Array.isArray(node)) { node.forEach((v, i) => walk(v, `${path}[${i}]`, parentKey, depth + 1)); return; }
+    if (typeof node !== "object") return;
+    const [nameKey, name] = nameOf(node);
+    const entries = Object.entries(node).filter(([k]) => k !== nameKey && !SCAN_SKIP_KEYS.has(k));
+    const longCount = entries.filter(([, v]) => typeof v === "string" && looksLikeProse(v)).length;
+    for (const [k, v] of entries) {
+      if (typeof v === "string") { if (looksLikeProse(v)) push(longCount > 1 && name ? `${name} · ${k}` : (name || k), v, `${path}.${k}`); }
+      else if (v && typeof v === "object") walk(v, `${path}.${k}`, k, depth + 1);
+    }
+  };
+  walk(root, "$", "", 0);
+  return out;
+}
+
+// ── 存储：settings 一行；combos / prompts / randoms / macros / preambles / favorites / recents 各一行一条 ──
+const COLLECTIONS = ["combos", "prompts", "randoms", "macros", "preambles", "favorites", "recents"];
+const freshSettings = () => JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+let writeQueue = Promise.resolve();
+function writeData(task) { const job = writeQueue.then(task); writeQueue = job.catch(() => {}); return job; }
+
+async function loadSettings() {
+  const rows = await api.db.list("settings", { limit: 5 });
+  const row = rows && rows[0];
+  const merged = { ...freshSettings(), ...(row || {}) };
+  if (!row) { const created = await api.db.create("settings", freshSettings()); merged.id = created.id; }
+  state.settings = merged;
+  return merged;
+}
+let saveTimer = 0;
+function saveSettings(patch) {
+  Object.assign(state.settings, patch || {});
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try { const { id, ...data } = state.settings; await writeData(() => api.db.update("settings", id, clone(data))); } catch (e) { fail(e); }
+  }, 250);
+}
+
+async function readAllRows(name) {
+  const rows = [], pages = new Set();
+  for (let offset = 0; ; offset += 500) {
+    const page = await api.db.list(name, { limit: 500, offset });
+    if (!Array.isArray(page)) throw new Error("宿主返回了无效的数据列表。");
+    const signature = JSON.stringify(page.map(r => r && r.id));
+    if (page.length && pages.has(signature)) throw new Error("读取超过 500 条数据需要新版宿主，请先更新宿主。");
+    pages.add(signature); rows.push(...page);
+    if (page.length < 500) return rows;
+  }
+}
+async function loadCollection(name) {
+  const rows = await readAllRows(name), seen = new Set(), list = [], invalid = [];
+  for (const row of rows) {
+    try {
+      if (!row || !row.id) throw new Error("缺少 ID");
+      const valid = validateRow(name, row);
+      if (!seen.has(valid.id)) { list.push(valid); seen.add(valid.id); }
+    } catch { invalid.push(row); }
+  }
+  (state.invalidRecords ||= {})[name] = invalid;
+  state[name] = list;
+  return list;
+}
+async function loadAll() { await Promise.all(COLLECTIONS.map(loadCollection)); }
+
+async function seedIfEmpty(force) {
+  if (state.settings.seeded && !force) return;
+  const now = new Date().toISOString();
+  const idMap = {};
+  const keyOf = r => r.title || r.name || "";
+  const seed = async (name, rows) => {
+    for (const r of rows) {
+      const { id: seedId, ...rest } = clone(r);
+      const exist = state[name].find(x => keyOf(x) === keyOf(r));
+      if (exist) { if (seedId) idMap[seedId] = exist.id; continue; }
+      const created = await api.db.create(name, { ...rest, createdAt: now, updatedAt: now });
+      state[name].push(created);
+      if (seedId) idMap[seedId] = created.id;
+    }
+  };
+  await seed("preambles", DEFAULT_PREAMBLES);
+  await seed("prompts", DEFAULT_PROMPTS);
+  await seed("randoms", DEFAULT_RANDOMS);
+  await seed("macros", DEFAULT_MACROS);
+  await seed("combos", DEFAULT_COMBOS.map(c => ({
+    ...c, preambleId: idMap[c.preambleId] || c.preambleId,
+    promptIds: (c.promptIds || []).map(id => idMap[id] || id), useCount: 0, lastUsedAt: "",
+  })));
+  saveSettings({ seeded: true });
+}
+
+// 同一草稿的重复点击共享一次写入；读取、合并、落库和更新内存全部在队列内。
+const pendingRows = new WeakMap();
+function upsert(name, row) {
+  if (pendingRows.has(row)) return pendingRows.get(row);
+  const patch = clone(row);
+  const job = writeData(async () => {
+    const list = state[name], now = new Date().toISOString();
+    const idx = patch.id ? list.findIndex(x => x.id === patch.id) : -1;
+    if (idx >= 0) {
+      const { id, ...data } = validateRow(name, { ...list[idx], ...patch, updatedAt: now });
+      const saved = await api.db.update(name, id, data);
+      if (!saved) throw new Error("记录已不存在，请重新打开 App。");
+      list[idx] = saved; return saved;
+    }
+    const data = validateRow(name, { ...patch, createdAt: patch.createdAt || now, updatedAt: now });
+    if (!data.id) delete data.id;
+    const created = await api.db.create(name, data);
+    list.push(created); row.id = created.id;
+    return created;
+  });
+  pendingRows.set(row, job);
+  const cleanup = () => { if (pendingRows.get(row) === job) pendingRows.delete(row); };
+  job.then(cleanup, cleanup);
+  return job;
+}
+function favoriteOf(result) {
+  return state.favorites.find(f => f.id === result.favoriteId || f.id === result.id || (result.id && f.recentId === result.id)) || null;
+}
+async function unlinkFavorites(ids) {
+  for (const r of state.recents) if (ids.has(r.favoriteId)) {
+    await api.db.update("recents", r.id, { favoriteId: "" }); r.favoriteId = "";
+  }
+  if (state.result && ids.has(state.result.favoriteId)) state.result.favoriteId = "";
+}
+function remove(name, id) {
+  return writeData(async () => {
+    await api.db.delete(name, id);
+    state[name] = state[name].filter(x => x.id !== id);
+    if (name === "favorites") await unlinkFavorites(new Set([id]));
+  });
+}
+function clearCollection(name) {
+  return writeData(async () => {
+    const rows = await readAllRows(name);
+    for (const row of rows) await api.db.delete(name, row.id);
+    state[name] = [];
+    if (state.invalidRecords) state.invalidRecords[name] = [];
+    if (name === "favorites") await unlinkFavorites(new Set(rows.map(r => r.id)));
+  });
+}
+
+/** 最近：超出上限自动挤掉最旧的 */
+async function pushRecent(item) {
+  const saved = await upsert("recents", item);
+  const keep = Math.max(1, Number(state.settings.recentKeep) || 10);
+  const sorted = [...state.recents].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  for (const old of sorted.slice(keep)) await remove("recents", old.id);
+  return saved;
+}
+
+// ── 导入导出 ──
+function exportBundle() {
+  const strip = r => { const { createdAt, updatedAt, ...rest } = r; return rest; };
+  return {
+    app: "float.xiaojuchang", version: 1, exportedAt: new Date().toISOString(),
+    preambles: state.preambles.map(strip), prompts: state.prompts.map(strip), randoms: state.randoms.map(strip),
+    macros: state.macros.map(strip), combos: state.combos.map(strip), favorites: state.favorites.map(strip), invalidRecords: clone(state.invalidRecords || {}),
+  };
+}
+function exportCombo(combo) {
+  const ids = new Set(combo.promptIds || []);
+  return {
+    app: "float.xiaojuchang", version: 1, kind: "combo",
+    combos: [combo], preambles: state.preambles.filter(p => p.id === combo.preambleId),
+    prompts: state.prompts.filter(p => ids.has(p.id)),
+    randoms: (combo.random && combo.random.count) ? state.randoms : [],
+    macros: state.macros,
+  };
+}
+/** 合并导入：同 id 覆盖，没有的新增。返回条数 */
+async function importBundle(data) {
+  data = validateBundle(data);
+  const idMap = Object.create(null);
+  let n = 0;
+  const put = async (name, row) => {
+    const { id: srcId, ...rest } = row;
+    const keep = srcId && state[name].some(x => x.id === srcId);
+    const saved = await upsert(name, keep ? { id: srcId, ...rest } : rest);
+    if (srcId) idMap[srcId] = saved.id;
+    n++;
+    return saved;
+  };
+  const mapCombo = c => ({ ...c, preambleId: idMap[c.preambleId] || c.preambleId, promptIds: (c.promptIds || []).map(id => idMap[id] || id) });
+  for (const name of ["preambles", "prompts", "randoms", "macros"]) {
+    for (const r of (Array.isArray(data[name]) ? data[name] : [])) { if (r && typeof r === "object") await put(name, r); }
+  }
+  for (const r of (Array.isArray(data.combos) ? data.combos : [])) { if (r && typeof r === "object") await put("combos", mapCombo(r)); }
+  for (const r of (Array.isArray(data.favorites) ? data.favorites : [])) {
+    if (!r || typeof r !== "object") continue;
+    await put("favorites", {
+      ...r, comboId: idMap[r.comboId] || r.comboId || "",
+      comboCopy: r.comboCopy ? mapCombo(r.comboCopy) : undefined,
+      segments: Array.isArray(r.segments) ? r.segments : [], snapshot: r.snapshot || {},
+    });
+  }
+  return n;
+}
+
+/** 暗柜「夜间档案」JSON → 一条场景提示词 + 一条形式提示词 + 一个组合 */
+async function importBlackMarketTheater(t) {
+  const src = t && t.templateSnapshot ? t.templateSnapshot : t;
+  if (!src || !src.aiInstruction) throw new Error("不像暗柜档案：缺少 aiInstruction。");
+  const title = String(src.title || "暗柜档案").trim();
+  const scene = await upsert("prompts", { title: `${title} · 剧情指令`, tags: ["暗柜", "场景"], content: String(src.aiInstruction) });
+  const ids = [scene.id];
+  if (src.outputContract) { const form = await upsert("prompts", { title: `${title} · 输出契约`, tags: ["暗柜", "形式"], content: String(src.outputContract) }); ids.push(form.id); }
+  const combo = await upsert("combos", {
+    name: title, tags: ["暗柜", ...(Array.isArray(src.tags) ? src.tags.slice(0, 4) : [])],
+    preambleId: state.preambles[0] ? state.preambles[0].id : "", promptIds: ids,
+    random: { count: 0, include: [], exclude: [] },
+    output: { mode: "mixed", wrapTag: "", length: "default", customChars: 900, style: "free" },
+    memory: { mode: "host", rounds: 12 }, writeBack: false, who: "persona", whoText: "", rawChannel: false, weight: 2, useCount: 0, lastUsedAt: "",
+  });
+  return combo;
+}
+
+async function pickJsonFile() {
+  const picked = await api.media.pick({ accept: ".json,application/json" });
+  const file = picked && (picked.file || picked);
+  const dataUrl = file && (file.dataUrl || file.dataURL);
+  if (!dataUrl) throw new Error("没有选到文件。");
+  const comma = dataUrl.indexOf(",");
+  const b64 = dataUrl.slice(comma + 1);
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const text = new TextDecoder("utf-8").decode(bytes);
+  return JSON.parse(text);
+}
+async function saveJsonFile(obj, name) {
+  const text = JSON.stringify(obj, null, 2);
+  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url; link.download = name; document.body.appendChild(link);
+  try { link.click(); }
+  finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+  openSheet("导出文件", box => {
+    box.appendChild(el("p", "note-box", "已请求下载 JSON 文件。如果手机没有出现下载，可复制下面的完整内容保存。"));
+    const ta = el("textarea", "ta"); ta.value = text; ta.rows = 8; ta.readOnly = true; box.appendChild(ta);
+    const copy = el("button", "fab", "复制 JSON"); copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(text); toast("已复制 JSON"); }
+      catch { ta.focus(); ta.select(); toast("请长按选中的文本复制"); }
+    }; box.appendChild(copy);
+  });
+  return true;
+}
+
+// ── 生成装配：组合 → 前置 + <Brief> → ai.generate（白名单只放人设/世界书/记忆）或 ai.chat 纯裸通道 → 切段 ──
+const WHITELIST_BASE = ["charDescription", "charPersonality", "characterRelations", "worldInfoBefore", "worldInfoAfter"];
+const WHITELIST_PERSONA = ["personaDescription"];
+const WHITELIST_MEMORY = ["memoryCore", "memoryLongTerm", "shortTermMemory"];
+const STYLE_HINT = {
+  free: "",
+  vars: "样式提示：页面外层已定义 CSS 变量 --xjc-bg（底色）--xjc-ink（文字）--xjc-acc（强调色）--xjc-line（细线）--xjc-font（字体），优先使用它们，让画面和 APP 主题协调；其余自由发挥。",
+  strict: "样式约束：颜色只能使用 CSS 变量 --xjc-bg --xjc-ink --xjc-acc --xjc-line（可用 color-mix 或透明度派生），字体只用 --xjc-font；不得自带其他颜色值。",
+};
+
+// 组合快照带上可重放的依赖；随机池保留候选，重放时仍重新抽取。
+function captureCombo(combo) {
+  const copy = clone(combo);
+  if (!copy._dependencies) {
+    copy._dependencies = clone({
+      preamble: byId(state.preambles, combo.preambleId) || state.preambles[0] || null,
+      prompts: (combo.promptIds || []).map(id => byId(state.prompts, id)).filter(Boolean),
+      randoms: state.randoms, macros: state.macros,
+      length: resolveLength(combo),
+    });
+  }
+  return copy;
+}
+function comboPrompts(combo) {
+  return [...(combo._virtualPrompts || []), ...(combo._dependencies
+    ? combo._dependencies.prompts : (combo.promptIds || []).map(id => byId(state.prompts, id)).filter(Boolean))];
+}
+function comboPreamble(combo) {
+  return combo._dependencies ? combo._dependencies.preamble : byId(state.preambles, combo.preambleId) || state.preambles[0];
+}
+
+function macroCtx(combo, character = state.character, userName = state.userName) {
+  const len = resolveLength(combo);
+  return { user: userName, char: charName(character), length: len ? `约 ${len.chars} 字` : "篇幅不限", macros: combo._dependencies ? combo._dependencies.macros : state.macros };
+}
+function resolveLength(combo) {
+  if (combo._dependencies) return combo._dependencies.length;
+  const o = combo.output || {};
+  if (o.length === "custom") return { chars: Math.max(50, Number(o.customChars) || 900), label: "自定" };
+  if (o.length && o.length !== "default") return { chars: LENGTH_CHARS[o.length] || 900, label: LENGTH_LABEL[o.length] };
+  if (!state.settings.lengthLimit) return null;
+  const k = state.settings.defaultLength || "medium";
+  return { chars: LENGTH_CHARS[k] || 900, label: LENGTH_LABEL[k] };
+}
+function drawRandoms(combo) {
+  const rule = combo.random || {}; const n = Math.max(0, Number(rule.count) || 0);
+  if (!n) return [];
+  const inc = new Set(rule.include || []), exc = new Set(rule.exclude || []);
+  const randoms = combo._dependencies ? combo._dependencies.randoms : state.randoms;
+  let pool = randoms.filter(r => { const tags = r.tags || []; if (tags.some(t => exc.has(t))) return false; if (inc.size && !tags.some(t => inc.has(t))) return false; return true; });
+  if (!pool.length) pool = randoms.filter(r => !(r.tags || []).some(t => exc.has(t)));
+  return shuffle(pool).slice(0, n);
+}
+
+/** 返回 { tasks, snapshot } —— tasks 是 <Brief> 全文，snapshot 记下这次用了什么 */
+function buildTasks(combo, extra, character = state.character, userName = state.userName, phase = null) {
+  const ctx = macroCtx(combo, character, userName);
+  const prompts = comboPrompts(combo);
+  const randoms = phase && phase.randoms ? phase.randoms : drawRandoms(combo);
+  const len = resolveLength(combo);
+  const o = combo.output || {};
+  const lines = ["<Brief>"];
+  const who = combo.who || "persona";
+  if (who === "persona") lines.push(`【身份】故事里的「${ctx.user}」就是用户本人，沿用前面给出的用户人设。`);
+  else if (who === "custom") lines.push(`【身份】用户在这篇里的身份：${expandMacros(combo.whoText || "", ctx) || "由你根据场景安排"}。忽略前面的用户人设。`);
+  else lines.push(`【身份】用户不出场，只作为旁观者阅读。全篇不要出现「${ctx.user}」这个人，重点写 ${ctx.char} 与其他人。`);
+  let i = 1;
+  for (const p of prompts) lines.push(`【任务 ${i++} · ${p.title}】${expandMacros(p.content, ctx)}`);
+  for (const r of randoms) lines.push(`【随机附加 · ${r.title}】${expandMacros(r.content, ctx)}`);
+  if (extra) lines.push(`【本次追加】${expandMacros(extra, ctx)}`);
+  const out = [];
+  const kind = phase && phase.kind;
+  if (kind === "shell") {
+    out.push("这一步只做页面骨架，不写正文。输出一段完整可渲染的 HTML（含 style 与 script），把所有将来要放文字的位置用空的占位元素标出来：<span data-slot=\"1\" data-hint=\"这里放什么、大约多少字\"></span>，编号从 1 递增，占位元素内部留空、不要嵌套占位。栏目名、用户名、时间戳、按钮文字这类界面文字直接写死。占位数量按内容需要，通常 5～40 个。不要 markdown 围栏、不要任何 HTML 之外的说明文字。 " + MOBILE_HTML_RULES);
+    if (STYLE_HINT[o.style]) out.push(STYLE_HINT[o.style]);
+    out.push("给这一篇起一个不超过 12 字的标题，放在最前面一行，格式：标题：xxx");
+  } else if (kind === "fill") {
+    lines.push(`【骨架】页面骨架已经定稿，下面是它的文字脉络，[[编号]] 就是要你填的位置：\n${phase.outline}`);
+    lines.push(`【占位清单】\n${phase.slots.map(x => `[[${x.n}]] ${x.hint || "正文"}`).join("\n")}`);
+    out.push("只输出各占位的文字。格式严格：每段以单独一行 [[编号]] 开头，从下一行起是该处的文字，可用 <br> 换行，不要任何其它 HTML、不要 markdown、不要解释；每个编号都要给到，按编号顺序，不要多不要少。");
+    if (len) out.push(`全部占位的文字合计约 ${len.chars} 字。`);
+  } else {
+    if (o.mode === "html") out.push("整体输出为一段 HTML（不要 markdown 围栏、不要任何 HTML 之外的说明文字）。" + (prompts.some(p => (p.tags || []).includes("前端")) ? "" : " " + MOBILE_HTML_RULES));
+    else if (o.mode === "mixed") out.push("允许 HTML 与纯文字混排：HTML 部分用 ```html 围栏包裹，文字部分直接写；两者之间空一行。" + " " + MOBILE_HTML_RULES);
+    else out.push("只输出纯文字正文，不要 HTML、不要 markdown 标题、不要代码块。");
+    if (len) out.push(`篇幅约 ${len.chars} 字（HTML 里只算可见文字）。`);
+    if (o.wrapTag) out.push(`把全部输出包在 <${o.wrapTag}></${o.wrapTag}> 标签内，标签外不要有任何内容。`);
+    if (o.mode !== "text" && STYLE_HINT[o.style]) out.push(STYLE_HINT[o.style]);
+    out.push("给这一篇起一个不超过 12 字的标题，放在最前面一行，格式：标题：xxx");
+  }
+  lines.push(`【输出要求】${out.join(" ")}`);
+  lines.push("</Brief>");
+  return {
+    tasks: lines.join("\n"), randoms,
+    snapshot: {
+      comboId: combo.id || "", comboName: combo.name, preambleName: (comboPreamble(combo) || {}).name || "",
+      prompts: prompts.map(p => p.title), randoms: randoms.map(r => r.title), who, output: { ...o }, length: len ? `${len.label} · 约 ${len.chars} 字` : "不限",
+      memory: { ...(combo.memory || {}) }, rawChannel: !!combo.rawChannel, extra: extra || "", staged: kind === "shell",
+    },
+  };
+}
+
+// ── 分两步出：第一步骨架带 data-slot 占位，第二步按编号填字。占位是我们指定的空叶子元素，正则够用 ──
+const SLOT_RE = /<([a-zA-Z][\w-]*)\b([^>]*?\sdata-slot="(\d+)"[^>]*)>([\s\S]*?)<\/\1>/g;
+function extractSlots(html) {
+  const slots = [], seen = new Set();
+  for (const m of html.matchAll(SLOT_RE)) {
+    const n = m[3]; if (seen.has(n)) continue; seen.add(n);
+    const hint = (m[2].match(/data-hint="([^"]*)"/) || [])[1] || "";
+    slots.push({ n, hint: hint.replace(/&quot;/g, '"').trim() });
+  }
+  const outline = html.replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ").replace(SLOT_RE, " [[$3]] ").replace(/<br\s*\/?>|<\/(p|div|li|tr|h\d|section|article|header|footer)>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").trim().slice(0, 4000);
+  return { slots, outline };
+}
+function parseFill(text) {
+  const map = {};
+  const body = String(text).replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, "").replace(/```[a-z]*\n?|```/g, "");
+  for (const m of body.matchAll(/\[\[(\d+)\]\]\s*([\s\S]*?)(?=\n\s*\[\[\d+\]\]|$)/g)) { const t = m[2].trim(); if (t) map[m[1]] = t; }
+  return map;
+}
+const slotHtml = text => esc(text).replace(/&lt;br\s*\/?&gt;/gi, "<br>").replace(/\n/g, "<br>");
+function fillSlots(html, map) {
+  return html.replace(SLOT_RE, (whole, tag, attrs, n, inner) => map[n] ? `<${tag}${attrs}>${slotHtml(map[n])}</${tag}>` : whole);
+}
+
+function includeList(combo) {
+  const list = [...WHITELIST_BASE];
+  if ((combo.who || "persona") === "persona") list.push(...WHITELIST_PERSONA);
+  if ((combo.memory || {}).mode === "host") list.push(...WHITELIST_MEMORY);
+  return list;
+}
+
+async function recentHistory(characterId, rounds) {
+  const target = Math.max(1, Math.min(50, Number(rounds) || 12)) * 2;
+  let before = "", history = [];
+  const cursors = new Set();
+  while (history.length < target) {
+    let res;
+    try { res = await api.chat.readHistory({ characterId, sessionId: "", limit: 200, before }); }
+    catch (e) { if (String(e && e.message).includes("chat.readHistory 找不到会话")) return []; throw e; }
+    if (res && res.characterId && res.characterId !== characterId) throw new Error("聊天记录与当前角色不一致。");
+    const msgs = (res && res.messages) || [];
+    const eligible = msgs.filter(m => !m.isRetracted && (m.role === "user" || m.role === "assistant") && m.content && !String(m.mediaType || "").startsWith("app_"));
+    history = [...eligible, ...history];
+    if (msgs.length < 200 || history.length >= target) break;
+    const cursor = msgs[0] && msgs[0].id;
+    if (!cursor || cursors.has(cursor)) throw new Error("宿主未能继续读取聊天记录，请更新宿主。");
+    cursors.add(cursor); before = cursor;
+  }
+  return history.slice(-target).map(m => ({ role: m.role, content: String(m.content).slice(0, 4000), createdAt: m.createdAt }));
+}
+function historyText(history, character, userName) {
+  if (!history.length) return "";
+  return "<RecentChat>\n" + history.map(m => `${m.role === "user" ? userName : character.name}：${m.content}`).join("\n") + "\n</RecentChat>";
+}
+async function refreshUserName(character) {
+  if (!character) return;
+  const profile = await api.user.getProfile({ characterId: character.id });
+  if (state.character && state.character.id === character.id) state.userName = (profile && profile.name) || "用户";
+  return profile;
+}
+
+async function rawContext(character, history, userName, persona, memories) {
+  const parts = [];
+  parts.push("<CharacterSheet>", `角色：${character.name}`, character.persona ? `设定：${character.persona}` : "", character.personality ? `性格：${character.personality}` : "", "</CharacterSheet>");
+  const wb = character.embeddedWorldBook;
+  if (wb && Array.isArray(wb.entries) && wb.entries.length) {
+    parts.push("<WorldNotes>");
+    for (const e of wb.entries.slice(0, 60)) { if (e && !e.disable && e.content) parts.push(`- ${(e.comment || (Array.isArray(e.key) ? e.key.join("/") : e.key) || "")}：${e.content}`); }
+    parts.push("</WorldNotes>");
+  }
+  if (persona && persona.text) parts.push("<UserPersona>", persona.text, "</UserPersona>");
+  if (memories) for (const [tag, value] of Object.entries(memories)) if (value && value.text) parts.push(`<${tag}>`, value.text, `</${tag}>`);
+  parts.push(historyText(history, character, userName));
+  return parts.filter(Boolean).join("\n");
+}
+
+/** 主入口：返回 { raw, title, segments, snapshot, model } */
+async function generateTheater(combo, opts) {
+  const character = (opts && opts.character) || state.character;
+  if (!character) throw new Error("先选一个角色。");
+  combo = captureCombo(combo);
+  const profile = await api.user.getProfile({ characterId: character.id });
+  const userName = (profile && profile.name) || "用户";
+  const pre = comboPreamble(combo);
+  const preamble = pre ? expandMacros(pre.content, macroCtx(combo, character, userName)) : "";
+  const mem = combo.memory || { mode: "host", rounds: 12 };
+  const history = mem.mode === "recent" ? await recentHistory(character.id, mem.rounds) : [];
+  let rawCtx = null;
+  if (combo.rawChannel) {
+    const full = await api.characters.get(character.id).catch(() => character);
+    const query = { characterId: character.id, sessionId: "" };
+    const persona = (combo.who || "persona") === "persona" ? await api.user.getPersona(query) : null;
+    let memories = null;
+    if (mem.mode === "host") {
+      const [core, long, short] = await Promise.all([api.memory.readCore(query), api.memory.readLongTerm(query), api.memory.readShortTerm(query)]);
+      memories = { memoryCore: core, memoryLongTerm: long, shortTermMemory: short };
+    }
+    rawCtx = await rawContext(full || character, history, userName, persona, memories);
+  }
+  const cancelled = () => !!(opts && opts.isCancelled && opts.isCancelled());
+  // 宿主流式：有 onStream 才带第二个参数；老宿主会忽略它，照旧一次性返回
+  const stream = (kind, snapshot) => opts && opts.onStream ? { onChunk: info => { if (cancelled()) return; const text = previewText(info && info.text); opts.onStream(kind === "fill" ? { kind, text, snapshot, fill: parseFill(text) } : { kind, text, snapshot }); } } : undefined;
+  const call = async (tasks, handlers) => {
+    if (combo.rawChannel) {
+      const res = await api.ai.chat({ characterId: character.id, messages: [
+        { role: "system", content: preamble || "只输出 <Brief> 要求的内容。" },
+        { role: "user", content: `${rawCtx}\n\n${tasks}` },
+      ] }, handlers);
+      return { raw: (res && res.text) || "", model: "" };
+    }
+    const res = await api.ai.generate({
+      characterId: character.id,
+      instruction: [preamble, historyText(history, character, userName), tasks].filter(Boolean).join("\n\n"),
+      messages: [],
+      historyLimit: Math.max(1, Math.min(50, (Number(mem.rounds) || 12) * 2)),
+      appTags: ["xjc"],
+      promptProfile: { id: "xjc", label: "小剧场", include: includeList(combo), history: "none", enableRegexes: false },
+    }, handlers);
+    return { raw: (res && res.text) || "", model: (res && res.model) || "" };
+  };
+  const o = combo.output || {};
+  if (o.staged && o.mode === "html") {
+    const shellTask = buildTasks(combo, opts && opts.extra, character, userName, { kind: "shell" });
+    const shell = await call(shellTask.tasks, stream("shell", shellTask.snapshot));
+    if (cancelled()) return null;
+    if (!shell.raw.trim()) throw new Error("模型没有返回骨架。");
+    const parsed = postProcess(shell.raw, combo);
+    const seg = parsed.segments.find(x => x.type === "html");
+    const found = seg ? extractSlots(seg.content) : { slots: [] };
+    // 模型没按占位写就当一次性成品，不再跑第二步
+    if (!seg || !found.slots.length) return { raw: shell.raw, title: parsed.title, segments: parsed.segments, snapshot: { ...shellTask.snapshot, staged: false }, model: shell.model };
+    if (opts && opts.onShell) opts.onShell({ raw: shell.raw, title: parsed.title, segments: parsed.segments, snapshot: shellTask.snapshot, model: shell.model, slots: found.slots });
+    if (cancelled()) return null;
+    const fillTask = buildTasks(combo, opts && opts.extra, character, userName, { kind: "fill", randoms: shellTask.randoms, slots: found.slots, outline: found.outline });
+    const fill = await call(fillTask.tasks, stream("fill", shellTask.snapshot));
+    if (cancelled()) return null;
+    const map = parseFill(fill.raw);
+    if (!Object.keys(map).length) throw new Error("第二步没填出文字，骨架已保留。");
+    const segments = parsed.segments.map(x => x === seg ? { type: "html", content: fillSlots(seg.content, map) } : x);
+    return { raw: `${shell.raw}\n\n<!-- 填字 -->\n${fill.raw}`, title: parsed.title, segments, snapshot: shellTask.snapshot, model: shell.model || fill.model, fill: map };
+  }
+  const { tasks, snapshot } = buildTasks(combo, opts && opts.extra, character, userName);
+  const { raw, model } = await call(tasks, stream("text", snapshot));
+  if (cancelled()) return null;
+  if (!raw.trim()) throw new Error("模型没有返回内容。");
+  const parsed = postProcess(raw, combo);
+  return { raw, title: parsed.title, segments: parsed.segments, snapshot, model };
+}
+
+/** 流式增量是模型原文，思维链标签可能还没闭合，预览前先剥掉 */
+function previewText(text) { return String(text || "").replace(/<(think|thinking|reasoning)>[\s\S]*?(<\/\1>|$)/gi, "").replace(/^\s+/, ""); }
+function postProcess(raw, combo) {
+  let text = String(raw).replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, "").trim();
+  let title = "";
+  const grab = () => { const tm = text.match(/^\s*(?:<!--\s*)?(?:标题|题目|Title)\s*[:：]\s*(.{1,40}?)\s*(?:-->)?\s*$/m); if (tm) { title = tm[1].replace(/^[「《"']|[」》"']$/g, ""); text = text.replace(tm[0], "").trim(); } };
+  grab();
+  const tag = (combo.output || {}).wrapTag;
+  if (tag) {
+    const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "gi");
+    const found = [...text.matchAll(re)].map(m => m[1].trim()).filter(Boolean);
+    if (found.length) text = found.join("\n\n");
+    else text = text.replace(new RegExp(`<\\/?${tag}[^>]*>`, "gi"), "").trim();
+  }
+  if (!title) grab();
+  const segments = [];
+  const fence = /```(?:html|HTML)?\s*\n([\s\S]*?)```/g;
+  let last = 0, m;
+  while ((m = fence.exec(text)) !== null) {
+    const before = text.slice(last, m.index).trim(); if (before) segments.push({ type: "text", content: before });
+    const inner = m[1].trim(); if (inner) segments.push({ type: looksHtml(inner) ? "html" : "text", content: inner });
+    last = m.index + m[0].length;
+  }
+  const rest = text.slice(last).trim();
+  if (rest) segments.push({ type: (combo.output || {}).mode !== "text" && looksHtml(rest) ? "html" : "text", content: rest });
+  if (!title) {
+    const h = segments.find(s => s.type === "html") && (segments.find(s => s.type === "html").content.match(/<h[1-3][^>]*>([^<]{1,40})<\/h[1-3]>/i) || segments.find(s => s.type === "html").content.match(/<title>([^<]{1,40})<\/title>/i));
+    if (h) title = h[1].trim();
+    else { const t = segments.find(s => s.type === "text"); if (t) title = t.content.split(/\n/)[0].replace(/<[^>]*>/g, "").replace(/^[#*\s「《]+|[」》*]+$/g, "").trim().slice(0, 18); }
+  }
+  return { title: title || combo.name || "小剧场", segments };
+}
+function looksHtml(s) { return /^\s*(<!doctype|<html|<style|<div|<section|<article|<main|<body|<table|<ul|<ol|<header|<span|<p\b)/i.test(s) || (/<\w+[^>]*>/.test(s) && /<\/\w+>/.test(s) && (s.match(/<\w+/g) || []).length >= 3); }
+
+function weightedRandomCombo() {
+  const pool = state.combos.map(c => ({ c, w: Math.max(0, Number(c.weight) || 0) })).filter(x => x.w > 0);
+  if (state.settings.randomIncludesAi) pool.push({ c: aiPickCombo(), w: 1 });
+  const total = pool.reduce((a, x) => a + x.w, 0);
+  if (!total) return state.combos[0] || aiPickCombo();
+  let r = Math.random() * total;
+  for (const x of pool) { r -= x.w; if (r <= 0) return x.c; }
+  return pool[pool.length - 1].c;
+}
+/** 虚拟组合：把所有「形式」提示词列给 AI，让它自己挑一种 */
+function aiPickCombo() {
+  const forms = state.prompts.filter(p => (p.tags || []).includes("形式"));
+  const menu = forms.map((p, i) => `${i + 1}. ${p.title}：${p.content.replace(/\s+/g, " ").slice(0, 80)}…`).join("\n");
+  const scenes = state.prompts.filter(p => (p.tags || []).includes("场景")).map(p => p.title).join(" / ");
+  const picker = { id: "", title: "AI 自选", content: `从下面的形式里自选一种最适合当前关系与最近发生的事的，严格按那一条的形式要求写；场景可从「${scenes || "任意"}」里挑，也可以自创。\n${menu}\n先在标题行之后用一行注明「形式：xxx」。` };
+  return {
+    id: "", name: "AI 自选", tags: ["随机"], preambleId: state.settings.defaultPreambleId || (state.preambles[0] || {}).id, promptIds: [], _virtualPrompts: [picker],
+    random: { count: 1, include: [], exclude: [] },
+    output: { mode: "mixed", wrapTag: "", length: "default", customChars: 900, style: state.settings.defaultStyle || "free" },
+    memory: { mode: state.settings.defaultMemory || "host", rounds: state.settings.defaultRounds || 12 },
+    writeBack: false, who: state.settings.defaultWho || "persona", whoText: "", rawChannel: false, weight: 1,
+  };
+}
+async function writeBackMemory(result, combo) {
+  if (!combo.writeBack || !result.characterId) return;
+  const text = result.segments.filter(s => s.type === "text").map(s => s.content).join("\n") || result.segments.map(s => s.content.replace(/<[^>]+>/g, " ")).join(" ");
+  const gist = text.replace(/\s+/g, " ").slice(0, 400);
+  if (!gist) return;
+  try { await api.memory.add({ characterId: result.characterId, type: "long_term", importance: 0.5, reason: `小剧场《${result.title}》`, content: `（小剧场·${combo.name}）${gist}` }); }
+  catch (e) { console.warn("[小剧场] 写回记忆失败", e); }
+}
+
+// ── 渲染：AI 写的 HTML/JS 整块放进沙盒 iframe；纯文字段落也进同一个 iframe，样式跟当前主题 ──
+const frames = new Map();
+let frameSeq = 0;
+window.addEventListener("message", e => {
+  const d = e.data; if (!d || d.source !== "xjc-frame" || !frames.has(d.id)) return;
+  const entry = frames.get(d.id), f = entry.iframe;
+  if (!f.isConnected || e.source !== f.contentWindow) return;
+  if (d.type === "resize" && Number.isFinite(d.height) && !entry.fullscreen) f.style.height = `${Math.max(80, Math.min(20000, Math.ceil(d.height)))}px`;
+  if (d.type === "action" && entry.result) {
+    const visible = entry.fullscreen ? !$("fullscreen").hidden : $("fullscreen").hidden && state.view === "stage";
+    const text = typeof d.text === "string" ? d.text.trim() : "";
+    if (visible && text) stage.continueResult(entry.result, text);
+  }
+});
+
+function themeTokens() {
+  const cs = getComputedStyle($("app"));
+  const get = (k, d) => (cs.getPropertyValue(k) || d).trim();
+  return { size: 13 * (Number(state.settings.fontScale) || 1), lineHeight: LINE_HEIGHTS[state.settings.lineHeight] || 1.55, bg: get("--paper", "#f6f1e8"), ink: get("--ink", "#1c1a17"), acc: get("--acc", "#8b2e2e"), line: get("--line", "#d9d1c3"), font: cs.fontFamily || "sans-serif", serif: getComputedStyle(document.querySelector(".topbar h1")).fontFamily };
+}
+function textToHtml(text) {
+  return String(text).split(/\n{2,}/).map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
+}
+function frameDoc(segments, id, fullscreen) {
+  const t = themeTokens();
+  const body = segments.map(s => s.type === "html" ? `<div class="xjc-html">${s.content}</div>` : `<article class="xjc-text">${textToHtml(s.content)}</article>`).join("\n");
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+:root{--xjc-bg:${t.bg};--xjc-ink:${t.ink};--xjc-acc:${t.acc};--xjc-line:${t.line};--xjc-font:${t.font.replace(/"/g, "'")};--xjc-serif:${t.serif.replace(/"/g, "'")}}
+html,body{margin:0;padding:0;background:var(--xjc-bg);color:var(--xjc-ink);font-family:var(--xjc-font);font-size:${t.size}px;line-height:${t.lineHeight};-webkit-text-size-adjust:100%}
+body{min-height:0}#xjc-content{display:flow-root;padding:${fullscreen ? "14px 16px 40px" : "12px 14px"}}
+*{box-sizing:border-box}img,video,canvas,svg,iframe{max-width:100%}
+.xjc-text p{margin:0 0 .9em;text-align:justify;word-break:break-word}
+.xjc-text p:last-child{margin-bottom:0}
+.xjc-text+.xjc-html,.xjc-html+.xjc-text,.xjc-html+.xjc-html{margin-top:16px}
+.xjc-html{max-width:100%;overflow-x:auto}
+[data-slot]:empty{display:inline-block;min-width:4em;min-height:1em;vertical-align:middle;border-radius:3px;background:linear-gradient(90deg,transparent 20%,var(--xjc-line) 50%,transparent 80%) 0 0/200% 100%;animation:xjc-sh 1.4s linear infinite;opacity:.7}
+@keyframes xjc-sh{to{background-position:-200% 0}}
+.xjc-text.writing p:last-child::after{content:"▍";margin-left:1px;color:var(--xjc-acc);animation:xjc-bl 1s steps(2) infinite}
+@keyframes xjc-bl{50%{opacity:0}}
+</style></head><body><div id="xjc-content">${body}</div>
+<${"script"}>(function(){var id=${JSON.stringify(id)};var content=document.getElementById("xjc-content");function h(){return Math.max(content.scrollHeight,content.getBoundingClientRect().height)}var last=0;function send(){var v=h();if(Math.abs(v-last)>1){last=v;parent.postMessage({source:"xjc-frame",type:"resize",id:id,height:v},"*")}}
+if(window.ResizeObserver){new ResizeObserver(send).observe(content)}window.addEventListener("load",send);setInterval(send,600);send();
+window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){if(Number.isFinite(d.size))document.body.style.fontSize=d.size+"px";if(Number.isFinite(d.lineHeight))document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="text"&&typeof d.html==="string"){content.innerHTML=d.html;send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
+document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("[data-action]"):null;if(a){parent.postMessage({source:"xjc-frame",type:"action",id:id,text:a.getAttribute("data-action")||a.textContent||""},"*")}});})();</${"script"}>
+</body></html>`;
+}
+function updateFrameReading() {
+  const t = themeTokens();
+  for (const [id, entry] of frames) if (entry.iframe.isConnected) entry.iframe.contentWindow.postMessage({ source: "xjc-parent", type: "reading", id, size: t.size, lineHeight: t.lineHeight }, "*");
+}
+/** 分两步出的第二步：把填好的字送进已经显示的 iframe，不重载、不打断它的脚本 */
+function fillFrame(result, slots) {
+  for (const [id, entry] of frames) if (entry.result === result && entry.iframe.isConnected) entry.iframe.contentWindow.postMessage({ source: "xjc-parent", type: "fill", id, slots }, "*");
+}
+/** 流式：纯文字边写边显示，整段重设 innerHTML，不重载 iframe */
+function streamFrame(result, segments, writing) {
+  const html = segments.map(s => `<article class="xjc-text${writing ? " writing" : ""}">${textToHtml(s.content)}</article>`).join("\n");
+  for (const [id, entry] of frames) if (entry.result === result && entry.iframe.isConnected) entry.iframe.contentWindow.postMessage({ source: "xjc-parent", type: "text", id, html }, "*");
+}
+/** 结果对象在原地更新后（填字、流式收尾）刷新标题和字数，不重挂卡片 */
+function refreshResultMeta(result) {
+  const card = document.querySelector("#result-host .result"); if (!card) return;
+  const snap = result.snapshot || {};
+  card.querySelector("h2").textContent = result.title || snap.comboName || "无题";
+  const spans = card.querySelectorAll(".meta span");
+  if (spans[0]) spans[0].textContent = `${result.characterName || charName(state.character)} · ${fmtTime(result.createdAt)}`;
+  if (spans[1]) spans[1].textContent = `${resultCharCount(result)} 字 · ${memoryLabel(snap.memory)}${result.model ? " · " + result.model : ""}`;
+}
+function setResultStatus(text) {
+  const node = document.querySelector("#result-host .result .status"); if (!node) return;
+  node.hidden = !text; node.textContent = ""; if (text) { node.appendChild(el("i", "spin")); node.appendChild(document.createTextNode(text)); }
+}
+function mountFrame(container, segments, fullscreen, result) {
+  for (const [key, entry] of frames) if (!entry.iframe.isConnected) frames.delete(key);
+  const id = `f${++frameSeq}`;
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-scripts allow-forms allow-modals allow-popups");
+  iframe.setAttribute("scrolling", fullscreen ? "yes" : "no");
+  iframe.title = "小剧场";
+  iframe.srcdoc = frameDoc(segments, id, fullscreen);
+  frames.set(id, { iframe, result, fullscreen });
+  container.appendChild(iframe);
+  return iframe;
+}
+
+const KIND_LABEL = { html: "前端型", text: "文字型", mixed: "组合型" };
+/** 收藏/最近里可能有缺字段的旧数据或别人导入的数据，取用前一律过这里 */
+function segmentsOf(result) {
+  const list = Array.isArray(result && result.segments) ? result.segments.filter(s => s && typeof s.content === "string") : [];
+  if (list.length) return list;
+  const raw = result && typeof result.raw === "string" ? result.raw.trim() : "";
+  return raw ? [{ type: "text", content: raw }] : [{ type: "text", content: "这条记录的内容已经丢失了。" }];
+}
+function kindOf(result) {
+  const types = new Set(segmentsOf(result).map(s => s.type));
+  return types.size > 1 ? "mixed" : (types.has("html") ? "html" : "text");
+}
+function resultCharCount(result) { return segmentsOf(result).reduce((a, s) => a + (s.type === "html" ? s.content.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>|<[^>]+>/g, "").replace(/\s+/g, "").length : s.content.replace(/\s+/g, "").length), 0); }
+
+/** 结果卡：handlers = { again, fav, copy } */
+function renderResultCard(host, result, handlers) {
+  host.innerHTML = "";
+  const card = el("article", "result");
+  const kind = el("div", "kind row");
+  const snap = result.snapshot || {};
+  const picks = Array.isArray(snap.randoms) ? snap.randoms : [];
+  const kt = el("span", "grow", `${KIND_LABEL[kindOf(result)]} · ${snap.comboName || result.comboName || "小剧场"}${picks.length ? " · 随机 " + picks.join("、") : ""}`);
+  const fs = el("button", "fs", "⤢ 全屏"); fs.type = "button"; fs.onclick = () => openFullscreen(result, handlers);
+  kind.append(kt, fs); card.appendChild(kind);
+  card.appendChild(el("h2", "", result.title || snap.comboName || "无题"));
+  const status = el("div", "status"); status.hidden = true; card.appendChild(status);
+  const wrap = el("div", "frame-wrap"); mountFrame(wrap, segmentsOf(result), false, result);
+  card.appendChild(wrap);
+  const meta = el("div", "meta");
+  meta.appendChild(el("span", "", `${result.characterName || charName(state.character)} · ${fmtTime(result.createdAt)}`));
+  meta.appendChild(el("span", "", `${resultCharCount(result)} 字 · ${memoryLabel(snap.memory)}${result.model ? " · " + result.model : ""}`));
+  card.appendChild(meta);
+  const ops = el("div", "ops");
+  const mk = (label, fn, cls) => { const b = el("button", cls || "", label); b.type = "button"; b.onclick = fn; ops.appendChild(b); return b; };
+  mk("再来一条", () => handlers.again(result));
+  const favBtn = mk(favoriteOf(result) ? "已收藏" : "收藏", async () => { try { const id = await handlers.fav(result); if (id) favBtn.textContent = "已收藏"; } catch (e) { fail(e); } });
+  mk("复制", () => handlers.copy(result));
+  card.appendChild(ops);
+  host.appendChild(card);
+  return card;
+}
+function memoryLabel(m) { if (!m) return "记忆未知"; return m.mode === "host" ? "跟宿主记忆" : m.mode === "recent" ? `最近 ${m.rounds || 12} 轮` : "不带记忆"; }
+
+let fsResult = null, fsHandlers = null;
+function openFullscreen(result, handlers) {
+  fsResult = result; fsHandlers = handlers;
+  const body = $("fs-body"); body.innerHTML = "";
+  $("fs-title").textContent = result.title || "";
+  mountFrame(body, segmentsOf(result), true, result);
+  $("fullscreen").hidden = false;
+}
+function closeFullscreen() { $("fullscreen").hidden = true; $("fs-body").innerHTML = ""; fsResult = null; }
+$("fs-close").onclick = closeFullscreen;
+$("fs-again").onclick = () => { if (fsResult && fsHandlers) { const r = fsResult; closeFullscreen(); fsHandlers.again(r); } };
+
+function resultPlainText(result) {
+  return segmentsOf(result).map(s => s.type === "text" ? s.content : s.content.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, "").replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>|<\/h\d>/gi, "\n").replace(/<[^>]+>/g, "").replace(/\n{3,}/g, "\n\n").trim()).join("\n\n");
+}
+async function copyResult(result) {
+  const text = `${result.title}\n\n${resultPlainText(result)}`;
+  try { await navigator.clipboard.writeText(text); toast("已复制正文"); }
+  catch { openSheet("复制", box => { const ta = el("textarea", "ta"); ta.value = result.raw; ta.rows = 12; box.appendChild(ta); ta.focus(); ta.select(); }); }
+}
+
+// ── 主题：四套整体布局不同的壳；字号整体偏小，只给一档「标准」放大 ──
+const THEMES = [
+  { id: "magazine", name: "杂志", desc: "衬线标题 · 编辑排版", pv: "pv-mag" },
+  { id: "sticky", name: "便签墙", desc: "彩色便签 · 手账感", pv: "pv-stk" },
+  { id: "terminal", name: "终端", desc: "等宽 · 暗色 · 扫描线", pv: "pv-trm" },
+  { id: "script", name: "剧本", desc: "场次 · 台词缩进", pv: "pv-scr" },
+];
+const LINE_HEIGHTS = { tight: 1.45, mid: 1.55, loose: 1.7 };
+const theme = {
+  apply() {
+    const s = state.settings; const app = $("app");
+    app.dataset.theme = THEMES.some(t => t.id === s.theme) ? s.theme : "magazine";
+    app.style.setProperty("--fs-scale", String(Number(s.fontScale) || 1));
+    app.style.setProperty("--lh", String(LINE_HEIGHTS[s.lineHeight] || 1.55));
+    app.dataset.motion = s.motion === false ? "off" : "on";
+    const d = new Date();
+    $("hdr-date").textContent = `${d.getFullYear()} · ${String(d.getMonth() + 1).padStart(2, "0")} · ${String(d.getDate()).padStart(2, "0")}`;
+    $("hdr-no").textContent = `No. ${String(Math.max(1, Number(s.issueNo) || 1)).padStart(3, "0")}`;
+  },
+};
+
+// ── 舞台：主演卡 → 选小剧场 → 生成 → 结果 → 最近 ──
+const pendingFavorites = new Map();
+const stage = {
+  bind() {
+    $("btn-gen").onclick = () => { const c = stage.currentCombo(); if (!c) { toast("先建一个小剧场"); switchView("library"); return; } stage.run(c); };
+    $("btn-random").onclick = () => stage.run(weightedRandomCombo());
+    $("btn-ai").onclick = () => stage.run(aiPickCombo());
+    viewHooks.stage = () => stage.render();
+  },
+  currentCombo() { return byId(state.combos, state.settings.currentComboId) || state.combos[0] || null; },
+  comboOf(result) { return result.comboCopy || byId(state.combos, result.comboId) || null; },
+  continueResult(result, text) {
+    if (state.busy) { toast("上一篇还在写"); return; }
+    const combo = stage.comboOf(result);
+    if (!combo) { toast("配置已丢失"); return; }
+    const character = byId(state.characters, result.characterId);
+    if (!character) { toast("这篇的角色已删除或不可见"); return; }
+    closeFullscreen();
+    switchView("stage");
+    return stage.run(combo, `上一篇正文：\n${resultPlainText(result)}\n\n用户在上一篇里选择了「${text}」，接着这个选择往下写新的一篇。`, character);
+  },
+  render() { stage.renderLead(); stage.renderPick(); stage.renderRecent(); if (state.result && !$("result-host").children.length) stage.showResult(state.result); },
+
+  renderLead() {
+    const box = $("lead"); box.innerHTML = "";
+    const c = state.character;
+    const ava = el("span", "ava c1");
+    if (c && c.avatar) { const img = el("img"); img.src = c.avatar; img.alt = ""; ava.appendChild(img); } else ava.textContent = c ? c.name.slice(0, 1) : "?";
+    const info = el("div", "grow");
+    info.appendChild(el("div", "nm", c ? c.name : "还没有角色"));
+    const mine = c ? [...state.recents, ...state.favorites].filter(r => r.characterId === c.id) : [];
+    const last = mine.map(r => r.createdAt).sort().pop();
+    const played = c ? (state.combos.reduce((a, x) => a + ((x.plays || {})[c.id] || 0), 0)) : 0;
+    info.appendChild(el("div", "small", c ? `已演 ${played} 篇${last ? " · 上次 " + fmtTime(last) : ""} · ${memoryLabel((stage.currentCombo() || {}).memory)}` : "去宿主里先建一个角色"));
+    const sw = el("button", "sw", "切换 ›"); sw.type = "button"; sw.onclick = stage.pickCharacter;
+    box.append(ava, info, sw);
+  },
+  pickCharacter() {
+    openSheet("选主演", box => {
+      if (!state.characters.length) { box.appendChild(el("p", "empty", "宿主里还没有角色")); return; }
+      state.characters.forEach(c => {
+        const row = el("div", "pickrow" + (state.character && c.id === state.character.id ? " on" : ""));
+        const ava = el("span", "ava c1"); if (c.avatar) { const img = el("img"); img.src = c.avatar; ava.appendChild(img); } else ava.textContent = c.name.slice(0, 1);
+        ava.style.width = "28px"; ava.style.height = "28px"; ava.style.fontSize = "11px";
+        row.append(ava, el("div", "grow", c.name));
+        row.onclick = () => { state.character = c; refreshUserName(c).catch(fail); saveSettings({ characterId: c.id }); closeSheet(); stage.render(); };
+        box.appendChild(row);
+      });
+    });
+  },
+
+  renderPick() {
+    const box = $("pick"); box.innerHTML = "";
+    const c = stage.currentCombo();
+    if (!c) { box.appendChild(el("div", "name none", "还没有小剧场，去「小剧场」页建一个")); box.onclick = () => switchView("library"); return; }
+    box.appendChild(el("div", "name", c.name));
+    const chips = el("div", "chips");
+    const titles = (c.promptIds || []).map(id => (byId(state.prompts, id) || {}).title).filter(Boolean);
+    const chip = (k, v) => { const s = el("span", "chip"); s.appendChild(el("b", "", k)); s.appendChild(document.createTextNode(v)); chips.appendChild(s); };
+    chip("提示词", titles.length ? titles.join(" · ") : "无");
+    const r = c.random || {}; chip("随机", r.count ? `抽 ${r.count}${(r.include || []).length ? " · #" + r.include.join(" #") : ""}` : "不抽");
+    chip("输出", ({ html: "HTML", text: "纯文字", mixed: "组合" }[(c.output || {}).mode] || "纯文字") + ((c.output || {}).staged && (c.output || {}).mode === "html" ? " · 两步" : ""));
+    chip("记忆", memoryLabel(c.memory));
+    box.appendChild(chips);
+    box.onclick = stage.pickCombo;
+  },
+  pickCombo() {
+    openSheet("选小剧场", box => {
+      const cur = state.settings.currentComboId;
+      state.combos.forEach(c => {
+        const row = el("div", "pickrow" + (c.id === cur ? " on" : ""));
+        const cb = el("span", "cb"); const body = el("div", "grow");
+        body.appendChild(el("div", "et", c.name));
+        body.appendChild(el("div", "ex", `${(c.tags || []).join(" · ") || "无标签"} · 权重 ${c.weight ?? 1}`));
+        const edit = el("button", "small", "编辑"); edit.type = "button"; edit.onclick = e => { e.stopPropagation(); closeSheet(); library.openCompose(c.id); };
+        row.append(cb, body, edit);
+        row.onclick = () => { saveSettings({ currentComboId: c.id }); closeSheet(); stage.render(); };
+        box.appendChild(row);
+      });
+      const add = el("button", "fab ghost", "新建小剧场"); add.type = "button"; add.onclick = () => { closeSheet(); library.openCompose(""); };
+      box.appendChild(add);
+    });
+  },
+
+  runSeq: 0,
+  async run(combo, extra, selectedCharacter = state.character) {
+    if (state.busy) { toast("上一篇还在写"); return; }
+    if (!selectedCharacter) { toast("先选一个角色"); return; }
+    const character = clone(selectedCharacter);
+    combo = captureCombo(combo);
+    const token = ++stage.runSeq;
+    const mine = () => stage.runSeq === token;
+    state.busy = true;
+    const host = $("result-host"); host.innerHTML = "";
+    const started = Date.now();
+    const busy = el("div", "busy");
+    const line = el("div", "row"); line.appendChild(el("i", "spin")); line.appendChild(el("span", "", `${charName(character)} 正在演《${combo.name}》`)); const sec = el("b", "sec", "0 秒"); line.appendChild(sec);
+    const cancel = el("button", "cancel", "取消"); cancel.type = "button"; cancel.onclick = () => stage.cancel(token);
+    busy.append(line, cancel); host.appendChild(busy);
+    let phase = "", chars = 0;
+    const tick = () => { const n = Math.round((Date.now() - started) / 1000); sec.textContent = `${n} 秒${chars ? ` · ${chars} 字` : ""}`; if (phase) setResultStatus(`${phase} · ${n} 秒`); };
+    const timer = setInterval(tick, 1000);
+    stage.setWriting(true);
+    $("main").scrollTop = 0;
+    let result = null, previewing = false;
+    const stamp = () => new Date().toISOString();
+    const base = () => ({ characterId: character.id, characterName: character.name, comboId: combo.id || "", comboName: combo.name, comboCopy: clone(combo), createdAt: stamp() });
+    const slotTotal = { n: 0 };
+    // 流式预览：纯文字直接写进 iframe；HTML 只报字数（半截 HTML 没法渲染）；填字阶段流进格子
+    const preview = throttle(ev => {
+      if (!mine()) return;
+      chars = ev.text.replace(/\s+/g, "").length;
+      if (ev.kind === "fill") {
+        const done = Object.keys(ev.fill).length;
+        if (result && done) { fillFrame(result, ev.fill); phase = `骨架好了，正在填第 ${Math.min(done, slotTotal.n)} / ${slotTotal.n} 处`; }
+        tick(); return;
+      }
+      if (ev.kind !== "text") { tick(); return; }
+      const parsed = postProcess(ev.text, combo);
+      if (!parsed.segments.length || !parsed.segments.every(x => x.type === "text")) { tick(); return; }
+      if (!result) { result = { ...base(), title: parsed.title, raw: ev.text, segments: [{ type: "text", content: "" }], snapshot: ev.snapshot || {} }; stage.showResult(result); stage.markWriting(true); previewing = true; host.appendChild(cancel); }
+      if (!previewing) return;
+      streamFrame(result, parsed.segments, true);
+      Object.assign(result, { title: parsed.title, raw: ev.text, segments: parsed.segments }); refreshResultMeta(result);
+      tick();
+    }, 160);
+    try {
+      const gen = await generateTheater(combo, {
+        extra, character, isCancelled: () => !mine(),
+        onStream: state.settings.streamPreview !== false ? preview : undefined,
+        onShell: shell => {
+          if (!mine()) return;
+          preview.cancel(); chars = 0;
+          result = { ...base(), title: shell.title, raw: shell.raw, segments: shell.segments, snapshot: shell.snapshot, model: shell.model };
+          stage.showResult(result); stage.markWriting(true);
+          slotTotal.n = shell.slots.length;
+          phase = `骨架好了，正在填 ${shell.slots.length} 处文字`; tick();
+          host.appendChild(cancel);
+        },
+      });
+      if (!mine() || !gen) return;
+      preview.cancel(); clearInterval(timer); phase = ""; setResultStatus(""); cancel.remove();
+      if (result) Object.assign(result, { title: gen.title, raw: gen.raw, segments: gen.segments, snapshot: gen.snapshot, model: gen.model, createdAt: stamp() });
+      else result = { ...base(), title: gen.title, raw: gen.raw, segments: gen.segments, snapshot: gen.snapshot, model: gen.model };
+      const saved = await pushRecent(result);
+      Object.assign(result, saved);
+      state.result = result;
+      if (gen.fill) { fillFrame(result, gen.fill); refreshResultMeta(result); }
+      else if (previewing && gen.segments.every(x => x.type === "text")) { streamFrame(result, gen.segments, false); refreshResultMeta(result); }
+      else stage.showResult(result);
+      stage.markWriting(false);
+      const current = byId(state.combos, combo.id);
+      if (current) {
+        const plays = { ...(current.plays || {}) }; plays[character.id] = (plays[character.id] || 0) + 1;
+        await upsert("combos", { id: current.id, useCount: (current.useCount || 0) + 1, lastUsedAt: result.createdAt, plays });
+      }
+      saveSettings({ issueNo: (Number(state.settings.issueNo) || 1) + 1 });
+      writeBackMemory(result, combo);
+      stage.renderLead(); stage.renderRecent();
+    } catch (e) {
+      if (!mine()) return;
+      preview.cancel(); clearInterval(timer); phase = ""; setResultStatus(""); cancel.remove();
+      const err = el("div", "err", `没写出来：${e && e.message ? e.message : e}`);
+      const retry = el("button", "fab ghost", "再试一次"); retry.type = "button"; retry.onclick = () => stage.run(combo, extra, character);
+      if (result && !previewing) { stage.markWriting(false); host.append(err, retry); } else { host.innerHTML = ""; host.append(err, retry); }
+    } finally { if (mine()) { clearInterval(timer); state.busy = false; stage.setWriting(false); } }
+  },
+  /** 宿主的 ai.generate 不能中断，取消只是不再等它：结果回来也丢掉 */
+  cancel(token) {
+    if (stage.runSeq !== token || !state.busy) return;
+    stage.runSeq++; state.busy = false; stage.setWriting(false);
+    const host = $("result-host"); host.innerHTML = "";
+    host.appendChild(el("div", "empty", "已取消。模型那边可能还在写，回来的结果会直接丢掉。"));
+  },
+  /** 还在写的结果卡：收藏 / 复制 / 再来一条先按不了，免得存半篇 */
+  markWriting(on) { const card = $("result-host").querySelector(".result"); if (card) card.classList.toggle("writing", on); },
+  setWriting(on) { $("app").classList.toggle("writing", on); const b = $("btn-gen"); b.disabled = on; b.textContent = on ? "正在写…" : "生成一篇"; },
+  handlers() {
+    return {
+      again: r => { const c = stage.comboOf(r); if (c) stage.run(c); else toast("这个小剧场已删除"); },
+      fav: r => {
+        const key = r.id || r;
+        if (pendingFavorites.has(key)) return pendingFavorites.get(key);
+        const job = (async () => {
+          const existing = favoriteOf(r);
+          if (existing) { r.favoriteId = existing.id; toast("已经收藏过了"); return existing.id; }
+          const { id, favoriteId, ...data } = r;
+          const saved = await upsert("favorites", { ...data, recentId: id || "", favoritedAt: new Date().toISOString() });
+          r.favoriteId = saved.id;
+          if (id && state.recents.some(x => x.id === id)) await upsert("recents", { id, favoriteId: saved.id });
+          toast("已收藏"); favorites.render(); return saved.id;
+        })();
+        pendingFavorites.set(key, job);
+        job.then(() => pendingFavorites.delete(key), () => pendingFavorites.delete(key));
+        return job;
+      },
+      copy: r => copyResult(r),
+    };
+  },
+  showResult(result) { state.result = result; renderResultCard($("result-host"), result, stage.handlers()); },
+
+  renderRecent() {
+    const box = $("recent"); box.innerHTML = "";
+    const list = [...state.recents].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    $("recent-title").textContent = `最近 · ${list.length}`;
+    if (!list.length) { box.appendChild(el("div", "empty", "还没有生成过。点上面的「生成一篇」。")); return; }
+    list.forEach(r => {
+      const row = el("div", "item");
+      row.appendChild(el("span", "t", r.title || r.comboName || "无题"));
+      row.appendChild(el("span", "badge", KIND_LABEL[kindOf(r)].replace("型", "")));
+      row.appendChild(el("span", "small", fmtTime(r.createdAt)));
+      row.onclick = () => { stage.showResult(r); $("main").scrollTop = 0; };
+      box.appendChild(row);
+    });
+  },
+};
+
+// ── 小剧场库：组合 / 提示词 / 随机池+宏 / 前置要求；组合在独立页编辑，其余在底部抽屉编辑 ──
+const OUT_MODE = [{ v: "text", l: "纯文字" }, { v: "html", l: "HTML" }, { v: "mixed", l: "组合" }];
+const LEN_OPTS = [{ v: "default", l: "跟设置" }, { v: "short", l: "短" }, { v: "medium", l: "中" }, { v: "long", l: "长" }, { v: "custom", l: "自定" }];
+const STYLE_OPTS = [{ v: "free", l: "不约束" }, { v: "vars", l: "给主题变量" }, { v: "strict", l: "严格" }];
+const MEM_OPTS = [{ v: "host", l: "跟宿主" }, { v: "recent", l: "最近 N 轮" }, { v: "none", l: "不带" }];
+const WHO_OPTS = [{ v: "persona", l: "宿主人设" }, { v: "custom", l: "自定" }, { v: "observer", l: "旁观" }];
+
+function newCombo() {
+  const s = state.settings;
+  return {
+    name: "", tags: [], preambleId: state.preambles[0] ? state.preambles[0].id : "", promptIds: [],
+    random: { count: 0, include: [], exclude: [] },
+    output: { mode: "text", wrapTag: "", length: "default", customChars: 900, style: s.defaultStyle || "free", staged: !!s.stagedDefault },
+    memory: { mode: s.defaultMemory || "host", rounds: Number(s.defaultRounds) || 12 },
+    writeBack: !!s.writeBackDefault, who: s.defaultWho || "persona", whoText: "", rawChannel: false, weight: 2, useCount: 0, lastUsedAt: "",
+  };
+}
+function field(label, control) { const w = el("div"); const l = el("label", "lb", label); w.append(l, control); return w; }
+function input(value, ph) { const i = el("input", "inp"); i.value = value || ""; if (ph) i.placeholder = ph; return i; }
+function textarea(value, rows, ph) { const t = el("textarea", "ta"); t.value = value || ""; t.rows = rows || 5; if (ph) t.placeholder = ph; return t; }
+function select(options, value) { const s = el("select", "sel"); options.forEach(o => { const op = el("option", "", o.l); op.value = o.v; s.appendChild(op); }); s.value = value; return s; }
+const allTags = list => [...new Set(list.flatMap(x => x.tags || []))];
+
+const composeSaves = new WeakMap();
+const library = {
+  promptFilter: "全部",
+  bind() {
+    document.querySelectorAll("#lib-seg [data-lt]").forEach(b => { b.onclick = () => library.setTab(b.dataset.lt); });
+    $("btn-new-combo").onclick = () => library.openCompose("");
+    $("btn-new-prompt").onclick = () => library.editPrompt(null);
+    $("btn-import-prompts").onclick = library.importPrompts;
+    $("btn-new-random").onclick = () => library.editRandom(null);
+    $("btn-new-macro").onclick = () => library.editMacro(null);
+    $("btn-new-pre").onclick = () => library.editPreamble(null);
+    viewHooks.library = tab => { if (tab) state.libTab = tab; library.render(); };
+    viewHooks.compose = () => {};
+  },
+  setTab(t) { state.libTab = t; library.render(); },
+  render() {
+    document.querySelectorAll("#lib-seg [data-lt]").forEach(b => b.classList.toggle("on", b.dataset.lt === state.libTab));
+    document.querySelectorAll(".lpane").forEach(p => p.classList.toggle("on", p.dataset.lpane === state.libTab));
+    $("cnt-combo").textContent = state.combos.length; $("cnt-prompts").textContent = state.prompts.length;
+    $("cnt-random").textContent = state.randoms.length + state.macros.length; $("cnt-pre").textContent = state.preambles.length;
+    library.renderCombos(); library.renderPrompts(); library.renderRandoms(); library.renderPreambles();
+  },
+
+  // ── 组合列表 ──
+  renderCombos() {
+    const box = $("combo-list"); box.innerHTML = "";
+    if (!state.combos.length) { box.appendChild(el("div", "empty", "还没有小剧场。下面「新建」，或去设置里导入。")); return; }
+    const cur = state.settings.currentComboId;
+    state.combos.forEach(c => {
+      const card = el("div", "card" + (c.id === cur ? " sel" : ""));
+      const t = el("div", "t"); t.appendChild(el("span", "grow", c.name));
+      if (c.id === cur) t.appendChild(el("span", "badge", "当前"));
+      if (c.rawChannel) t.appendChild(el("span", "badge", "纯裸"));
+      card.appendChild(t);
+      const chips = el("div", "chips");
+      const pt = (c.promptIds || []).map(id => (byId(state.prompts, id) || {}).title).filter(Boolean);
+      const chip = (k, v) => { const s = el("span", "chip"); s.appendChild(el("b", "", k)); s.appendChild(document.createTextNode(v)); chips.appendChild(s); };
+      chip("提示词", pt.length ? `${pt.length} 条` : "无"); chip("随机", (c.random || {}).count ? `抽 ${c.random.count}` : "不抽");
+      chip("输出", { html: "HTML", text: "纯文字", mixed: "组合" }[(c.output || {}).mode] || "纯文字"); chip("记忆", memoryLabel(c.memory));
+      card.appendChild(chips);
+      const foot = el("div", "foot");
+      foot.appendChild(el("span", "", `${(c.tags || []).map(x => "#" + x).join(" ") || "无标签"} · 权重 ${c.weight ?? 1}`));
+      foot.appendChild(el("span", "w", `${c.useCount || 0} 次${c.lastUsedAt ? " · " + fmtTime(c.lastUsedAt) : ""}`));
+      card.appendChild(foot);
+      card.onclick = () => library.openCompose(c.id);
+      box.appendChild(card);
+    });
+  },
+
+  // ── 编辑组合页 ──
+  openCompose(id) {
+    const src = id ? byId(state.combos, id) : null;
+    const draft = src ? clone(src) : newCombo();
+    if (!draft.random) draft.random = { count: 0, include: [], exclude: [] };
+    if (!draft.output) draft.output = newCombo().output;
+    if (!draft.memory) draft.memory = newCombo().memory;
+    state.compose = draft;
+    switchView("compose");
+    library.renderCompose(draft, !!src);
+  },
+  renderCompose(d, exists) {
+    const root = $("compose"); root.innerHTML = "";
+    const bar = el("div", "cbar");
+    const back = el("button", "", "‹ 返回"); back.type = "button"; back.onclick = () => switchView("library");
+    bar.appendChild(back); bar.appendChild(el("span", "grow", exists ? "编辑小剧场" : "新建小剧场"));
+    if (exists) { const exp = el("button", "small", "导出"); exp.type = "button"; exp.onclick = () => saveJsonFile(exportCombo(d), `小剧场-${d.name || "未命名"}.json`).catch(fail); bar.appendChild(exp); }
+    root.appendChild(bar);
+
+    const nameRow = el("div", "field"); nameRow.appendChild(el("label", "", "名字"));
+    const nameIn = input(d.name, "比如：深夜便利店偶遇"); nameIn.oninput = () => { d.name = nameIn.value; }; nameRow.appendChild(nameIn); root.appendChild(nameRow);
+    const tagRow = el("div", "field"); tagRow.appendChild(el("label", "", "标签")); tagRow.appendChild(tagInput(d.tags, t => { d.tags = t; })); root.appendChild(tagRow);
+
+    const grp = (title, sub) => { const g = el("div", "grp"); const h = el("h3", "", title); if (sub) h.appendChild(el("span", "small", sub)); g.appendChild(h); root.appendChild(g); return g; };
+
+    // 前置
+    const g1 = grp("前置要求", "system 框架");
+    const preSel = select(state.preambles.map(p => ({ v: p.id, l: p.name })), d.preambleId);
+    preSel.onchange = () => { d.preambleId = preSel.value; }; g1.appendChild(preSel);
+
+    // 提示词
+    const g2 = grp("提示词", "按顺序拼进任务");
+    const plist = el("div", "rows");
+    const paintPrompts = () => {
+      plist.innerHTML = "";
+      if (!d.promptIds.length) plist.appendChild(el("div", "small hint", "还没选提示词。至少要一条，场景 / if 线 / 形式随意搭。"));
+      d.promptIds.forEach((pid, i) => {
+        const p = byId(state.prompts, pid); if (!p) return;
+        const row = el("div", "entry pick2");
+        const order = el("div", "order");
+        const up = el("button", "", "▲"); up.type = "button"; up.disabled = i === 0; up.onclick = () => { [d.promptIds[i - 1], d.promptIds[i]] = [d.promptIds[i], d.promptIds[i - 1]]; paintPrompts(); };
+        const dn = el("button", "", "▼"); dn.type = "button"; dn.disabled = i === d.promptIds.length - 1; dn.onclick = () => { [d.promptIds[i + 1], d.promptIds[i]] = [d.promptIds[i], d.promptIds[i + 1]]; paintPrompts(); };
+        order.append(up, dn);
+        const body = el("div", "grow"); body.appendChild(el("div", "et", p.title)); body.appendChild(el("div", "ex", (p.tags || []).map(t => "#" + t).join(" ")));
+        const rm = el("button", "small", "移除"); rm.type = "button"; rm.onclick = () => { d.promptIds.splice(i, 1); paintPrompts(); };
+        row.append(order, body, rm); plist.appendChild(row);
+      });
+    };
+    paintPrompts(); g2.appendChild(plist);
+    const addP = el("button", "fab ghost", "＋ 选提示词"); addP.type = "button"; addP.onclick = () => library.pickPrompts(d.promptIds, ids => { d.promptIds = ids; paintPrompts(); }); g2.appendChild(addP);
+
+    // 随机
+    const g3 = grp("随机附加", "每次生成从随机池抽");
+    g3.appendChild(setRow("抽几条", `池里共 ${state.randoms.length} 条`, stepper(Number(d.random.count) || 0, 0, 5, v => { d.random.count = v; })));
+    const tagsR = allTags(state.randoms);
+    const pickTags = (label, key) => {
+      const chips = el("div", "chips");
+      if (!tagsR.length) chips.appendChild(el("span", "small", "随机池还没有标签"));
+      tagsR.forEach(t => { const c = el("span", "chip" + ((d.random[key] || []).includes(t) ? " on" : ""), "#" + t); c.onclick = () => { const set = new Set(d.random[key] || []); set.has(t) ? set.delete(t) : set.add(t); d.random[key] = [...set]; c.classList.toggle("on", set.has(t)); }; chips.appendChild(c); });
+      g3.appendChild(setRow(label, key === "include" ? "不选 = 全池" : "带这些标签的不抽", chips));
+    };
+    pickTags("只抽", "include"); pickTags("排除", "exclude");
+
+    // 输出
+    const g4 = grp("输出方式");
+    g4.appendChild(setRow("形式", "HTML 由 AI 整段写", miniSeg(OUT_MODE, d.output.mode, v => { d.output.mode = v; styleRow.style.display = v === "text" ? "none" : ""; stagedRow.style.display = v === "html" ? "" : "none"; })));
+    const wrapIn = input(d.output.wrapTag, "例如 theater，留空不包"); wrapIn.style.maxWidth = "150px"; wrapIn.oninput = () => { d.output.wrapTag = wrapIn.value.replace(/[^a-zA-Z0-9_-]/g, ""); };
+    g4.appendChild(setRow("标签包裹", "只取标签内的内容", wrapIn));
+    const customIn = input(String(d.output.customChars || 900), "字数"); customIn.type = "number"; customIn.style.maxWidth = "80px"; customIn.oninput = () => { d.output.customChars = Number(customIn.value) || 900; };
+    const lenRow = setRow("篇幅", "", miniSeg(LEN_OPTS, d.output.length, v => { d.output.length = v; customRow.style.display = v === "custom" ? "" : "none"; }));
+    const customRow = setRow("自定字数", "", customIn); customRow.style.display = d.output.length === "custom" ? "" : "none";
+    g4.append(lenRow, customRow);
+    const styleRow = setRow("HTML 风格", "严格 = 只准用主题色", miniSeg(STYLE_OPTS, d.output.style, v => { d.output.style = v; })); styleRow.style.display = d.output.mode === "text" ? "none" : "";
+    g4.appendChild(styleRow);
+    const stagedRow = setRow("分两步出", "先出页面骨架立刻显示，再往里填字；只对 HTML 生效", toggle(!!d.output.staged, v => { d.output.staged = v; })); stagedRow.style.display = d.output.mode === "html" ? "" : "none";
+    g4.appendChild(stagedRow);
+
+    // 记忆 / 身份
+    const g5 = grp("记忆与身份");
+    const roundsRow = setRow("带多少轮", "只算你和角色的正文", stepper(Number(d.memory.rounds) || 12, 1, 50, v => { d.memory.rounds = v; }));
+    g5.appendChild(setRow("记忆", "跟宿主 = 用宿主的长期/核心记忆", miniSeg(MEM_OPTS, d.memory.mode, v => { d.memory.mode = v; roundsRow.style.display = v === "recent" ? "" : "none"; })));
+    roundsRow.style.display = d.memory.mode === "recent" ? "" : "none"; g5.appendChild(roundsRow);
+    g5.appendChild(setRow("写回记忆", "生成后存一条长期记忆", toggle(!!d.writeBack, v => { d.writeBack = v; })));
+    const whoIn = textarea(d.whoText, 2, "比如：他多年未见的高中同桌，现在是便利店夜班店员"); const whoRow = el("div"); whoRow.appendChild(whoIn); whoRow.style.display = d.who === "custom" ? "" : "none"; whoIn.oninput = () => { d.whoText = whoIn.value; };
+    g5.appendChild(setRow("我是谁", "", miniSeg(WHO_OPTS, d.who, v => { d.who = v; whoRow.style.display = v === "custom" ? "" : "none"; })));
+    g5.appendChild(whoRow);
+
+    // 高级
+    const g6 = grp("高级");
+    g6.appendChild(setRow("纯裸通道", "不走宿主预设，人设/世界书由 APP 自己拼", toggle(!!d.rawChannel, v => { d.rawChannel = v; })));
+    g6.appendChild(setRow("随机权重", "「随机一篇」抽中的概率", stepper(Number(d.weight ?? 1), 0, 9, v => { d.weight = v; })));
+
+    // 操作
+    const btns = el("div", "btns"); btns.style.marginTop = "18px";
+    if (exists) { const del = el("button", "warn", "删除"); del.type = "button"; del.onclick = () => confirmSheet("删除小剧场", `删除《${d.name}》？收藏里的记录不受影响。`, "删除", async () => { await remove("combos", d.id); if (state.settings.currentComboId === d.id) saveSettings({ currentComboId: state.combos[0] ? state.combos[0].id : "" }); switchView("library"); }, true); btns.appendChild(del); }
+    const test = el("button", "", "保存并试生成"); test.type = "button"; test.onclick = async () => { const saved = await library.saveCompose(d); if (saved) { switchView("stage"); stage.run(saved); } };
+    const save = el("button", "pri", "保存"); save.type = "button"; save.onclick = async () => { const saved = await library.saveCompose(d); if (saved) { toast("已保存"); switchView("library"); } };
+    btns.append(test, save); root.appendChild(btns);
+  },
+  saveCompose(d) {
+    if (composeSaves.has(d)) return composeSaves.get(d);
+    const job = library.persistCompose(d); composeSaves.set(d, job);
+    job.then(() => composeSaves.delete(d), () => composeSaves.delete(d));
+    return job;
+  },
+  async persistCompose(d) {
+    d.name = String(d.name || "").trim();
+    if (!d.name) { toast("给小剧场起个名字"); return null; }
+    if (!d.promptIds.length) { toast("至少选一条提示词"); return null; }
+    try {
+      const { useCount, lastUsedAt, plays, ...patch } = d;
+      const saved = await upsert("combos", patch);
+      d.id = saved.id;
+      if (!state.settings.currentComboId || !byId(state.combos, state.settings.currentComboId)) saveSettings({ currentComboId: saved.id });
+      return saved;
+    } catch (e) { fail(e); return null; }
+  },
+  pickPrompts(selected, onDone) {
+    const set = new Set(selected); let q = ""; let tag = "全部";
+    openSheet("选提示词", box => {
+      const search = input("", "搜标题 / 内容"); search.className = "inp search"; box.appendChild(search);
+      const chips = el("div", "chips filters"); box.appendChild(chips);
+      const list = el("div", "rows"); box.appendChild(list);
+      const paint = () => {
+        chips.innerHTML = ""; ["全部", ...allTags(state.prompts)].forEach(t => { const c = el("span", "chip" + (tag === t ? " on" : ""), t); c.onclick = () => { tag = t; paint(); }; chips.appendChild(c); });
+        list.innerHTML = "";
+        const shown = state.prompts.filter(p => (tag === "全部" || (p.tags || []).includes(tag)) && (!q || (p.title + p.content).toLowerCase().includes(q)));
+        if (!shown.length) list.appendChild(el("div", "empty", "没有匹配的提示词"));
+        shown.forEach(p => {
+          const row = el("div", "pickrow" + (set.has(p.id) ? " on" : ""));
+          const body = el("div", "grow"); body.appendChild(el("div", "et", p.title)); body.appendChild(el("div", "ex", (p.tags || []).map(t => "#" + t).join(" ") + " · " + p.content.slice(0, 40)));
+          row.append(el("span", "cb"), body);
+          row.onclick = () => { set.has(p.id) ? set.delete(p.id) : set.add(p.id); row.classList.toggle("on", set.has(p.id)); };
+          list.appendChild(row);
+        });
+      };
+      search.oninput = () => { q = search.value.trim().toLowerCase(); paint(); };
+      paint();
+      const btns = el("div", "btns"); const ok = el("button", "pri", "确定"); ok.type = "button";
+      ok.onclick = () => { const kept = selected.filter(id => set.has(id)); const added = [...set].filter(id => !kept.includes(id)); closeSheet(); onDone([...kept, ...added]); };
+      btns.appendChild(ok); box.appendChild(btns);
+    });
+  },
+
+  // ── 提示词 ──
+  renderPrompts() {
+    const filters = $("prompt-filters"); filters.innerHTML = "";
+    const tags = ["全部", ...allTags(state.prompts)];
+    if (!tags.includes(library.promptFilter)) library.promptFilter = "全部";
+    tags.forEach(t => { const c = el("span", "chip" + (library.promptFilter === t ? " on" : ""), t); c.onclick = () => { library.promptFilter = t; library.renderPrompts(); }; filters.appendChild(c); });
+    const box = $("prompt-list"); box.innerHTML = "";
+    const shown = state.prompts.filter(p => library.promptFilter === "全部" || (p.tags || []).includes(library.promptFilter));
+    if (!shown.length) { box.appendChild(el("div", "empty", "空的。新增一条，或批量导入。")); return; }
+    shown.forEach(p => box.appendChild(library.entry(p.title, p.content, p.tags, () => library.editPrompt(p))));
+  },
+  entry(title, content, tags, onClick) {
+    const row = el("div", "entry");
+    const body = el("div", "grow"); body.appendChild(el("div", "et", title)); body.appendChild(el("div", "ex", content));
+    const tg = el("div", "tags"); (tags || []).slice(0, 3).forEach(t => tg.appendChild(el("span", "tag", t)));
+    row.append(body, tg); row.onclick = onClick; return row;
+  },
+  editPrompt(p) {
+    const d = p ? clone(p) : { title: "", tags: [], content: "" };
+    openSheet(p ? "编辑提示词" : "新增提示词", box => {
+      const f = el("div", "frm");
+      const title = input(d.title, "标题"); title.oninput = () => { d.title = title.value; };
+      f.appendChild(field("标题", title));
+      f.appendChild(field("标签（场景 / if 线 / 形式 / 文字 / 前端 …）", tagInput(d.tags, t => { d.tags = t; })));
+      const ta = textarea(d.content, 9, "支持宏：{{user}} {{char}} {{篇幅}} {{random::a::b}} {{roll:1d6}} {{随机词:世界}} {{随机数:好感}}"); ta.oninput = () => { d.content = ta.value; };
+      f.appendChild(field("内容", ta));
+      box.appendChild(f);
+      box.appendChild(library.sheetButtons(p, async () => {
+        if (!d.title.trim() || !d.content.trim()) { toast("标题和内容都要填"); return; }
+        await upsert("prompts", d); closeSheet(); library.render();
+      }, async () => {
+        const used = state.combos.filter(c => (c.promptIds || []).includes(p.id)).map(c => c.name);
+        confirmSheet("删除提示词", used.length ? `《${p.title}》正被 ${used.join("、")} 使用，删除后它们会少一条任务。继续？` : `删除《${p.title}》？`, "删除", async () => {
+          await remove("prompts", p.id);
+          for (const c of state.combos) if ((c.promptIds || []).includes(p.id)) await upsert("combos", { id: c.id, promptIds: c.promptIds.filter(x => x !== p.id) });
+          library.render();
+        }, true);
+      }));
+    });
+  },
+  sheetButtons(existing, onSave, onDelete) {
+    const btns = el("div", "btns");
+    if (existing) { const del = el("button", "warn", "删除"); del.type = "button"; del.onclick = onDelete; btns.appendChild(del); }
+    const cancel = el("button", "", "取消"); cancel.type = "button"; cancel.onclick = closeSheet;
+    const save = el("button", "pri", "保存"); save.type = "button"; save.onclick = () => onSave().catch(fail);
+    btns.append(cancel, save); return btns;
+  },
+  importPrompts() {
+    openSheet("批量导入提示词", box => {
+      box.appendChild(el("p", "note-box", "两种来源：① 粘贴文本，每条用一行「## 标题 #标签 #标签」开头，下面是内容；② 选一个 JSON 文件：本 APP 导出的、暗柜「夜间档案」直接进库，其它格式（酒馆预设、角色卡、别人的生成器）会把里面像提示词的段落列出来让你挑。"));
+      const ta = textarea("", 8, "## 雨夜便利店 #场景 #日常\n写{{char}}在深夜便利店……\n\n## 弹幕流 #形式 #前端\n输出一段带弹幕滚动的 HTML……"); box.appendChild(ta);
+      const btns = el("div", "btns");
+      const file = el("button", "", "选 JSON 文件"); file.type = "button"; file.onclick = async () => {
+        try { const data = await pickJsonFile(); const n = await library.importAny(data); closeSheet(); library.render(); toast(n ? `导入 ${n} 条` : "没有导入"); } catch (e) { fail(e); }
+      };
+      const ok = el("button", "pri", "导入文本"); ok.type = "button"; ok.onclick = async () => {
+        const blocks = ta.value.split(/^##\s*/m).map(s => s.trim()).filter(Boolean); let n = 0;
+        for (const b of blocks) {
+          const nl = b.indexOf("\n"); const head = nl < 0 ? b : b.slice(0, nl); const content = nl < 0 ? "" : b.slice(nl + 1).trim();
+          const tags = [...head.matchAll(/#(\S+)/g)].map(m => m[1]); const title = head.replace(/#\S+/g, "").trim();
+          if (!title || !content) continue;
+          await upsert("prompts", { title, tags, content }); n++;
+        }
+        closeSheet(); library.render(); toast(n ? `导入 ${n} 条` : "没解析到内容，检查「## 标题」格式");
+      };
+      btns.append(file, ok); box.appendChild(btns);
+    });
+  },
+  async importAny(data) {
+    if (data && data.app === "float.xiaojuchang") return importBundle(data);
+    if (data && (data.aiInstruction || (data.templateSnapshot && data.templateSnapshot.aiInstruction))) { await importBlackMarketTheater(data); return 1; }
+    if (Array.isArray(data)) { let n = 0; for (const t of data) { if (t && (t.aiInstruction || (t.templateSnapshot && t.templateSnapshot.aiInstruction))) { await importBlackMarketTheater(t); n++; } else if (t && t.title && t.content) { await upsert("prompts", { title: String(t.title), tags: Array.isArray(t.tags) ? t.tags : [], content: String(t.content) }); n++; } } return n; }
+    if (data && Array.isArray(data.theaters)) { let n = 0; for (const t of data.theaters) { await importBlackMarketTheater(t); n++; } return n; }
+    const found = scanLooseJson(data);
+    if (!found.length) throw new Error("这个 JSON 里没找到像提示词的段落。");
+    return library.pickLoose(found);
+  },
+  /** 没认出格式的 JSON：列出扫到的段落，勾选后按所选类型入库。取消时返回 0 */
+  pickLoose(found) {
+    return new Promise(resolve => {
+      let done = false; const finish = n => { if (!done) { done = true; resolve(n); } };
+      const set = new Set(); let target = "prompts", tags = [], q = "";
+      openSheet("从 JSON 里挑", box => {
+        box.appendChild(el("p", "note-box", `没认出这个格式，把里面像提示词的 ${found.length} 段列出来了。点一条勾上，点正文能展开看全文。`));
+        const top = el("div", "row loose-top");
+        const seg = miniSeg([{ v: "prompts", l: "导为提示词" }, { v: "preambles", l: "前置要求" }, { v: "randoms", l: "随机条目" }], target, v => { target = v; tagBox.style.display = v === "preambles" ? "none" : ""; });
+        const all = el("button", "small-btn", "全选"); all.type = "button";
+        all.onclick = () => { const shown = visible(); const every = shown.every(c => set.has(c)); shown.forEach(c => every ? set.delete(c) : set.add(c)); paint(); };
+        top.append(seg, el("span", "grow"), all); box.appendChild(top);
+        const tagBox = field("统一加标签（可空）", tagInput(tags, t => { tags = t; })); box.appendChild(tagBox);
+        let search = null;
+        if (found.length > 8) { search = input("", "搜名字 / 内容"); search.className = "inp search"; search.oninput = () => { q = search.value.trim().toLowerCase(); paint(); }; box.appendChild(search); }
+        const list = el("div", "rows"); box.appendChild(list);
+        const visible = () => found.filter(c => !q || (c.name + c.content).toLowerCase().includes(q));
+        const btns = el("div", "btns");
+        const cancel = el("button", "", "取消"); cancel.type = "button"; cancel.onclick = closeSheet;
+        const ok = el("button", "pri", "导入"); ok.type = "button";
+        const paintOk = () => { ok.textContent = set.size ? `导入 ${set.size} 条` : "导入"; ok.disabled = !set.size; };
+        const paint = () => {
+          list.innerHTML = "";
+          const shown = visible();
+          if (!shown.length) list.appendChild(el("div", "empty", "没有匹配的段落"));
+          shown.forEach(c => {
+            const row = el("div", "pickrow" + (set.has(c) ? " on" : ""));
+            const body = el("div", "grow"); body.appendChild(el("div", "et", c.name));
+            const ex = el("div", "ex", c.content); body.appendChild(ex);
+            body.appendChild(el("div", "path", c.path));
+            ex.onclick = e => { e.stopPropagation(); ex.classList.toggle("full"); };
+            row.append(el("span", "cb"), body);
+            row.onclick = () => { set.has(c) ? set.delete(c) : set.add(c); row.classList.toggle("on", set.has(c)); paintOk(); };
+            list.appendChild(row);
+          });
+          paintOk();
+        };
+        paint();
+        ok.onclick = async () => {
+          const picked = found.filter(c => set.has(c)); if (!picked.length) return;
+          ok.disabled = true;
+          try {
+            let n = 0;
+            for (const c of picked) {
+              if (target === "preambles") await upsert("preambles", { name: c.name, content: c.content });
+              else await upsert(target, { title: c.name, tags: [...tags], content: c.content });
+              n++;
+            }
+            finish(n); closeSheet();
+          } catch (e) { fail(e); ok.disabled = false; }
+        };
+        btns.append(cancel, ok); box.appendChild(btns);
+      }, () => finish(0));
+    });
+  },
+
+  // ── 随机池 + 宏 ──
+  renderRandoms() {
+    const box = $("random-list"); box.innerHTML = "";
+    if (!state.randoms.length) box.appendChild(el("div", "empty", "随机池是空的"));
+    state.randoms.forEach(r => box.appendChild(library.entry(r.title, r.content, r.tags, () => library.editRandom(r))));
+    const mb = $("macro-list"); mb.innerHTML = "";
+    if (!state.macros.length) mb.appendChild(el("div", "empty", "还没有宏"));
+    state.macros.forEach(m => {
+      const desc = m.kind === "number" ? `{{随机数:${m.name}}} → ${m.min}～${m.max}` : `{{随机词:${m.name}}} → ${(m.values || []).length} 个词：${(m.values || []).slice(0, 6).join("、")}${(m.values || []).length > 6 ? "…" : ""}`;
+      mb.appendChild(library.entry(m.name, desc, [m.kind === "number" ? "数字" : "词"], () => library.editMacro(m)));
+    });
+  },
+  editRandom(r) {
+    const d = r ? clone(r) : { title: "", tags: [], content: "" };
+    openSheet(r ? "编辑随机条目" : "新增随机条目", box => {
+      const f = el("div", "frm");
+      const title = input(d.title, "标题"); title.oninput = () => { d.title = title.value; }; f.appendChild(field("标题", title));
+      f.appendChild(field("标签（小剧场里按标签只抽 / 排除）", tagInput(d.tags, t => { d.tags = t; })));
+      const ta = textarea(d.content, 6, "抽中时追加到任务里的一句话"); ta.oninput = () => { d.content = ta.value; }; f.appendChild(field("内容", ta));
+      box.appendChild(f);
+      box.appendChild(library.sheetButtons(r, async () => { if (!d.title.trim() || !d.content.trim()) { toast("标题和内容都要填"); return; } await upsert("randoms", d); closeSheet(); library.render(); },
+        () => confirmSheet("删除随机条目", `删除《${r.title}》？`, "删除", async () => { await remove("randoms", r.id); library.render(); }, true)));
+    });
+  },
+  editMacro(m) {
+    const d = m ? clone(m) : { name: "", kind: "words", values: [], min: 1, max: 6 };
+    openSheet(m ? "编辑宏" : "新增宏", box => {
+      const f = el("div", "frm");
+      const name = input(d.name, "名字，比如 世界"); name.oninput = () => { d.name = name.value.trim(); }; f.appendChild(field("名字（提示词里写 {{随机词:名字}} 或 {{随机数:名字}}）", name));
+      const wordsBox = el("div"); const numBox = el("div", "two");
+      const ta = textarea((d.values || []).join("\n"), 7, "一行一个词"); ta.oninput = () => { d.values = ta.value.split(/\n/).map(s => s.trim()).filter(Boolean); }; wordsBox.appendChild(field("词表", ta));
+      const mn = input(String(d.min ?? 1)); mn.type = "number"; mn.oninput = () => { d.min = Number(mn.value) || 0; }; const mx = input(String(d.max ?? 6)); mx.type = "number"; mx.oninput = () => { d.max = Number(mx.value) || 0; };
+      numBox.append(field("最小", mn), field("最大", mx));
+      const paint = () => { wordsBox.style.display = d.kind === "words" ? "" : "none"; numBox.style.display = d.kind === "number" ? "" : "none"; };
+      f.appendChild(field("类型", miniSeg([{ v: "words", l: "词表" }, { v: "number", l: "数字范围" }], d.kind, v => { d.kind = v; paint(); })));
+      f.append(wordsBox, numBox); paint(); box.appendChild(f);
+      box.appendChild(library.sheetButtons(m, async () => {
+        if (!d.name) { toast("宏要有名字"); return; }
+        if (d.kind === "words" && !(d.values || []).length) { toast("词表至少一个词"); return; }
+        await upsert("macros", d); closeSheet(); library.render();
+      }, () => confirmSheet("删除宏", `删除「${m.name}」？用到它的提示词会原样输出宏文本。`, "删除", async () => { await remove("macros", m.id); library.render(); }, true)));
+    });
+  },
+
+  // ── 前置要求 ──
+  renderPreambles() {
+    const box = $("pre-list"); box.innerHTML = "";
+    state.preambles.forEach(p => {
+      const used = state.combos.filter(c => c.preambleId === p.id).length;
+      box.appendChild(library.entry(p.name, p.content, used ? [`${used} 个小剧场在用`] : [], () => library.editPreamble(p)));
+    });
+  },
+  editPreamble(p) {
+    const d = p ? clone(p) : { name: "", content: "" };
+    openSheet(p ? "编辑前置要求" : "新增前置要求", box => {
+      const f = el("div", "frm");
+      const name = input(d.name, "名字"); name.oninput = () => { d.name = name.value; }; f.appendChild(field("名字", name));
+      const ta = textarea(d.content, 12, "整段 system 级别的框架说明。默认链路里它排在人设 / 世界书 / 记忆之后；纯裸通道里它就是整个 system。"); ta.oninput = () => { d.content = ta.value; }; f.appendChild(field("内容", ta));
+      box.appendChild(f);
+      box.appendChild(library.sheetButtons(p, async () => { if (!d.name.trim() || !d.content.trim()) { toast("名字和内容都要填"); return; } delete d.builtin; await upsert("preambles", d); closeSheet(); library.render(); },
+        () => {
+          if (state.preambles.length <= 1) { toast("至少留一条前置要求"); return; }
+          confirmSheet("删除前置要求", `删除「${p.name}」？用它的小剧场会改用第一条。`, "删除", async () => {
+            await remove("preambles", p.id); const fb = state.preambles[0].id;
+            for (const c of state.combos) if (c.preambleId === p.id) await upsert("combos", { id: c.id, preambleId: fb });
+            library.render();
+          }, true);
+        }));
+    });
+  },
+};
+
+// ── 收藏：roll 到喜欢的存下来，连同当时的配置 ──
+const favorites = {
+  filter: "all", openId: "",
+  bind() { viewHooks.fav = () => favorites.render(); },
+  render() {
+    const list = [...state.favorites].sort((a, b) => String(b.favoritedAt || b.createdAt).localeCompare(String(a.favoritedAt || a.createdAt)));
+    const filters = $("fav-filters"); filters.innerHTML = "";
+    const chars = [...new Set(list.map(r => r.characterId))].map(id => ({ id, name: (list.find(r => r.characterId === id) || {}).characterName || "?" }));
+    const opts = [{ v: "all", l: `全部 ${list.length}` }, ...chars.map(c => ({ v: `c:${c.id}`, l: `${c.name} ${list.filter(r => r.characterId === c.id).length}` })), { v: "html", l: `前端型 ${list.filter(r => kindOf(r) !== "text").length}` }];
+    opts.forEach(o => { const s = el("span", "chip" + (favorites.filter === o.v ? " on" : ""), o.l); s.onclick = () => { favorites.filter = o.v; favorites.render(); }; filters.appendChild(s); });
+    const box = $("fav-list"); box.innerHTML = "";
+    const shown = list.filter(r => favorites.filter === "all" ? true : favorites.filter === "html" ? kindOf(r) !== "text" : r.characterId === favorites.filter.slice(2));
+    if (!shown.length) { box.appendChild(el("div", "empty", "还没有收藏。舞台页结果下面点「收藏」。")); return; }
+    shown.forEach(r => {
+      const item = el("div", "fav-item" + (favorites.openId === r.id ? " open" : ""));
+      const t = el("div", "t", r.title || r.comboName || "无题"); if (kindOf(r) !== "text") { t.appendChild(document.createTextNode(" ")); t.appendChild(el("span", "badge", KIND_LABEL[kindOf(r)].replace("型", ""))); }
+      item.appendChild(t);
+      item.appendChild(el("div", "who", [r.characterName, r.comboName, fmtFull(r.createdAt)].filter(Boolean).join(" · ")));
+      if (favorites.openId === r.id) {
+        const s = r.snapshot || {};
+        const dl = el("dl", "info");
+        const kv = (k, v) => { if (!v) return; dl.appendChild(el("dt", "", k)); dl.appendChild(el("dd", "", v)); };
+        kv("前置", s.preambleName); kv("提示词", (s.prompts || []).join(" · ")); kv("随机", (s.randoms || []).join(" · ")); kv("追加", s.extra);
+        kv("输出", `${{ html: "HTML", text: "纯文字", mixed: "组合" }[(s.output || {}).mode] || "纯文字"}${(s.output || {}).wrapTag ? " · <" + s.output.wrapTag + ">" : ""} · ${s.length || ""}`);
+        kv("记忆", memoryLabel(s.memory) + (s.rawChannel ? " · 纯裸通道" : "")); kv("我是谁", { persona: "宿主用户人设", custom: "自定身份", observer: "旁观" }[s.who] || ""); kv("模型", r.model);
+        item.appendChild(dl);
+        const ops = el("div", "ops");
+        const mk = (l, fn) => { const b = el("button", "", l); b.type = "button"; b.onclick = e => { e.stopPropagation(); fn(); }; ops.appendChild(b); };
+        mk("打开", () => openFullscreen(r, stage.handlers()));
+        mk("放到舞台", () => { stage.showResult(r); switchView("stage"); });
+        mk("按这套再来一条", () => { const c = stage.comboOf(r); if (!c) { toast("配置已丢失"); return; } switchView("stage"); stage.run(c); });
+        mk("删除", () => confirmSheet("删除收藏", `删除《${r.title || r.comboName || "这条"}》？不可恢复。`, "删除", async () => { await remove("favorites", r.id); favorites.render(); }, true));
+        item.appendChild(ops);
+      }
+      item.onclick = () => { favorites.openId = favorites.openId === r.id ? "" : r.id; favorites.render(); };
+      box.appendChild(item);
+    });
+  },
+};
+
+// ── 设置：外观 / 生成 / 数据 三类横排切换 ──
+const settings = {
+  bind() {
+    document.querySelectorAll("#set-cats [data-p]").forEach(b => { b.onclick = () => { document.querySelectorAll("#set-cats [data-p]").forEach(x => x.classList.toggle("on", x === b)); document.querySelectorAll(".view-settings .pane").forEach(p => p.classList.toggle("on", p.dataset.pane === b.dataset.p)); }; });
+    viewHooks.settings = () => settings.render();
+  },
+  set(patch) {
+    const before = state.settings.theme;
+    saveSettings(patch); theme.apply();
+    if (patch.fontScale !== undefined || patch.lineHeight !== undefined) updateFrameReading();
+    if (patch.theme && patch.theme !== before && state.result && $("result-host").firstChild) stage.showResult(state.result);
+  },
+  render() { settings.renderLook(); settings.renderGen(); settings.renderData(); },
+
+  renderLook() {
+    const box = $("pane-look"); box.innerHTML = "";
+    const s = state.settings;
+    const tiles = el("div", "themes");
+    THEMES.forEach(t => {
+      const b = el("button", "th" + (s.theme === t.id ? " on" : "")); b.type = "button";
+      b.appendChild(el("div", "pv " + t.pv)); b.appendChild(el("b", "", t.name)); b.appendChild(el("span", "", t.desc));
+      b.onclick = () => { settings.set({ theme: t.id }); settings.renderLook(); };
+      tiles.appendChild(b);
+    });
+    box.appendChild(tiles);
+    box.appendChild(setRow("字号", "整体偏小是故意的", miniSeg([{ v: "0.92", l: "小" }, { v: "1", l: "标准" }, { v: "1.08", l: "略大" }], String(s.fontScale || 1), v => settings.set({ fontScale: Number(v) }))));
+    box.appendChild(setRow("行距", "", miniSeg([{ v: "tight", l: "紧" }, { v: "mid", l: "中" }, { v: "loose", l: "松" }], s.lineHeight || "mid", v => settings.set({ lineHeight: v }))));
+    box.appendChild(setRow("动效", "抽屉滑入、生成时呼吸灯", toggle(s.motion !== false, v => settings.set({ motion: v }))));
+  },
+  renderGen() {
+    const box = $("pane-gen"); box.innerHTML = "";
+    const s = state.settings;
+    const h = t => { const x = el("div", "grp"); x.appendChild(el("h3", "", t)); box.appendChild(x); return x; };
+    const g1 = h("生成");
+    const lenRow = setRow("默认篇幅", "小剧场里选「跟设置」时用", miniSeg([{ v: "short", l: "短 400" }, { v: "medium", l: "中 900" }, { v: "long", l: "长 1800" }], s.defaultLength || "medium", v => settings.set({ defaultLength: v })));
+    g1.appendChild(setRow("篇幅限制", "关掉后不给模型字数要求", toggle(s.lengthLimit !== false, v => { settings.set({ lengthLimit: v }); lenRow.style.opacity = v ? "" : ".4"; })));
+    lenRow.style.opacity = s.lengthLimit !== false ? "" : ".4"; g1.appendChild(lenRow);
+    g1.appendChild(setRow("边写边显示", "宿主支持流式时逐字出现；HTML 分两步出的第二步直接填进格子", toggle(s.streamPreview !== false, v => settings.set({ streamPreview: v }))));
+    const g2 = h("新建小剧场的默认值");
+    g2.appendChild(setRow("我是谁", "", miniSeg(WHO_OPTS, s.defaultWho || "persona", v => settings.set({ defaultWho: v }))));
+    const roundsRow = setRow("默认轮数", "", stepper(Number(s.defaultRounds) || 12, 1, 50, v => settings.set({ defaultRounds: v })));
+    g2.appendChild(setRow("记忆", "", miniSeg(MEM_OPTS, s.defaultMemory || "host", v => { settings.set({ defaultMemory: v }); roundsRow.style.display = v === "recent" ? "" : "none"; })));
+    roundsRow.style.display = (s.defaultMemory || "host") === "recent" ? "" : "none"; g2.appendChild(roundsRow);
+    g2.appendChild(setRow("写回记忆", "", toggle(!!s.writeBackDefault, v => settings.set({ writeBackDefault: v }))));
+    g2.appendChild(setRow("HTML 风格约束", "", miniSeg(STYLE_OPTS, s.defaultStyle || "free", v => settings.set({ defaultStyle: v }))));
+    g2.appendChild(setRow("HTML 分两步出", "先骨架后填字，页面能早点看到", toggle(!!s.stagedDefault, v => settings.set({ stagedDefault: v }))));
+    const g3 = h("随机与最近");
+    g3.appendChild(setRow("随机一篇可抽到「AI 自选」", "", toggle(s.randomIncludesAi !== false, v => settings.set({ randomIncludesAi: v }))));
+    g3.appendChild(setRow("最近保留", "没收藏的结果留几条", stepper(Number(s.recentKeep) || 10, 1, 50, v => settings.set({ recentKeep: v }))));
+  },
+  renderData() {
+    const box = $("pane-data"); box.innerHTML = "";
+    const counts = `${state.combos.length} 个小剧场 · ${state.prompts.length} 条提示词 · ${state.randoms.length} 条随机 · ${state.macros.length} 个宏 · ${state.preambles.length} 条前置 · ${state.favorites.length} 收藏`;
+    box.appendChild(el("p", "note-box", counts));
+    const invalidCount = Object.values(state.invalidRecords || {}).reduce((n, rows) => n + rows.length, 0);
+    if (invalidCount) box.appendChild(el("p", "note-box", `有 ${invalidCount} 条无效数据已隔离。导出整包会保留其原始内容，清空或重置会删除。`));
+    const row = (label, sub, btnLabel, fn, danger) => { const b = el("button", danger ? "danger" : "", btnLabel); b.type = "button"; b.onclick = () => fn().catch(fail); box.appendChild(setRow(label, sub, b)); };
+    row("导出整包", "库 + 收藏，JSON", "导出", async () => { await saveJsonFile(exportBundle(), `小剧场-全部-${new Date().toISOString().slice(0, 10)}.json`); });
+    row("导入", "本 APP 的 JSON / 暗柜「夜间档案」；其它 JSON 会列出段落让你挑", "选文件", async () => { const data = await pickJsonFile(); const n = await library.importAny(data); toast(n ? `导入 ${n} 条` : "没有导入"); settings.renderData(); });
+    row("恢复默认库", "只补缺失的默认条目，不动你改过的", "补齐", async () => { await seedIfEmpty(true); toast("已补齐"); library.render(); settings.renderData(); });
+    row("清空最近", "", "清空", async () => confirmSheet("清空最近", "删掉所有未收藏的最近结果？", "清空", async () => { await clearCollection("recents"); state.result = null; $("result-host").innerHTML = ""; settings.renderData(); toast("已清空"); }, true), true);
+    row("清空收藏", "", "清空", async () => confirmSheet("清空收藏", "删掉全部收藏？不可恢复。", "清空", async () => { await clearCollection("favorites"); settings.renderData(); toast("已清空"); }, true), true);
+    row("重置全部", "库、收藏、设置全删，重新播种默认库", "重置", async () => confirmSheet("重置全部", "所有小剧场、提示词、收藏和设置都会删掉。确定？", "全部重置", async () => {
+      for (const n of ["combos", "prompts", "randoms", "macros", "preambles", "favorites", "recents"]) await clearCollection(n);
+      const id = state.settings.id; state.settings = { ...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), id, characterId: state.character ? state.character.id : "" };
+      saveSettings({}); await seedIfEmpty(); theme.apply(); state.result = null; $("result-host").innerHTML = ""; settings.render(); toast("已重置");
+    }, true), true);
+    box.appendChild(el("p", "small hint", "版本 0.1.1 · 生成走宿主 ai.generate，只注入人设 / 性格 / 关系 / 世界书 / 你选的记忆段；纯裸通道走 ai.chat。"));
+  },
+};
+
+// ── 启动 ──
+async function boot() {
+  if (!api) { document.body.innerHTML = '<p style="padding:24px;font-size:13px">这个页面要在 AI 手机里作为自定义 APP 打开。</p>'; return; }
+  await loadSettings();
+  theme.apply();
+  const [chars] = await Promise.all([
+    api.characters.list().catch(() => []),
+    loadAll(),
+  ]);
+  state.characters = Array.isArray(chars) ? chars : (chars && chars.characters) || [];
+  await seedIfEmpty();
+  let launch = null;
+  try { launch = api.app && api.app.getLaunchContext ? await api.app.getLaunchContext() : null; } catch {}
+  const wantId = (launch && launch.characterId) || state.settings.characterId;
+  state.character = byId(state.characters, wantId) || state.characters[0] || null;
+  if (state.character && state.character.id !== state.settings.characterId) saveSettings({ characterId: state.character.id });
+  if (!byId(state.combos, state.settings.currentComboId) && state.combos[0]) saveSettings({ currentComboId: state.combos[0].id });
+  await refreshUserName(state.character);
+  stage.bind(); library.bind(); favorites.bind(); settings.bind();
+  switchView("stage");
+  if (api.__mock) window.__xjc = { state, stage, library, favorites, settings, switchView, generateTheater, buildTasks, expandMacros };
+}
+boot().catch(e => { console.error(e); const m = $("main"); m.innerHTML = ""; m.appendChild(el("div", "err", `启动失败：${e && e.message ? e.message : e}`)); });
+})();
+</script></body></html>

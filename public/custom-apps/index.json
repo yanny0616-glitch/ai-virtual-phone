@@ -2,7 +2,7 @@
   {
     "id": "gua.nian",
     "name": "挂念",
-    "version": "0.9.35",
+    "version": "0.10.2",
     "description": "让角色过上自己的一天，并在TA的一天里想起你：浏览器关着也会收到TA的消息、看到TA发的朋友圈，心意随你们的聊天随时变。",
     "file": "gua-nian.zip"
   },
@@ -16,7 +16,7 @@
   {
     "id": "float.peimian",
     "name": "陪眠",
-    "version": "0.3.0",
+    "version": "0.3.3",
     "description": "睡前陪伴：角色用自己的声音哄你入睡，越说越轻；多层白噪音叠加成你的声景，可从 Freesound 搜更多；每晚一条夜记，周视图看作息。",
     "file": "pei-mian.zip"
   },
@@ -33,5 +33,12 @@
     "version": "2.8.1",
     "description": "模型调用面板：按天用量柱状图、按角色卡/模型/来源排行与筛选（带头像）、最近调用日志，点进单条可看参数、缓存命中和发给模型的原始消息。来源细分到小红书、朋友圈、群聊、查手机等各个 APP；报错、超时、空回复的调用单独计数，可只看失败的那些。",
     "file": "usage-dashboard.zip"
+  },
+  {
+    "id": "float.xiaojuchang",
+    "name": "小剧场",
+    "version": "0.1.1",
+    "description": "给角色点一下出一篇小剧场：前置要求、提示词库、随机池、随机宏自由组合；AI 直接写整段 HTML/JS 在沙盒里渲染，可全屏、可收藏、可再来一条。四套主题。",
+    "file": "xiao-ju-chang.zip"
   }
 ]

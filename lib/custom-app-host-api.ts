@@ -95,7 +95,7 @@ import {
   sanitizeBridgeDataKey,
 } from "./reality-bridge/storage";
 import { isGuanianTemplateWake, loadTimedWakeSchedules, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "./timed-wake-storage";
-import { armTemplateBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "./push-bailout-client";
+import { armCompanionChatTemplate, armTemplateBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "./push-bailout-client";
 
 const CUSTOM_APP_NOTIFICATIONS_KEY = "ai_phone_custom_app_notifications_v1";
 const CUSTOM_APP_BADGES_KEY = "ai_phone_custom_app_badges_v1";
@@ -1064,11 +1064,26 @@ export async function synthesizeCustomAppSpeech(app: InstalledCustomApp, record:
   };
 }
 
+const customAppRecognitions = new Map<string, { appId: string; stop: (cancel: boolean) => void }>();
+
+/** STT 的停止与录音停止独立；requestId 防止旧松手事件结束下一轮识别。 */
+export function stopCustomAppSpeechRecognition(app: InstalledCustomApp, record: Record<string, unknown>): Record<string, unknown> {
+  const requestId = cleanText(record.requestId, 160);
+  const key = `${app.id}:${requestId}`;
+  const active = customAppRecognitions.get(key);
+  if (!active) return { ok: false, reason: "no-active-recognition" };
+  active.stop(record.cancel === true);
+  return { ok: true };
+}
+
 export function recognizeCustomAppSpeech(app: InstalledCustomApp, record: Record<string, unknown>): Promise<Record<string, unknown>> {
   const config = resolveCustomAppVoiceConfig(app, record);
   if (config && config.enableSTT === false) throw new Error("当前语音配置未启用 STT。");
   const lang = cleanText(record.lang ?? record.language, 20) || "zh-CN";
   const timeoutMs = Math.max(1000, Math.min(60_000, Number(record.timeoutMs ?? 15_000) || 15_000));
+  const requestId = cleanText(record.requestId, 160);
+  const key = `${app.id}:${requestId}`;
+  if (customAppRecognitions.has(key)) throw new Error("该语音识别请求仍在进行。");
   return new Promise((resolve, reject) => {
     let settled = false;
     let interimText = "";
@@ -1077,6 +1092,7 @@ export function recognizeCustomAppSpeech(app: InstalledCustomApp, record: Record
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
+      customAppRecognitions.delete(key);
       try { session?.abort(); } catch { /* ignore */ }
       if (error) reject(error);
       else resolve(result);
@@ -1095,7 +1111,11 @@ export function recognizeCustomAppSpeech(app: InstalledCustomApp, record: Record
       finish({}, new Error("浏览器不支持语音识别。"));
       return;
     }
-    session.start();
+    customAppRecognitions.set(key, { appId: app.id, stop: cancel => {
+      if (cancel) finish({ ok: false, text: "", reason: "cancelled" });
+      else session?.stop();
+    } });
+    try { session.start(); } catch (error) { finish({}, error instanceof Error ? error : new Error(String(error))); }
   });
 }
 
@@ -1332,7 +1352,7 @@ export async function saveCustomAppMedia(record: Record<string, unknown>): Promi
   };
 }
 
-export async function runCustomAppAiChat(app: InstalledCustomApp, record: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function runCustomAppAiChat(app: InstalledCustomApp, record: Record<string, unknown>, onDelta?: (delta: string) => void): Promise<Record<string, unknown>> {
   const config = resolveCustomAppApiConfig(app, record);
   if (!config) throw new Error("未找到可用 API 配置。");
   const rawMessages = Array.isArray(record.messages) ? record.messages : [];
@@ -1355,6 +1375,7 @@ export async function runCustomAppAiChat(app: InstalledCustomApp, record: Record
       temperature: typeof record.temperature === "number" ? record.temperature : undefined,
       max_tokens: typeof record.maxTokens === "number" ? record.maxTokens : typeof record.max_tokens === "number" ? record.max_tokens : undefined,
       signal,
+      ...(record.stream === true && onDelta ? { onDelta } : {}),
     })
   ));
   if (result.error) throw new Error(result.error);
@@ -1988,7 +2009,7 @@ export async function requestCustomAppReply(app: InstalledCustomApp, record: Rec
   return { sessionId: session.id, messageIds: [], text: "", requested: true, handled: detail.handled };
 }
 
-export async function generateCustomAppText(app: InstalledCustomApp, record: Record<string, unknown>): Promise<{
+export async function generateCustomAppText(app: InstalledCustomApp, record: Record<string, unknown>, onDelta?: (delta: string) => void): Promise<{
   text: string;
   appendMessages: Record<string, unknown>[];
   messages: Record<string, unknown>[];
@@ -2037,7 +2058,8 @@ export async function generateCustomAppText(app: InstalledCustomApp, record: Rec
   const pushContextMessage = (patch: Partial<ChatMessage> & Pick<ChatMessage, "role">): void => {
     appendMessages.push(createCustomAppGeneratedContextMessage(session.id, appendMessages.length, patch));
   };
-  const completion = await generateChatCompletion(session, history, {
+  const completion = await generateChatCompletion(record.stream === true && onDelta ? { ...session, streamOnline: true } : session, history, {
+    requiredTask: taskMessage,
     appId: `custom_app:${app.id}`,
     appTags,
     promptProfile: profile ?? undefined,
@@ -2047,6 +2069,7 @@ export async function generateCustomAppText(app: InstalledCustomApp, record: Rec
     toolsAllowed,
     forceEnableTools: enableTools,
   }, {
+    ...(record.stream === true && onDelta ? { onStreamDelta: onDelta } : {}),
     onTextPart: (text, _senderInfo, options) => {
       const content = cleanUnboundedText(text);
       if (!content) return;
@@ -2116,7 +2139,7 @@ export function isCustomAppGroupGenerateRecord(record: Record<string, unknown>):
 // 角色的 <member> 人设块、用户身份、记忆等通用条目),内容条目只按 APP 自己的
 // appTags 命中(不塞 "text"/"offline" 等宿主内置场景 tag,APP 拿不到内置 APP
 // 的格式条目),单次补全返回原始文本,输出格式由 APP 的预设条目约定、APP 自行解析。
-export async function generateCustomAppGroupText(app: InstalledCustomApp, record: Record<string, unknown>): Promise<{
+export async function generateCustomAppGroupText(app: InstalledCustomApp, record: Record<string, unknown>, onDelta?: (delta: string) => void): Promise<{
   text: string;
   appendMessages: Record<string, unknown>[];
   messages: Record<string, unknown>[];
@@ -2177,6 +2200,7 @@ export async function generateCustomAppGroupText(app: InstalledCustomApp, record
   // 纯 APP tags(与单聊路径一致):资料包结构化组装照进,宿主内置条目不命中
   const appTags = buildCustomAppChatTags(app, record);
   const completion = await generateGroupRawCompletion(session, history, {
+    ...(record.stream === true && onDelta ? { onStreamDelta: onDelta } : {}),
     appTags,
     promptProfile: profile ?? undefined,
     apiConfigId: cleanText(record.apiConfigId ?? record.configId, 160) || undefined,
@@ -2496,6 +2520,13 @@ export async function freezeCustomAppTemplate(
   if (!key) throw new Error("push.freeze 缺少 key（模板名，字母数字）。");
   if (!loadCharacters().some(item => item.id === characterId)) throw new Error("找不到对应角色。");
   const session = ensureCharacterSession(characterId);
+  const triggerKey = `capptpl:${app.id}:${characterId}:${key}`;
+  if (record.chatSnapshot === true) {
+    // 聊天模板：聊天 APP 原样的提示词 + 完整聊天记录，意图留占位（挂念 VPS 后端到点发消息用）
+    rememberCustomAppTemplate(app.id, characterId, key, record);
+    const armResult = await armCompanionChatTemplate({ triggerKey, session });
+    return { id: triggerKey, placeholder: CUSTOM_APP_TEMPLATE_PLACEHOLDER, armed: armResult.ok, reason: armResult.ok ? undefined : armResult.reason };
+  }
   const profile = resolvePromptProfile(app, record);
   const instruction = cleanUnboundedText(record.instruction ?? record.context) || CUSTOM_APP_TEMPLATE_PLACEHOLDER;
   const taskMessage: ChatMessage = {
@@ -2512,7 +2543,6 @@ export async function freezeCustomAppTemplate(
   const activateAllWorldBooks = record.activateAllWorldBooks === true
     || record.activateWorldBooks === true
     || activeWorlds.some(item => item.activateAll);
-  const triggerKey = `capptpl:${app.id}:${characterId}:${key}`;
   rememberCustomAppTemplate(app.id, characterId, key, record);
   const armResult = await armTemplateBailout({
     triggerKey,
@@ -2536,7 +2566,8 @@ export async function freezeCustomAppTemplate(
 // 模板登记簿：APP 冻过哪些模板。角色聊完天记忆会变，模板里烤着旧记忆，
 // 所以宿主在角色每次回复之后自动按登记簿重冻一遍，不用等 APP 再被打开。
 const CUSTOM_APP_TEMPLATE_REGISTRY_KEY = "custom_app_templates_v1";
-const CUSTOM_APP_TEMPLATE_REFRESH_DEBOUNCE_MS = 3 * 60_000;
+// 后端靠这些模板发消息，得尽快跟上：回复停下 30 秒就重冻
+const CUSTOM_APP_TEMPLATE_REFRESH_DEBOUNCE_MS = 30_000;
 type CustomAppTemplateRecord = { appId: string; characterId: string; key: string; record: Record<string, unknown>; at: number };
 
 function loadCustomAppTemplateRegistry(): CustomAppTemplateRecord[] {
@@ -2599,7 +2630,8 @@ export async function refreshCustomAppTemplatesForCharacter(characterId: string)
 }
 
 let templateRefresherInstalled = false;
-/** 角色每次回复后（记忆可能已更新）延迟几分钟重冻该角色的全部模板；连续聊天只在停下来后冻一次。 */
+/** 角色每次回复后（记忆可能已更新）稍等片刻重冻该角色的全部模板；连续聊天只在停下来后冻一次。
+ *  切到后台时也全部重冻一遍：改了预设、人设、世界书，离开小手机就同步。 */
 export function installCustomAppTemplateRefresher(): void {
   if (templateRefresherInstalled || typeof window === "undefined") return;
   templateRefresherInstalled = true;
@@ -2617,6 +2649,13 @@ export function installCustomAppTemplateRefresher(): void {
       timers.delete(characterId);
       void refreshCustomAppTemplatesForCharacter(characterId);
     }, CUSTOM_APP_TEMPLATE_REFRESH_DEBOUNCE_MS));
+  });
+  let hiddenRefreshAt = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden || Date.now() - hiddenRefreshAt < 30_000) return;
+    hiddenRefreshAt = Date.now();
+    const ids = [...new Set(loadCustomAppTemplateRegistry().map(item => item.characterId))];
+    void (async () => { for (const id of ids) await refreshCustomAppTemplatesForCharacter(id); })();
   });
 }
 
