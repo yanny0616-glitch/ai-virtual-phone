@@ -1,5 +1,14 @@
 # Fork 变更日志
 
+## 2026-09-17：离线执行位置全局开关（挂念 0.10.2）
+
+- 小手机「离线推送与定时消息 → 运行位置」新增「离线执行：云端 / 后端」（`lib/offline-executor.ts`），默认云端；未设过且挂念已交给后端的沿用后端。后端地址和测试也搬到这里，钥匙统一用「云服务部署」里的个人云 Secret key。
+- 自定义 APP 新接口 `AiPhone.offline.getConfig()`（权限 `offline.config`）：返回模式、后端地址、个人云地址和 Secret key。
+- 挂念 0.10.2：设置「云端」删掉个人云地址、密钥、「交给 VPS 后端」、后端地址，改成只读的当前位置和测试连接；「浏览器关着也复核」只在云端模式显示。启动和每分钟读小手机设置，不一致就走原保存流程交接（先确认停掉旧的一边再切），失败 5 分钟后重试。旧版小手机没有接口时沿用挂念里原来存的值。
+- 宿主 `guanian-server-sync`、`wake-server-sync` 的后端地址改读全局设置。
+- 目前后端只接管挂念；回复兜底、追问、定时消息、经期关怀选了后端也暂时仍走云端。
+- 验证：`gua-nian:check`；`check-gua-nian-server-handoff`（新增跟随小手机交接场景）、`check-gua-nian-server-direct`（真后端 + Chromium）、`check-gua-nian-day-prompt`、`check-gua-nian-bailout-ownership`；根 `tsc --noEmit`。其余挂念检查与改动前一致（delivery / orphan-wakes / p1 / p2 / scheduler / scheduler-app / template-recovery 改动前已失败）。未做手机端实测。
+
 ## 2026-09-17：唤醒后端（事件唤醒交给 VPS）
 
 - 工具箱 MCP 的「事件唤醒」新增处理方式「交给 VPS 后端」：手机关着也处理，后端用这个 MCP 调工具、回复、推送。工具箱仍是原件，花园只是一个接入方，其他项目照旧用通用 Webhook 投递。

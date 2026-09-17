@@ -3,7 +3,7 @@
 //   · 后端起意的朋友圈在前台补成帖子，回执寄回后端
 //   · 后端生成的日程写回系统日程表
 //   · 把后端看不到的原料寄过去：好感、系统日程表上的安排、「忙碌回复」插件的固定作息和例外
-// 鉴权用挂念设置里存的个人云 Secret key；后端拿它去个人云核对。
+// 鉴权用「云服务部署」里的个人云 Secret key；后端拿它去个人云核对。
 import { loadInstalledCustomApps, readCustomAppCollection, CUSTOM_APPS_UPDATED_EVENT, CUSTOM_APP_DATA_UPDATED_EVENT } from './custom-app-storage';
 import { getChatPluginVar, setChatPluginVar, unsetChatPluginVar, CHAT_PLUGIN_VARS_CHANGED_EVENT } from './chat-plugin-storage';
 import { normalizeReplyGate, setCustomAppReplyGate } from './chat-reply-gate';
@@ -11,9 +11,9 @@ import { clearCustomAppChatContext, setCustomAppChatContext } from './custom-app
 import { postCustomAppMoment, readCustomAppCalendar, writeCustomAppCalendar } from './custom-app-host-api';
 import { calculateGuanianPresence, guanianPresenceGate, presenceDate, type PresenceDay } from './guanian-presence';
 import { kvGet, kvSet, registerKvMigration } from './kv-db';
+import { companionServerUrl, personalCloudCredentials } from './offline-executor';
 
 const SOURCE = 'guanian-server';
-export const GUANIAN_SERVER_URL = 'https://float.yanny.top/companion';
 const CALENDAR_KEY = 'guanian_server_calendar_v1';
 registerKvMigration(CALENDAR_KEY);
 const NET_MS = 60_000;
@@ -29,9 +29,9 @@ type HostCharacter = {
 
 let stopCurrent: (() => void) | null = null;
 
-export function guanianServerConfig(settings: Record<string, unknown>) {
-  const url = String(settings.serverUrl || '').trim().replace(/\/+$/, '') || GUANIAN_SERVER_URL;
-  return { url, key: String(settings.cloudKey || '').trim() };
+// 地址和钥匙只看小手机「离线推送 → 离线执行」和「云服务部署」，挂念自己不再存
+export function guanianServerConfig(_settings?: Record<string, unknown>) {
+  return { url: companionServerUrl(), key: personalCloudCredentials().key };
 }
 
 const addMin = (hm: string, n: number) => {

@@ -1,7 +1,7 @@
 import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
 const root=new URL('../custom-apps/gua-nian/src/',import.meta.url),nodes=new Map();
 const node=key=>{if(!nodes.has(key))nodes.set(key,{dataset:{v:'0'},value:'',textContent:'0',innerHTML:'',focus(){this.focused=true;},querySelectorAll:()=>[],classList:{contains:()=>false,toggle(){}}});return nodes.get(key);};
-const c=vm.createContext({console,Object,Array,String,Number,isFinite,cur:()=>null,$:node,esc:s=>String(s).replace(/</g,'&lt;'),document:{querySelector:node,querySelectorAll:()=>[],body:{classList:{add(){},remove(){}}}},S:{settings:{},characters:[],order:[]}});
+const c=vm.createContext({console,Object,Array,String,Number,isFinite,cur:()=>null,hostCfg:()=>({mode:'cloud'}),cloudCfg:()=>null,serverBrainOn:()=>false,$:node,esc:s=>String(s).replace(/</g,'&lt;'),document:{querySelector:node,querySelectorAll:()=>[],body:{classList:{add(){},remove(){}}}},S:{settings:{},characters:[],order:[]}});
 vm.runInContext(fs.readFileSync(new URL('data/defaults.js',root),'utf8')+fs.readFileSync(new URL('ui/settings.js',root),'utf8')+'\nglobalThis.a={SET_DEF,DEFAULT_DAY_PROMPT,openSheet,bindSheet,readSheet,settingsSaveEffects};',c);
 c.S.settings={...c.a.SET_DEF,dayPrompt:'自定义 <内容>'};c.a.openSheet();assert.equal(node('#set-dayPrompt').value,'自定义 <内容>');
 assert.equal(c.a.readSheet().dayPrompt,'自定义 <内容>');

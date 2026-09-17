@@ -229,7 +229,8 @@ async function hostCheck() {
   const vars = new Map(), gates = new Map(), contexts = new Map(), calendar = new Map(), kv = new Map(), posts = [];
   const events = new EventTarget(), doc = new EventTarget();
   doc.visibilityState = "visible";
-  const settings = { characterIds: ["c1"], serverBrain: true, serverUrl: BASE, cloudKey: KEY, injectChat: true, routineOn: true };
+  // 地址和钥匙由小手机「离线执行」和「云服务部署」给，挂念设置里不再存
+  const settings = { characterIds: ["c1"], serverBrain: true, injectChat: true, routineOn: true };
   calendar.set("c1", [{ id: "cal1", date: today, startTime: "09:00", endTime: "10:00", title: "考试·忙", location: "" }]);
   vars.set("c1:affection", { score: 60, tier: "亲近", relation: "恋人" });
   vars.set("c1:routine", { items: [{ id: "r1", kind: "sleep", from: "23:00", to: "07:00" }] });
@@ -255,6 +256,7 @@ async function hostCheck() {
       return { ok: true };
     },
     kvGet: k => kv.get(k) ?? null, kvSet: (k, v) => { kv.set(k, v); }, registerKvMigration() {},
+    companionServerUrl: () => BASE, personalCloudCredentials: () => ({ url: "https://cloud.invalid", key: KEY }),
   });
   vm.runInContext(strip(await read("lib/guanian-presence.ts")) + "\n" + strip(await read("lib/guanian-server-sync.ts")) + "\nglobalThis.start = startGuanianServerSync;", ctx);
   const wait = async (fn, msg) => { for (let i = 0; i < 150; i++) { if (await fn()) return; await new Promise(r => setTimeout(r, 100)); } throw new Error("timeout: " + msg); };

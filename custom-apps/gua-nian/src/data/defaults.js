@@ -29,8 +29,8 @@
     forkBurst: true,     // 变数落到「忍不住」时主动来说（占主动额度，守免打扰）
     routineOn: true,     // 生成TA的一天时照着「忙碌回复」插件里的固定作息和今天的例外
     cloudGen: false,     // 到点由云端生成TA的一天并编排（浏览器关着也行；需要云连接 + 自动生成）
-    serverBrain: false,  // 交给 VPS 后端：本机不生成、不判断、不排消息，界面直接读写后端
-    serverUrl: "",       // 后端地址，留空用 https://float.yanny.top/companion
+    serverBrain: false,  // 实际已交给后端（跟随小手机「离线执行」，交接确认后才改）：本机不生成、不判断、不排消息
+    serverUrl: "",       // 旧版：后端地址，现由小手机设置；只在小手机没有 offline 接口时兜底
     genTpls: {},         // 每个角色云端生成借用的提示词模板 { cid: { daily, impulse, at } }
     sentinels: {},       // 每个角色的哨兵预约 { cid: { wakeId, armed } }
     characterIds: [],    // 挂念的人（可以多位）
@@ -52,8 +52,8 @@
     moodGate: true,      // 精力低/心情差时更克制
     injectChat: true,    // 把TA此刻的状态注入聊天提示词（需 chat.context 权限）
     chatEditsDay: true,  // 复核时允许按聊天内容改今天的日程（只动还没到的）
-    cloudUrl: "",        // 个人云（Supabase）项目地址，选填
-    cloudKey: "",        // 个人云 Secret / service_role key，只存本机应用数据
+    cloudUrl: "",        // 旧版：个人云地址，现由小手机「云服务部署」提供；只在小手机没有 offline 接口时兜底
+    cloudKey: "",        // 旧版：个人云 Secret key，同上
     cloudRecheck: true,  // 浏览器关着时也让云端复核（需要云连接）
     // 云端门禁：这几道全过了云端才真的发一次裁决调用，拦下来的不花钱也不占额度
     gateDailyCap: 8,     // 每天最多判几次

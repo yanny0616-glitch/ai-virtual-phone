@@ -6,7 +6,7 @@ import { stripTypeScriptTypes } from 'node:module';
 const read = path => readFile(new URL('../' + path, import.meta.url), 'utf8');
 const settings = await read('custom-apps/gua-nian/src/ui/settings.js');
 const server = await read('custom-apps/gua-nian/src/cloud/server.js');
-const save = settings.slice(settings.indexOf('  async function saveSettings()'));
+const save = settings.slice(settings.indexOf('  function hostWantsServer()'));
 const forget = server.slice(server.indexOf('  async function serverForget('), server.indexOf('  // 手动操作'));
 
 for (const outcome of ['confirmed', 'queued', 'network', 'unconfirmed']) {
@@ -15,14 +15,12 @@ for (const outcome of ['confirmed', 'queued', 'network', 'unconfirmed']) {
   const S = { settings: { serverBrain: true, serverUrl: 'old', cloudKey: 'old-key' }, order: ['c1'], cur: 'c1', byId: { c1: cx } };
   const ctx = vm.createContext({
     S, document: { querySelectorAll: () => [{ dataset: { id: 'c1' } }] },
-    readSheet: () => ({ serverBrain: false, serverUrl: 'new', cloudKey: 'new-key' }),
+    readSheet: () => ({}), hostCfg: () => ({ mode: 'cloud' }),
     validateUserSleepSettings() {},
     serverPath: () => '/app/characters/c1',
     serverFetch: async (_path, init) => {
       calls.push('disable');
       assert.equal(S.settings.serverBrain, true);
-      assert.equal(S.settings.serverUrl, 'old');
-      assert.equal(S.settings.cloudKey, 'old-key');
       assert.equal(JSON.parse(init.body).enabled, false);
       if (outcome === 'network') throw Error('offline');
       return outcome === 'queued' ? { queued: true } : { character: { enabled: outcome !== 'confirmed' } };
@@ -51,12 +49,12 @@ const handoff = server.slice(server.indexOf('  async function serverHandoff('), 
 for (const outcome of ['confirmed', 'queued', 'network', 'unconfirmed']) {
   const calls=[],toasts=[];
   const cx={character:{id:'c1',name:'test'}};
-  const S={settings:{serverBrain:false,cloudRecheck:true,cloudGen:false,serverUrl:'old',cloudKey:'old-key'},order:['c1'],cur:'c1',byId:{c1:cx}};
+  const S={settings:{serverBrain:false,cloudRecheck:true,cloudGen:false},order:['c1'],cur:'c1',byId:{c1:cx}};
   const ctx=vm.createContext({
-    S,document:{querySelectorAll:()=>[{dataset:{id:'c1'}}]},readSheet:()=>({serverBrain:true,cloudRecheck:true,cloudGen:false,serverUrl:'new',cloudKey:'new-key'}),validateUserSleepSettings(){},
+    S,document:{querySelectorAll:()=>[{dataset:{id:'c1'}}]},readSheet:()=>({cloudRecheck:true,cloudGen:false}),hostCfg:()=>({mode:'server'}),validateUserSleepSettings(){},
     myDev:()=> 'device', serverPath:(_cx,tail)=>'/app/characters/c1'+tail,
-    serverFetch:async(path,init,_ms,draft)=>{
-      calls.push('handoff'); assert.equal(S.settings.serverBrain,false); assert.equal(draft.serverUrl,'new'); assert.equal(draft.cloudKey,'new-key');
+    serverFetch:async(path,init)=>{
+      calls.push('handoff'); assert.equal(S.settings.serverBrain,false);
       assert.equal(path,'/app/characters/c1/handoff');assert.equal(JSON.parse(init.body).owner,'device');
       if(outcome === 'network') throw Error('offline'); return outcome === 'queued' ? {queued:true} : {stopped:outcome === 'confirmed'};
     },
@@ -72,7 +70,7 @@ for (const outcome of ['confirmed', 'queued', 'network', 'unconfirmed']) {
     assert.deepEqual(calls,['handoff']);assert.equal(S.settings.serverBrain,false);assert.match(toasts[0],/设置未保存/);
   }
 }
-console.log('VPS 启用交接：确认旧调度停止后才保存/启用，草稿连接及失败路径通过');
+console.log('VPS 启用交接：跟随小手机离线执行位置，确认旧调度停止后才保存/启用，失败路径通过');
 
 // 运行真实本地定时发送入口的保护段：VPS 接管后不发消息，也不删云端凭据。
 const ownership = (await read('lib/guanian-wake-ownership.ts')).replace(/^import .*;\n/m, '').replace('export ', '').replace('schedule: { id: string }', 'schedule');
@@ -88,3 +86,25 @@ for (const owned of [true,false]) {
   const result=await ctx.fireTimedWake({id});assert.equal(result,owned?undefined:'legacy');assert.deepEqual(removed,[id]);
 }
 console.log('旧本地定时发送：VPS 模式让位，非 VPS 模式保留原路径');
+
+// 小手机改了离线执行位置：挂念按保存流程交接；位置一致不动，失败 5 分钟内不重试。
+{
+  const follow = settings.slice(settings.indexOf('  async function followHostMode()'), settings.indexOf('  async function applySettings('));
+  const applied = [];
+  const S = { host: { mode: 'server' }, settings: { serverBrain: false, quota: 3, cloudRecheck: true }, order: ['c1'] };
+  const ctx = vm.createContext({
+    S, Date, toast() {}, allCx: () => [{}], serverBrainOn: () => S.settings.serverBrain,
+    hostWantsServer: () => S.host.mode === 'server',
+    SET_FIELDS: () => [{ type: 'stepper', key: 'quota' }, { type: 'toggles', items: [{ key: 'cloudRecheck' }] }, { type: 'hostOffline' }],
+    applySettings: async (ids, sheet) => { applied.push({ ids, sheet: { ...sheet } }); },
+  });
+  vm.runInContext(follow, ctx);
+  assert.equal(await ctx.followHostMode(), false);
+  assert.deepEqual(applied, [{ ids: ['c1'], sheet: { quota: 3, cloudRecheck: true, serverBrain: true } }]);
+  assert.equal(await ctx.followHostMode(), false); // 交接失败，5 分钟内不再试
+  assert.equal(applied.length, 1);
+  S.host.mode = 'cloud'; S._followAt = 0;
+  assert.equal(await ctx.followHostMode(), false); // 位置一致
+  assert.equal(applied.length, 1);
+}
+console.log('跟随小手机离线执行：不一致才交接，失败不刷屏重试');

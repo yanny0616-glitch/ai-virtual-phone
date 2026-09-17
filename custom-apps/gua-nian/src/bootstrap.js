@@ -38,6 +38,10 @@
         const rows = await AiPhone.db.list("logs", { limit: 5 });
         S.logs = (rows && rows[0]) || null;
       } catch (e) { /* 无日志可读 */ }
+      // 离线执行位置跟小手机走：那边改了就在这里交接，切成功会重新载入
+      await loadHostOffline();
+      if (await followHostMode().catch(() => false)) return;
+      setInterval(() => { loadHostOffline().then(followHostMode).catch(() => { /* 下一分钟再试 */ }); }, 60000);
       if (serverBrainOn()) {
         // 交给后端：界面直接读后端，本机不跑任何判断和预约
         await serverStart();

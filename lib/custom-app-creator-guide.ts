@@ -1546,6 +1546,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "* `memory.readCore` / `memory.readLongTerm` / `memory.readShortTerm` / `memory.search`：读取或搜索记忆。",
   "* `usage.read`：读取模型调用的按天用量统计（模型、次数、token 数）。只有计数，不含提示词和回复原文。",
   "* `usage.settings`：修改宿主保留的调用日志条数（50/150/300/500）。调小会立刻丢掉超出的旧日志。",
+  "* `offline.config`：`AiPhone.offline.getConfig()` 读取小手机「离线推送 → 离线执行」：`{ mode: \"cloud\" | \"server\", serverUrl, cloudUrl, cloudKey }`。含个人云 Secret key，只给确实要直连个人云或后端的 APP。",
   "* `memory.write`：写入角色记忆。",
   "* `memory.suggest`：提交记忆写入建议。",
   "",

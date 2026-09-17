@@ -7,8 +7,8 @@
 import { buildChatPromptMessages, buildNativeChatTools, nativeToolSourceKey } from './chat-engine';
 import { addChatContact, createOrGetSession, getMaxToolRounds, loadChatContacts, loadChatMessages, type ChatMessage } from './chat-storage';
 import { isCloudBackupConfigured, loadCloudBackupConfig } from './cloud-backup/config';
-import { GUANIAN_SERVER_URL } from './guanian-server-sync';
 import { kvGet, kvSet, registerKvMigration } from './kv-db';
+import { companionServerUrl } from './offline-executor';
 import { buildProviderRequest, nativeToolProtocolForConfig, toLlmRequestMessages } from './llm-provider-adapter';
 import { buildMcpAuthHeaders } from './tool-executor';
 import { toolEventEnabled, toolEventRequest, type ToolEventStatus } from './tool-event-client';
@@ -28,7 +28,7 @@ type Uploaded = Record<string, { characterId: string; sig: string; at: number }>
 
 export function wakeServerAuth(): { url: string; key: string } | null {
   const backup = loadCloudBackupConfig();
-  return isCloudBackupConfigured(backup) ? { url: GUANIAN_SERVER_URL, key: backup.key.trim() } : null;
+  return isCloudBackupConfigured(backup) ? { url: companionServerUrl(), key: backup.key.trim() } : null;
 }
 
 export async function wakeServerApi<T = Record<string, unknown>>(path: string, init: RequestInit = {}): Promise<T> {

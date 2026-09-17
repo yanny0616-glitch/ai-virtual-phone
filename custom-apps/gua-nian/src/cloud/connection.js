@@ -1,7 +1,21 @@
-  /* ================= 云连接（个人云后端） ================= */
+  /* ================= 云连接（个人云后端） =================
+     个人云地址、Secret key、离线执行位置（云端 / 后端）都由小手机统一设：
+     「云服务部署」连个人云，「离线推送 → 离线执行」选位置。挂念只读，不再自己存。 */
+  async function loadHostOffline() {
+    try { S.host = AiPhone.offline && AiPhone.offline.getConfig ? await AiPhone.offline.getConfig() : null; }
+    catch (e) { S.host = null; }
+    return S.host;
+  }
+  function hostCfg() {
+    if (S.host) return S.host;
+    // 旧版小手机没有这个接口：沿用挂念里原来存的
+    const st = S.settings || {};
+    return { mode: st.serverBrain ? "server" : "cloud", serverUrl: st.serverUrl || SERVER_URL_DEF, cloudUrl: st.cloudUrl || "", cloudKey: st.cloudKey || "" };
+  }
   function cloudCfg() {
-    const u = (S.settings && S.settings.cloudUrl || "").trim().replace(/\/+$/, "");
-    const k = (S.settings && S.settings.cloudKey || "").trim();
+    const h = hostCfg();
+    const u = String(h.cloudUrl || "").trim().replace(/\/+$/, "");
+    const k = String(h.cloudKey || "").trim();
     return /^https:\/\//.test(u) && k ? { url: u, key: k } : null;
   }
   async function cloudFetch(action, init, params) {

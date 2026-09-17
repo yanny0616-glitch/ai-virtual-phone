@@ -28,6 +28,7 @@ import { requestNotificationPermission } from "@/lib/browser-notification";
 import { disableOfflinePush, enableOfflinePush, getOfflinePushState, isShellEnvironment, loadPushQuietHours, savePushQuietHours, sendTestOfflinePush, type OfflinePushState } from "@/lib/push-client";
 import { isPersonalPushCloudActive, setPersonalPushCloudScheduled } from "@/lib/personal-push-cloud";
 import { loadPushCloudScheduled, savePushCloudScheduled } from "@/lib/cloud-deploy-status";
+import { DEFAULT_COMPANION_SERVER_URL, guanianPendingSwitch, loadOfflineExecutorConfig, saveOfflineExecutorConfig, testCompanionServer, type OfflineExecutorMode } from "@/lib/offline-executor";
 import { armIdleReconnectBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "@/lib/push-bailout-client";
 import { loadTimedWakeSchedules, makeTimedWakeId, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "@/lib/timed-wake-storage";
 import { IDLE_RECONNECT_MAX_CONSECUTIVE, loadIdleReconnectRules, removeIdleReconnectRule, upsertIdleReconnectRule, type IdleReconnectRule } from "@/lib/idle-reconnect-storage";
@@ -1185,6 +1186,42 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
     const [pushCloudScheduled, setPushCloudScheduled] = useState(() => loadPushCloudScheduled());
     const [pushScheduleBusy, setPushScheduleBusy] = useState(false);
     const [pushScheduleHint, setPushScheduleHint] = useState("");
+    const [offlineExec, setOfflineExec] = useState(() => loadOfflineExecutorConfig());
+    const [serverUrlDraft, setServerUrlDraft] = useState(() => loadOfflineExecutorConfig().serverUrl);
+    const [execHint, setExecHint] = useState("");
+    const [execTesting, setExecTesting] = useState(false);
+    const guanianPending = useMemo(() => guanianPendingSwitch(offlineExec), [offlineExec]);
+
+    const handleOfflineExecMode = (mode: OfflineExecutorMode) => {
+        if (mode === offlineExec.mode) return;
+        const next = { ...offlineExec, mode };
+        saveOfflineExecutorConfig(next);
+        setOfflineExec(next);
+        setExecHint(mode === "server"
+            ? "已改成后端。挂念下次打开时自动交接（先停云端，再由后端接管）。回复兜底、追问、定时消息、经期关怀还在迁移，暂时仍走云端。"
+            : "已改成云端。挂念下次打开时自动交接（先停后端，再由云端接管）。");
+    };
+    const saveServerUrl = () => {
+        const url = serverUrlDraft.trim().replace(/\/+$/, "");
+        if (url === offlineExec.serverUrl) return;
+        if (url && !/^https:\/\//.test(url)) { setExecHint("后端地址要以 https:// 开头"); return; }
+        const next = { ...offlineExec, serverUrl: url };
+        saveOfflineExecutorConfig(next);
+        setOfflineExec(next);
+        setExecHint("后端地址已保存。");
+    };
+    const handleTestServer = async () => {
+        if (execTesting) return;
+        setExecTesting(true);
+        setExecHint("测试中…");
+        try {
+            setExecHint(`✓ ${await testCompanionServer(serverUrlDraft)}`);
+        } catch (error) {
+            setExecHint(`✗ ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setExecTesting(false);
+        }
+    };
 
     const handleTogglePushCloudSchedule = async (enabled: boolean) => {
         if (pushScheduleBusy) return;
@@ -1405,6 +1442,47 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                                 {pushScheduleHint && (
                                     <span className="menu-desc !mt-0">{pushScheduleHint}</span>
                                 )}
+                            </div>
+                            <div className="menu-item" style={{ alignItems: "stretch", flexDirection: "column", gap: 10 }}>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex-1 flex flex-col">
+                                        <span className="menu-label">离线执行</span>
+                                        <span className="menu-desc !mt-0">浏览器关着时，由谁判断和生成角色的消息</span>
+                                    </div>
+                                    <div className="flex shrink-0 overflow-hidden rounded-full border border-black/10">
+                                        {(["cloud", "server"] as const).map(mode => (
+                                            <button
+                                                key={mode}
+                                                type="button"
+                                                className={`px-3 py-1 ts-12 ${offlineExec.mode === mode ? "bg-[var(--c-text-title)] text-[var(--c-card)]" : "text-[var(--c-text)]"}`}
+                                                onClick={() => handleOfflineExecMode(mode)}
+                                            >
+                                                {mode === "cloud" ? "云端" : "后端"}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                {offlineExec.mode === "server" && (
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="url"
+                                            className="flex-1 min-w-0 border-none outline-none bg-transparent ts-13 text-[var(--c-text)]"
+                                            placeholder={DEFAULT_COMPANION_SERVER_URL}
+                                            value={serverUrlDraft}
+                                            spellCheck={false}
+                                            autoComplete="off"
+                                            onChange={e => setServerUrlDraft(e.target.value)}
+                                            onBlur={saveServerUrl}
+                                        />
+                                        <button type="button" className="ui-btn ui-btn-outline py-1 px-2 ts-11 shrink-0" style={{ whiteSpace: "nowrap" }} onClick={() => void handleTestServer()} disabled={execTesting}>测试</button>
+                                    </div>
+                                )}
+                                <span className="menu-desc !mt-0">
+                                    {execHint || (offlineExec.mode === "server"
+                                        ? "后端用「云服务部署」里的个人云 Secret key 认你。目前挂念走后端；回复兜底、追问、定时消息、经期关怀迁移完成前仍走云端。"
+                                        : "个人云里的云函数负责离线消息（原项目做法）。")}
+                                    {guanianPending && " 挂念还没切过去，打开挂念会自动交接。"}
+                                </span>
                             </div>
                         </div>
                         <p className="menu-group-desc mx-2">系统推送</p>

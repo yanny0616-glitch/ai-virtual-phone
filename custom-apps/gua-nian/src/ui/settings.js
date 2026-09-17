@@ -68,14 +68,10 @@
         hint: "让TA聊天时知道自己此刻在做什么、什么心情、剩多少精力、接下来做什么。<br>每次刷新覆盖上一次，不会堆进聊天记录，也不影响前面人设和世界书的缓存。<br>关掉立刻撤销。" },
     ] },
     { id: "cloud", name: "云端", groups: [
-      { title: "云连接", sub: "个人云后端，选填", fields: [
-        { type: "text", key: "cloudUrl", placeholder: "https://xxxx.supabase.co" },
-        { type: "text", key: "cloudKey", password: true, placeholder: "sb_secret_… 或 service_role key" },
-        { type: "cloudTest" },
-        { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }, { key: "serverBrain", label: "交给 VPS 后端" }] },
-        { type: "text", key: "serverUrl", placeholder: "后端地址，留空用 " + SERVER_URL_DEF },
-        { type: "serverTest" },
-      ], hint: "开了「交给 VPS 后端」：TA的一天、念头、账本和判断都在后端，挂念直接读写后端显示；本机不再生成、复核、排消息。三份提示词模板（判断 / 生成一天 / 聊天）照旧寄到个人云给后端用，TA每次回复、小手机切到后台都会自动重寄。注入聊天、在线状态、朋友圈和写回日程由小手机每分钟从后端取。保存时先确认停用旧云端复核、生成及待发预约，再由 VPS 接管。后端用上面这把 Secret key 认你。<br>填小手机「云服务部署」里那个 Supabase 项目的地址和 Secret key。密钥只存在本机，只发往这个地址。<br>开了「浏览器关着也复核」，今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
+      { title: "离线执行", sub: "在小手机里设", fields: [
+        { type: "hostOffline" },
+        { type: "toggles", items: [{ key: "cloudRecheck", label: "浏览器关着也复核" }] },
+      ], hint: "个人云在小手机「设置 → 云服务部署」里连；浏览器关着时由云端还是后端管TA，在小手机「离线推送与定时消息 → 离线执行」里选，挂念跟着切。<br>选了后端：TA的一天、念头、账本和判断都在后端，挂念直接读写后端显示；本机不再生成、复核、排消息。三份提示词模板（判断 / 生成一天 / 聊天）照旧寄到个人云给后端用，TA每次回复、小手机切到后台都会自动重寄。注入聊天、在线状态、朋友圈和写回日程由小手机每分钟从后端取。切换时先确认停用旧的一边，再由新的一边接管。<br>选了云端并开着「浏览器关着也复核」：今天的计划会寄存到云上，云端每 5 分钟醒一次，按你们最新的聊天重审（先过下面的门禁）。下次打开挂念，TA在云端改的主意会并进来。" },
       { title: "复核门禁", adv: true, sub: "拦下来的不花钱、不占额度", fields: [
         { type: "stepper", key: "gateDailyCap", min: 1, max: 24, step: 1, label: "每天最多判", unit: "次" },
         { type: "stepper", key: "gateGapMin", min: 5, max: 240, step: 5, label: "两次判至少隔", unit: "分钟" },
@@ -143,11 +139,12 @@
       return '<input type="' + (f.password ? "password" : "text") + '" class="txt-in" id="set-' + f.key +
         '" placeholder="' + esc(f.placeholder || "") + '" spellcheck="false" autocomplete="off">';
     }
-    if (f.type === "serverTest") {
-      return '<div class="cloud-row"><button class="tgl" id="btn-server-test">测试后端</button><span id="server-test-r"></span></div>';
-    }
-    if (f.type === "cloudTest") {
-      return '<div class="cloud-row"><button class="tgl" id="btn-cloud-test">测试连接</button><span id="cloud-test-r"></span></div>';
+    if (f.type === "hostOffline") {
+      const server = hostWantsServer();
+      const state = !S.host && !cloudCfg() ? "小手机版本偏旧，读不到设置" : (server ? "后端" : "云端") + (cloudCfg() ? " · 个人云已连接" : " · 个人云未连接")
+        + (server !== serverBrainOn() ? " · 还没切过去" : "");
+      return '<div class="frow"><div class="fl">现在由<div class="fu">' + esc(state) + '</div></div></div>' +
+        '<div class="cloud-row"><button type="button" class="mini" id="btn-cloud-test">测试连接</button><span id="cloud-test-r"></span></div>';
     }
     return "";
   }
@@ -219,6 +216,8 @@
       else if (f.type === "textarea") $("#set-" + f.key).value = S.settings[f.key] ?? SET_DEF[f.key];
       else if (f.type === "text") $("#set-" + f.key).value = S.settings[f.key] || "";
     }
+    const recheck = $("#set-cloudRecheck");
+    if (recheck && recheck.parentNode) recheck.parentNode.hidden = hostWantsServer();
     bindSheet();
     document.body.classList.add("sheet-open");
   }
@@ -276,44 +275,30 @@
       if (b.id === "set-userSleepOn") syncUserSleepFields();
     }; });
     syncUserSleepFields();
-    bindServerTest();
     const test = $("#btn-cloud-test");
     if (test) test.onclick = async () => {
       const r = $("#cloud-test-r");
-      const u = ($("#set-cloudUrl").value || "").trim().replace(/\/+$/, "");
-      const k = ($("#set-cloudKey").value || "").trim();
-      if (!/^https:\/\//.test(u) || !k) { r.textContent = "先填完整地址和密钥"; return; }
+      await loadHostOffline();
+      const c = cloudCfg();
+      if (!c) { r.textContent = "个人云没连上：去小手机「设置 → 云服务部署」"; return; }
       r.textContent = "测试中…";
       try {
-        const res = await fetch(u + "/functions/v1/ai-phone-push?action=health", { cache: "no-store", headers: { "x-ai-phone-service-key": k } });
+        if (hostWantsServer()) {
+          const data = await serverFetch("/app/state?ids=" + encodeURIComponent(S.order.join(",")), {}, 15000);
+          const known = (data.characters || []).filter((x) => x.exists).length;
+          r.textContent = "✓ 后端已连通 · " + (data.mode === "live" ? "真发" : "影子") + " · 后端有 " + known + "/" + (data.characters || []).length + " 位";
+          return;
+        }
+        const res = await fetch(c.url + "/functions/v1/ai-phone-push?action=health", { cache: "no-store", headers: { "x-ai-phone-service-key": c.key } });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || data.ok !== true) throw new Error((data && data.error) || ("HTTP " + res.status));
         const mir = (data.capabilities || []).indexOf("chat-mirror") >= 0;
-        r.textContent = "✓ 已连通 · 云函数 v" + (data.schemaVersion || "?") +
+        r.textContent = "✓ 个人云已连通 · 云函数 v" + (data.schemaVersion || "?") +
           (mir ? " · 支持聊天镜像" : " · 版本偏旧：去小手机「设置→云服务部署」重新部署离线推送");
       } catch (e) { r.textContent = "✗ " + (e && e.message || e); }
     };
   }
 
-  function bindServerTest() {
-    const btn = $("#btn-server-test");
-    if (!btn) return;
-    btn.onclick = async () => {
-      const r = $("#server-test-r");
-      const u = (($("#set-serverUrl").value || "").trim() || SERVER_URL_DEF).replace(/\/+$/, "");
-      const k = ($("#set-cloudKey").value || "").trim();
-      if (!/^https:\/\//.test(u) || !k) { r.textContent = "先填完整个人云密钥和后端地址"; return; }
-      r.textContent = "测试中…";
-      try {
-        const res = await fetch(u + "/app/state?ids=" + encodeURIComponent(S.order.join(",")), { cache: "no-store", headers: { Authorization: "Bearer " + k } });
-        const data = await res.json().catch(() => null);
-        if (res.status === 401) throw new Error("后端不认这把密钥");
-        if (!res.ok || !data || data.ok !== true) throw new Error((data && data.error) || ("HTTP " + res.status));
-        const known = (data.characters || []).filter((c) => c.exists).length;
-        r.textContent = "✓ 已连通 · " + (data.mode === "live" ? "真发" : "影子") + " · 后端有 " + known + "/" + (data.characters || []).length + " 位";
-      } catch (e) { r.textContent = "✗ " + (e && e.message || e); }
-    };
-  }
   function syncUserSleepFields() {
     const toggle = $("#set-userSleepOn");
     const enabled = !!(toggle && toggle.classList.contains("on"));
@@ -343,7 +328,6 @@
       else if (f.type === "textarea") out[f.key] = ($("#set-" + f.key).value || "").trim() || SET_DEF[f.key];
       else if (f.type === "text") out[f.key] = ($("#set-" + f.key).value || "").trim();
     }
-    if (typeof out.cloudUrl === "string") out.cloudUrl = out.cloudUrl.replace(/\/+$/, "");
     return out;
   }
 
@@ -375,24 +359,49 @@
       notes.map((note) => '<div class="d-why">' + esc(note) + '</div>').join("") + '</div>' : "";
   }
 
+  function hostWantsServer() { return hostCfg().mode === "server"; }
+
   async function saveSettings() {
     const picked = Array.from(document.querySelectorAll(".char-cell.sel")).map((el) => el.dataset.id);
+    const sheet = readSheet();
+    sheet.serverBrain = hostWantsServer();
+    return applySettings(picked, sheet);
+  }
+
+  // 小手机改了离线执行位置：按保存设置的流程交接（先确认停掉旧的一边，再切）。失败的 5 分钟后再试。
+  async function followHostMode() {
+    if (!S.host || hostWantsServer() === serverBrainOn() || S._following) return false;
+    if (S._followAt && Date.now() - S._followAt < 5 * 60000) return false;
+    if (allCx().some((cx) => cx.busy || cx._planLock)) return false;
+    S._following = true; S._followAt = Date.now();
+    try {
+      const sheet = {};
+      for (const f of SET_FIELDS()) {
+        for (const k of f.keys || (f.items || []).map((it) => it.key).concat(f.key ? [f.key] : [])) sheet[k] = S.settings[k];
+      }
+      sheet.serverBrain = hostWantsServer();
+      toast("小手机改成了" + (sheet.serverBrain ? "后端" : "云端") + "执行，挂念正在交接…");
+      await applySettings(S.order.slice(), sheet);
+      return serverBrainOn() === sheet.serverBrain;
+    } finally { S._following = false; }
+  }
+
+  async function applySettings(picked, sheet) {
     const ids = picked.length ? picked : S.order.slice();
     const prevIds = S.order.slice();
     const removed = prevIds.filter((id) => !ids.includes(id));
     const added = ids.filter((id) => !prevIds.includes(id));
-    const sheet = readSheet();
     validateUserSleepSettings(sheet);
     if (sheet.serverBrain) {
       try {
         for (const id of ids) {
           const cx = S.byId[id] || ctxOf(S.characters.find(c => c.id === id));
-          if (!S.settings.serverBrain || !cx.server?.legacyStopped) await serverHandoff(cx, Object.assign({}, S.settings, sheet));
+          if (!S.settings.serverBrain || !cx.server?.legacyStopped) await serverHandoff(cx);
         }
       } catch (e) { toast("设置未保存：" + (e && e.message || e)); return; }
       sheet.cloudRecheck = false; sheet.cloudGen = false;
     }
-    // 用保存前的地址和密钥停用旧后端，确认完成才切换本机调度。
+    // 先确认后端停用，才切换本机调度。
     if (S.settings.serverBrain) {
       const stopIds = sheet.serverBrain ? removed : prevIds;
       try {

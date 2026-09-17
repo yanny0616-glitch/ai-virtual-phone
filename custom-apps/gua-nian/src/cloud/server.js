@@ -1,18 +1,18 @@
   /* ================= VPS 后端直连 =================
-     开了「交给 VPS 后端」：TA的一天、念头、账本、判断记录都在后端，挂念只是它的窗口。
+     小手机「离线执行」选了后端：TA的一天、念头、账本、判断记录都在后端，挂念只是它的窗口。
      每分钟读一次 /app/state 填进 cx.day / cx.plan / cx.threads，界面照旧渲染；手动操作直接发给后端。
      注入聊天、回复闸门、在线状态、朋友圈和写回系统日程由小手机宿主每分钟从后端取，挂念关着也照常。
      鉴权用设置里本来就存着的个人云 Secret key，后端拿它去个人云核对，不多存一把钥匙。 */
-  function serverCfg(settings) {
-    const st = settings || S.settings || {};
-    const c = /^https:\/\//.test(String(st.cloudUrl || "")) && String(st.cloudKey || "").trim() ? { key: String(st.cloudKey).trim() } : null;
-    const url = String(st.serverUrl || SERVER_URL_DEF).trim().replace(/\/+$/, "");
+  function serverCfg() {
+    const h = hostCfg();
+    const c = cloudCfg();
+    const url = String(h.serverUrl || SERVER_URL_DEF).trim().replace(/\/+$/, "");
     // 本机回环地址放行 http，给自测起的后端用
     return c && (/^https:\/\//.test(url) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) ? { url: url, key: c.key } : null;
   }
-  async function serverFetch(path, init, timeoutMs, settings) {
-    const c = serverCfg(settings);
-    if (!c) throw new Error("先在设置「云端」里填好个人云地址和 Secret key");
+  async function serverFetch(path, init, timeoutMs) {
+    const c = serverCfg();
+    if (!c) throw new Error("先在小手机「设置 → 云服务部署」连上个人云");
     const ms = timeoutMs || 25000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ms);
@@ -96,9 +96,9 @@
     await log(cx, st.exists ? "设置已同步到后端" : "后端开始挂念TA");
     return true;
   }
-  async function serverHandoff(cx, settings) {
+  async function serverHandoff(cx) {
     if (cx.busy || cx._planLock) throw new Error("本机还在处理计划，请结束后再交接");
-    const r = await serverFetch(serverPath(cx, "/handoff"), { method: "POST", body: JSON.stringify({ owner: myDev() }) }, 25000, settings);
+    const r = await serverFetch(serverPath(cx, "/handoff"), { method: "POST", body: JSON.stringify({ owner: myDev() }) }, 25000);
     if (r.queued || r.stopped !== true) throw new Error("旧云端停用尚未确认，请稍后再保存；VPS 尚未接管");
     cx._legacyStopped = true;
     // 后端暂时停用，下一次 ensure 必须重新确认启用。

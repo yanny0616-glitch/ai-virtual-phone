@@ -103,6 +103,7 @@ import {
 import { REALITY_BRIDGE_APP_EVENT_NAME, REALITY_BRIDGE_DATA_EVENT } from "@/lib/reality-bridge/types";
 import { OnlineRoomConnection, onlineCloudApi } from "@/lib/online-room-client";
 import { submitContentReport } from "@/lib/moderation-client";
+import { offlineConfigForApp } from "@/lib/offline-executor";
 
 type CustomAppRunnerProps = {
   app: InstalledCustomApp;
@@ -523,6 +524,9 @@ html, body { min-height: 100%; margin: 0; padding: 0; overscroll-behavior: none;
       readLogDetail: function(payload){ return request('usage.readLogDetail', payload || {}); },
       getSettings: function(){ return request('usage.getSettings', {}); },
       setSettings: function(payload){ return request('usage.setSettings', payload || {}); }
+    },
+    offline: {
+      getConfig: function(){ return request('offline.getConfig', {}); }
     },
     variables: {
       get: function(name, opts){ return request('variables.get', Object.assign({ name: name }, opts || {})).then(function(r){ return r && r.value; }); },
@@ -1789,6 +1793,10 @@ export function CustomAppRunner({
           failed: Boolean(log.failed),
         })),
       };
+    }
+    if (action === "offline.getConfig") {
+      requirePermission("offline.config");
+      return offlineConfigForApp();
     }
     if (action === "usage.getSettings") {
       requirePermission("usage.read");
