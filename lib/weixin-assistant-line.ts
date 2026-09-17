@@ -22,7 +22,7 @@ async function serverCall(path: '' | '/run', body?: unknown): Promise<WeixinServ
   let res: Response;
   try {
     res = await fetch(`${companionServerUrl()}/app/weixin${path}`, {
-      method: body === undefined ? 'GET' : 'POST', cache: 'no-store', signal: AbortSignal.timeout(path === '/run' ? 180_000 : 20_000),
+      method: body === undefined ? 'GET' : 'POST', cache: 'no-store', signal: AbortSignal.timeout(path === '/run' ? 240_000 : 20_000),
       headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
