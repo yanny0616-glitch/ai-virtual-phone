@@ -11,6 +11,7 @@ import {
 } from "./memory-storage";
 import { resolveAuxiliaryApiConfig } from "./settings-storage";
 import { simpleLLMCall } from "./api-helpers";
+import { buildCoreMergeEvents, earliestCoreStart, isSupersededCore } from "./memory-layering";
 
 const coreBuildingSet = new Set<string>();
 
@@ -73,7 +74,13 @@ export async function runCoreMemoryPipeline(
     const formatted = formatCoreTimelineForSummarization(entries);
     if (!formatted) return { success: false, error: "格式化核心记忆数据失败" };
 
-    const { eventsText, earliest, latest } = formatted;
+    const { latest } = formatted;
+    // 合并模式：旧核心一起喂进去，产出替换旧版的完整核心；手动全量重建也照样合并，旧核心里可能有长期记忆已经没有的内容
+    const previousCores = config.coreDedupEnabled
+        ? (await loadMemoryEntriesByType(characterId, "core")).filter(entry => !isSupersededCore(entry))
+        : [];
+    const eventsText = previousCores.length > 0 ? buildCoreMergeEvents(previousCores, entries.map(entry => entry.content)) : formatted.eventsText;
+    const earliest = earliestCoreStart(previousCores, formatted.earliest);
     const promptTemplate = config.coreMemoryPrompt?.trim() || DEFAULT_CORE_MEMORY_PROMPT;
     const prompt = promptTemplate
         .replace(/\{\{char\}\}/gi, characterName)
@@ -134,9 +141,13 @@ export async function runCoreMemoryPipeline(
             summarizedLongTermEntries: entries.length,
             timeSpan: `${earliest} ~ ${latest}`,
             sourceSessionIds,
+            ...(previousCores.length > 0 ? { mergedCoreIds: previousCores.map(entry => entry.id) } : {}),
         },
     };
     await saveMemoryEntry(coreEntry);
+    for (const old of previousCores) {
+        await saveMemoryEntry({ ...old, updatedAt: now, metadata: { ...old.metadata, supersededBy: coreEntry.id } });
+    }
 
     setLastCoreSummarizedTimestamp(characterId, latest);
     if (!options?.force) {

@@ -11,6 +11,7 @@ import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
 import type { MemoryEntry, MemoryConfig } from "@/lib/memory-types";
 import { DEFAULT_CORE_MEMORY_PROMPT, DEFAULT_SUMMARIZATION_PROMPT } from "@/lib/memory-types";
+import { isSupersededCore } from "@/lib/memory-layering";
 import {
     loadMemoryConfig,
     saveMemoryConfig,
@@ -614,6 +615,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         <div
                             key={entry.id}
                             className={`g-card memory-report-card${entryMenuId === entry.id ? " is-menu-open" : ""}`}
+                            style={isSupersededCore(entry) ? { opacity: 0.55 } : undefined}
                             onClick={() => {
                                 if (entryMenuId) {
                                     setEntryMenuId(null);
@@ -625,6 +627,9 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                             <div className="mem-report-head">
                                 <span className="ts-11 text-secondary" style={{ letterSpacing: "1px" }}>[ DATE: {relativeTime(entry.createdAt)} ]</span>
                                 <div className="mem-report-actions">
+                                    {isSupersededCore(entry) && (
+                                        <span className="mem-origin-badge" title="已合并进更新的核心记忆，不再注入">旧版本</span>
+                                    )}
                                     <span className={`mem-origin-badge ${isManualMemoryEntry(entry) ? "is-manual" : ""}`}>
                                         {isManualMemoryEntry(entry) ? "MANUAL" : "AUTO"}
                                     </span>
@@ -1064,6 +1069,52 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                             }}
                         />
                     )}
+                </div>
+
+                <p className="menu-group-desc mx-2">少带重复内容</p>
+                <div className="menu-group">
+                    <div className="menu-item">
+                        <MemorySettingsIcon icon={Archive} color={BINDING_ACCENTS.memory} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">核心记忆去重</span>
+                            <span className="menu-desc">核心记忆合成过的长期记忆不再放进提示词（仍保留、可查）；核心改为旧核心和新增长期记忆合并成一份，旧版留在列表里</span>
+                        </div>
+                        <div className="menu-right">
+                            <Toggle checked={config.coreDedupEnabled ?? false} onChange={(v) => {
+                                const next = { ...config, coreDedupEnabled: v };
+                                setConfig(next);
+                                saveMemoryConfig(next);
+                            }} />
+                        </div>
+                    </div>
+                    <div className="menu-item">
+                        <MemorySettingsIcon icon={Zap} color={BINDING_ACCENTS.embedding} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">预算按模型校准</span>
+                            <span className="menu-desc">「控制截断量」里的短期、长期、核心预算按当前模型实际的 token 数算，不再按估算值；还没有用量样本的模型照旧</span>
+                        </div>
+                        <div className="menu-right">
+                            <Toggle checked={config.calibratedBudgetEnabled ?? false} onChange={(v) => {
+                                const next = { ...config, calibratedBudgetEnabled: v };
+                                setConfig(next);
+                                saveMemoryConfig(next);
+                            }} />
+                        </div>
+                    </div>
+                    <div className="menu-item">
+                        <MemorySettingsIcon icon={Filter} color={BINDING_ACCENTS.voice} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">挂念判断不重复带私聊</span>
+                            <span className="menu-desc">挂念后台判断时不再把和该角色的私聊塞进短期记忆，后端自己带最近几轮聊天；长期、核心记忆照带</span>
+                        </div>
+                        <div className="menu-right">
+                            <Toggle checked={config.guanianJudgeSlimEnabled ?? true} onChange={(v) => {
+                                const next = { ...config, guanianJudgeSlimEnabled: v };
+                                setConfig(next);
+                                saveMemoryConfig(next);
+                            }} />
+                        </div>
+                    </div>
                 </div>
 
                 {/* Token budget sliders */}

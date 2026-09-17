@@ -592,6 +592,7 @@ export async function armTemplateBailout(input: {
     extraWorldBookIds?: string[];
     worldBookActivationContext?: string;
     activateAllWorldBooks?: boolean;
+    excludeDirectChatFromShortTerm?: boolean;
 }): Promise<BailoutArmResult> {
     if (!bailoutEnabled()) return { ok: false, reason: "当前环境不支持服务端离线预约" };
     try {
@@ -600,6 +601,7 @@ export async function armTemplateBailout(input: {
             input.session,
             input.history,
             {
+                excludeDirectChatFromShortTerm: input.excludeDirectChatFromShortTerm,
                 appId: input.appId,
                 appTags: input.appTags,
                 promptProfile: input.promptProfile,

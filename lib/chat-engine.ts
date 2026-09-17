@@ -63,7 +63,7 @@ import { setDebugPromptSnapshot, type DebugPromptSnapshot } from "./debug-store"
 import { extractFinishReason } from "./api-helpers";
 import { fetchLlmPayload } from "./llm-http";
 import { loadMemoryConfig, incrementEventCounter } from "./memory-storage";
-import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt, buildLongTermRecallContext } from "./memory-service";
+import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt, buildLongTermRecallContext, resolveMemoryConfigForModel } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 import { maybeRunSummarization } from "./memory-summarizer";
 import { prepareShortTermContext } from "./short-term-assembler";
@@ -398,6 +398,8 @@ type ChatPromptBuildOptions = {
     forceEnableTools?: boolean;
     /** 只让模型看到这些工具（唤醒后端底稿只带绑定的那个 MCP） */
     toolFilter?: (tool: EnabledTool) => boolean;
+    /** 挂念判断模板：私聊不进短期记忆，后端判断自带最近聊天 */
+    excludeDirectChatFromShortTerm?: boolean;
 };
 
 function matchesPromptProfileRef(prompt: { identifier: string; name?: string }, refs: Set<string>): boolean {
@@ -1984,7 +1986,7 @@ export async function buildChatPromptMessages(
     const now = new Date();
     const promptTimeContext = buildCharacterTimeContext(character.timeZone, now);
     const promptTimestampOptions = getPromptTimestampOptionsForTimeContext(promptTimeContext);
-    const memConfig = loadMemoryConfig();
+    const memConfig = resolveMemoryConfigForModel(loadMemoryConfig(), config.defaultModel);
     const isOfflineMode = options?.appTags?.includes("offline") === true;
     const callKind = options?.appTags?.includes("video") ? "video" as const : options?.appTags?.includes("voice") ? "voice" as const : null;
     const effectiveAppTags = mergeAppTags(options?.appTags, promptProfile?.appTags, resolvedAppId);
@@ -1998,6 +2000,8 @@ export async function buildChatPromptMessages(
         includeDirectChatEntries: isOfflineMode,
         includeNativeToolHistory: usesNativeActions,
         excludeOfflineSessionId: options?.excludeOfflineSessionId,
+        excludeDirectChat: options?.excludeDirectChatFromShortTerm === true,
+        tokenBudget: memConfig.shortTermTokenBudget,
         promptTimestampOptions,
     });
     if (truncatedHistory.some(msg => !msg.isRetracted && msg.mediaData?.xhsNote?.status === "loading")) throw new Error("小红书笔记和配图还在加载，请完成后再回复");
@@ -2013,7 +2017,10 @@ export async function buildChatPromptMessages(
     }
 
     const [memResults, coreResults, musicLocal, musicCloud] = await Promise.all([
-        retrieveMemoriesForPrompt(character.id, buildLongTermRecallContext(wbActivationContext, historyForPrompt, memConfig), memConfig).catch(() => null),
+        retrieveMemoriesForPrompt(character.id, buildLongTermRecallContext(wbActivationContext, historyForPrompt, memConfig), memConfig, {
+            // 核心记忆这一层没进提示词时，被它合成过的长期记忆还得照带
+            skipCoveredByCore: presetMarkerEnabled(preset, "memoryCore"),
+        }).catch(() => null),
         retrieveCoreMemoriesForPrompt(character.id, memConfig).catch(() => null),
         buildMusicLocalMacro(),
         buildMusicCloudMacro(),

@@ -41,6 +41,7 @@
     "check:regex-history-role": "node scripts/check-regex-history-role.mjs",
     "check:memory-recall": "node scripts/check-memory-recall.mjs",
     "check:memory-prompts": "node scripts/check-memory-prompts.mjs",
+    "check:memory-layering": "node scripts/check-memory-layering.mjs",
     "check:offline-reroll": "node scripts/check-offline-reroll.mjs",
     "check:menstrual-predict": "node scripts/check-menstrual-predict.mjs",
     "check:meetup-plugin": "node scripts/check-meetup-plugin.mjs",

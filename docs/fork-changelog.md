@@ -1,5 +1,15 @@
 # Fork 变更日志
 
+## 2026-09-17：记忆阶段二 2.0 / 2.2 / 2.3（带开关）
+
+- 记忆设置新增「少带重复内容」三个开关（`lib/memory-types.ts`）。
+- 2.3 挂念判断不重复带私聊（`guanianJudgeSlimEnabled`，**默认开**）：挂念冻 `judge` 模板时 `prepareShortTermContext` 传 `excludeDirectChat`，和该角色的线上私聊、线下条目都不进短期记忆；群聊、朋友圈等其他事件和长期 / 核心 / 拾光照带。后端判断自带线上 / 线下回看轮数的聊天（带消息 ID），实测模板里那份私聊约 3.9 万字。`daily`、`impulse`、`chat` 模板不变。宿主每次角色回复后重冻，自动生效。
+- 2.0 预算按模型校准（`calibratedBudgetEnabled`，默认关）：`resolveMemoryConfigForModel` 用当前模型的校准比例把短期 / 长期 / 核心预算换成估算侧上限（预算 ÷ 比例），只作用于 `buildChatPromptMessages`（私聊、线下、自定义 APP、模板）；群聊装配、拾光预算未改。没有样本的模型照旧。
+- 2.2 核心记忆去重（`coreDedupEnabled`，默认关）：
+  - 注入：「全部放入」模式下，`createdAt` 不晚于核心水位线的长期记忆不再注入；预设里核心记忆条目关着、或角色没有有效核心时照带。「按话题挑」模式不去重，仍可召回旧条目。
+  - 生成：旧核心（未被替换的）+ 新增长期记忆合并成一份完整新核心，旧版写 `metadata.supersededBy` 留作历史，记忆页标「旧版本」、变淡，不再注入（不论开关）。新核心 `timeSpan` 从最早旧核心算起。
+- 新增 `lib/memory-layering.ts`（纯逻辑）与 `check:memory-layering`。验证：`check:memory-layering`、`check:memory-prompts`、`check:memory-recall`、`check-custom-app-prompt-context`、根 `tsc --noEmit`。`check-chat-prompt-layout`（沙箱缺 `compactToolHistory`）与 `check-custom-app-prompt-bridge`（Chromium 超时）本次前即失败，与改动无关。未做手机端实测。
+
 ## 2026-09-17：挂念生成一天时，没睡好之后会恢复
 
 - 问题：生成一天的提示词只列前几天的心情（「醒得早」「发钝」之类），并要求「昨天开了头的事今天要有下文」，却没有恢复规则，角色没睡好一次后起床精力一路走低（沈烬言 9/14–9/17：70→62→62→58，起床 06:30→04:21）。

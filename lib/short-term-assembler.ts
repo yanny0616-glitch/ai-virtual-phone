@@ -943,6 +943,10 @@ export function prepareShortTermContext(
         excludeOfflineSessionId?: string;
         includeNativeToolHistory?: boolean;
         includeDirectChatEntries?: boolean;
+        /** 和该角色的私聊（线上 + 线下）一条都不进短期记忆 */
+        excludeDirectChat?: boolean;
+        /** 覆盖 shortTermTokenBudget（按模型校准后的值） */
+        tokenBudget?: number;
         timeAware?: boolean;
         promptTimestampOptions?: PromptTimestampOptions;
     },
@@ -966,12 +970,12 @@ export function prepareShortTermContext(
 
     // Activation context: full timeline for keyword matching (not truncated)
     const wbActivationContext = timeline.slice(-10).map(e => e.content).join("\n");
-    const budget = memConfig.shortTermTokenBudget;
+    const budget = options?.tokenBudget ?? memConfig.shortTermTokenBudget;
     const currentTag = getFeatureTag(appId);
     const history = options?.history ?? [];
     const characterName = loadCharacters().find(c => c.id === characterId)?.name ?? "角色";
     const wrapsCurrentHistory = appId === "chat" || appId === "group_chat" || appId === "story" || appId === "vn" || appId === "adventure";
-    const skipDirectChatEntries = appId === "chat" && !options?.includeDirectChatEntries;
+    const skipDirectChatEntries = (appId === "chat" && !options?.includeDirectChatEntries) || options?.excludeDirectChat === true;
 
     // ── Collect non-history entries per block ──
     const raw: { tag: string; order: number; entries: NativeTimelineEntry[] }[] = [];
@@ -1075,7 +1079,7 @@ export function prepareShortTermContext(
         raw.push({ tag: "recent_group_chat", order: FEATURE_ORDER.group_chat, entries: offlineGroupChatEntries });
     }
 
-    const offlineDirectChatEntries = timeline.filter(e => isChatOfflineEntry(e) && !e.groupSessionId);
+    const offlineDirectChatEntries = options?.excludeDirectChat ? [] : timeline.filter(e => isChatOfflineEntry(e) && !e.groupSessionId);
     if (offlineDirectChatEntries.length > 0) {
         raw.push({ tag: "recent_chat", order: FEATURE_ORDER.chat, entries: offlineDirectChatEntries });
     }

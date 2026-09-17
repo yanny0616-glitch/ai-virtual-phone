@@ -2554,6 +2554,8 @@ export async function freezeCustomAppTemplate(
     extraWorldBookIds: activeCustomAppWorldBookIds(app, record),
     worldBookActivationContext: worldActivationContext || undefined,
     activateAllWorldBooks,
+    // 挂念后端判断时自带线上 / 线下回看轮数的聊天（带消息 ID），模板里再放一份私聊只是重复
+    excludeDirectChatFromShortTerm: app.manifest.id === "gua.nian" && key === "judge" && loadMemoryConfig().guanianJudgeSlimEnabled !== false,
   });
   return {
     id: triggerKey,

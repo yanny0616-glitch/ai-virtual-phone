@@ -35,6 +35,12 @@ export type MemoryConfig = {
     longTermTokenBudget: number;            // token limit for injected long-term memories
     longTermRecallMode: "all" | "relevant"; // all：按预算从新到旧塞满（原来的做法）；relevant：按话题挑、标日期
     longTermRecallTopK: number;
+    /** 2.0：短期 / 长期 / 核心预算按当前模型校准后的 token 数判断 */
+    calibratedBudgetEnabled: boolean;
+    /** 2.2：核心记忆合成过的长期记忆不再注入；核心改为旧核心 + 新增长期合并成一份，旧版留作历史 */
+    coreDedupEnabled: boolean;
+    /** 2.3：挂念判断模板不带和该角色的私聊短期记忆，后端判断时自带带消息 ID 的最近聊天 */
+    guanianJudgeSlimEnabled: boolean;
     summarizationPrompt: string;            // user-editable prompt template for memory summarization
     coreMemoryPrompt: string;               // user-editable prompt template for core-memory extraction
     vnSummaryPrompt: string;                // user-editable prompt for VN chapter summarization
@@ -216,6 +222,9 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     longTermTokenBudget: 100000,
     longTermRecallMode: "all",
     longTermRecallTopK: 8,
+    calibratedBudgetEnabled: false,
+    coreDedupEnabled: false,
+    guanianJudgeSlimEnabled: true,
     summarizationPrompt: DEFAULT_SUMMARIZATION_PROMPT,
     coreMemoryPrompt: DEFAULT_CORE_MEMORY_PROMPT,
     vnSummaryPrompt: "",
