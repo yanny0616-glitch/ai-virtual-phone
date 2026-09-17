@@ -7,6 +7,16 @@
 `git diff upstream/main...main` 共 139 个提交、130 个文件（2026-09-03 核对）。
 
 
+## 2026-09-17 线下「重试以下」中断不再丢那一轮
+
+- 起因：线下重新生成时退出聊天，回来被重试的那一楼不见了。
+- 原因是先删后生成：点「重试以下」的当下就 `saveChatOfflineTurns(session.id, baseTurns)` 把那一轮连同之后的记录从存储抹掉，新内容要等生成成功才 `appendChatOfflineTurn` 写回。中途退出、断网或 iOS 切后台掐断请求，catch 分支只把用户输入还回输入框，从不恢复被删的轮次，那一楼就永久没了。
+- 改成先生成后落盘：存储保持原样，成功时用新增的 `createChatOfflineTurn`（`lib/chat-offline-storage.ts`，只构造不落盘）拼出「基底 + 新一轮」整份一次 `saveChatOfflineTurns`，而不是按当前存储追加。
+- 失败、中断、按停止都 `setOfflineTurns(loadChatOfflineTurns(...))` 从存储读回界面；`clearOfflineGeneration` 同样补了这一句。
+- 新增 `isOfflineGenerationRunSuperseded`：已被更晚一次重试接管时跳过回滚，避免覆盖新一轮的显示。注意它与 `isOfflineGenerationRunActive` 不同，用户按停止后登记被整条删除，那不算接管，仍然要回滚。
+- 线上的 `handleRetry` 还是先 `deleteChatMessagesFrom` 再生成，同一类问题，这次没动。
+- 验证：`tsc --noEmit` 干净；`eslint` 对两个改动文件的结果与改动前逐条一致（68 项，全部既有）；`check:push` / `check:apps-dist` / `check:sdk` 均通过。真机中断场景未复现验证。
+
 ## 2026-09-12 陪眠 0.3.0：浅色重做、组合收纳、音质可选
 
 - 白天 / 灰雾两套浅色不再是换底色：米纸 / 冷灰纸底 + 白色毛玻璃卡片 + 实心强调按钮，灰雾的蓝换成鼠尾草绿；通知条加了壳（深底浅字、描边、投影）。

@@ -45,7 +45,7 @@ import { ConfirmDialog } from "@/components/ui/modal";
 import { deleteWeixinCloudMessagesFromCloud, emitWeixinSyncToast, syncAllWeixinBotRuntimesToCloud } from "@/lib/weixin-cloud-sync";
 import { loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
 import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseGroupChatResponse, buildEditableGroupRoundText } from "@/lib/group-chat-engine";
-import { appendChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
+import { appendChatOfflineTurn, createChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
 import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating, isBackgroundMessagePending } from "@/lib/follow-up-service";
 import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismiss-auto-send";
@@ -438,6 +438,17 @@ function finishOfflineGenerationRun(sessionId: string, runId: string): boolean {
     if (!run || run.runId !== runId) return false;
     activeOfflineGenerationRuns.delete(sessionId);
     return true;
+}
+
+/**
+ * 本次线下运行是否已被更晚的一次运行接管。
+ * 接管时界面归那一次负责，失败/中断回滚必须跳过，否则会把新一轮的显示覆盖掉。
+ * 注意与 isOfflineGenerationRunActive 的区别：用户按「停止」后登记会被整条删除，
+ * 那不算接管，仍然需要回滚。
+ */
+function isOfflineGenerationRunSuperseded(sessionId: string, runId: string): boolean {
+    const run = activeOfflineGenerationRuns.get(sessionId);
+    return Boolean(run && run.runId !== runId);
 }
 
 function cancelOfflineGenerationRun(sessionId: string): boolean {
@@ -2765,6 +2776,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const clearOfflineGeneration = () => {
         const cancelled = cancelOfflineGenerationRun(session.id);
         if (!cancelled && !isOfflineGenerating) return;
+        // 重试期间界面按基底轮次显示，存储里被重试的那一轮还在。停止后按存储读回来，
+        // 这一楼就不会停留在「已消失」的样子。普通发送没有待恢复的轮次，读回是空操作。
+        setOfflineTurns(loadChatOfflineTurns(session.id));
         const pendingText = offlineGenerationInputRef.current || pendingOfflineUserText;
         offlineTextInputRef.current?.restoreIfEmpty(pendingText);
         setPendingOfflineUserText("");
@@ -4458,7 +4472,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setShowEmojiPanel(false);
         setShowStickerPanel(false);
         setRichModal(null);
-        saveChatOfflineTurns(session.id, baseTurns);
+        // 存储保持原样直到新的一轮生成成功：中途退出、断网或停止都不会把被重试的
+        // 这一轮弄丢。界面先按基底轮次显示，回滚时再从存储读回来。
         setOfflineTurns(baseTurns);
         setPendingOfflineUserText(retryInput);
         offlineGenerationInputRef.current = retryInput;
@@ -4500,7 +4515,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const assistantContent = result.content.trim() || result.rawText.trim();
             if (!assistantContent) throw new Error("AI 没有返回线下正文");
             if (!result.summary.trim()) showChatToast(`未提取到 <${result.summaryTag}> 摘要`);
-            const saved = appendChatOfflineTurn({
+            const saved = createChatOfflineTurn({
                 sessionId: session.id,
                 userContent: retryInput,
                 assistantContent,
@@ -4511,9 +4526,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 thinkingText: result.thinking,
                 thinkingTag: result.thinkingTag,
             });
-            setOfflineTurns([...baseTurns, saved]);
+            // 被重试的那一轮到这里才删：基底 + 新一轮一次写入，替换掉旧的整份列表。
+            const nextTurns = [...baseTurns, saved];
+            saveChatOfflineTurns(session.id, nextTurns);
+            setOfflineTurns(nextTurns);
         } catch (error: any) {
-            if (!isCurrentOfflineRun() || isAbortLikeError(error)) return;
+            // 已被更晚的一次重试接管：界面归那一次管，这里什么都不要动。
+            if (isOfflineGenerationRunSuperseded(session.id, offlineRunId)) return;
+            // 失败、中断、用户停止：存储里那一轮还在，把界面读回来。
+            setOfflineTurns(loadChatOfflineTurns(session.id));
+            if (isAbortLikeError(error)) return;
             offlineTextInputRef.current?.setText(retryInput);
             showChatToast(`线下重试失败: ${error?.message || String(error)}`, 3000);
         } finally {
