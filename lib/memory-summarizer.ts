@@ -112,6 +112,7 @@ async function summarizeUnlocked(characterId: string, characterName: string, opt
         .replace(/\{\{earliest\}\}/gi, () => earliest)
         .replace(/\{\{latest\}\}/gi, () => latest)
         .replace(/\{\{events\}\}/gi, () => eventsText)
+        .replace(/\{\{count\}\}/gi, () => String(allEntries.length))
         + (/\{\{events\}\}/i.test(promptTemplate) ? "" : `\n事件记录：\n${eventsText}`);
 
     // Call LLM for summarization — compatible with all providers

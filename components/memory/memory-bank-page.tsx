@@ -5,6 +5,7 @@ import { Trash2, Zap, Clock, Users, Archive, AlertCircle, Search, Brain, FileTex
 import { ConfirmDialog } from "@/components/ui/modal";
 import { MemoryTimeline } from "./memory-timeline";
 import { ShiguangPanel } from "./shiguang-panel";
+import { MemoryUsageHint } from "./memory-usage-hint";
 import { Toggle } from "@/components/ui/form";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -403,7 +404,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
 
             const result = await runCoreMemoryPipeline(selectedCharId, selectedChar?.name ?? "");
             if (result.success) {
-                showNotice(result.rebuiltCount ? `核心记忆已重建（${result.rebuiltCount}条）` : "核心记忆已重建");
+                showNotice(result.rebuiltCount === 0 ? "这段长期记忆里没有需要写进核心的内容" : result.rebuiltCount ? `核心记忆已重建（${result.rebuiltCount}条）` : "核心记忆已重建");
                 loadDetailData(selectedCharId);
                 loadCharacterList();
             } else {
@@ -682,6 +683,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                 {/* Content */}
                 <div className="memory-detail-scroll flex-1 overflow-y-auto flex flex-col gap-2 min-h-0">
                     <MemoryDetailBoundary>
+                    {!loading && <MemoryUsageHint key={selectedChar.id} characterId={selectedChar.id} />}
                     {loading ? (
                         <p className="text-center ts-14 mt-10 text-secondary">
                             加载中...
@@ -1138,7 +1140,8 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         <div className="menu-label-group">
                             <span className="menu-label">长期记忆总结提示词</span>
                             <span className="menu-desc">
-                                变量：{"{{char}}"} 角色、{"{{earliest}}"} 起始时间、{"{{latest}}"} 结束时间、{"{{events}}"} 记录集合
+                                变量：{"{{char}}"} 角色、{"{{earliest}}"} 起始时间、{"{{latest}}"} 结束时间、{"{{events}}"} 记录集合、{"{{count}}"} 本批条数
+                                {!isDefault && "。你改过这份提示词，不会自动换成新版默认；点「恢复默认」会换成新版并覆盖你改的内容"}
                             </span>
                         </div>
                         {!isDefault && (
@@ -1174,6 +1177,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                             <span className="menu-label">核心记忆总结提示词</span>
                             <span className="menu-desc">
                                 变量：{"{{char}}"} 角色、{"{{earliest}}"} 起始时间、{"{{latest}}"} 结束时间、{"{{events}}"} 长期记忆集合
+                                {!isCoreDefault && "。你改过这份提示词，不会自动换成新版默认；点「恢复默认」会换成新版并覆盖你改的内容"}
                             </span>
                         </div>
                         {!isCoreDefault && (

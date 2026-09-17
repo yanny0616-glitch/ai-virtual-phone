@@ -60,10 +60,61 @@ export type MemorySearchResult = {
 };
 
 /**
- * Default summarization prompt template.
- * Placeholders: {{char}}, {{earliest}}, {{latest}}, {{events}}
+ * 默认长期总结提示词。占位：{{char}} {{earliest}} {{latest}} {{events}} {{count}}（本批条数）
+ * 规则参考 Memory Constellations「航海日志」、糯叽机总结规则、ai-memory-gateway，见 docs/memory-refactor-plan.md。
  */
-export const DEFAULT_SUMMARIZATION_PROMPT = `你是一个记忆整理助手。根据以下事件记录，创建一段简洁的事实性总结。
+export const DEFAULT_SUMMARIZATION_PROMPT = `你是{{char}}的记忆整理助手。下面是 {{earliest}} 至 {{latest}} 之间还没整理过的 {{count}} 条记录（聊天、朋友圈、日记等），请整理成一段记忆日志，供{{char}}以后回忆。
+
+记录：
+{{events}}
+
+怎么写：
+1. 按时间顺序，按话题或情绪转折分段，每段一行，开头写绝对时间，格式「M月D日 HH:MM～HH:MM · 主题：具体内容」。不要写「今天」「昨天」「刚才」；记录里说的「明天」「周五」「下个月」要换算成具体日期。
+2. 写具体发生了什么：做了什么、说了什么、结果怎样。关键原话、称呼、昵称和口头禅用引号保留，并写明是谁说的；人名、地点、物品、作品名照原文写。
+3. 约定、承诺、计划要写清：谁答应了谁、什么事、什么时间、什么条件、目前有没有做到。时间和条件不能省略。
+4. 普通闲聊、小情绪、随口提到的喜好和近况也要记，一两句写清即可，不要因为普通就省略。
+5. 前后说法不一致、被纠正或改变的事，写最新的说法，并注明「改为……」。
+6. 只写记录里确实发生的事，不推测、不解读意义；玩笑、猜测和夸张不能写成真实情况。
+7. 不要用「讨论了」「交流了」「分享了」「表达了」这类空泛的词，直接写内容。
+8. 用第三人称，人物用记录里的名字。长短跟着内容走：内容少就写几行，内容多就多写；不凑字数，也不为压缩字数丢掉时间、原话和约定。
+9. 只写这批记录里的内容。只输出日志正文，不要标题、解释、JSON 或代码块。
+
+记忆日志：`;
+
+/**
+ * 默认核心记忆提示词。占位：{{char}} {{earliest}} {{latest}} {{events}}
+ * 以 docs/shiguang-core-memory-prompt.txt 为底，把「保留」和「略去」分开写。
+ */
+export const DEFAULT_CORE_MEMORY_PROMPT = `你是{{char}}的核心记忆整理助手。下面是 {{earliest}} 至 {{latest}} 的长期记忆，请提炼出值得长久记住、会影响以后相处的重要事实。
+
+长期记忆：
+{{events}}
+
+要保留：
+- 关系身份及其变化，如确认关系、分开、复合、订婚、结婚
+- 共同经历里的重要转折和里程碑，如第一次见面、同居、见家长、一起养宠物
+- 重要日期（纪念日、生日、约定的日子）和关键人物
+- 仍然有效的承诺和约定，写明内容、时间和条件
+- 明确说过的边界、禁忌和相处需求，保留原因和具体说法
+- 长期稳定的偏好、习惯和个人情况，如职业、住处、家人
+
+要略去（这些已经留在长期记忆里，不会丢）：
+- 普通日常闲聊、一时的情绪波动、暂时的小矛盾
+- 重复的表白和寒暄
+- 没有依据的推测和不确定的内容
+
+写法：
+1. 区分已经发生的事、还没兑现的约定和一方的想法，不要把计划写成已发生。
+2. 同一件事合并写，有新进展以最新为准，保留理解变化需要的背景；不同的事不要因为相似合在一起。
+3. 保留日期、人名和关键说法，不要概括成「彼此关心」这类空话。
+4. 用第三人称、简洁的中文分句。信息少就短，信息多可以写到 400 字左右，不凑字数。
+5. 这段长期记忆里没有值得长久记住的内容时，只输出「无」。
+6. 只输出核心记忆正文，不要标题、解释或 JSON。
+
+核心记忆：`;
+
+/** 2026-09-17 之前的默认长期总结提示词。设置页保存过会整份写进配置，读配置时和它全文一致的换成新默认。 */
+export const LEGACY_SUMMARIZATION_PROMPT = `你是一个记忆整理助手。根据以下事件记录，创建一段简洁的事实性总结。
 
 角色：{{char}}
 时间跨度：{{earliest}} 至 {{latest}}
@@ -81,11 +132,8 @@ export const DEFAULT_SUMMARIZATION_PROMPT = `你是一个记忆整理助手。�
 
 总结：`;
 
-/**
- * Default core-memory summarization prompt template.
- * Placeholders: {{char}}, {{earliest}}, {{latest}}, {{events}}
- */
-export const DEFAULT_CORE_MEMORY_PROMPT = `你是一个核心记忆整理助手。请根据以下长期记忆记录，为{{char}}整理一段“核心记忆”总结。
+/** 2026-09-17 之前的默认核心记忆提示词，迁移规则同上。 */
+export const LEGACY_CORE_MEMORY_PROMPT = `你是一个核心记忆整理助手。请根据以下长期记忆记录，为{{char}}整理一段“核心记忆”总结。
 
 角色：{{char}}
 时间跨度：{{earliest}} 至 {{latest}}
@@ -110,6 +158,16 @@ export const DEFAULT_CORE_MEMORY_PROMPT = `你是一个核心记忆整理助手�
 - 不要使用 JSON、列表符号、标题或格式标记
 
 核心记忆总结：`;
+
+/** 设置页保存过的旧默认提示词换成新默认；用户改过的不动。 */
+export function migrateMemoryPrompts(config: MemoryConfig): MemoryConfig {
+    const same = (value: string | undefined, legacy: string) => typeof value === "string" && value.trim() === legacy.trim();
+    return {
+        ...config,
+        ...(same(config.summarizationPrompt, LEGACY_SUMMARIZATION_PROMPT) ? { summarizationPrompt: DEFAULT_SUMMARIZATION_PROMPT } : {}),
+        ...(same(config.coreMemoryPrompt, LEGACY_CORE_MEMORY_PROMPT) ? { coreMemoryPrompt: DEFAULT_CORE_MEMORY_PROMPT } : {}),
+    };
+}
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     shiguangEnabled: true,

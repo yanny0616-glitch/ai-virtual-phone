@@ -403,6 +403,12 @@ function isPromptEnabled(prompt: Prompt, promptOrder?: PromptOrderEntry[]): bool
 }
 
 
+/** 预设里这个标记条目存在且开着（不看标签过滤）。给记忆占用统计判断某层有没有真的进提示词。 */
+export function presetMarkerEnabled(preset: PresetConfig | null | undefined, identifier: string): boolean {
+    const prompt = preset?.prompts.find(p => p.identifier === identifier);
+    return Boolean(prompt && isPromptEnabled(prompt, preset!.prompt_order));
+}
+
 // ── Helper: sanitize identifier into valid XML tag name ──
 function toXmlTag(identifier: string): string {
     // Replace non-alphanumeric (except _ and -) with underscore, ensure starts with letter

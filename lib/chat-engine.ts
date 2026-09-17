@@ -37,7 +37,9 @@ import {
     loadRegexes,
     resolveUserIdentity,
 } from "./settings-storage";
-import { assemblePromptPayload, applyOutputRegex, type LLMMessage, type LLMContentPart } from "./llm-prompt-assembler";
+import { assemblePromptPayload, applyOutputRegex, presetMarkerEnabled, type LLMMessage, type LLMContentPart } from "./llm-prompt-assembler";
+import { measureMemoryLayer, recordMemoryPromptUsage } from "./memory-prompt-usage";
+import { loadInstalledCustomApps } from "./custom-app-storage";
 import { MacroEngine, postProcessTrim } from "./macro-engine";
 import { getStatusRegionConfig, resolveStatusRegionSection, resolveStatusRegionExampleLine, resolveStatusRegionComposition, resolveStatusRegionFullExample } from "./chat-status-region";
 import {
@@ -1863,6 +1865,52 @@ export function nativeChatToolCallToTextCall(call: LlmToolCall, bundle: NativeCh
  * Shared prompt builder — used by both generateChatCompletion and previewPromptPayload.
  * Single source of truth for chat prompt assembly.
  */
+/** 记忆页「上次请求记忆占用」：只数真的会进提示词的层（预设里对应条目关着就算 0）。 */
+function recordChatMemoryUsage(input: {
+    characterId: string;
+    model: string;
+    appId: string;
+    preset: PresetConfig | null;
+    history: ChatMessage[];
+    unifiedRecentItems: ReturnType<typeof prepareShortTermContext>["unifiedRecentItems"];
+    recentBlocks: ReturnType<typeof prepareShortTermContext>["recentBlocks"];
+    longTerm: { content: string }[];
+    core: { content: string }[];
+    customAppContext: string;
+}): void {
+    const { preset } = input;
+    const shortOn = !preset || presetMarkerEnabled(preset, "shortTermMemory") || presetMarkerEnabled(preset, "chatHistory");
+    const historyTexts: string[] = [];
+    const eventTexts: string[] = [];
+    if (shortOn) {
+        if (input.unifiedRecentItems.length > 0) {
+            for (const item of input.unifiedRecentItems) {
+                if (item.kind === "event") eventTexts.push(item.text);
+                else historyTexts.push(stripStateAndInnerForPrompt(input.history[item.historyIndex]?.content || ""));
+            }
+        } else {
+            historyTexts.push(...input.history.map(message => stripStateAndInnerForPrompt(message.content || "")));
+            eventTexts.push(...input.recentBlocks.map(block => block.content));
+        }
+    }
+    // 拾光的 manifest id 见 shiguang-bundled-install.ts；那个模块会拉起安装注册链，这里不引
+    const shiguangName = loadInstalledCustomApps().find(app => app.manifest?.id === "float.shiguang")?.name || "拾光";
+    const escaped = shiguangName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const shiguangText = new RegExp(`【${escaped}(?: · [^】]*)?】\\n([\\s\\S]*?)(?=\\n\\n【|\\n</app_context>|$)`).exec(input.customAppContext)?.[1] ?? "";
+    recordMemoryPromptUsage(input.characterId, {
+        at: new Date().toISOString(),
+        model: input.model,
+        appId: input.appId,
+        layers: [
+            measureMemoryLayer("short_history", historyTexts),
+            measureMemoryLayer("short_events", eventTexts),
+            measureMemoryLayer("long_term", presetMarkerEnabled(preset, "memoryLongTerm") ? input.longTerm.map(entry => entry.content) : []),
+            measureMemoryLayer("core", presetMarkerEnabled(preset, "memoryCore") ? input.core.map(entry => entry.content) : []),
+            measureMemoryLayer("shiguang", shiguangText ? [shiguangText] : []),
+        ],
+    });
+}
+
 export async function buildChatPromptMessages(
     session: ChatSession,
     history: ChatMessage[],
@@ -2093,6 +2141,13 @@ export async function buildChatPromptMessages(
         llmMessages.splice(firstConversationIndex < 0 ? llmMessages.length : firstConversationIndex, 0, {
             role: "system", _debugMeta: { marker: "沉默输出规则" }, content:
                 `本轮允许自主选择沉默。决定不回复时，第一行单独输出 ${CHAT_SILENCE_TOKEN}，后面换行，状态数值、[状态栏]、[内心]、签名及必要的状态更新仍按已有规则正常输出或执行。沉默只表示不向用户发送聊天消息，不停止内部更新；不输出聊天正文、语音条或表情，不用旁白或工具消息代替回复。本轮内心与状态会保存，但不显示新的爱心或聊天卡片。不要为沉默额外编造签名或状态。决定回复时按正常格式输出，不带此标记。此规则仅覆盖必须发送聊天正文的要求，其他已配置规则保持有效。`,
+        });
+    }
+    if (!promptProfile && !session.isGroup && !effectiveAppTags?.includes("timed_wake")) {
+        recordChatMemoryUsage({
+            characterId: character.id, model: config.defaultModel, appId: resolvedAppId, preset,
+            history: promptHistory, unifiedRecentItems, recentBlocks,
+            longTerm: memResults ?? [], core: coreResults ?? [], customAppContext,
         });
     }
     return { llmMessages, character, config, preset, regexes, userIdentity, toolsEnabled, allowSilence };

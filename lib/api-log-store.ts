@@ -3,6 +3,7 @@
 
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { recordApiUsage } from "./api-usage-stats";
+import { recordTokenCalibration } from "./token-calibration";
 
 export type DebugInfo = {
     id: string;
@@ -208,6 +209,10 @@ export function pushApiLog(entry: Omit<DebugInfo, "id" | "timestamp">): void {
         characterId: entry.characterId,
         characterName: entry.characterName,
     });
+    // 含图片的消息日志里只剩占位字，估算对不上实际，不拿来校准
+    if (!entry.failed && entry.messages.every(m => typeof m.content === "string" && !m.content.startsWith("[vision:"))) {
+        recordTokenCalibration(entry.model, entry.messages.map(m => m.content), entry.usage?.prompt_tokens);
+    }
     try {
         const logs = _loadLogs(key);
         logs.push({

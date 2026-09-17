@@ -2,7 +2,7 @@
 // IndexedDB persistence for long-term memory entries + short-term events + localStorage config.
 
 import type { MemoryEntry, MemoryConfig } from "./memory-types";
-import { DEFAULT_MEMORY_CONFIG } from "./memory-types";
+import { DEFAULT_MEMORY_CONFIG, migrateMemoryPrompts } from "./memory-types";
 import { kvGet, kvSet, kvRemove, registerKvMigration, registerDynamicPrefix } from "./kv-db";
 import { openIndexedDbAtLeast } from "./idb-open";
 
@@ -222,7 +222,7 @@ export function loadMemoryConfig(): MemoryConfig {
     try {
         const raw = kvGet(CONFIG_KEY);
         if (!raw) return { ...DEFAULT_MEMORY_CONFIG };
-        return { ...DEFAULT_MEMORY_CONFIG, ...JSON.parse(raw) };
+        return migrateMemoryPrompts({ ...DEFAULT_MEMORY_CONFIG, ...JSON.parse(raw) });
     } catch {
         return { ...DEFAULT_MEMORY_CONFIG };
     }
