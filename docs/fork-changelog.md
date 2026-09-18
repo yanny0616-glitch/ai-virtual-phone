@@ -61,6 +61,16 @@
 - 数据：沈烬言 9/17 起床精力 58 → 68（改前备份了数据库）。
 - 验证：companion-server 113 项测试（新增一项）、`tsc`、`check:apps-dist`。
 
+## 2026-09-17：重试改成先生成后删，时间线不再空一截
+
+- 上一条的版本机制解决了「找不回来」，没解决「看起来没了」：`handleRetry` 和 `handleOfflineRetryFrom` 都是点下去当下就删，旧回复只存进版本库，时间线立刻空一截。线下失败时 catch 里会放回去，但**页面被 iOS 回收时 catch 根本不会执行**，线上则从来没有放回的逻辑。实报：线下重新生成时退出，回来那一楼不见了（最新版仍复现）。
+- 改成先生成后删。线下：不再一进来就 `saveChatOfflineTurns(session.id, baseTurns)`，等新一轮拿到手才把「基底 + 新一轮」整份一次写入，新增 `createChatOfflineTurn`（`lib/chat-offline-storage.ts`，只构造不落盘）配合。
+- 线上：新增可选回调 `onSaved`，群聊与单聊两个分支各自比对 `loadChatMessages(session.id).length` 的前后差，条数真的变多才触发，所以沉默、空正文、群聊全员不发言都不会删。`handleRetry` 先把 `removedTail` 的 id 记成 `doomedIds`，在 `onSaved` 里用 `deleteChatMessagesByIds` 按 id 删——用 id 而不是「从这条往后删」，新生成的内容和重试期间到达的推送都不会被卷走。
+- 没产出时两条路径都把版本记录 `rollback()` 回重试前（`recordReplyVersionBeforeRetry` 因此改成返回 `{ rollback }`，与线下对齐），再从存储把界面读回来，免得选择器里多一版空的。
+- 接管保护：线下新增 `isOfflineGenerationRunSuperseded`（按「停止」时登记被整条删除，那不算接管，仍要回滚）；线上在回滚前检查 `activeGenerationRuns` 是否已有别的运行。
+- 版本机制本身没动，换版本照常。
+- 验证：`tsc --noEmit` 干净；`eslint` 三个改动文件 70 项，与改动前逐条一致；`check:push` / `check:apps-dist` / `check:sdk` 通过。`check:chat-silence` / `check:cloud-messages` / `check:reply-delivery` / `check:regex-history-role` 失败，但在干净 main 上就全部失败，与本次无关。真机中断场景未复现验证。
+
 ## 2026-09-17：线下重试保留版本、可附重写说明
 
 - 线下「重试以下」以前直接删掉这一轮及之后的轮次，旧回复找不回来，也不能附说明。现在和线上一致：先弹「重新生成」框（可选问题标签、说明、附上一版对照），被重试掉的那一截存成一版，长按回复出现「换一版 N/M」，最多 8 版。
