@@ -2,7 +2,7 @@ import nodeCrypto from "crypto";
 
 import { NextResponse } from "next/server";
 
-import { uploadAppIconToStorage } from "@/lib/server/app-market-assets";
+import { isRasterIconDataUrl, uploadAppIconToStorage } from "@/lib/server/app-market-assets";
 import { getCurrentAccount } from "@/lib/server/account-auth";
 import { getModeratorContext } from "@/lib/server/admin-auth";
 import { encodeSupabaseFilter, formatSupabaseRestError, getSupabaseServerConfig, supabaseRestFetch } from "@/lib/server/supabase-rest";
@@ -66,7 +66,8 @@ const MAX_ICON_DATA_URL_LENGTH = 300000;
 // 丢弃回退默认图标;达到上限的存量数据就是历史版本 slice 截断留下的坏图,同样丢弃。
 function cleanIconDataUrl(value: unknown): string {
   const icon = String(value ?? "").trim();
-  if (!icon.startsWith("data:image/")) return "";
+  // 只收位图（png/jpeg/webp/gif/avif）：SVG 可以带脚本，见 isRasterIconDataUrl。
+  if (!isRasterIconDataUrl(icon)) return "";
   if (icon.length >= MAX_ICON_DATA_URL_LENGTH) return "";
   return icon;
 }

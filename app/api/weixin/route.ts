@@ -410,6 +410,15 @@ async function handleSendFile(payload: SendFileRequest) {
     return NextResponse.json({ ok: true });
 }
 
+const ILINK_PATH_RE = /^\/ilink\/[A-Za-z0-9_\-/]+(?:\?[A-Za-z0-9_=&%.\-]*)?$/;
+
+function buildIlinkUrl(path: unknown): string | null {
+    if (typeof path !== "string" || !ILINK_PATH_RE.test(path) || path.includes("//") || path.includes("..")) return null;
+    const base = new URL(ILINK_BASE);
+    const url = new URL(path, base);
+    return url.origin === base.origin ? url.toString() : null;
+}
+
 export async function POST(request: Request) {
     let payload: WeixinRequest;
     try {
@@ -464,9 +473,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "missing_path" }, { status: 400 });
     }
 
-    const headers = makeIlinkHeaders(botToken);
+    // path 来自客户端：只允许 iLink 自己的 /ilink/ 路径，避免拼出 "@内网地址"
+    // 或 ".其他域名" 之类的 URL，把这个接口变成任意出网代理。
+    const url = buildIlinkUrl(path);
+    if (!url) {
+        return NextResponse.json({ error: "invalid_path" }, { status: 400 });
+    }
 
-    const url = `${ILINK_BASE}${path}`;
+    const headers = makeIlinkHeaders(botToken);
     const fetchMethod = method === "GET" ? "GET" : "POST";
     const hasBody = body !== undefined && body !== null
         && !(typeof body === "object" && Object.keys(body as object).length === 0);

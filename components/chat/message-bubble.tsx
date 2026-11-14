@@ -19,6 +19,7 @@ import { splitBilingualText } from "@/lib/bilingual-text";
 import { isInvisibleOrWhitespaceOnly } from "@/lib/rich-message-parser";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
+import rehypeStripUnsafe from "@/lib/rehype-strip-unsafe";
 import remarkGfm from "remark-gfm";
 // CommonMark 的 flanking 规则会让 **「加粗」** 这类紧贴全角标点的写法解析失败
 // （** 后跟标点时要求前面是空格/标点，中文里前面通常是汉字），中文消息大量中招。
@@ -230,6 +231,14 @@ export function isStandaloneHtmlPreviewContent(content: string): boolean {
     return segments.length === 1 && segments[0].type === "html";
 }
 
+// rehype-raw 会把模型输出里的原始 HTML 变成真元素，必须紧跟一次清洗。
+const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeStripUnsafe];
+
+// AI/正则/角色卡产出的 HTML 不可信：iframe 必须沙箱化且不给 allow-same-origin，
+// 否则里面的脚本与主站同源，可直接读 IndexedDB/localStorage 里的 API Key 和聊天记录。
+// 与父页面的通信只走 postMessage（已校验 e.source），不受影响。
+const UNTRUSTED_HTML_SANDBOX = "allow-scripts allow-forms allow-modals allow-popups";
+
 /** Full-screen iframe modal for interactive HTML content */
 function HtmlFullscreenModal({ html, onClose, onActionSelect }: { html: string; onClose: () => void; onActionSelect?: (text: string) => void }) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -282,6 +291,7 @@ function HtmlFullscreenModal({ html, onClose, onActionSelect }: { html: string; 
             <iframe
                 ref={iframeRef}
                 srcDoc={srcDoc}
+                sandbox={UNTRUSTED_HTML_SANDBOX}
                 onClick={(e) => e.stopPropagation()}
             />
         </div>,
@@ -360,6 +370,7 @@ function ChatHtmlInlineFrame({
                 ref={iframeRef}
                 className="chat-html-inline-frame"
                 srcDoc={srcDoc}
+                sandbox={UNTRUSTED_HTML_SANDBOX}
                 title="AI 生成互动内容"
                 style={{ height }}
             />
@@ -545,7 +556,7 @@ function MarkdownTextContent({
             <div className="chat-markdown hide-scrollbar break-words" ref={containerRef}>
                 {styles && <style dangerouslySetInnerHTML={{ __html: styles }} />}
                 {mdCleaned && (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly]} rehypePlugins={[rehypeRaw]} components={MARKDOWN_COMPONENTS}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly]} rehypePlugins={MARKDOWN_REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
                         {mdCleaned}
                     </ReactMarkdown>
                 )}
@@ -568,7 +579,7 @@ function MarkdownTextContent({
                     <div key={`md-${i}`}>
                         {styles && <style dangerouslySetInnerHTML={{ __html: styles }} />}
                         {mdContent && (
-                            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly]} rehypePlugins={[rehypeRaw]} components={MARKDOWN_COMPONENTS}>
+                            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly]} rehypePlugins={MARKDOWN_REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
                                 {mdContent}
                             </ReactMarkdown>
                         )}

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
+import { ProxyAgent, type Dispatcher } from "undici";
+
+import { safeOutboundFetch, UnsafeOutboundUrlError } from "@/lib/server/safe-outbound-fetch";
 
 type ModelListRequest = {
   apiKey?: string;
@@ -54,11 +56,9 @@ function extractModels(data: unknown): string[] {
   return Array.from(new Set(results));
 }
 
+// baseUrl 由用户填写：必须拦住本机/内网/元数据地址，并逐跳校验重定向。
 async function externalFetch(url: string, init: RequestInit): Promise<Response> {
-  const dispatcher = getProxyDispatcher();
-  return dispatcher
-    ? undiciFetch(url, { ...(init as Parameters<typeof undiciFetch>[1]), dispatcher }) as unknown as Response
-    : fetch(url, init);
+  return safeOutboundFetch(url, init, getProxyDispatcher());
 }
 
 export async function POST(req: NextRequest) {
@@ -84,6 +84,9 @@ export async function POST(req: NextRequest) {
     const parsed = JSON.parse(text);
     return NextResponse.json({ models: extractModels(parsed) });
   } catch (err) {
+    if (err instanceof UnsafeOutboundUrlError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
   }
 }
