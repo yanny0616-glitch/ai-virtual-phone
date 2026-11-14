@@ -17,6 +17,16 @@ function iconExtension(mime: string): string {
   return "jpg";
 }
 
+// 图标只收位图。SVG 能带脚本，从站点域名下发时等于存储型 XSS。
+export const RASTER_ICON_MIME_RE = /^image\/(?:png|jpe?g|webp|gif|avif)$/i;
+
+export function isRasterIconDataUrl(value: string): boolean {
+  const comma = value.indexOf(",");
+  if (!value.startsWith("data:image/") || comma < 0) return false;
+  const mime = value.slice(5, comma).split(";")[0]?.trim().toLowerCase() || "";
+  return RASTER_ICON_MIME_RE.test(mime);
+}
+
 /** 解析 data:image/... 图标；非法或超限返回 null（上限与图标字段一致）。 */
 export function decodeIconDataUrl(value: string): { mime: string; bytes: Buffer } | null {
   if (!value.startsWith("data:image/")) return null;
@@ -25,7 +35,7 @@ export function decodeIconDataUrl(value: string): { mime: string; bytes: Buffer 
   const meta = value.slice(5, comma);
   const payload = value.slice(comma + 1);
   const mime = meta.split(";")[0]?.trim().toLowerCase() || "image/png";
-  if (!/^image\/[a-z0-9.+-]+$/i.test(mime)) return null;
+  if (!RASTER_ICON_MIME_RE.test(mime)) return null;
   try {
     const bytes = meta.toLowerCase().includes(";base64")
       ? Buffer.from(payload, "base64")

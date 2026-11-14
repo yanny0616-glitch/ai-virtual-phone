@@ -31,6 +31,10 @@ const nextConfig = {
     return [{
       source: "/custom-apps/:path*",
       headers: [{ key: "Cache-Control", value: "no-store" }],
+    }, {
+      // 剧情页 HTML 在沙箱 iframe（不同源）里引用 /fonts/，跨源加载字体需要 CORS 头
+      source: "/fonts/:path*",
+      headers: [{ key: "Access-Control-Allow-Origin", value: "*" }],
     }];
   },
   typescript: {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { uploadAppIconToStorage } from "@/lib/server/app-market-assets";
+import { RASTER_ICON_MIME_RE, uploadAppIconToStorage } from "@/lib/server/app-market-assets";
 import { getCurrentAccount } from "@/lib/server/account-auth";
 import { encodeSupabaseFilter, formatSupabaseRestError, getSupabaseServerConfig, supabaseRestFetch } from "@/lib/server/supabase-rest";
 
@@ -12,7 +12,8 @@ function decodeDataUrl(value: string): { mime: string; bytes: Buffer } | null {
   const comma = value.indexOf(","); if (comma < 0) return null;
   const meta = value.slice(5, comma); const payload = value.slice(comma + 1);
   const mime = meta.split(";")[0]?.trim().toLowerCase() || "image/png";
-  if (!/^image\/[a-z0-9.+-]+$/i.test(mime)) return null;
+  // 只下发位图：存量里如果有 SVG 图标，宁可回退默认图标也不从站点域名下发可执行内容。
+  if (!RASTER_ICON_MIME_RE.test(mime)) return null;
   try {
     const bytes = meta.toLowerCase().includes(";base64") ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload), "utf8");
     if (bytes.length === 0 || bytes.length > 2 * 1024 * 1024) return null;
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
     if (!decoded) return new Response(null, { status: 404 });
     return new Response(new Uint8Array(decoded.bytes), {
       status: 200,
-      headers: { ...cacheHeaders, "Content-Type": decoded.mime, "Content-Length": String(decoded.bytes.length), "X-Content-Type-Options": "nosniff" },
+      headers: { ...cacheHeaders, "Content-Type": decoded.mime, "Content-Length": String(decoded.bytes.length), "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox" },
     });
   } catch (err) {
     return NextResponse.json({ ok: false, error: formatSupabaseRestError(err) }, { status: 500 });

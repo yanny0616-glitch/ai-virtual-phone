@@ -129,3 +129,8 @@ $$;
 --     max_uses = excluded.max_uses,
 --     status = 'active',
 --     updated_at = now();
+
+-- 安全修复：security definer 函数默认对 anon 可调用，anon key 又是公开的，
+-- 不收权限的话任何人都能绕过站点限流，直接调 /rpc/app_register_account 试激活码。
+revoke all on function public.app_register_account(text, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.app_register_account(text, text, text, text, text) to service_role;

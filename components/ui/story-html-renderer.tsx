@@ -370,6 +370,8 @@ function HtmlPageSegment({ html, onOptionSelect, htmlPageMode, serifIframeFallba
         <iframe
             ref={iframeRef}
             srcDoc={srcDoc}
+            // 生成页是不可信 HTML：不给 allow-same-origin，避免脚本读取主站存储里的 API Key。
+            sandbox="allow-scripts allow-forms allow-modals allow-popups"
             title="HTML content"
             style={{
                 width: "100%",

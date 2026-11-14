@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { proxyFetch } from "@/lib/proxy-fetch";
+import { safeProxyFetch } from "@/lib/proxy-fetch";
 
 export const runtime = "nodejs";
 export const maxDuration = 15;
@@ -69,7 +69,7 @@ async function handleGetVoices(request: Request) {
 
     if (!apiKey) return NextResponse.json({ error: "missing_api_key" }, { status: 400 });
 
-    const response = await proxyFetch(`${baseUrl}/get_voice`, {
+    const response = await safeProxyFetch(`${baseUrl}/get_voice`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${apiKey}`,

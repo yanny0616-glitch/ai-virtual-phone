@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { proxyFetch } from "@/lib/proxy-fetch";
+import { safeProxyFetch } from "@/lib/proxy-fetch";
 
 export const runtime = "nodejs";
 export const maxDuration = 25;
@@ -88,7 +88,7 @@ async function handleClone(request: Request) {
     uploadForm.set("purpose", "voice_clone");
     uploadForm.set("file", audio, audio.name || "voice-sample.mp3");
 
-    const uploadResponse = await proxyFetch(`${baseUrl}/files/upload`, {
+    const uploadResponse = await safeProxyFetch(`${baseUrl}/files/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: uploadForm,
@@ -112,7 +112,7 @@ async function handleClone(request: Request) {
         return NextResponse.json({ error: "missing_file_id", message: uploadText.slice(0, 500) }, { status: 502 });
     }
 
-    const cloneResponse = await proxyFetch(`${baseUrl}/voice_clone`, {
+    const cloneResponse = await safeProxyFetch(`${baseUrl}/voice_clone`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${apiKey}`,
