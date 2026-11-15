@@ -173,7 +173,7 @@
   .arc-fork { font-size: 12px; line-height: 1.6; color: var(--tx2); margin: 4px 0; }
   .arc-fork b { color: var(--acc2); font-weight: 700; margin-right: 6px; font-variant-numeric: tabular-nums; }
   .arc-fork .say { margin-left: 6px; font-size: 10.5px; color: var(--tx3); }
-  .seg + .tgl-row { margin-top: 10px; }
+  .seg + .tgl-row, .seg + .frow { margin-top: 10px; }
   .seg button small { display: block; font-size: 10.5px; font-weight: 400; opacity: .7; margin-top: 1px; }
   .sd-ask { margin-top: 14px; }
   .sd-ask input {
@@ -289,6 +289,7 @@
   .grp-sub { font-weight: 400; font-size: 11px; color: var(--tx3); letter-spacing: 0; }
   .frow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px dashed var(--line); }
   .frow:first-of-type, .grp-t + .frow { border-top: none; }
+  .frow[hidden], .field-row[hidden] { display: none; }
   .frow .fl { font-size: 13px; color: var(--tx); min-width: 0; }
   .frow .fu { font-size: 11px; color: var(--tx3); margin-top: 2px; }
   .frow .stepper { gap: 8px; flex: none; }
@@ -350,6 +351,21 @@
   }
   .tgl.on { color: var(--acc2); border-color: rgba(245, 107, 156, .5); background: rgba(255, 107, 157, .08); font-weight: 600; }
   .tgl.on::before { content: "✓ "; }
+  /* 设置页的开关：一行一个，右边胶囊滑动开关（诊断页那些 .tgl 是操作按钮，不走这套） */
+  .sw-row { cursor: pointer; min-height: 42px; }
+  .sw-row .fl { flex: 1; }
+  .tgl.sw {
+    flex: none; position: relative; width: 46px; height: 28px; padding: 0; border: none; border-radius: 999px;
+    background: color-mix(in srgb, var(--tx3) 55%, transparent); transition: background .2s ease;
+  }
+  .tgl.sw::before {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgba(70, 40, 50, .28); transition: transform .2s ease;
+  }
+  .tgl.sw.on { background: linear-gradient(135deg, var(--acc), var(--acc2)); border: none; }
+  .tgl.sw.on::before { content: ""; transform: translateX(18px); }
+  .tgl.sw:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { .tgl.sw, .tgl.sw::before { transition: none; } }
   .grp-hint { font-size: 11.5px; color: var(--tx2); line-height: 1.6; margin-top: 7px; padding: 8px 10px; border-radius: var(--r-md); background: var(--bg1); }
   .grp-hint[hidden] { display: none; }
   .hero .kvs.link { cursor: pointer; }
@@ -6298,7 +6314,9 @@ return Object.freeze(exports);
   }
   /* ================= 设置弹层：schema 驱动 =================
      加一项配置 = 往 SET_SECTIONS 某一节的 groups 里加一条 + 往 SET_DEF 里补个默认值，
-     渲染 / 回填 / 读表三处都不用再动。 */
+     渲染 / 回填 / 读表三处都不用再动。
+     when：这一项只在某个开关开着（when: "键名"）或某个分段选中某值（when: ["键名", 值]）时才显示；
+     藏起来的项照样在 DOM 里，保存时值不丢，重新打开开关还是原来的数。 */
   const SET_SECTIONS = [
     { id: "base", name: "基本", groups: [
       { title: "挂念的人", sub: "可以多选，每位各有自己的一天", fields: [{ type: "chars" }] },
@@ -6312,11 +6330,11 @@ return Object.freeze(exports);
       { title: "免打扰时段", sub: "这段时间TA不会来找你", fields: [{ type: "timeRange", keys: ["quietStart", "quietEnd"] }] },
       { title: "你的睡眠时段", sub: "可选，默认关闭；作息不固定可以不设", fields: [
         { type: "toggles", items: [{ key: "userSleepOn", label: "睡眠时段暂停回音计时" }] },
-        { type: "timeRange", keys: ["userSleepStart", "userSleepEnd"] },
+        { type: "timeRange", keys: ["userSleepStart", "userSleepEnd"], when: "userSleepOn" },
       ], hint: "开启后每天按这段时间暂停回音统计的等待计时，醒来后继续累计，满 3 小时再统计。按保存时设备所在时区计算，可跨零点，起止时间不能相同。<br>只影响回音统计，不改变免打扰、TA的作息或未回应降速。未回复仍保持中性；不需要每天操作，也没有手动忙碌按钮。保存并成功同步计划后，对尚未结算的回音生效；旧统计不重算。" },
       { title: "自动生成TA的一天", fields: [
-        { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }, { key: "cloudGen", label: "浏览器关着也生成（云端）" }] },
-        { type: "timeRange", keys: ["autoGenAt"], label: "每天几点" },
+        { type: "toggles", items: [{ key: "autoGen", label: "每天到点自动生成" }, { key: "cloudGen", label: "浏览器关着也生成（云端）", when: "autoGen" }] },
+        { type: "timeRange", keys: ["autoGenAt"], label: "每天几点", when: "autoGen" },
       ], hint: "到点自动生成TA今天的状态、日程和心动时刻。挂念在后台也算开着。<br>开了「云端」：每次打开挂念会把明天的生成原料和一份和本地同源的提示词模板寄到你的个人云，到点由云函数生成并编排，你打开时直接接管；云端 45 分钟没生成会本地补。需要云连接和离线推送。<br>错过了这个点，下次打开时补。浏览器一整天没开就生成不了，那天只有云端的兜底问候。" },
       { title: "日子的起伏", sub: "给几件事埋岔子，到点才揭晓", fields: [
         { type: "seg", key: "forkLevel", options: [[0, "平稳", "三天一次"], [1, "平常", "一天一次"], [2, "多事", "一天两三次"]] },
@@ -6345,8 +6363,8 @@ return Object.freeze(exports);
         { key: "moodGate", label: "状态低落时更安静" },
         { key: "momentsOn", label: "想分享时发朋友圈" },
       ] },
-        { type: "stepper", key: "momentsWeekly", min: 0, max: 14, step: 1, label: "朋友圈一周最多", unit: "条 · 不占私聊额度" },
-        { type: "stepper", key: "momentsGapH", min: 1, max: 48, step: 1, label: "两条至少隔", unit: "小时" },
+        { type: "stepper", key: "momentsWeekly", min: 0, max: 14, step: 1, label: "朋友圈一周最多", unit: "条 · 不占私聊额度", when: "momentsOn" },
+        { type: "stepper", key: "momentsGapH", min: 1, max: 48, step: 1, label: "两条至少隔", unit: "小时", when: "momentsOn" },
       ],
       hint: "睡前锚点 / 早安锚点：提醒TA留意睡前那段、早上刚过免打扰那会儿，想不起来也不勉强——不再硬排时刻。<br>聊天临时起念：复核时允许按没聊完的话头临时加一个时刻。<br>状态低落时更安静：精力很低的那天明显少起念。<br>想分享时发朋友圈：TA自己过日子也会想发圈——云端每小时按时段、精力、刚做完的事掷一次骰子（不调模型）；复核判定某件事更像发给所有人看时也会改走朋友圈。都走宿主朋友圈的整条管线；浏览器关着时云端只记下起意和时间点，下次打开补成当时的帖子。<br>一周几条、隔几小时是发圈唯一的一套数：装了挂念，「朋友圈节奏」插件会让位。" },
     ] },
@@ -6360,7 +6378,7 @@ return Object.freeze(exports);
         hint: "复核时顺带看聊天里有没有说定、取消或临时被叫走的安排，有就直接改今天的日程，一次最多 2 条。<br>只改还没到点的，改动写回系统日程，也记进「诊断」。<br>「动态复核」设成 0 时这条不会发生。" },
       { title: "惦记账本", fields: [
         { type: "toggles", items: [{ key: "threadsOn", label: "跨天记住话头、约定和日子" }] },
-        { type: "stepper", key: "threadDays", min: 1, max: 14, step: 1, label: "话头几天没再提就淡掉", unit: "天" },
+        { type: "stepper", key: "threadDays", min: 1, max: 14, step: 1, label: "话头几天没再提就淡掉", unit: "天", when: "threadsOn" },
       ], hint: "复核时顺带从聊天里记下没聊完的话头、约好的事、重要的日子；起念、生成明天、注入聊天、到点发消息都会看它。约定快到点、刚过点、到日子了，TA会自己想起来找你（走云端自发起念）。「今天」页能手动记和了结。" },
       { title: "注入聊天", fields: [{ type: "toggles", items: [{ key: "injectChat", label: "让TA聊天时知道自己此刻的状态" }] }],
         hint: "让TA聊天时知道自己此刻在做什么、什么心情、剩多少精力、接下来做什么。<br>每次刷新覆盖上一次，不会堆进聊天记录，也不影响前面人设和世界书的缓存。<br>关掉立刻撤销。" },
@@ -6389,14 +6407,14 @@ return Object.freeze(exports);
       { title: "主动消息的忙与睡", sub: "到点了TA顾不上呢", fields: [
         { type: "toggles", items: [{ key: "busyHold", label: "忙着就押后再发" }] },
         { type: "stepper", key: "busyBufferMin", min: 0, max: 60, step: 5, label: "忙完 / 醒来再等", unit: "分钟" },
-        { type: "stepper", key: "busyMaxHoldMin", min: 30, max: 480, step: 30, label: "等待多久概率减半", unit: "分钟 · 不设固定截止，聊过或已解决就作罢" },
+        { type: "stepper", key: "busyMaxHoldMin", min: 30, max: 480, step: 30, label: "等待多久概率减半", unit: "分钟 · 不设固定截止，聊过或已解决就作罢", when: "busyHold" },
         { type: "seg", key: "sleepMode", options: [[0, "睡着就不发"], [1, "押到起床后"], [2, "概率醒来"]] },
-        { type: "stepper", key: "sleepWakeProb", min: 5, max: 60, step: 5, label: "醒来的概率", unit: "%" },
+        { type: "stepper", key: "sleepWakeProb", min: 5, max: 60, step: 5, label: "醒来的概率", unit: "%", when: ["sleepMode", 2] },
       ], hint: "到点时TA正忙（上课、开会、开车这类，生成日程时标的），主动消息就押到忙完再加几分钟（按这个数上下浮动四成）；不设固定截止；每经过设定的分钟数，保留发送概率减半。忙完再核对最新聊天，已经提过或事实已变化就作罢。此规则需更新个人云函数。睡着了按选的办：不发、押到起床后、或按概率迷迷糊糊醒来说一两句。这里只管主动消息预约。<br>聊天里的延后回复已迁到小手机「设置 → 聊天插件 → 忙碌回复」：在那里设置偷空概率、等待间隔、睡眠和紧急消息规则。挂念只提供作息和忙闲，首次安装插件时会导入原设置，之后两边互不覆盖。启用个人离线推送后，聊天显示「等待已同步云端」才可关闭小手机。" },
       { title: "发送失败后延长重试", adv: true, sub: "模型不通、没写进去时", fields: [
         { type: "toggles", items: [{ key: "sendRetry", label: "失败后在一段时间内接着试" }] },
-        { type: "stepper", key: "sendRetryMin", min: 15, max: 360, step: 15, label: "普通念头最多再试", unit: "分钟" },
-        { type: "stepper", key: "promiseRetryMin", min: 30, max: 1440, step: 30, label: "约定最多再试", unit: "分钟" },
+        { type: "stepper", key: "sendRetryMin", min: 15, max: 360, step: 15, label: "普通念头最多再试", unit: "分钟", when: "sendRetry" },
+        { type: "stepper", key: "promiseRetryMin", min: 30, max: 1440, step: 30, label: "约定最多再试", unit: "分钟", when: "sendRetry" },
       ], hint: "只在离线执行选了「后端」时生效。<br>关着（默认）：到点没发出去，后端只在 10 分钟内再试两次，还不行这条就作罢，不会拖到很晚才发。<br>打开：在设定的时间内隔 5、10、20、40 分钟、之后每小时再试一次，超过就作罢。时间设得越长，消息越可能晚到；晚了 20 分钟以上的，发之前会告诉TA已经晚了多久，问午饭、道早安这类和时刻绑着的话TA会自己作罢。<br>约定最后没发出来会推一条通知。" },
     ] },
   ];
@@ -6412,26 +6430,33 @@ return Object.freeze(exports);
     return String(value);
   }
 
+  // when → 行上的 data-when / data-eq，syncWhen 按它显示或隐藏
+  function whenAttr(w) {
+    if (!w) return "";
+    return Array.isArray(w) ? ' data-when="' + esc(w[0]) + '" data-eq="' + esc(w[1]) + '"' : ' data-when="' + esc(w) + '"';
+  }
   function fieldHtml(f) {
+    const wa = whenAttr(f.when);
     if (f.type === "chars") return '<div class="char-grid" id="char-grid"></div>';
     if (f.type === "timeRange") {
-      if (f.keys.length === 1) return '<div class="frow"><div class="fl">' + esc(f.label || "") + '</div><input type="time" id="set-' + f.keys[0] + '"></div>';
-      return '<div class="field-row"><input type="time" id="set-' + f.keys[0] + '">' +
+      if (f.keys.length === 1) return '<div class="frow"' + wa + '><div class="fl">' + esc(f.label || "") + '</div><input type="time" id="set-' + f.keys[0] + '"></div>';
+      return '<div class="field-row"' + wa + '><input type="time" id="set-' + f.keys[0] + '">' +
         '<span style="color:var(--tx3)">—</span><input type="time" id="set-' + f.keys[1] + '"></div>';
     }
     if (f.type === "stepper") {
       const ctl = '<div class="stepper"><button data-step="' + f.key + '" data-d="-1">−</button>' +
         '<div class="val" id="set-' + f.key + '">' + SET_DEF[f.key] + "</div>" +
         '<button data-step="' + f.key + '" data-d="1">＋</button></div>';
-      return '<div class="frow"><div class="fl">' + esc(f.label || "") + (f.unit ? '<div class="fu">' + esc(f.unit) + "</div>" : "") + "</div>" + ctl + "</div>";
+      return '<div class="frow"' + wa + '><div class="fl">' + esc(f.label || "") + (f.unit ? '<div class="fu">' + esc(f.unit) + "</div>" : "") + "</div>" + ctl + "</div>";
     }
     if (f.type === "seg") {
       return '<div class="seg" id="set-' + f.key + '">' +
         (f.options || []).map((o) => '<button data-v="' + o[0] + '">' + esc(o[1]) + (o[2] ? "<small>" + esc(o[2]) + "</small>" : "") + "</button>").join("") + "</div>";
     }
     if (f.type === "toggles") {
-      return '<div class="tgl-row">' +
-        (f.items || []).map((it) => '<button class="tgl" id="set-' + it.key + '">' + esc(it.label) + "</button>").join("") + "</div>";
+      // 每个开关一行：左边说明，右边胶囊滑动开关。按钮仍带 .tgl 和 .on，回填 / 读表照旧按 id 取
+      return (f.items || []).map((it) => '<div class="frow sw-row"' + whenAttr(it.when) + '><div class="fl">' + esc(it.label) + "</div>" +
+        '<button type="button" class="tgl sw" role="switch" aria-checked="false" aria-label="' + esc(it.label) + '" id="set-' + it.key + '"></button></div>').join("");
     }
     if (f.type === "textarea") {
       return '<input type="hidden" id="set-' + f.key + '">' +
@@ -6515,7 +6540,7 @@ return Object.freeze(exports);
       else if (f.type === "stepper") $("#set-" + f.key).textContent = S.settings[f.key];
       else if (f.type === "seg") document.querySelectorAll("#set-" + f.key + " button")
         .forEach((b) => b.classList.toggle("on", +b.dataset.v === (+S.settings[f.key] || 0)));
-      else if (f.type === "toggles") (f.items || []).forEach((it) => $("#set-" + it.key).classList.toggle("on", !!S.settings[it.key]));
+      else if (f.type === "toggles") (f.items || []).forEach((it) => setSwitch($("#set-" + it.key), !!S.settings[it.key]));
       else if (f.type === "textarea") $("#set-" + f.key).value = S.settings[f.key] ?? SET_DEF[f.key];
       else if (f.type === "text") $("#set-" + f.key).value = S.settings[f.key] || "";
     }
@@ -6571,13 +6596,16 @@ return Object.freeze(exports);
       };
     });
     $("#sheet-body").querySelectorAll(".seg button").forEach((b) => {
-      b.onclick = () => { b.parentNode.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); };
+      b.onclick = () => { b.parentNode.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); syncWhen(); };
     });
-    $("#sheet-body").querySelectorAll(".tgl").forEach((b) => { b.onclick = () => {
-      b.classList.toggle("on");
-      if (b.id === "set-userSleepOn") syncUserSleepFields();
+    // 整行都能点：手指不用对准右边那个小开关
+    $("#sheet-body").querySelectorAll(".sw-row").forEach((row) => { row.onclick = () => {
+      const b = row.querySelector(".tgl");
+      if (!b) return;
+      setSwitch(b, !b.classList.contains("on"));
+      syncWhen();
     }; });
-    syncUserSleepFields();
+    syncWhen();
     const test = $("#btn-cloud-test");
     if (test) test.onclick = async () => {
       const r = $("#cloud-test-r");
@@ -6602,13 +6630,25 @@ return Object.freeze(exports);
     };
   }
 
-  function syncUserSleepFields() {
-    const toggle = $("#set-userSleepOn");
-    const enabled = !!(toggle && toggle.classList.contains("on"));
-    for (const key of ["userSleepStart", "userSleepEnd"]) {
-      const input = $("#set-" + key);
-      if (input) input.disabled = !enabled;
-    }
+  function setSwitch(el, on) {
+    if (!el) return;
+    el.classList.toggle("on", !!on);
+    if (el.setAttribute) el.setAttribute("aria-checked", on ? "true" : "false");
+  }
+  // 附属设置跟着开关走：开关关着（或分段没选到那一档）就藏起来；跟着藏的开关不改它自己的值
+  function syncWhen() {
+    $("#sheet-body").querySelectorAll("[data-when]").forEach((el) => {
+      const key = el.dataset.when;
+      let show;
+      if (el.dataset.eq != null) {
+        const on = document.querySelector("#set-" + key + " button.on");
+        show = !!on && +on.dataset.v === +el.dataset.eq;
+      } else {
+        const src = $("#set-" + key);
+        show = !!(src && src.classList.contains("on"));
+      }
+      el.hidden = !show;
+    });
   }
   function validateUserSleepSettings(settings) {
     if (!settings.userSleepOn) return;

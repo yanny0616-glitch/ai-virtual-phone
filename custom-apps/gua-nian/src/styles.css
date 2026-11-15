@@ -167,7 +167,7 @@
   .arc-fork { font-size: 12px; line-height: 1.6; color: var(--tx2); margin: 4px 0; }
   .arc-fork b { color: var(--acc2); font-weight: 700; margin-right: 6px; font-variant-numeric: tabular-nums; }
   .arc-fork .say { margin-left: 6px; font-size: 10.5px; color: var(--tx3); }
-  .seg + .tgl-row { margin-top: 10px; }
+  .seg + .tgl-row, .seg + .frow { margin-top: 10px; }
   .seg button small { display: block; font-size: 10.5px; font-weight: 400; opacity: .7; margin-top: 1px; }
   .sd-ask { margin-top: 14px; }
   .sd-ask input {
@@ -283,6 +283,7 @@
   .grp-sub { font-weight: 400; font-size: 11px; color: var(--tx3); letter-spacing: 0; }
   .frow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px dashed var(--line); }
   .frow:first-of-type, .grp-t + .frow { border-top: none; }
+  .frow[hidden], .field-row[hidden] { display: none; }
   .frow .fl { font-size: 13px; color: var(--tx); min-width: 0; }
   .frow .fu { font-size: 11px; color: var(--tx3); margin-top: 2px; }
   .frow .stepper { gap: 8px; flex: none; }
@@ -344,6 +345,21 @@
   }
   .tgl.on { color: var(--acc2); border-color: rgba(245, 107, 156, .5); background: rgba(255, 107, 157, .08); font-weight: 600; }
   .tgl.on::before { content: "✓ "; }
+  /* 设置页的开关：一行一个，右边胶囊滑动开关（诊断页那些 .tgl 是操作按钮，不走这套） */
+  .sw-row { cursor: pointer; min-height: 42px; }
+  .sw-row .fl { flex: 1; }
+  .tgl.sw {
+    flex: none; position: relative; width: 46px; height: 28px; padding: 0; border: none; border-radius: 999px;
+    background: color-mix(in srgb, var(--tx3) 55%, transparent); transition: background .2s ease;
+  }
+  .tgl.sw::before {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgba(70, 40, 50, .28); transition: transform .2s ease;
+  }
+  .tgl.sw.on { background: linear-gradient(135deg, var(--acc), var(--acc2)); border: none; }
+  .tgl.sw.on::before { content: ""; transform: translateX(18px); }
+  .tgl.sw:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { .tgl.sw, .tgl.sw::before { transition: none; } }
   .grp-hint { font-size: 11.5px; color: var(--tx2); line-height: 1.6; margin-top: 7px; padding: 8px 10px; border-radius: var(--r-md); background: var(--bg1); }
   .grp-hint[hidden] { display: none; }
   .hero .kvs.link { cursor: pointer; }

@@ -1609,3 +1609,14 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 测试：新增 `test/resilience.test.ts` 6 项，`engine.test.ts` +4，`templates.test.ts` +1，`api.test.ts` +1。`engine` 49、`rules` 14、`api` 20、`resilience` 6、`templates` 3、`jobs` 12、`wake` 8、`shortcut-resume` 6、`generation-lease` 3、`handoff` 3、`push` 3、`store` 5、`delivery` 3 项通过，`tsc` 通过。没跑的测试文件：`chat-state`、`feedback-import`、`handoff-import`、`reply-timing`、`weixin`。
 - 没验证的：优雅退出和看门狗没有在真实进程上演练（只测了引擎里「正在退出」时的分支）；出站地址检查的单测用的是假解析器，真实 DNS 只手动核对过三个地址（线上模型域名放行，`localhost` 和 `host.docker.internal` 拦下）；App 的「后端体检」栏没有在手机或浏览器里看过。
 - 部署（2026-11-16 北京时间早上，用户说「部署」）：审计第一批、第二批的后端改动一起同步到 `/opt/float-companion/companion-server` 并重启。旧 `src` 备份在 `/opt/float-companion/backups/20261115-pre-batch2`，库备份在 `/var/lib/float-companion/companion.db.pre-batch2-20261115.bak`。部署前核对：库里没有待发或正在生成的念头，所有出站地址都是公网域名。重启后 `/health` 回 200，`problems` 只有 `gen_failed`（模型通道仍然 503，和部署前一样），本机和站点反代两个入口都通。又重启了一次演练优雅退出：日志有「收到 SIGTERM，收尾后退出」，进程正常退出；当时没有正在跑的模型调用，所以「等这一轮跑完 / 打断模型调用」那段没有演练到。仓库改动仍未提交，挂念 0.10.4 没发布，手机上的「后端体检」栏要等 App 更新才看得到。
+
+## 2026-11-16：挂念 0.10.5 设置页开关改胶囊滑动开关、附属设置随开关显隐
+
+用户要求：设置里的开关改成胶囊状；有些设置关着时不显示、开着才显示；几选一的不做成胶囊。
+
+- `custom-apps/gua-nian/src/ui/settings.js`：`toggles` 字段从一排 `.tgl` 药丸改成一行一个 `.frow.sw-row`（左说明、右 `button.tgl.sw[role=switch]`，整行可点）；按钮仍带 `.tgl` / `.on`，回填和 `readSheet` 不变。新增 schema 属性 `when`（`"开关键名"` 或 `["分段键名", 值]`）、`whenAttr` / `setSwitch` / `syncWhen`；去掉只管睡眠时段的 `syncUserSleepFields`。
+- 声明了依赖的项：睡眠起止时间、云端生成与每天几点、朋友圈两项、话头几天淡掉、等待多久概率减半、延长重试两个时长、醒来的概率（跟分段「概率醒来」）。「忙完 / 醒来再等」不藏，睡着押后也用它。藏起来的项仍在 DOM 里，保存时值不丢。
+- `styles.css`：`.tgl.sw` 开关样式、`.sw-row`、`.frow[hidden]` / `.field-row[hidden]`。诊断页等处的 `.tgl` 操作按钮不受影响。分段控件（`.seg`）没动。
+- 验证：`gua-nian:build`、`apps:build-dist`、`gua-nian:check`、`check:apps-dist`、`check:sdk`、`check-gua-nian-day-prompt.mjs` 通过。用本机 Chromium 以 390px 宽打开产物，自动点开关核对 23 项（开关尺寸、✓ 不再出现、整行点击、各项显隐、藏起来的值读表不丢、没有行溢出）并看过截图。没有在真机上看过。
+- 顺带发现（不是这次引起的，没修）：`scripts/check-gua-nian-backend-browser.mjs` 在改动前的代码上就失败，`#cloud-sync` 在「后台」页找不到。
+
