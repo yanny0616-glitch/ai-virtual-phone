@@ -49,6 +49,7 @@
       presendMax: st.presendMax, presendTalkingMin: st.presendTalkingMin, presendGapMin: st.presendGapMin,
       busyHold: st.busyHold ? 1 : 0, busyBufferMin: st.busyBufferMin, busyMaxHoldMin: st.busyMaxHoldMin,
       sleepMode: st.sleepMode, sleepWakeProb: st.sleepWakeProb,
+      sendRetryMin: st.sendRetry ? st.sendRetryMin : 0, promiseRetryMin: st.sendRetry ? st.promiseRetryMin : 0,
       threadsOn: st.threadsOn ? 1 : 0, threadDays: st.threadDays, chatEditsDay: st.chatEditsDay !== false,
       momentsOn: momentsReady() ? 1 : 0, momentsWeekly: st.momentsWeekly, momentsGapH: st.momentsGapH,
       genEnabled: st.autoGen ? 1 : 0, autoGenAt: st.autoGenAt || SET_DEF.autoGenAt,
@@ -63,7 +64,7 @@
     if (!ids.length) return;
     try {
       const r = await serverFetch("/app/state?ids=" + encodeURIComponent(ids.join(",")));
-      S._server = { mode: r.mode, running: r.running, lastTickAt: r.lastTickAt, at: Date.now(), error: "" };
+      S._server = { mode: r.mode, running: r.running, lastTickAt: r.lastTickAt, health: r.health || null, at: Date.now(), error: "" };
       for (const st of r.characters || []) {
         const cx = S.byId[st.characterId];
         if (!cx) continue;
@@ -181,6 +182,16 @@
     extra: "临时起念", dedupe: "去重", recheck: "作罢", freshness: "等待", ledger: "账本", settle: "了结", promise: "约定",
     post: "朋友圈", mood: "情绪", schedule: "改日程", setup: "开始挂念", error: "出错",
   };
+  // 后端体检的问题代号 → 人话；hint 说的是你能做什么
+  const SERVER_HEALTH = {
+    tick_stale: { title: "后端卡住了", hint: "卡满 30 分钟后端会自己重启。重启后还这样，需要到服务器上看日志。" },
+    gen_failed: { title: "今天的日程没生成出来", tone: "warn", hint: "先按昨天的作息顶着，中午和傍晚会再试。一直不成，多半是生成用的模型不通，去设置里换一个。" },
+    model_unreachable: { title: "判断用的模型调不通", hint: "调不通就不会起新的念头。检查模型通道，或去设置里给后台任务换一个能用的模型。" },
+    send_failing: { title: "有消息到点没发出去", hint: "没开「发送失败后延长重试」时，10 分钟内再试两次，还不行这条就作罢。" },
+    push_failing: { title: "通知没推出去", tone: "warn", hint: "消息照样会进聊天，只是手机不弹通知。" },
+    no_push_subscription: { title: "没有能收通知的设备", tone: "warn", hint: "消息照样会进聊天，只是手机不弹通知。在小手机设置里重新开一次通知。" },
+  };
+
   function renderServerDiag() {
     const cx = cur(), st = cx.server || {}, sv = S._server || {};
     const v = $("#subview") || $("#view");
@@ -192,6 +203,28 @@
       return (dateStrOf(d) === todayStr() ? "" : (d.getMonth() + 1) + "/" + d.getDate() + " ") + fmtHM(ms);
     };
     const items = [];
+    // 后端体检：轮询卡没卡、模型通不通、消息和通知发不发得出去
+    {
+      const h = sv.health;
+      const probs = h && Array.isArray(h.problems) ? h.problems : [];
+      const body = sv.error
+        ? '<div class="diag-item">后端这会儿读不到，体检结果是上一次的。</div>'
+        : !h
+          ? '<div class="diag-item">这个后端还是旧版本，不会报体检结果。更新后端后这里才有内容。</div>'
+          : probs.length
+            ? probs.map((p) => {
+                const k = SERVER_HEALTH[p.code] || { title: p.code, hint: "" };
+                return '<div class="diag-item"><b>' + esc(k.title) + "</b> " + esc(k.hint || "") + "</div>"
+                  + (p.note ? '<div class="diag-item">原因：' + esc(p.note) + "</div>" : "");
+              }).join("")
+            : '<div class="diag-item">轮询在跑，今天的日程、模型、到点发送和通知推送都没发现问题。</div>'
+              + '<div class="archive-note">只反映后端最近看到的情况：模型看的是最近 6 小时，发送看最近 2 小时，推送看最近一次。</div>';
+      const worst = probs.some((p) => (SERVER_HEALTH[p.code] || {}).tone !== "warn") ? "bad" : "warn";
+      const tone = sv.error || !h ? "" : probs.length ? worst : "ok";
+      const titles = probs.map((p) => (SERVER_HEALTH[p.code] || { title: p.code }).title).filter((x, i, a) => a.indexOf(x) === i);
+      items.push(dgItem("srv-health", "后端体检", body,
+        sv.error ? "读不到" : !h ? "旧版后端" : probs.length ? titles.join(" · ") : "没发现问题", tone, open("srv-health", probs.length > 0)));
+    }
     // 连接
     {
       const bad = !!sv.error;

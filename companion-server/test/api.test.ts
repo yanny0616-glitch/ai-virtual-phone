@@ -8,6 +8,7 @@ import { chatContextText } from "../src/context.ts";
 import type { EngineDeps } from "../src/engine.ts";
 import { fixedForDay } from "../src/routine.ts";
 import { Runner } from "../src/runner.ts";
+import { PushWatch } from "../src/health.ts";
 import { createApp } from "../src/server.ts";
 import { Store } from "../src/store.ts";
 
@@ -298,4 +299,161 @@ test("新角色建空账本；固定作息原件存下，第三天后端自己�
   env.store.addTimer({ id: "wr", characterId: CID, date: "2026-09-16", fireAt: 0, kind: "quiet", status: "running", note: "生成中" });
   assert.equal(env.store.recoverRunningTimers(), 1);
   assert.equal(env.store.getTimer("wr")!.status, "pending");
+});
+
+async function withRevisedMatter(env: ReturnType<typeof setup>) {
+  await withCharacter(env);
+  const row = env.store.getDay(CID, "2026-09-16")!;
+  row.items = [
+    { time: "07:00", fireAt: at("2026-09-16T07:00"), act: true, generatedAt: at("2026-09-16T07:01"),
+      source: "约定·说明安排", intent: "说明安排", why: "已经约好", kind: "promise", from: "p1", matterId: "matter1", promiseRevision: 1, wakeId: "promise1" },
+    { time: "19:40", fireAt: at("2026-09-16T19:40"), act: false, matterSuppressed: true,
+      source: "约定·晚些说明安排", intent: "说明安排", why: "同一事项已发过，未核实新的聊天进展", kind: "promise", from: "p1", matterId: "matter1", promiseRevision: 2, wakeId: "promise2" },
+  ] as typeof row.items;
+  env.store.saveDay(row);
+  env.store.addTimer({ id: "promise1", characterId: CID, date: row.date, fireAt: row.items[0].fireAt, kind: "promise", status: "done", note: "已发送" });
+  env.store.addTimer({ id: "promise2", characterId: CID, date: row.date, fireAt: row.items[1].fireAt, kind: "promise", status: "cancelled", note: row.items[1].why });
+  env.store.addDecision(CID, "send", "07:00 已发送", "live", { wakeId: "promise1" }, at("2026-09-16T07:01"));
+  env.store.addDecision(CID, "promise", "改约到 19:40", "live", { wakeId: "promise2" }, at("2026-09-16T09:47"));
+  env.store.addDecision(CID, "dedupe", row.items[1].why, "live", { wakeId: "promise2" }, at("2026-09-16T10:07"));
+  return row;
+}
+
+test("同一念头已发送后改期又作罢：心动与记录只显示一条，详情保留两版轨迹", async () => {
+  const e = setup("2026-09-16T20:08");
+  try {
+    await withRevisedMatter(e);
+    const before = e.store.getDay(CID, "2026-09-16");
+    const timer = e.store.getTimer("promise2");
+    const state = await e.call("GET", `/app/state?ids=${CID}`);
+    const items = state.body.characters[0].plan.items;
+    assert.equal(items.length, 1);
+    assert.equal(items[0].wakeId, "promise1");
+    assert.equal(items[0].time, "07:00");
+    assert.equal(items[0].serverStatus.status, "sent");
+    const history = items[0].hist.map((h: any) => h.note).join("\n");
+    assert.match(history, /07:00 已发送/);
+    assert.match(history, /改约到 19:40/);
+    assert.match(history, /同一事项已发过/);
+    assert.match(history, /19:40 的安排：作罢/);
+    assert.equal(items[0].hist.find((h: any) => h.note.startsWith("19:40 的安排：")).at, at("2026-09-16T10:07"));
+    const archive = await e.call("GET", `/app/archive?id=${CID}&limit=30`);
+    assert.deepEqual(archive.body.days[0].plan.items, items);
+    assert.deepEqual(e.store.getDay(CID, "2026-09-16"), before, "展示归并不能删改执行历史");
+    assert.deepEqual(e.store.getTimer("promise2"), timer);
+  } finally { e.store.close(); }
+});
+
+test("同一事项有有效的新预约：展示当前版本、保留旧发送历史，取消仍定位正确任务", async () => {
+  const e = setup("2026-09-16T15:00");
+  try {
+    const row = await withRevisedMatter(e);
+    row.items[1].act = true; delete row.items[1].matterSuppressed;
+    row.items[1].why = "有新的明确安排";
+    e.store.saveDay(row);
+    e.store.updateTimer("promise2", { status: "pending", note: "" });
+    const state = await e.call("GET", `/app/state?ids=${CID}`);
+    const [item] = state.body.characters[0].plan.items;
+    assert.equal(state.body.characters[0].plan.items.length, 1);
+    assert.equal(item.wakeId, "promise2");
+    assert.equal(item.serverStatus.status, "pending");
+    assert.ok(item.hist.some((h: any) => h.note === "07:00 已发送"));
+    await e.call("POST", `/app/characters/${CID}/items/cancel`, { wakeId: item.wakeId });
+    assert.equal(e.store.getTimer("promise2")!.status, "cancelled");
+    assert.equal(e.store.getTimer("promise1")!.status, "done");
+    assert.equal(e.store.getDay(CID, row.date)!.items.length, 2);
+  } finally { e.store.close(); }
+});
+
+test("同名不同事项不合并；同一事项跨日保留各日历史；旧约定无事项编号按约定 ID 合并", async () => {
+  const e = setup("2026-09-16T20:08");
+  try {
+    const row = await withRevisedMatter(e);
+    delete row.items[0].matterId; delete row.items[1].matterId;
+    row.items.push({ ...row.items[0], wakeId: "other", from: "p2", matterId: "other-matter" });
+    row.items.push({ ...row.items[1], wakeId: "tomorrow", promiseRevision: 3, fireAt: at("2026-09-17T19:40") });
+    e.store.saveDay(row);
+    const state = await e.call("GET", `/app/state?ids=${CID}`);
+    const items = state.body.characters[0].plan.items;
+    assert.equal(items.length, 3);
+    assert.deepEqual(new Set(items.map((i: any) => i.wakeId)), new Set(["promise1", "other", "tomorrow"]));
+    assert.equal(e.store.getDay(CID, row.date)!.items.length, 4);
+  } finally { e.store.close(); }
+});
+
+// ─── 审计第二批（2026-11）：看得见、防误操作
+
+async function serve(env: ReturnType<typeof setup>, over: Record<string, unknown> = {}) {
+  const auth = new Auth("admin", async key => key === "phone-key");
+  const server = createApp({ rest: env.engine.rest, store: env.store, userId: "u1", auth, startedAt: new Date(at("2026-09-16T14:58")), runner: env.runner, engine: env.engine, ...over } as any);
+  await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const get = async (path: string, token = "") => { const r = await fetch(base + path, token ? { headers: { Authorization: "Bearer " + token } } : {}); return { status: r.status, body: await r.json() as any }; };
+  const post = async (path: string, token: string, body: unknown) => { const r = await fetch(base + path, { method: "POST", headers: { Authorization: "Bearer " + token }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json() as any }; };
+  return { get, post, close: () => server.close() };
+}
+
+test("/health 反映真实状态：生成失败、模型不通、推送送不出去给代号；轮询卡住回 503；原因只在带令牌的 /status 里", async () => {
+  const env = setup();
+  await withCharacter(env);
+  const pushWatch = new PushWatch();
+  const http = await serve(env, { pushWatch });
+  try {
+    const fine = await http.get("/health");
+    assert.equal(fine.status, 200);
+    assert.equal(fine.body.ok, true);
+    assert.deepEqual(fine.body.problems, []);
+
+    const row = env.store.getDay(CID, "2026-09-16")!; row.genError = "模型 HTTP 503: no_cookie_available"; env.store.saveDay(row);
+    env.store.addDecision(CID, "judge", "自发起念——模型没调通，这轮没判成：模型 HTTP 503", "live", { failed: "call" }, at("2026-09-16T14:50"));
+    pushWatch.record(at("2026-09-16T14:55"), { sent: 0, total: 2, removed: 0, skippedShell: 0, errors: ["timeout", "timeout"] });
+    const sick = await http.get("/health");
+    assert.equal(sick.status, 200);
+    assert.equal(sick.body.ok, false);
+    assert.deepEqual(sick.body.problems.sort(), ["gen_failed", "model_unreachable", "push_failing"]);
+    assert.doesNotMatch(JSON.stringify(sick.body), /no_cookie|赵兖/, "不带鉴权的接口不出原因和角色名");
+    const detail = await http.get("/status", "admin");
+    assert.equal(detail.body.health.ok, false);
+    assert.match(detail.body.health.problems.find((p: any) => p.code === "gen_failed").note, /赵兖今天的日程没生成出来：模型 HTTP 503/);
+
+    env.setNow("2026-09-16T15:30");
+    const stuck = await http.get("/health");
+    assert.equal(stuck.status, 503);
+    assert.ok(stuck.body.problems.includes("tick_stale"));
+  } finally { http.close(); }
+});
+
+test("覆盖迁入：手机密钥不行、真发模式不行；普通迁入不受影响", async () => {
+  const env = setup();
+  await withCharacter(env);
+  const http = await serve(env);
+  try {
+    assert.equal((await http.post("/import", "phone-key", { force: true })).status, 403);
+    assert.equal((await http.post("/import", "phone-key", {})).status, 200);
+    env.runner.setMode("live");
+    const live = await http.post("/import", "admin", { force: true });
+    assert.equal(live.status, 409);
+    assert.match(live.body.error, /真发模式下不能覆盖迁入/);
+    env.runner.setMode("shadow");
+    assert.equal((await http.post("/import", "admin", { force: true })).status, 200);
+    assert.equal(env.store.getCharacter(CID)!.name, "赵兖");
+  } finally { http.close(); }
+});
+
+test("个人云抖动时手机来的请求回 503「稍后再试」而不是 401「密钥无效」；/app/state 带后端体检", async () => {
+  const env = setup();
+  await withCharacter(env);
+  let down = true;
+  const auth = new Auth("admin", async key => { if (down) throw new Error("timeout"); return key === "phone-key"; });
+  const http = await serve(env, { auth, pushWatch: new PushWatch() });
+  try {
+    const flaky = await http.get(`/app/state?ids=${CID}`, "phone-key");
+    assert.equal(flaky.status, 503);
+    assert.match(flaky.body.error, /个人云暂时连不上/);
+    down = false;
+    const ok = await http.get(`/app/state?ids=${CID}`, "phone-key");
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.body.health, { ok: true, problems: [] });
+    assert.equal((await http.get(`/app/state?ids=${CID}`, "wrong-key")).status, 401);
+  } finally { http.close(); env.store.close(); }
 });

@@ -4,7 +4,7 @@ import test from "node:test";
 import { buildDayInstruction, calendarReality, parseDayResult, recentDaysBrief } from "../src/day.ts";
 import { guanianAsleep, guanianNow, stateNote } from "../src/life.ts";
 import { appendUserNote, buildTaskRequest, parseModelJson, splitPreview, visibleResponse } from "../src/llm.ts";
-import { feedbackWindowEnd, impulseValue, parseJudgeJson, valueFloor } from "../src/rules.ts";
+import { feedbackWindowEnd, impulseValue, parseJudgeJson, parseJudgeText, valueFloor } from "../src/rules.ts";
 import { parseWhen, settleByWords } from "../src/threads.ts";
 import type { GuanianDay, Thread } from "../src/types.ts";
 
@@ -153,4 +153,44 @@ test("生成一天：前几天带睡眠和起床精力，并要求没睡好之�
   assert.match(inst, /逐天回到正常的 70 到 90/);
   const fresh = buildDayInstruction({ date: "2026-09-17", nowHM: "06:00", past: { lines: [], residue: [] }, existing: [], threads: [], routine: {} });
   assert.doesNotMatch(fresh, /睡眠和精力会恢复/);
+});
+
+test("口头了结：「太好了」「我好了」「不用了谢谢」不误伤唯一的约定；TA上一句正说着这件事才认短回应", () => {
+  const one = (): Thread[] => [{ id: "p1", kind: "promise", text: "明早八点叫你起床", due: 1, since: 100, at: 100 }];
+  for (const said of ["太好了", "我好了", "不用了谢谢", "那就好了"]) assert.deepEqual(settleByWords(one(), [{ text: said, at: 200 }], 300), [], said);
+  // TA上一句问的是别的事
+  assert.deepEqual(settleByWords(one(), [{ text: "不用了谢谢", at: 200, prev: "要不要给你带杯奶茶" }], 300), []);
+  // TA上一句正在说这件事
+  const hit = one();
+  assert.deepEqual(settleByWords(hit, [{ text: "不用了", at: 200, prev: "那明早八点我叫你起床？" }], 300).map(x => x.id), ["p1"]);
+  assert.equal(hit[0].status, "cancelled");
+  // 这句话比约定记下的时刻还早：不可能是在说它
+  assert.deepEqual(settleByWords(one(), [{ text: "叫你起床的事算了", at: 50 }], 300), []);
+  assert.deepEqual(settleByWords(one(), [{ text: "叫你起床的事算了", at: 200 }], 300).map(x => x.id), ["p1"]);
+});
+
+test("连着没回的轮数：接你话的那句回复不算，只数之后主动发的", async () => {
+  const { unansweredRounds } = await import("../src/history.ts");
+  const iso = (hm: string) => `2026-09-16T${hm}:00Z`;
+  const messages = [
+    { id: "u1", role: "user", content: "我去开会了", message_at: iso("06:00") },
+    { id: "a1", role: "assistant", content: "去吧", message_at: iso("06:01") },
+    { id: "push-outbox:o1", role: "assistant", content: "开完了吗", message_at: iso("09:00") },
+  ];
+  const outputs = [{ id: "o1", trigger_key: "timedwake:w1", raw_text: "开完了吗", created_at: iso("09:00") }];
+  assert.equal(unansweredRounds({ messages, outputs, lastGeneratedAt: 0 }, Date.parse(iso("10:00"))), 1);
+  assert.equal(unansweredRounds({ messages: messages.slice(0, 2), outputs: [], lastGeneratedAt: 0 }, Date.parse(iso("10:00"))), 0);
+  // 你说完马上到点的主动消息不是回复，照数
+  const direct = [messages[0], { ...messages[2], message_at: iso("06:05") }];
+  assert.equal(unansweredRounds({ messages: direct, outputs, lastGeneratedAt: 0 }, Date.parse(iso("10:00"))), 1);
+});
+
+test("判断输出只用一套解析器：思考块里的花括号、JSON 后面带花括号的话都不影响取结果", () => {
+  const body = '{"decisions":[],"extra":[{"time":"10:30","intent":"想说"}],"keep":[],"settle":[]}';
+  assert.equal(parseJudgeText(`<thinking>先看 {日程} 再定</thinking>${body}`).extra[0].time, "10:30");
+  assert.equal(parseJudgeText(`${body}\n（按要求只输出了 {JSON}）`).extra[0].time, "10:30");
+  assert.equal(parseJudgeText(`想了想 {"note":"草稿"} 最后：${body}`).extra[0].time, "10:30");
+  assert.equal(parseJudgeText('{"skip":"没什么想说的"}').skip, "没什么想说的");
+  assert.throws(() => parseJudgeText("还是不发了吧"));
+  assert.deepEqual(parseJudgeJson("还是不发了吧").extra, []);
 });

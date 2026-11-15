@@ -24,6 +24,7 @@
 //   POST /app/weixin                            开关 { enabled }；POST /app/weixin/run 立刻轮询一次（测试用，不看开关）
 // 改状态的都在 Runner 的锁里做：正在跑的一轮调模型时改了，会被那轮结束时的保存盖掉。
 
+import type { HealthReport } from "./health.ts";
 import { importFromCloud, importMissingCloudTasks, importPendingCloudFeedback } from "./importer.ts";
 import { stopLegacyScheduler } from "./handoff.ts";
 import type { EngineDeps } from "./engine.ts";
@@ -39,7 +40,11 @@ import type { WeixinService } from "./weixin.ts";
 import { DEFERRED_KEY, deferredReceipt, putDeferred, validateJob, type JobPayload } from "./jobs.ts";
 import { SETTING_KEYS, type GuanianDay, type GuanianSched, type PlanItem, type Thread } from "./types.ts";
 
-export type AppDeps = { store: Store; runner: Runner; engine: EngineDeps; wake?: WakeService; weixin?: WeixinService };
+export type AppDeps = {
+  store: Store; runner: Runner; engine: EngineDeps; wake?: WakeService; weixin?: WeixinService;
+  /** 后端体检（轮询卡没卡、模型通不通、推送送不送得出去），挂念诊断页显示 */
+  health?: (nowMs: number) => HealthReport;
+};
 
 export class HttpError extends Error {
   status: number;
@@ -143,6 +148,48 @@ function decisionsByWake(store: Store, characterId: string, sinceMs: number): Ma
   return out;
 }
 
+/** 同一天的同一事项只有一个展示条目；各次预约和发送凭据仍留在存储中。 */
+function mergeMatterViews(items: ViewItem[], tz: number): ViewItem[] {
+  const groups = new Map<string, ViewItem[]>();
+  // 已有事项编号优先；旧数据没有编号时，只合并同一约定 ID，不按标题猜测。
+  const promiseMatters = new Map<string, string>();
+  for (const item of [...items].sort((a, b) => Number(a.promiseRevision || 0) - Number(b.promiseRevision || 0))) {
+    if (item.kind === "promise" && item.from && item.matterId) promiseMatters.set(item.from, item.matterId);
+  }
+  items.forEach((item, index) => {
+    const matter = item.kind === "promise" && item.from
+      ? promiseMatters.get(item.from) || `thread:${item.from}`
+      : item.matterId;
+    const date = Number.isFinite(item.fireAt) ? localDate(item.fireAt, tz) : "unknown";
+    const key = `${date}|${matter ? "matter:" + matter : "item:" + (item.wakeId || index)}`;
+    const group = groups.get(key) || [];
+    group.push(item); groups.set(key, group);
+  });
+  const priority = (item: ViewItem) => {
+    const status = item.serverStatus.status;
+    return status === "running" ? 4 : status === "pending" ? 3 : status === "sent" ? 2 : status === "unknown" && item.act ? 1 : 0;
+  };
+  const changedAt = (item: ViewItem) => Math.max(Number(item.generatedAt) || 0, ...item.hist.map(h => h.at), 0);
+  const labels: Record<string, string> = { sent: "已发送", pending: "待处理", running: "正在生成", skipped: "作罢", cancelled: "已取消", failed: "失败", unknown: "待确认" };
+  return [...groups.values()].map(group => {
+    if (group.length === 1) return group[0];
+    const selected = [...group].sort((a, b) => priority(b) - priority(a)
+      || Number(b.promiseRevision || 0) - Number(a.promiseRevision || 0)
+      || changedAt(b) - changedAt(a) || b.fireAt - a.fireAt)[0];
+    const events = group.flatMap(item => [
+      ...item.hist,
+      {
+        at: item.hist.length ? Math.max(...item.hist.map(h => h.at)) : Number(item.generatedAt) || item.fireAt,
+        kind: "recheck", by: "server",
+        note: `${hhmm(item.fireAt, tz)} 的安排：${labels[item.serverStatus.status] || "待确认"} · ${item.source || item.intent || "念头"}`
+          + (item.serverStatus.note ? `（${item.serverStatus.note}）` : ""),
+      },
+    ]);
+    const unique = new Map(events.map(event => [JSON.stringify([event.at, event.kind, event.note, event.by]), event]));
+    return { ...selected, hist: [...unique.values()].sort((a, b) => a.at - b.at) };
+  }).sort((a, b) => a.fireAt - b.fireAt);
+}
+
 function dayView(row: DayRow | null, tz: number, nowMs: number, affection: unknown): (GuanianDay & { date: string; characterId: string; by: string }) | null {
   if (!row?.day) return null;
   const base = { ...row.day, tz };
@@ -156,7 +203,7 @@ function planView(store: Store, c: CharacterRow, row: DayRow | null, date: strin
   // 约定的念头可能挂在别的日子那行里：按到点时刻落在这一天的都算进来
   const others = store.listDays(c.characterId, 40).filter(r => r.date !== date)
     .flatMap(r => r.items.filter(i => i.fireAt >= start && i.fireAt < start + DAY));
-  const items = [...(row?.items || []), ...others].map(i => viewItem(store, i, byWake, nowMs)).sort((a, b) => a.fireAt - b.fireAt);
+  const items = mergeMatterViews([...(row?.items || []), ...others].map(i => viewItem(store, i, byWake, nowMs)), tz);
   return {
     date, characterId: c.characterId, items,
     recheckAt: row?.judgedAt || 0, plannedAt: row?.judgedAt || 0, recheckCount: row?.recheckCount || 0, selfUsed: row?.selfUsed || 0,
@@ -175,6 +222,7 @@ export function appState(deps: AppDeps, characterIds: string[], nowMs = deps.eng
   const { store, runner } = deps;
   return {
     mode: runner.mode, running: runner.running, lastTickAt: runner.lastTickAt, now: nowMs,
+    ...(deps.health ? { health: (h => ({ ok: h.ok, problems: h.problems }))(deps.health(nowMs)) } : {}),
     characters: characterIds.map(id => {
       const c = store.getCharacter(id);
       if (!c) return { characterId: id, exists: false };
@@ -215,7 +263,7 @@ export function appArchive(deps: AppDeps, characterId: string, limit: number, no
     days: rows.map(r => ({
       date: r.date,
       day: dayView(r, tz, nowMs, c.settings.affection),
-      plan: { date: r.date, characterId, items: r.items.map(i => viewItem(store, i, byWake, nowMs)).sort((a, b) => a.fireAt - b.fireAt), recheckAt: r.judgedAt, by: r.source },
+      plan: { date: r.date, characterId, items: mergeMatterViews(r.items.map(i => viewItem(store, i, byWake, nowMs)), tz), recheckAt: r.judgedAt, by: r.source },
     })),
     moments: Array.isArray(c.state.momentHistory) ? c.state.momentHistory : [],
   };

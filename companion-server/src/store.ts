@@ -9,6 +9,7 @@
 //   routines   固定作息原件和例外：宿主只寄今明两天，更远的日子后端自己展开
 //   wake_templates / wake_runs  唤醒后端：每个来源一份底稿、处理记录（见 wake.ts）
 
+import { chmodSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
@@ -85,6 +86,8 @@ export type GeneratedDraft = {
   /** 建命令前先记 tried：重启后看到 tried 却没有结果，就不重复执行 */
   shortcutTried?: boolean; shortcutCommand?: ShortcutCommand | null; shortcutDelivered?: boolean;
   deliveryError?: string;
+  /** 通知推过了：恢复投递时不重复推，也不漏推 */
+  pushed?: boolean;
 };
 
 /** 快捷动作结果续跑：命令建好后等手机回传结果，再由后端生成第二轮 */
@@ -115,8 +118,19 @@ type Row = Record<string, unknown>;
 
 export class Store {
   #db: DatabaseSync;
+  #path: string;
+
+  /** 不可撤销的操作之前留一份完整的库（放在库文件旁边，权限 600）；内存库不留，返回空串 */
+  backup(label: string): string {
+    if (!this.#path || this.#path === ":memory:") return "";
+    const target = `${this.#path}.${label}-${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}.bak`;
+    this.#db.prepare("vacuum into ?").run(target);
+    chmodSync(target, 0o600);
+    return target;
+  }
 
   constructor(path: string) {
+    this.#path = path;
     this.#db = new DatabaseSync(path);
     this.#db.exec("pragma journal_mode = wal");
     // 阶段 1 的快照表按角色一份，换成按用途分份

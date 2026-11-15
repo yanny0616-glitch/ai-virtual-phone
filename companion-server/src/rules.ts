@@ -2,6 +2,7 @@
 
 import { matterPrompt } from "./vendor/matters.mjs";
 import { forkDay, guanianNow } from "./life.ts";
+import { parseModelJson } from "./llm.ts";
 import { THREAD_TASK, threadsEnabled } from "./threads.ts";
 import type { Ctx, Decision, Extra, FbBook, Keep, Outbox, PlanItem } from "./types.ts";
 import type { CloudOutput } from "./history.ts";
@@ -43,8 +44,8 @@ export function fbLine(fb: FbBook | undefined, kind: string): string {
   return `这类由头之后记录到用户接话 ${replied} 次，可作为轻微的正向参考，不代表每次都想聊。未回复不作为负面偏好，不据此判断用户冷淡或不喜欢，也不要催回复。`;
 }
 
-export function selfBrief(kind: string, reason: string): string {
-  if (kind === "miss") return `没有新对话。${reason}，最后一句是用户说的，不是你发了没人回。按你的性子和现在的关系想一想会不会有点想TA——本来就不主动的人、关系还生疏的，就不发。要发也只轻轻带一句想念或近况，不问「怎么不理我」，不催TA回。`;
+export function selfBrief(kind: string, reason: string, mineLast = false): string {
+  if (kind === "miss") return `没有新对话。${reason}，${mineLast ? "最后一句是你发的，TA一直没回——不追问、不重复上次说过的话，只当隔了这些天忽然又想起TA" : "最后一句是用户说的，不是你发了没人回"}。按你的性子和现在的关系想一想会不会有点想TA——本来就不主动的人、关系还生疏的，就不发。要发也只轻轻带一句想念或近况，不问「怎么不理我」，不催TA回。`;
   if (kind === "echo") return `没有新对话。由头是${reason}——从昨天的对话里挑一件轻松的小事（吃的、看的、随口说过的），像忽然想起来那样顺手提一句，不要求TA回应；昨天的事已经过去或已经说清楚了就别提，别翻旧账、别追问结果。`;
   if (kind === "thread") return `没有新对话。由头是心里挂着的事：${reason}。像朋友随口问起，不像提醒或查岗；上面聊到的事已经了了就写 []。`;
   return `没有新对话。由头是你自己这边的事：${reason}。想一想此刻的你会不会想找用户说点什么——分享刚发生的、忽然想起TA、单纯想搭句话都行；上面聊到的事已经了了就写 []。`;
@@ -170,6 +171,8 @@ export type PromptInput = {
   pending: PlanItem[]; litCount: number; chatLines: string; threadLinesNow: string[];
   echoLines: string; ledgerOnly: boolean; judge: boolean; canJudge: boolean; canImpulse: boolean; canPost: boolean;
   selfKind: string; selfReason: string; momentsWeekN: number; hm: string;
+  /** 想念由头：聊天最后一句是不是角色自己发的 */
+  selfMineLast?: boolean;
 };
 
 export function buildJudgePrompt(p: PromptInput): string {
@@ -203,7 +206,7 @@ export function buildJudgePrompt(p: PromptInput): string {
     "",
     threadsOn && p.threadLinesNow.length ? "惦记账本（已了结项仅供判重）：\n" + p.threadLinesNow.join("\n") : "",
     selfReason
-      ? selfBrief(p.selfKind, selfReason) + fbLine(ctx.fb, p.selfKind) + "不想说就老实写 []，不要为了发而发。真要发的话时刻定在接下来 5 到 40 分钟之间。已经说过或已经解决的事不要重复起念。"
+      ? selfBrief(p.selfKind, selfReason, !!p.selfMineLast) + fbLine(ctx.fb, p.selfKind) + "真没有想说的就写 []，并在 skip 里用一句话写清这会儿为什么不找TA。真要发的话时刻定在接下来 5 到 40 分钟之间。已经说过或已经解决的事不要重复起念。"
       : p.canJudge
       ? "根据刚才聊过的内容重新判断每个时刻：聊过的话题已经了了就别再提，"
         + "用户说了忙/情绪不好就收敛，聊到一半没说完或约好了要说的事可以点亮"
@@ -224,6 +227,7 @@ export function buildJudgePrompt(p: PromptInput): string {
       : "")
     + (!selfReason && !p.ledgerOnly && day ? ',"feel":{"mood":"聊天带来的此刻情绪，8字内","cause":"依据，12字内","energy":0,"intensity":50,"hours":3},"sched":[{"op":"add或move或drop","time":"原时刻HH:MM","newTime":"目标HH:MM","title":"新增标题","note":"细节","mood":"做完情绪","cost":0,"why":"聊天依据"}]' : "")
     + (p.canPost ? ',"post":{"hint":"想发的朋友圈由头或大意（30字内）"}或null' : "")
+    + (selfReason ? ',"skip":"extra 为空时写一句这会儿不找TA的原因（30字内），否则空字符串"' : "")
     + "}",
     threadsOn && !selfReason ? THREAD_TASK : "",
     !selfReason && !p.ledgerOnly && day ? "feel 只描述聊天带来的变化，不改今天的底色；平淡聊天降低 intensity，没有变化给 null。energy 为 -20 到 20，intensity 为 0 到 100，hours 为 1 到 12。" : "",
@@ -243,15 +247,24 @@ export function buildJudgePrompt(p: PromptInput): string {
   ].filter(Boolean).join("\n");
 }
 
-export type Judged = { links: Record<string, unknown>[]; decisions: Decision[]; extra: Extra[]; keep: Keep[]; settle: string[]; post: string; feel: unknown; sched: unknown[] };
+export type Judged = { links: Record<string, unknown>[]; decisions: Decision[]; extra: Extra[]; keep: Keep[]; settle: string[]; post: string; feel: unknown; sched: unknown[]; skip: string };
+
+const JUDGE_KEYS = ["decisions", "extra", "keep", "settle", "skip", "post", "feel", "sched", "links"];
+const judgeShaped = (v: unknown) => !!v && typeof v === "object" && !Array.isArray(v) && JUDGE_KEYS.some(k => k in (v as object));
+
+/** 判断模型的输出：和「回的是不是 JSON」用同一个解析器；一个对象都取不出来才抛错 */
+export function parseJudgeText(text: unknown): Judged {
+  const parsed = parseModelJson(text, judgeShaped);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("模型没回 JSON 对象");
+  return judgedFrom(parsed as Record<string, unknown>);
+}
 
 export function parseJudgeJson(text: string): Judged {
-  const empty: Judged = { links: [], decisions: [], extra: [], keep: [], settle: [], post: "", feel: null, sched: [] };
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) return empty;
-  try {
-    const parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  try { return parseJudgeText(text); } catch { return judgedFrom({}); }
+}
+
+function judgedFrom(parsed: Record<string, unknown>): Judged {
+  {
     const post = parsed.post && typeof parsed.post === "object" ? (parsed.post as { hint?: unknown }).hint : null;
     return {
       feel: parsed.feel ?? null, sched: Array.isArray(parsed.sched) ? parsed.sched.slice(0, 2) : [],
@@ -261,8 +274,7 @@ export function parseJudgeJson(text: string): Judged {
       keep: Array.isArray(parsed.keep) ? parsed.keep.slice(0, 2) : [],
       settle: Array.isArray(parsed.settle) ? parsed.settle.slice(0, 6).map(x => String(x)) : [],
       post: typeof post === "string" ? post.trim().slice(0, 120) : "",
+      skip: typeof parsed.skip === "string" ? parsed.skip.trim().slice(0, 120) : "",
     };
-  } catch {
-    return empty;
   }
 }

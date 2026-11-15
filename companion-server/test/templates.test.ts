@@ -50,3 +50,26 @@ test("取模板：只收挂念、认识的角色、更新过的；重复轮次�
   assert.equal(payloadReads, 1);
   store.close();
 });
+
+test("判断 / 生成模板先到不切会话，只有聊天模板能把角色切到另一个会话", async () => {
+  const store = new Store(":memory:");
+  store.saveCharacter({ characterId: "c1", sessionId: "s1", name: "沈烬言", enabled: true, settings: { tzOffsetMin: 480 }, state: {}, importedAt: 0, updatedAt: 0 });
+  const secret = "k";
+  const payload = await encryptPayload(JSON.stringify({
+    request: { url: "https://model", headers: {}, body: { messages: [] }, providerKind: "anthropic" },
+    notify: { title: "沈烬言" }, merge: { ...merge, snapshotAt: "2026-09-17T00:00:00.000Z" },
+  }), secret);
+  let keys = ["capptpl:app_gua.nian_01:c1:judge", "capptpl:app_gua.nian_01:c1:daily"];
+  const rest = async (path: string) => {
+    if (path.startsWith("push_server_config")) return new Response(JSON.stringify([{ payload_key: secret }]));
+    if (path.includes("select=trigger_key,updated_at")) return new Response(JSON.stringify(keys.map(trigger_key => ({ trigger_key, updated_at: "2026-09-17T00:00:01Z" }))));
+    return new Response(JSON.stringify([{ payload, updated_at: "2026-09-17T00:00:01Z" }]));
+  };
+  assert.deepEqual(await syncTemplates(rest, store, "u"), ["沈烬言:judge", "沈烬言:daily"]);
+  assert.equal(store.getCharacter("c1")!.sessionId, "s1");
+  assert.equal(store.getSnapshot("c1", "judge")!.sessionId, "s2");
+  keys = ["capptpl:app_gua.nian_01:c1:chat"];
+  assert.deepEqual(await syncTemplates(rest, store, "u"), ["沈烬言:chat"]);
+  assert.equal(store.getCharacter("c1")!.sessionId, "s2");
+  store.close();
+});

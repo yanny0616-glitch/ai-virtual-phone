@@ -49,7 +49,9 @@ export async function syncTemplates(rest: Rest, store: Store, userId: string): P
         ? { shortcutContinuation: payload.shortcutContinuation } : {}),
     };
     store.saveSnapshot(snap);
-    if (merge.sessionId && merge.sessionId !== c.sessionId) { c.sessionId = String(merge.sessionId); store.saveCharacter(c); }
+    // 只有聊天模板能把角色切到另一个会话：它带着那个会话的聊天记录。判断 / 生成模板先到不切，
+    // 否则会拿旧会话的聊天模板成文、写进新会话
+    if (purpose === "chat" && merge.sessionId && merge.sessionId !== c.sessionId) { c.sessionId = String(merge.sessionId); store.saveCharacter(c); }
     updated.push(`${c.name || characterId}:${purpose}`);
   }
   return updated;

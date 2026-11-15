@@ -53,3 +53,19 @@ test("安卓壳订阅：接了个人云时发 Realtime 广播，来电带 kind=c
   assert.equal(broadcasts[0].path, "realtime/v1/api/broadcast");
   assert.deepEqual(broadcasts[0].body.messages[0], { topic: "shellpush:u1", event: "notify", payload: { title: "📞 赵兖", body: "来电话了…", url: "/?ring=s1", kind: "call", characterName: "赵兖", sessionId: "s1", callTs: 5 } });
 });
+
+test("推送服务接了连接不回包：到点放手，不把整轮挂住；这一批剩下的几段不再等它", async () => {
+  const { rest } = fakeRest([{ endpoint: "https://push.example/hang" }, { endpoint: "https://push.example/ok" }]);
+  const { sendPushMessages } = await import("../src/push.ts");
+  const tried: string[] = [];
+  const started = Date.now();
+  const result = await sendPushMessages(rest, "u1", [{ title: "t", body: "一" }, { title: "t", body: "二" }], async (sub, _payload, options) => {
+    tried.push(sub.endpoint);
+    assert.equal(options.timeout, 40);
+    if (sub.endpoint.endsWith("/hang")) return new Promise(() => undefined);
+    return { statusCode: 201 };
+  }, 0, undefined, 40);
+  assert.ok(Date.now() - started < 5_000);
+  assert.deepEqual(result, { sent: 2, total: 2, removed: 0, skippedShell: 0, errors: ["timeout"] });
+  assert.equal(tried.filter(e => e.endsWith("/hang")).length, 1);
+});

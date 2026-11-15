@@ -1562,3 +1562,50 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 宿主 `armCompanionChatTemplate`：聊天模板加来电占位、快捷动作说明、微信通道和续跑底稿，与定时唤醒一致；`templates.ts` 同步时保留 `weixin` 与 `shortcutContinuation`。
 - 修补 GPT 复查改动：旧交接角色补迁回音账失败不再拖停整轮；交接补迁遇到找不到账本的约定改为跳过并记一笔，不再让交接失败（失败会让旧云端和 VPS 都停着）；已撤销念头的成文草稿随撤销删除。
 - 验证：后端 80 项测试 + tsc；`check-gua-nian-server-handoff`、`check-gua-nian-bailout-ownership`、`check-wake-server`；根 tsc；eslint。线上只读核对了交接补迁和回音补迁对现有两个角色无报错、Realtime 广播与现实桥网关可达。未做手机实测。
+
+## 2026-11-15：挂念后端止血（已部署到 VPS，未提交）
+
+背景：线上 `decisions` 两个月 210 次判断里 201 次是「刚忙完」且全部被否、只发出 1 条；10-31 起生成一天因 judge / daily 模板指向的模型通道不可用而每天静默失败 3 次。调研与方案见 `float/docs-draft/guanian-reset-research-2026-11-15.md`（仓库外）。
+
+- `llm.ts`：`altChannel` / `callModelWithFallback`，生成与判断失败时换聊天快照的通道重试；`generateJson` 多一个备用模板参数。
+- `engine.ts`：生成按三段重试并推 `guanian_gen_failed` 通知；没有今天生活面且生成报错时 `gates()` 用 `bridgeDay`；判断失败 / 非 JSON 记 `judge` 决定后返回（不再抛到整轮）；`judge` 决定的 `data` 带 `raw` / `selfKind` / `skip` / `viaAlt`；`applyJudgment` 丢弃分支补记录、过点时刻挪后；`selfUsed` 起念成功才加；新状态 `selfTry`（`STATE_KEYS`）；想念改 `missStage`，`missKey` 变成 `最后一条用户消息时刻:阶段`。
+- `rules.ts`：自发提示词去掉「不要为了发而发」，改为没有想说的写 `skip` 原因；`selfBrief` 的想念文案区分最后一句是谁发的；`parseJudgeJson` 多 `skip`。
+- 测试：`engine.test.ts` 新增 6 项（备用通道、分段重试与通知、被否不占额度与落库、判断失败不报错、过点挪后、想念分阶段）；`engine.test.ts` + `rules.test.ts` 47 项、`api` / `wake` / `jobs` 37 项通过，`tsc` 通过。未跑全量测试，未提交。
+- 部署：当晚同步到 `/opt/float-companion/companion-server` 并重启（旧 `src` 备份在 `/opt/float-companion/backups/20261115-pre-p0`，库备份在 `/var/lib/float-companion/backup-20261115-pre-p0`）。上线第一轮发现聊天模型在同一个 clewdr 通道上同样 503（整个通道没有可用账号），备用通道救不回来——这是通道本身的问题，代码侧无解。顺手修了一处：判断没调通 / 非 JSON 时把想念阶段、余韵骰子的标记还原，不白白用掉；线上两个角色被用掉的阶段已清回。
+
+## 2026-11-15：挂念后端审计第一批修复（本地，未部署、未提交）
+
+依据 `float/docs-draft/guanian-audit-2026-11-15.md` 第 1 节 12 条，只改 `companion-server`：
+
+- `engine.ts`：新增 `sendFailed`（退避重试 + 期限 + 约定失败通知）；`fireTimerLocked` 的收尾拆成 `done` / `shelve` / `drop`，没发成的念头置 `act: false`；作罢正则放宽到任意位置；`presend` 前加「你正说着话」押后；没快照 / 空回复 / 思考块不完整改为抛错走重试；用量上限时约定每小时再看；`deliverDraft` 抽出 `notify()`，凭据恢复分支按 `draft.pushed` 与 `consumed_at` 补推；`reconcilePromises` 加同版本只挂一次；`gates` 的约定快车道限次、上次失败等正常间隔、「到日子了」受由头冷却；`judgeTurn` 跨天接 `judgedChatAt`、分量不够不记 `missKey`、调用失败退还 `recheckCount` 与 `selfTry.n`；`applyJudgment` 的 nudge 标记改为起念成功才记。
+- `llm.ts`：`parseModelJson` 多一个 `accept` 参数，剥 `<thinking>` / `<thought>`。`rules.ts`：新增 `parseJudgeText`，`parseJudgeJson` 改为它的不抛错包装。
+- `history.ts`：`unansweredRounds` 不数接话的那轮回复。`threads.ts`：`settleByWords` 接受 `{ text, at, prev }`，去掉无上下文的短句兜底。
+- `types.ts`：状态键 `ledgerFast`。`store.ts`：`GeneratedDraft.pushed`。
+- 测试：`engine.test.ts` 新增 8 项、改 2 项（租约那条跟着「你正说着话」多等一轮；凭据恢复那条断言补推），`rules.test.ts` 新增 3 项。`engine` + `rules` 58 项、`api` / `jobs` / `wake` / `store` / `handoff` 44 项通过，`tsc` 通过；没跑其余测试文件，没用真实模型或手机验证。
+- 没做的：发送这一步不加备用通道（判断用的模型替 TA 写聊天消息会走样）。
+- 同日追加（用户提出「过了点再发会很怪」）：重试窗口从固定 6 小时 / 一天改成设置项 `sendRetryMin`（默认 30）/ `promiseRetryMin`（默认 120），0 = 不重试，下一次重试会超出窗口就作罢；约定的通知改到作罢时推；事实核对新增晚发提示。`engine.test.ts` 相应改 1 项、加 1 项，`engine` + `rules` 59 项通过。挂念 App 还没有这两项的界面。
+- 再追加（用户要求前端可调、默认关闭）：后端默认改回 5 分钟一次、共 3 次；挂念 0.10.3 在「设置 → 云端」加高级组「发送失败后延长重试」（`sendRetry` 开关 + 两个时长，`defaults.js` / `settings.js` / `cloud/server.js`），关着时寄 0。已跑 `gua-nian:build`、`apps:build-dist`、`gua-nian:check`、`check:apps-dist`；`public/custom-apps/gua-nian.zip` 与 `index.json` 已更新到 0.10.3，随宿主发布后才会提示升级。未做手机实测。
+
+## 2026-11-15：挂念后端审计第二批 #13 #14 #16（本地，未部署、未提交）
+
+- `push.ts`：`PUSH_TIMEOUT_MS`、`bounded()` 硬超时、`options.timeout`；超时的订阅本批不再重试。`sendPushMessages` 多一个 `timeoutMs` 参数。
+- 新增 `health.ts`：`healthReport` / `PushWatch` / `tickAge`；`server.ts` 的 `/health` 与 `/status` 接上，`main.ts` 包一层 `engine.push` 记推送结果并加看门狗。
+- `auth.ts`：`Auth.isAdmin`。`store.ts`：`Store.backup(label)`（`vacuum into`）。`server.ts` / `cli.ts`：覆盖迁入的三道限制。
+- 测试：`api.test.ts` +2、`push.test.ts` +1、`store.test.ts` +1；`api` / `push` / `store` 27 项、`engine` + `rules` 59 项通过，`tsc` 通过。看门狗退出和 systemd 重启没有实际演练。#15 用户决定暂不处理。
+
+## 2026-11-15：挂念后端审计第二批 #17–#24 + 挂念 0.10.4 后端体检（本地，未部署、未提交）
+
+依据 `float/docs-draft/guanian-audit-2026-11-15.md` 第 2 节，#15 仍按用户要求不动。
+
+- #17 `llm.ts`：`usageBudget` 读失败抛 `UsageUnknown`，新增 `usageTz()`；`engine.ts` 加 `usageBlock()`（生成、判断的闸门），发送处读不到押 5 分钟记 `hold`；`shortcut-resume.ts` 主动消息读不到转 `DeliveryPaused`，回复兜底照常；`jobs.ts` 记账时区走 `usageTz`。
+- #18 `generation-lease.ts`：续租异常不置 `lost`，按 `HELD_MS`（8 分钟）判断还握不握着锁；多一个 `now` 参数给测试用。
+- #19 `engine.ts`：`generateDay` 拆成 `prepareDay` / `writeDay` / `applyDay`，失败通知抽成 `genFailedNotice`；`EngineDeps.background`。`runner.ts`：构造函数第三个参数 `{ detachGeneration }`、`busy`、`settled()`。`main.ts` 打开它。判断和成文没有挪出锁。
+- #20 `main.ts`：`stop()` 两段式退出、`AbortController` 接到 `fetchModel`；`EngineDeps.stopping`，`engine.ts` 在一轮的几个边界和三处失败分支里看它。
+- #21 `templates.ts`：只有 `chat` 模板改 `sessionId`；`engine.ts` 发送前核对聊天模板的会话。
+- #22 `auth.ts`：`Auth.verify()` 返回 `ok` / `denied` / `unavailable`，`supabaseKeyCheck` 对 408 / 429 / 5xx 抛错；`server.ts` 对 `unavailable` 回 503。
+- #23 `history.ts`：`cleanMirrors` / `cleanOutputs`，坏的整轮快照跳过，`CloudHistory.skipped`。
+- #24 新增 `net-guard.ts`（`isPrivateAddress` / `assertPublicUrl` / `guardedFetch`）；`config.ts` 读 `COMPANION_ALLOW_HOSTS`；`main.ts` 的模型和 MCP 出口、`cli.ts` 的模型出口都走它。上线前核对过：线上三份模板的模型地址是公网 https 域名，解析到公网地址，不会被拦。
+- 体检进 App：`api.ts` `AppDeps.health`、`appState` 多 `health`；`server.ts` 接上。挂念 0.10.4：`cloud/server.js` 存 `S._server.health`，`renderServerDiag` 最前面加「后端体检」，`SERVER_HEALTH` 把代号翻成人话。已跑 `gua-nian:build`、`apps:build-dist`、`gua-nian:check`、`check:apps-dist`、`check:sdk`；zip 存到 `float/releases/gua-nian/gua-nian-0.10.4.zip`。
+- 测试：新增 `test/resilience.test.ts` 6 项，`engine.test.ts` +4，`templates.test.ts` +1，`api.test.ts` +1。`engine` 49、`rules` 14、`api` 20、`resilience` 6、`templates` 3、`jobs` 12、`wake` 8、`shortcut-resume` 6、`generation-lease` 3、`handoff` 3、`push` 3、`store` 5、`delivery` 3 项通过，`tsc` 通过。没跑的测试文件：`chat-state`、`feedback-import`、`handoff-import`、`reply-timing`、`weixin`。
+- 没验证的：优雅退出和看门狗没有在真实进程上演练（只测了引擎里「正在退出」时的分支）；出站地址检查的单测用的是假解析器，真实 DNS 只手动核对过三个地址（线上模型域名放行，`localhost` 和 `host.docker.internal` 拦下）；App 的「后端体检」栏没有在手机或浏览器里看过。
+- 部署（2026-11-16 北京时间早上，用户说「部署」）：审计第一批、第二批的后端改动一起同步到 `/opt/float-companion/companion-server` 并重启。旧 `src` 备份在 `/opt/float-companion/backups/20261115-pre-batch2`，库备份在 `/var/lib/float-companion/companion.db.pre-batch2-20261115.bak`。部署前核对：库里没有待发或正在生成的念头，所有出站地址都是公网域名。重启后 `/health` 回 200，`problems` 只有 `gen_failed`（模型通道仍然 503，和部署前一样），本机和站点反代两个入口都通。又重启了一次演练优雅退出：日志有「收到 SIGTERM，收尾后退出」，进程正常退出；当时没有正在跑的模型调用，所以「等这一轮跑完 / 打断模型调用」那段没有演练到。仓库改动仍未提交，挂念 0.10.4 没发布，手机上的「后端体检」栏要等 App 更新才看得到。

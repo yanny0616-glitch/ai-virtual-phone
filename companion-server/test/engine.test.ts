@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { tickCharacter, type EngineDeps, type Mode } from "../src/engine.ts";
 import type { PushMessage } from "../src/push.ts";
+import { Runner } from "../src/runner.ts";
 import { Store } from "../src/store.ts";
 
 const CID = "char_test";
@@ -192,6 +193,8 @@ test("POST 已落库但响应丢失：精确读回凭据，不再次生成或投
     env.setNow("2026-09-16T16:07"); await env.tick();
     assert.equal(writes, 1);
     assert.equal(env.modelCalls.filter(x => !x.includes("后台判断任务")).length, generated);
+    assert.equal(env.pushes.length, 1, "正文其实已经落库、通知还没推过：恢复时补推一次");
+    assert.equal(env.pushes[0][0].type, "chat_outbox");
     assert.equal(env.store.getTimer(item.wakeId)!.status, "done");
     assert.equal(env.store.getDay(CID, "2026-09-16")!.items[0].generatedAt, Date.parse(written.created_at));
     assert.equal(env.store.pendingFeedback(CID)[0].outboxId, written.id);
@@ -438,7 +441,12 @@ test("旧云端占用会话时延期不计失败；取得租约后模型使用�
     assert.doesNotMatch(e.store.getTimer(id)!.note, /tries:/);
     assert.equal(e.modelCalls.filter(x => !x.includes("后台判断任务")).length, 0);
     busy = false;
+    // 取得租约后读到你 16:01 刚说的话：你正说着，先不插话，押到 16:16
     e.setNow("2026-09-16T16:03"); await e.tick();
+    assert.equal(e.modelCalls.filter(x => !x.includes("后台判断任务")).length, 0);
+    assert.equal(e.store.getTimer(id)!.fireAt, at("2026-09-16T16:16"));
+    assert.equal(e.store.getTimer(id)!.status, "pending");
+    e.setNow("2026-09-16T16:17"); await e.tick();
     assert.match(e.modelCalls.find(x => !x.includes("后台判断任务"))!, /刚刚改成明天去公园/);
   } finally { e.store.close(); }
 });
@@ -830,5 +838,424 @@ test("微信已送但回执丢失、5xx 或重启时 sending：保留未知状�
       assert.equal(env.store.getDraft(id)!.weixinState, "unknown");
       assert.equal(env.store.getTimer(id)!.status, "failed");
     } finally { env.store.close(); }
+  }
+});
+
+// ─── 止血（2026-11）：备用通道、分段重试、原话落库、由头降权、想念分阶段
+
+const dayRow = (date: string) => ({
+  characterId: CID, date, items: [], selfUsed: 0, recheckCount: 0, judgedAt: 0, judgedChatAt: at("2026-09-16T12:01"),
+  genTries: 0, genError: "", genLog: [], source: "server", updatedAt: 0,
+  day: { tz: 480, mood: "平静", energy: 70, wake: "08:00", bed: "23:30", schedule: [], conds: [] },
+});
+const deadSnapshot = (env: ReturnType<typeof setup>, purpose: "daily" | "judge") => {
+  const chat = env.store.getSnapshot(CID, "chat")!;
+  env.store.saveSnapshot({ ...chat, purpose, request: { ...chat.request, url: "https://dead.example/v1/messages", body: { ...chat.request.body, model: "dead" } } });
+};
+const reply = (text: string) => Response.json({ content: [{ type: "text", text }], usage: { input_tokens: 1, output_tokens: 1 } });
+
+test("生成用的通道调不通：换聊天快照的地址和模型再生成一次", async () => {
+  const env = setup("live", "2026-09-17T08:00");
+  try {
+    deadSnapshot(env, "daily");
+    const seen: { url: string; model: string }[] = [];
+    env.deps.fetchModel = async (url, init) => {
+      const body = String(init.body);
+      if (body.includes("后台判断任务")) return reply('{"decisions":[],"extra":[]}');
+      seen.push({ url: String(url), model: JSON.parse(body).model });
+      if (String(url).includes("dead.example")) return new Response('{"error":"no_cookie_available"}', { status: 503 });
+      return reply(JSON.stringify({ schedule: [{ time: "16:00", title: "工作" }] }));
+    };
+    await env.tick();
+    const row = env.store.getDay(CID, "2026-09-17")!;
+    assert.equal(row.genError, "");
+    assert.equal(row.day!.schedule!.length, 1);
+    assert.deepEqual(seen, [{ url: "https://dead.example/v1/messages", model: "dead" }, { url: "https://model.example/v1/messages", model: "m" }]);
+    assert.match(row.genLog.join("\n"), /换用聊天的模型/);
+    assert.equal(env.pushes.length, 0);
+  } finally { env.store.close(); }
+});
+
+test("一直生成不出来：一天分三段重试、只推一次通知，起念按昨天的作息照常", async () => {
+  const env = setup("live", "2026-09-17T08:00");
+  try {
+    let judged = 0;
+    env.deps.fetchModel = async (_u, init) => {
+      if (String(init.body).includes("后台判断任务")) { judged += 1; return reply('{"decisions":[],"extra":[],"skip":"还早"}'); }
+      return new Response("挂了", { status: 503 });
+    };
+    for (const hm of ["08:00", "08:11", "08:22", "08:33", "09:40"]) { env.setNow("2026-09-17T" + hm); await env.tick(); }
+    assert.equal(env.store.getDay(CID, "2026-09-17")!.genTries, 3);
+    const notices = env.pushes.flat().filter(m => m.type === "guanian_gen_failed");
+    assert.equal(notices.length, 1);
+    assert.match(notices[0].title, /赵兖今天的日程没生成出来/);
+    assert.ok(judged >= 1, "没有今天的生活面也该能自发起念");
+    env.setNow("2026-09-17T12:00"); await env.tick();
+    assert.equal(env.store.getDay(CID, "2026-09-17")!.genTries, 4);
+    assert.equal(env.pushes.flat().filter(m => m.type === "guanian_gen_failed").length, 1);
+  } finally { env.store.close(); }
+});
+
+test("自发起念被否：不占自发额度，原话和原因落库，同一种由头歇一阵", async () => {
+  const env = setup("live", "2026-09-16T15:00");
+  try {
+    env.deps.fetchModel = async (_u, init) => { env.modelCalls.push(String(init.body)); return reply('{"decisions":[],"extra":[],"skip":"TA在上班，不打扰"}'); };
+    await env.tick();
+    assert.match(env.modelCalls[0], /并在 skip 里用一句话写清/);
+    assert.equal(env.store.getDay(CID, "2026-09-16")!.selfUsed, 0);
+    const judge = env.store.listDecisions(CID, 10).find(d => d.kind === "judge")!;
+    assert.match(judge.note, /想了想，没找你（TA在上班，不打扰）/);
+    assert.equal(judge.data!.selfKind, "quiet");
+    assert.match(String(judge.data!.raw), /TA在上班/);
+    assert.equal((env.store.getCharacter(CID)!.state as any).selfTry.skips.quiet.n, 1);
+    env.setNow("2026-09-16T16:10"); await env.tick();
+    assert.equal(env.modelCalls.length, 1);
+    assert.match(env.store.lastDecision(CID, "gate")!.note, /刚被TA自己否过/);
+    // 歇够 3 小时再问
+    env.setNow("2026-09-16T18:05"); await env.tick();
+    assert.equal(env.modelCalls.length, 2);
+  } finally { env.store.close(); }
+});
+
+test("判断模型没调通或回的不是 JSON：记一笔带原话的决定，不让这一轮报错", async () => {
+  for (const bad of ["http", "text"]) {
+    const env = setup("live", "2026-09-16T15:00");
+    try {
+      env.deps.fetchModel = async () => bad === "http" ? new Response("挂了", { status: 503 }) : reply("我想想啊，还是不发了吧");
+      const trace = await env.tick();
+      assert.equal(trace.error, undefined);
+      const judge = env.store.listDecisions(CID, 10).find(d => d.kind === "judge")!;
+      assert.match(judge.note, bad === "http" ? /模型没调通/ : /不是 JSON/);
+      if (bad === "text") assert.match(String(judge.data!.raw), /还是不发了吧/);
+      // 断联 4 天的想念阶段不因为没判成而用掉
+      env.store.saveDay(dayRow("2026-09-20")); env.setNow("2026-09-20T15:00"); await env.tick();
+      assert.equal(env.store.getCharacter(CID)!.state.missKey, undefined);
+    } finally { env.store.close(); }
+  }
+});
+
+test("自发起念写的时刻已经过了：挪到 3 分钟后，不整条丢掉", async () => {
+  const env = setup("live", "2026-09-16T15:00");
+  try {
+    env.deps.fetchModel = async () => reply('{"decisions":[],"extra":[{"time":"14:50","matterId":"new:1","about":"想你","intent":"问问下午忙不忙","why":"好久没说话"}]}');
+    await env.tick();
+    const row = env.store.getDay(CID, "2026-09-16")!;
+    assert.equal(row.items.length, 1);
+    assert.equal(row.items[0].time, "15:03");
+    assert.equal(row.selfUsed, 1);
+  } finally { env.store.close(); }
+});
+
+test("想念分阶段：每个阶段问一次模型，阶段没变不重复问，最后一句是自己发的也能想念", async () => {
+  const env = setup("live", "2026-09-20T15:00");
+  try {
+    for (const d of ["2026-09-20", "2026-09-21", "2026-09-23"]) env.store.saveDay(dayRow(d));
+    const prompts: string[] = [];
+    env.deps.fetchModel = async (_u, init) => { prompts.push(String(init.body)); return reply('{"decisions":[],"extra":[],"skip":"再等等"}'); };
+    await env.tick();
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /已经 4 天没联系了，最后一句是你发的/);
+    assert.equal(env.store.getCharacter(CID)!.state.missKey, `${at("2026-09-16T12:00")}:1`);
+    env.setNow("2026-09-21T15:00"); await env.tick();
+    assert.equal(prompts.length, 1);
+    assert.match(env.store.lastDecision(CID, "gate")!.note, /这一阶段的想念已经问过了/);
+    env.setNow("2026-09-23T15:00"); await env.tick();
+    assert.equal(prompts.length, 2);
+    assert.equal(env.store.getCharacter(CID)!.state.missKey, `${at("2026-09-16T12:00")}:2`);
+  } finally { env.store.close(); }
+});
+
+// ─── 审计第一批（2026-11）：发错、发不出、白耗额度
+
+function withMessages(env: ReturnType<typeof setup>, list: { id: string; role: string; content: string; message_at: string }[]) {
+  const rest = env.deps.rest;
+  env.deps.rest = async (p, init) => p.startsWith("push_chat_mirror?") && p.includes("media_type.is.null,and(") ? Response.json(list) : rest(p, init);
+  return list;
+}
+const msg = (id: string, role: string, local: string, content: string) => ({ id, role, content, message_at: new Date(at(local)).toISOString() });
+const EMPTY_JUDGE = '{"decisions":[],"extra":[],"keep":[],"settle":[],"skip":"再等等"}';
+
+test("作罢标记后面多带了字：照样作罢不发；念头同时标成作罢，让出当天额度", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    await e.tick();
+    withChatReply(e, "[挂念作罢：聊天已提过]。\n\n[内心]其实还是有点想问");
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    assert.equal(e.pushes.length, 0);
+    assert.equal(e.calls.filter(c => c.path === "push_outbox" && c.method === "POST").length, 0);
+    const item = e.store.getDay(CID, "2026-09-16")!.items[0];
+    assert.equal(item.act, false);
+    assert.match(item.why, /核对后作罢：聊天已提过/);
+    assert.equal(e.store.getTimer(item.wakeId)!.status, "done");
+  } finally { e.store.close(); }
+});
+
+test("到点发送一直失败：默认只在 10 分钟内再试两次，过了就作罢并让出额度；打开延长重试才按设的窗口拉长", async () => {
+  // [设置的窗口, 每次失败的时刻 → 下次再试的时刻（空 = 作罢）]
+  const cases: [number | undefined, [string, string][]][] = [
+    [undefined, [["16:01", "16:06"], ["16:07", "16:12"], ["16:13", ""]]],
+    [0, [["16:01", "16:06"], ["16:07", "16:12"], ["16:13", ""]]],
+    [30, [["16:01", "16:06"], ["16:07", "16:17"], ["16:18", ""]]],
+    [120, [["16:01", "16:06"], ["16:07", "16:17"], ["16:18", "16:38"], ["16:39", "17:19"], ["17:20", ""]]],
+  ];
+  for (const [windowMin, steps] of cases) {
+    const e = setup("live", "2026-09-16T15:00");
+    try {
+      const c = e.store.getCharacter(CID)!;
+      c.settings.busyMaxHoldMin = 1_000_000;
+      if (windowMin !== undefined) c.settings.sendRetryMin = windowMin;
+      e.store.saveCharacter(c);
+      await e.tick();
+      const id = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+      const original = e.deps.fetchModel;
+      e.deps.fetchModel = async (u, init) => String(init.body).includes("后台判断任务") ? original(u, init) : new Response("挂了", { status: 503 });
+      for (const [now, next] of steps) {
+        e.setNow("2026-09-16T" + now); await e.tick();
+        const timer = e.store.getTimer(id)!, item = e.store.getDay(CID, "2026-09-16")!.items[0];
+        assert.equal(timer.status, next ? "pending" : "failed", `窗口 ${windowMin}，${now}`);
+        if (next) assert.equal(timer.fireAt, at("2026-09-16T" + next));
+        assert.equal(item.act, !!next);
+        if (!next) assert.match(item.why, /没发出去，作罢/);
+      }
+      assert.equal(e.pushes.length, 0);
+    } finally { e.store.close(); }
+  }
+});
+
+test("晚发的念头：事实核对里写明晚了多久，和时刻绑着的话让模型作罢", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    const c = e.store.getCharacter(CID)!; c.settings.busyMaxHoldMin = 1_000_000; e.store.saveCharacter(c);
+    await e.tick();
+    const bodies = withChatReply(e, "在忙吗");
+    e.setNow("2026-09-16T16:45"); await e.tick();
+    assert.match(bodies[0], /原定 16:00 发，现在已经晚了 45 分钟/);
+  } finally { e.store.close(); }
+});
+
+test("空回复不当场作废：五分钟后重试能发出去", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    await e.tick();
+    const id = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+    const original = e.deps.fetchModel;
+    let empty = true;
+    e.deps.fetchModel = async (u, init) => !empty || String(init.body).includes("后台判断任务") ? original(u, init) : reply("");
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    assert.equal(e.store.getTimer(id)!.status, "pending");
+    assert.match(e.store.getTimer(id)!.note, /tries:1 .*回复是空的/);
+    empty = false;
+    e.setNow("2026-09-16T16:07"); await e.tick();
+    assert.equal(e.store.getTimer(id)!.status, "done");
+    assert.equal(e.pushes.length, 1);
+  } finally { e.store.close(); }
+});
+
+test("约定快车道：一天头两次 1 分钟就再判，之后至少隔 10 分钟", async () => {
+  const env = setup("live", "2026-09-16T15:00");
+  try {
+    const list = withMessages(env, [msg("u1", "user", "2026-09-16T14:40", "明天八点记得叫我")]);
+    let n = 0;
+    env.deps.fetchModel = async () => { n += 1; return reply(EMPTY_JUDGE); };
+    await env.tick();
+    assert.equal(n, 1);
+    for (const [said, now, want] of [["15:00", "15:01", 2], ["15:01", "15:02", 3], ["15:02", "15:03", 3], ["15:03", "15:13", 4]] as const) {
+      list.push(msg("u" + now, "user", "2026-09-16T" + said, "那周五一起去看电影吧"));
+      env.setNow("2026-09-16T" + now); await env.tick();
+      assert.equal(n, want, `${now} 这一轮`);
+    }
+    assert.deepEqual(env.store.getCharacter(CID)!.state.ledgerFast, { date: "2026-09-16", n: 3 });
+  } finally { env.store.close(); }
+});
+
+test("判断没判成：同一批约定线索不每分钟重判；模型根本没调通不占当天判断次数", async () => {
+  for (const bad of ["text", "http"]) {
+    const env = setup("live", "2026-09-16T15:00");
+    try {
+      withMessages(env, [msg("u1", "user", "2026-09-16T14:40", "明天八点记得叫我")]);
+      let n = 0;
+      env.deps.fetchModel = async () => { n += 1; return bad === "http" ? new Response("挂了", { status: 503 }) : reply("让我想想"); };
+      await env.tick();
+      env.setNow("2026-09-16T15:01"); await env.tick();
+      env.setNow("2026-09-16T15:10"); await env.tick();
+      assert.equal(n, 1, "正常间隔没到，不再判");
+      assert.equal(env.store.getDay(CID, "2026-09-16")!.recheckCount, bad === "http" ? 0 : 1);
+      env.setNow("2026-09-16T15:26"); await env.tick();
+      assert.equal(n, 2);
+    } finally { env.store.close(); }
+  }
+});
+
+test("跨零点：从昨天判到的地方接着看，不把零点前的聊天再判一遍", async () => {
+  const env = setup("live", "2026-09-17T00:05");
+  try {
+    withMessages(env, [msg("u1", "user", "2026-09-16T21:00", "今天好累"), msg("a1", "assistant", "2026-09-16T21:01", "早点睡")]);
+    const d = env.store.getDay(CID, "2026-09-16")!; d.judgedChatAt = at("2026-09-16T21:00"); env.store.saveDay(d);
+    await env.tick();
+    assert.equal(env.modelCalls.length, 0);
+    assert.equal(env.store.getDay(CID, "2026-09-17")!.judgedChatAt, at("2026-09-16T21:00"));
+  } finally { env.store.close(); }
+});
+
+test("手动撤掉的约定念头，下一轮不会被重新挂回去", async () => {
+  const env = setup("live", "2026-09-16T15:00");
+  try {
+    const c = env.store.getCharacter(CID)!;
+    c.settings.threadsOn = 1;
+    c.state.threads = [{ id: "p1", kind: "promise", subject: "character", text: "叫你起床", due: at("2026-09-16T18:00"), revision: 1, status: "pending", since: at("2026-09-16T12:00"), at: at("2026-09-16T12:00") }];
+    env.store.saveCharacter(c);
+    await env.tick();
+    const row = env.store.getDay(CID, "2026-09-16")!;
+    const item = row.items.find(i => i.kind === "promise")!;
+    assert.equal(env.store.getTimer(item.wakeId)!.status, "pending");
+    // 和 App 的「撤掉」做同样的事
+    item.act = false; item.why = "你手动撤掉了"; env.store.saveDay(row);
+    env.store.updateTimer(item.wakeId, { status: "cancelled", note: "你手动撤掉了" });
+    env.setNow("2026-09-16T15:01"); await env.tick();
+    assert.equal(env.store.getTimer(item.wakeId)!.status, "cancelled");
+    assert.equal(env.store.getDay(CID, "2026-09-16")!.items.filter(i => i.kind === "promise").length, 1);
+  } finally { env.store.close(); }
+});
+
+test("没真正问到模型不算问过：分量不够被拦不占想念阶段；「到日子了」被婉拒歇一阵再问", async () => {
+  const miss = setup("live", "2026-09-20T15:00");
+  try {
+    const c = miss.store.getCharacter(CID)!; c.settings.quota = 1; miss.store.saveCharacter(c);
+    miss.store.saveDay(dayRow("2026-09-20"));
+    await miss.tick();
+    assert.equal(miss.modelCalls.length, 0);
+    assert.match(miss.store.lastDecision(CID, "gate")!.note, /「想念」这种由头分量不够/);
+    assert.equal(miss.store.getCharacter(CID)!.state.missKey, undefined);
+  } finally { miss.store.close(); }
+
+  const env = setup("live", "2026-09-16T10:00");
+  try {
+    const c = env.store.getCharacter(CID)!;
+    c.settings.threadsOn = 1;
+    c.state.threads = [{ id: "d1", kind: "date", text: "你的生日", due: at("2026-09-16T12:00"), since: at("2026-09-10T12:00"), at: at("2026-09-10T12:00") }];
+    env.store.saveCharacter(c);
+    withMessages(env, [msg("u1", "user", "2026-09-15T20:00", "晚安"), msg("a1", "assistant", "2026-09-15T20:01", "晚安")]);
+    const d = env.store.getDay(CID, "2026-09-16")!; d.judgedChatAt = at("2026-09-15T20:01"); env.store.saveDay(d);
+    env.deps.fetchModel = async () => reply('{"decisions":[],"extra":[],"skip":"太早了，晚点再说"}');
+    await env.tick();
+    const kinds = () => env.store.listDecisions(CID, 20).filter(x => x.kind === "judge").map(x => x.data?.selfKind);
+    assert.deepEqual(kinds(), ["thread"]);
+    assert.doesNotMatch(String(env.store.getCharacter(CID)!.state.threads![0].nudge || ""), /day:/);
+    env.setNow("2026-09-16T13:05"); await env.tick();
+    assert.equal(kinds().filter(k => k === "thread").length, 2, "歇够 3 小时，今年这个生日还会再问");
+  } finally { env.store.close(); }
+});
+
+test("用量上限读不到：不当成没上限。判断这轮不调模型；到点的消息押 5 分钟，不算一次发送失败", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    const rest = e.deps.rest;
+    let down = true;
+    e.deps.rest = async (p, init) => down && p.startsWith("push_api_limits?") ? new Response("down", { status: 503 }) : rest(p, init);
+    const trace = await e.tick();
+    assert.equal(trace.error, undefined);
+    assert.equal(e.modelCalls.length, 0);
+    down = false;
+    e.setNow("2026-09-16T15:01"); await e.tick();
+    assert.equal(e.modelCalls.length, 1);
+    const id = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+    down = true;
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    assert.equal(e.modelCalls.length, 1);
+    const held = e.store.getTimer(id)!;
+    assert.equal(held.status, "pending");
+    assert.equal(held.fireAt, at("2026-09-16T16:06"));
+    assert.doesNotMatch(held.note, /tries:/);
+    assert.match(e.store.listDecisions(CID, 5).find(d => d.kind === "hold")!.note, /读不到用量上限/);
+    down = false;
+    e.setNow("2026-09-16T16:07"); await e.tick();
+    assert.equal(e.store.getTimer(id)!.status, "done");
+    assert.equal(e.pushes.length, 1);
+  } finally { e.store.close(); }
+});
+
+test("重启打断的模型调用不记成失败：判断不留「模型没调通」，到点的消息原样放回待发，重启后照常发", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    const original = e.deps.fetchModel;
+    let stopping = false, cut = true;
+    e.deps.stopping = () => stopping;
+    e.deps.fetchModel = async (u, init) => { if (!cut) return original(u, init); stopping = true; throw new Error("后端正在重启"); };
+    await e.tick();
+    assert.equal(e.store.listDecisions(CID, 10).some(d => d.kind === "judge"), false);
+    assert.equal(e.store.getDay(CID, "2026-09-16")!.recheckCount, 0);
+    stopping = false; cut = false;
+    e.setNow("2026-09-16T15:40"); await e.tick();
+    const id = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+    cut = true;
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    const timer = e.store.getTimer(id)!;
+    assert.equal(timer.status, "pending");
+    assert.doesNotMatch(timer.note, /tries:/);
+    assert.equal(e.store.listDecisions(CID, 10).some(d => d.kind === "error"), false);
+    // 退出途中不再开新的一轮判断和发送
+    const before = e.calls.length;
+    await e.tick();
+    assert.equal(e.store.getTimer(id)!.status, "pending");
+    assert.ok(e.calls.length - before < 6);
+    stopping = false; cut = false;
+    e.setNow("2026-09-16T16:02"); await e.tick();
+    assert.equal(e.store.getTimer(id)!.status, "done");
+    assert.equal(e.pushes.length, 1);
+  } finally { e.store.close(); }
+});
+
+test("角色切了会话、聊天模板还是旧会话的：不拿旧会话的记录成文；新会话的模板到了才发", async () => {
+  const e = setup("live", "2026-09-16T15:00");
+  try {
+    await e.tick();
+    const id = e.store.getDay(CID, "2026-09-16")!.items[0].wakeId;
+    const c = e.store.getCharacter(CID)!;
+    c.sessionId = "sess2"; e.store.saveCharacter(c);
+    e.setNow("2026-09-16T16:01"); await e.tick();
+    assert.equal(e.modelCalls.filter(b => !b.includes("后台判断任务")).length, 0);
+    assert.match(e.store.getTimer(id)!.note, /tries:1 .*另一个会话/);
+    const snap = e.store.getSnapshot(CID, "chat")!;
+    e.store.saveSnapshot({ ...snap, sessionId: "sess2", capturedAt: at("2026-09-16T16:02") });
+    e.setNow("2026-09-16T16:07"); await e.tick();
+    assert.equal(e.store.getTimer(id)!.status, "done");
+    assert.equal((e.calls.find(x => x.path === "push_outbox" && x.method === "POST")!.body as { session_id: string }[])[0].session_id, "sess2");
+  } finally { e.store.close(); }
+});
+
+test("生成一天放到锁外：一轮不等它；期间不重复生成、别的照常跑；生成期间手动有了这一天就以手动的为准", async () => {
+  for (const manual of [false, true]) {
+    const e = setup("live", "2026-09-17T08:00");
+    try {
+      let release!: (r: Response) => void;
+      const pending = new Promise<Response>(resolve => { release = resolve; });
+      let genCalls = 0;
+      e.deps.fetchModel = async (_u, init) => {
+        if (String(init.body).includes("后台判断任务")) return reply(EMPTY_JUDGE);
+        genCalls++;
+        return pending;
+      };
+      const runner = new Runner(e.deps, "live", { detachGeneration: true });
+      const [first] = await runner.tick();
+      assert.match(first.steps.join("\n"), /开始生成（后台）/);
+      assert.equal(runner.running, false);
+      assert.equal(runner.busy, true);
+      assert.equal(e.store.getDay(CID, "2026-09-17")!.day, null);
+      assert.equal(e.store.getDay(CID, "2026-09-17")!.genTries, 1);
+      e.setNow("2026-09-17T08:01");
+      const [second] = await runner.tick();
+      assert.match(second.steps.join("\n"), /正在生成/);
+      // 手机这时候的改动不用等生成：锁是空的，马上做完
+      assert.equal(await runner.exclusive(() => "ok"), "ok");
+      if (manual) e.store.saveDay({ ...dayRow("2026-09-17"), source: "app" });
+      release(reply(JSON.stringify({ schedule: [{ time: "16:00", title: "工作" }] })));
+      await runner.settled();
+      assert.equal(genCalls, 1);
+      assert.equal(runner.busy, false);
+      const row = e.store.getDay(CID, "2026-09-17")!;
+      assert.equal(row.source, manual ? "app" : "server");
+      assert.equal(row.day!.schedule!.length, manual ? 0 : 1);
+      if (!manual) assert.match(e.store.listDecisions(CID, 5).find(d => d.kind === "gen")!.note, /生成今日生活面/);
+    } finally { e.store.close(); }
   }
 });

@@ -54,3 +54,24 @@ test("定时器到点查询与影子定时器清理", () => {
   assert.ok(store.getTimer("keep"));
   store.close();
 });
+
+test("backup：文件库旁边留一份能打开的完整副本，内存库不留", async () => {
+  const { mkdtempSync, rmSync, statSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "companion-backup-"));
+  try {
+    const store = new Store(join(dir, "companion.db"));
+    store.setMeta("mode", "live");
+    const target = store.backup("before-force-import");
+    store.close();
+    assert.match(target, /companion\.db\.before-force-import-\d{8}T\d{6}\.bak$/);
+    assert.equal(statSync(target).mode & 0o777, 0o600);
+    const copy = new Store(target);
+    assert.equal(copy.getMeta("mode"), "live");
+    copy.close();
+    const memory = new Store(":memory:");
+    assert.equal(memory.backup("x"), "");
+    memory.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

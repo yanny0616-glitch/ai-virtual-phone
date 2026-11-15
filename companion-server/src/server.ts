@@ -1,4 +1,4 @@
-// HTTP 接口。监听 127.0.0.1（和 Docker 网桥，给站点反代用）；除 /health 外都要令牌：
+// HTTP 接口。监听 127.0.0.1（和 Docker 网桥，给站点反代用）；除 /health 外都要令牌（/health 只给问题代号，见 health.ts）：
 // 运维令牌 COMPANION_API_TOKEN，或手机挂念里存的个人云 Secret key（见 auth.ts）。
 // 挂念 App 跑在沙箱 iframe 里（null origin），所以放开 CORS；鉴权只靠 Authorization 头，不用 cookie。
 //   GET  /status                            总览：模式、每个角色此刻、今天念头、最近判断
@@ -9,7 +9,7 @@
 //   POST /characters/:id/tick               立刻跑一轮
 //   PUT  /snapshots                         手机寄来的提示词快照
 //   POST /mode                              { mode: "shadow" | "live" }
-//   POST /import                            从个人云迁入 { force }
+//   POST /import                            从个人云迁入 { force }；force 只认运维令牌、真发模式下拒绝、做之前自动备份库
 //   GET  /diagnostics                       个人云聊天镜像最近几条
 //   POST /push/test                         测试推送
 //   /app/…                                  挂念直连、唤醒后端，见 api.ts
@@ -19,6 +19,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { handleApp, regenerate, saveSettings } from "./api.ts";
 import type { Auth } from "./auth.ts";
 import { collectDiagnostics } from "./diagnostics.ts";
+import { healthReport, type PushWatch } from "./health.ts";
 import type { EngineDeps } from "./engine.ts";
 import { importFromCloud } from "./importer.ts";
 import { sendPushToUser } from "./push.ts";
@@ -32,7 +33,11 @@ import type { WeixinService } from "./weixin.ts";
 
 const MAX_BODY = 4 * 1024 * 1024;
 
-export type ServerDeps = { rest: Rest; store: Store; userId: string; auth: Auth; startedAt: Date; runner: Runner; engine: EngineDeps; wake?: WakeService; weixin?: WeixinService };
+export type ServerDeps = {
+  rest: Rest; store: Store; userId: string; auth: Auth; startedAt: Date; runner: Runner; engine: EngineDeps; wake?: WakeService; weixin?: WeixinService;
+  /** 最近一次推送的结果（main.ts 包在 engine.push 外面记） */
+  pushWatch?: PushWatch;
+};
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -72,15 +77,28 @@ export function createApp(deps: ServerDeps): Server {
       } catch { return send(res, 400, { ok: false, error: "请求路径编码无效" }); }
       if (req.method === "OPTIONS") { res.writeHead(204, CORS); res.end(); return; }
       if (req.method === "GET" && path === "/health") {
-        return send(res, 200, { ok: true, startedAt: deps.startedAt.toISOString(), mode: deps.runner.mode, lastTickAt: deps.runner.lastTickAt });
+        // 不带鉴权：只报问题代号，不带角色名和报错原文；轮询卡住回 503，其余问题仍回 200 但 ok=false
+        const health = healthReport(deps.store, deps.runner, deps.pushWatch, deps.startedAt.getTime(), deps.engine.now());
+        return send(res, health.stale ? 503 : 200, {
+          ok: health.ok, startedAt: deps.startedAt.toISOString(), mode: deps.runner.mode, lastTickAt: deps.runner.lastTickAt,
+          running: deps.runner.running, problems: [...new Set(health.problems.map(p => p.code))],
+        });
       }
-      if (!await deps.auth.allow(req.headers.authorization)) return send(res, 401, { ok: false, error: "unauthorized" });
+      const verdict = await deps.auth.verify(req.headers.authorization);
+      if (verdict === "unavailable") return send(res, 503, { ok: false, error: "个人云暂时连不上，没法核对密钥，稍后再试" });
+      if (verdict !== "ok") return send(res, 401, { ok: false, error: "unauthorized" });
 
-      const appDeps = { store: deps.store, runner: deps.runner, engine: deps.engine, wake: deps.wake, weixin: deps.weixin };
+      const appDeps = {
+        store: deps.store, runner: deps.runner, engine: deps.engine, wake: deps.wake, weixin: deps.weixin,
+        health: (nowMs: number) => healthReport(deps.store, deps.runner, deps.pushWatch, deps.startedAt.getTime(), nowMs),
+      };
       const app = await handleApp(appDeps, req.method || "GET", path, url.searchParams, () => readJson(req));
       if (app) return send(res, app.status, app.body);
 
-      if (req.method === "GET" && path === "/status") return send(res, 200, { ok: true, ...overview(deps.store, deps.runner) });
+      if (req.method === "GET" && path === "/status") {
+        const health = healthReport(deps.store, deps.runner, deps.pushWatch, deps.startedAt.getTime(), deps.engine.now());
+        return send(res, 200, { ok: true, health: { ok: health.ok, problems: health.problems }, ...overview(deps.store, deps.runner) });
+      }
       if (req.method === "GET" && path === "/diagnostics") {
         return send(res, 200, { ok: true, ...await collectDiagnostics(deps.rest, deps.store, deps.userId) });
       }
@@ -92,7 +110,16 @@ export function createApp(deps: ServerDeps): Server {
       }
       if (req.method === "POST" && path === "/import") {
         const { force } = await readJson(req) as { force?: boolean };
-        return send(res, 200, { ok: true, ...await deps.runner.exclusive(() => importFromCloud(deps.rest, deps.store, deps.userId, { force: force === true })) });
+        let backup = "";
+        if (force === true) {
+          // 覆盖迁入会用云端旧数据盖掉后端的设置、账本、最近几天的日程，并删掉所有待发定时器：
+          // 只认运维令牌（手机上那把个人云密钥不行），真发模式下不做，做之前先留一份库
+          if (!deps.auth.isAdmin(req.headers.authorization)) return send(res, 403, { ok: false, error: "覆盖迁入只能用运维令牌或命令行，手机上的密钥不行" });
+          if (deps.runner.mode === "live") return send(res, 409, { ok: false, error: "真发模式下不能覆盖迁入：会用云端旧数据盖掉后端这段时间的账本和日程。确实要做，先切回影子模式，或用命令行 import --force --overwrite-live" });
+          backup = deps.store.backup("before-force-import");
+        }
+        const report = await deps.runner.exclusive(() => importFromCloud(deps.rest, deps.store, deps.userId, { force: force === true }));
+        return send(res, 200, { ok: true, ...report, ...(backup ? { backup } : {}) });
       }
       if (req.method === "PUT" && path === "/snapshots") {
         const body = await readJson(req);

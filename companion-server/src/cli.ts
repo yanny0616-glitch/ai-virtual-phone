@@ -13,6 +13,7 @@ import { collectDiagnostics } from "./diagnostics.ts";
 import { importFromCloud } from "./importer.ts";
 import { characterTz, tickCharacter } from "./engine.ts";
 import { hhmm, localDate } from "./life.ts";
+import { guardedFetch } from "./net-guard.ts";
 import { sendPushMessages, sendPushToUser } from "./push.ts";
 import { Store } from "./store.ts";
 import { characterStatus } from "./status.ts";
@@ -40,7 +41,17 @@ try {
       + (result.errors.length ? `，错误：${result.errors.join("; ")}` : ""));
     process.exitCode = result.sent > 0 ? 0 : 1;
   } else if (command === "import") {
-    const report = await importFromCloud(rest, store, userId, { force: arg === "--force" });
+    const force = arg === "--force";
+    if (force) {
+      // 覆盖迁入不可撤销：真发模式下要多说一句，做之前先留一份库
+      if (store.getMeta("mode") === "live" && !process.argv.includes("--overwrite-live")) {
+        console.error("现在是真发模式：覆盖迁入会用云端旧数据盖掉后端这段时间的设置、账本和最近几天的日程，并删掉所有待发定时器。\n确实要做，加上 --overwrite-live 再跑一次（会先自动备份数据库）。");
+        process.exit(1);
+      }
+      const backup = store.backup("before-force-import");
+      if (backup) console.log(`已备份数据库：${backup}`);
+    }
+    const report = await importFromCloud(rest, store, userId, { force });
     for (const c of report.characters) console.log(`${c.name || c.characterId}：${c.skipped || `日子 ${c.days.join(",") || "无"}，快照 ${c.snapshots.join("/") || "无"}，接手定时器 ${c.timers || 0}`}`);
   } else if (command === "mode" && (arg === "shadow" || arg === "live")) {
     store.setMeta("mode", arg);
@@ -62,7 +73,7 @@ try {
     store.addTimer({ id: wakeId, characterId: c.characterId, date, fireAt: nowMs, kind: "extra", status: "pending", note: "手动测试" });
     const mode = store.getMeta("mode") === "live" ? "live" : "shadow";
     const trace = await tickCharacter({
-      store, rest, userId, fetchModel: (url, init) => fetch(url, init), push: messages => sendPushMessages(rest, userId, messages),
+      store, rest, userId, fetchModel: guardedFetch(config.allowHosts), push: messages => sendPushMessages(rest, userId, messages),
       now: () => Date.now(), random: Math.random, log: line => console.log(line),
     }, mode, c.characterId);
     console.log(`[${mode}] ${c.name}` + (trace.error ? ` 出错：${trace.error}` : ""));
@@ -80,7 +91,7 @@ try {
       for (const d of s.decisions.slice(0, 10)) console.log(`  ${new Date(d.at + (s.tz ?? 0) * 60_000).toISOString().slice(5, 16)} [${d.mode}] ${d.kind}：${d.note}`);
     }
   } else {
-    console.error("用法：cli.ts diagnose | push-test | status | import [--force] | mode shadow|live | test-send <角色> <意图>");
+    console.error("用法：cli.ts diagnose | push-test | status | import [--force [--overwrite-live]] | mode shadow|live | test-send <角色> <意图>");
     process.exitCode = 2;
   }
 } finally {

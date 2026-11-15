@@ -27,12 +27,12 @@ import {
   busyUntil, forkDay, guanianAsleep, guanianNow, hhmm, hmMins, inWindow, localDate, nextLocalHM, roll, stateNote, waitingChance,
 } from "./life.ts";
 import {
-  buildChatRequest, buildTaskRequest, callModel, generateJson, parseModelJson, splitPreview, usageAdd, usageBudget, usageExceeded,
-  visibleResponse, type ModelFetch,
+  altChannel, buildChatRequest, buildTaskRequest, callModel, callModelWithFallback, generateJson, splitPreview, usageAdd,
+  usageBudget, usageExceeded, usageTz, UsageUnknown, visibleResponse, type FallbackResult, type ModelFetch,
 } from "./llm.ts";
 import type { PushMessage, PushResult } from "./push.ts";
 import {
-  buildJudgePrompt, cnum, feedbackWindowEnd, fbMod, gate, impulseValue, LEAD_MS, lifeRoll, momentsBudget, parseJudgeJson,
+  buildJudgePrompt, cnum, feedbackWindowEnd, fbMod, gate, impulseValue, LEAD_MS, lifeRoll, momentsBudget, parseJudgeText,
   SELF_KIND, valueFloor,
 } from "./rules.ts";
 import type { CharacterRow, DayRow, Snapshot, Store, TimerRow } from "./store.ts";
@@ -42,7 +42,7 @@ import {
 } from "./threads.ts";
 import { similarBlock, similarPromise } from "./similar.ts";
 import { fillChatTemplate } from "./templates.ts";
-import { STATE_KEYS, type Ctx, type GuanianDay, type PlanItem, type Thread } from "./types.ts";
+import { STATE_KEYS, type Ctx, type GuanianDay, type PlanItem, type SelfTry, type Thread } from "./types.ts";
 
 export type Mode = "shadow" | "live";
 
@@ -57,6 +57,13 @@ export type EngineDeps = {
   log: (line: string) => void;
   /** 手机发来的撤销 / 停用还在锁外排队：到发送边界先看一眼（Runner 提供） */
   halted?: (characterId: string, wakeId: string) => boolean;
+  /** 进程正在退出：不再开新的模型调用；被打断的调用不记成失败，留给重启后接着做 */
+  stopping?: () => boolean;
+  /**
+   * Runner 提供：把「生成一天」里读聊天、调模型的那段放到锁外跑，跑完再排进锁里落库。
+   * 不给就在这一轮里原地跑完（命令行、测试）。
+   */
+  background?: { busy: (characterId: string) => boolean; run: (characterId: string, work: () => Promise<() => void | Promise<void>>) => void };
   /** 个人云 functions / storage / realtime（快捷动作、微信、安卓壳通知）与管理员密钥；测试可不给 */
   cloud?: Cloud;
   cloudKey?: string;
@@ -145,6 +152,7 @@ export async function tickCharacter(deps: EngineDeps, mode: Mode, characterId: s
     let history: CloudHistory;
     try { history = await readHistory(deps.rest, deps.userId, c.sessionId, t.ctx); }
     catch (e) { trace.error = "聊天历史读取失败：" + errText(e); saveTurn(t); return trace; }
+    if (history.skipped) trace.steps.push(`聊天镜像里有 ${history.skipped} 条格式坏掉的记录，已跳过`);
     markGenerated(t, history);
     moments(t);
     await feedback(t);
@@ -152,19 +160,22 @@ export async function tickCharacter(deps: EngineDeps, mode: Mode, characterId: s
     await judgeTurn(t, history);
     saveTurn(t);
     for (const timer of deps.store.dueTimers(deps.now(), characterId)) {
+      if (deps.stopping?.()) break;
       try { await fireTimer(t, timer, history); }
       catch (e) {
+        if (deps.stopping?.()) {
+          // 重启打断的：不算一次发送失败，原样放回待发；已经成文的正文留着，重启后核对投递凭据再发
+          deps.store.updateTimer(timer.id, { status: "pending" });
+          saveTurn(t);
+          break;
+        }
         if (e instanceof DeliveryPaused) {
           deps.store.updateTimer(timer.id, { status: "pending", fireAt: deps.now() + 60_000 });
           decide(t, "hold", e.message, { wakeId: timer.id });
           saveTurn(t);
           continue;
         }
-        const tries = (Number(/tries:(\d+)/.exec(timer.note)?.[1]) || 0) + 1;
-        const note = `tries:${tries} ${errText(e)}`;
-        if (tries >= 3) deps.store.updateTimer(timer.id, { status: "failed", note });
-        else deps.store.updateTimer(timer.id, { status: "pending", fireAt: deps.now() + 5 * 60_000, note });
-        decide(t, "error", `到点发送失败（第 ${tries} 次）：${errText(e)}`, { wakeId: timer.id });
+        await sendFailed(t, timer, e);
       }
       saveTurn(t);
     }
@@ -174,6 +185,54 @@ export async function tickCharacter(deps: EngineDeps, mode: Mode, characterId: s
     saveTurn(t);
   }
   return trace;
+}
+
+/**
+ * 到点没发成。默认不延长重试：只在 10 分钟内每 5 分钟再试一次（共 3 次，为的是写好的消息不因为一次网络抖动丢掉）。
+ * 挂念里打开「发送失败后延长重试」才拉长：sendRetryMin（普通念头）/ promiseRetryMin（约定）分钟内，隔 5、10、20、40 分钟、之后每小时再试。
+ * 过了窗口不再发：一条说中午的话拖到傍晚才发，比不发更怪。作罢时把念头标掉、额度让出来。
+ */
+const BASE_RETRY_MIN = 10;
+async function sendFailed(t: Turn, timer: TimerRow, e: unknown): Promise<void> {
+  const { deps } = t;
+  const now = deps.now();
+  const tries = (Number(/tries:(\d+)/.exec(timer.note)?.[1]) || 0) + 1;
+  // 窗口从第一次失败算起（押到起床后才发的念头，不能按原定时刻一上来就判过期）；另按原定时刻封个顶，免得押后和失败交替着没完
+  const first = Number(/first:(\d+)/.exec(timer.note)?.[1]) || now;
+  const note = `tries:${tries} first:${first} ${errText(e)}`;
+  const found = findItem(t, timer.id);
+  const isPromise = timer.kind === "promise";
+  const windowMin = Math.min(1440, cnum(t.ctx, isPromise ? "promiseRetryMin" : "sendRetryMin", 0));
+  const extended = windowMin > BASE_RETRY_MIN;
+  const base = Number(found?.item.origFireAt) || Number(found?.item.fireAt) || timer.fireAt;
+  const deadline = Math.min(first + windowMin * 60_000, Math.max(base, 0) + (isPromise ? 48 : 24) * HOUR);
+  const waitMin = extended ? Math.min(60, 5 * 2 ** Math.min(tries - 1, 4)) : 5;
+  if (extended ? now + waitMin * 60_000 <= deadline : tries < 3) {
+    deps.store.updateTimer(timer.id, { status: "pending", fireAt: now + waitMin * 60_000, note });
+    decide(t, "error", `到点发送失败（第 ${tries} 次），${waitMin} 分钟后再试：${errText(e)}`, { wakeId: timer.id });
+    return;
+  }
+  deps.store.updateTimer(timer.id, { status: "failed", note });
+  if (found && !found.item.generatedAt) {
+    found.item.act = false; found.item.why = `没发出去，作罢：${errText(e)}`.slice(0, 200);
+    if (found.row !== t.row) deps.store.saveDay(found.row);
+  }
+  decide(t, "error", `到点发送失败（第 ${tries} 次），${extended ? `再试就超过 ${windowMin} 分钟的重试窗口了` : "没开延长重试"}，作罢：${errText(e)}`, { wakeId: timer.id });
+  // 约定没发出来：推一条通知，别让说好的事悄悄落空
+  if (isPromise && t.mode === "live") {
+    const name = String(snapshotFor(t, "chat")?.notify.title || t.c.name || "TA");
+    await deps.push([{
+      type: "guanian_send_failed", title: `${name}有件约好的事没发出来`,
+      body: `${errText(e).slice(0, 70)}。这次已经作罢，可以去挂念里看看模型是不是不通。`,
+      tag: `guanian-send-${timer.id}`, url: "/",
+    }]).catch(() => undefined);
+  }
+}
+
+/** 用量到顶或读不到上限时返回原因（读不到不当成没上限），都没事返回空串 */
+async function usageBlock(deps: EngineDeps, nowMs: number): Promise<string> {
+  try { return usageExceeded(await usageBudget(deps.rest, deps.userId, nowMs)); }
+  catch (e) { if (e instanceof UsageUnknown) return e.message; throw e; }
 }
 
 const SENTINEL_INTENT = "挂念后台复核模板，仅供后台调用，不生成聊天消息";
@@ -205,17 +264,68 @@ async function ensureDay(t: Turn): Promise<void> {
   if (row.day) return;
   if (Number(c.settings.genEnabled) === 0) { t.steps.push("自动生成关着"); return; }
   const at = String(c.settings.autoGenAt || "07:30");
-  if (hhmm(t.nowMs, t.tz) < at) return;
-  if (row.genTries >= 3) return;
+  const hm = hhmm(t.nowMs, t.tz);
+  if (hm < at) return;
+  // 一天分三段重试（到点、中午、傍晚各 3 次）：早上通道挂了，下午恢复还能补上今天
+  const segments = [at, "12:00", "18:00"].filter((m, i) => (i === 0 || m > at) && hm >= m).length;
+  if (row.genTries >= 3 * segments) return;
   if (row.genError && t.nowMs - (row.genAt || 0) < 10 * 60_000) return;
-  const over = usageExceeded(await usageBudget(deps.rest, deps.userId, t.nowMs));
+  const over = await usageBlock(deps, t.nowMs);
   if (over) { t.steps.push("生成一天：" + over); return; }
-  await generateDay(t);
+  if (deps.stopping?.()) return;
+  if (!deps.background) {
+    await generateDay(t);
+    await genFailedNotice(t);
+    return;
+  }
+  // 调模型最坏要十几分钟：放到锁外跑，这期间别的角色照常到点发，手机的改动也不用排队等
+  if (deps.background.busy(c.characterId)) { t.steps.push("今天的日程正在生成"); return; }
+  const prep = prepareDay(t);
+  deps.store.saveDay(row);
+  if (!prep) { await genFailedNotice(t); return; }
+  t.steps.push("今天的日程开始生成（后台）");
+  const { date, tz } = t;
+  deps.background.run(c.characterId, async () => {
+    const outcome = await writeDay(deps, prep);
+    // 下面这段由 Runner 排进锁里执行：重新读库，不碰这一轮早就存过的旧对象
+    return async () => {
+      const fresh = deps.store.getCharacter(c.characterId);
+      if (!fresh) return;
+      const freshRow = deps.store.getDay(c.characterId, date) || emptyDay(c.characterId, date);
+      // 生成期间你手动生成或改过这一天：以你的为准，这份不要了
+      if (freshRow.day) return;
+      const turn: Turn = { deps, mode: "live", c: fresh, ctx: buildCtx(fresh, freshRow, tz), tz, nowMs: deps.now(), date, row: freshRow, steps: [] };
+      applyDay(turn, prep, outcome);
+      await genFailedNotice(turn);
+    };
+  });
 }
 
-export async function generateDay(t: Turn): Promise<void> {
+/** 头一段 3 次都没成：推一条通知，一天只推一次（后面两段还会接着试） */
+async function genFailedNotice(t: Turn): Promise<void> {
   const { deps, c, row } = t;
-  const log = (line: string) => { row.genLog.push(line); };
+  const notifyKey = `gen-notify:${c.characterId}:${t.date}`;
+  if (!row.genError || row.genTries < 3 || deps.store.getMeta(notifyKey)) return;
+  deps.store.setMeta(notifyKey, String(t.nowMs));
+  const name = String(snapshotFor(t, "daily")?.notify.title || c.name || "TA");
+  await deps.push([{
+    type: "guanian_gen_failed", title: `${name}今天的日程没生成出来`,
+    body: `${row.genError.slice(0, 70)}。挂念先按昨天的作息顶着，中午和傍晚会再试；也可以去挂念里换个生成用的模型。`,
+    tag: `guanian-gen-${c.characterId}`, url: "/",
+  }]).catch(() => undefined);
+  decide(t, "gen", "连着 3 次没生成出来，已推通知；今天先按昨天的作息起念");
+}
+
+/** 生成一天分三段：备料（读库，同步）→ 写（读聊天、调模型，慢，可以在锁外）→ 落库（同步） */
+type DayPrep = {
+  characterId: string; sessionId: string; tz: number; nowMs: number; window: { onlineRounds?: unknown; offlineRounds?: unknown };
+  request: Snapshot["request"]; alt: Snapshot["request"] | null; instruction: string; cal: { items: FixedItem[]; routine: Routine }; log: string[];
+};
+type DayOutcome = { raw: unknown } | { error: unknown };
+
+/** 记一次尝试并备好料；没有提示词快照时记下原因、返回 null */
+function prepareDay(t: Turn): DayPrep | null {
+  const { deps, c, row } = t;
   row.genTries += 1;
   row.genAt = deps.now();
   row.genLog = [];
@@ -223,26 +333,45 @@ export async function generateDay(t: Turn): Promise<void> {
   if (!snap) {
     row.genError = "没有提示词快照，生成不了（打开一次 Float 聊天让手机寄一份）";
     decide(t, "gen", row.genError);
-    deps.store.saveDay(row);
-    return;
+    return null;
   }
+  const cal = fixedFor(t, t.date);
+  const past = recentDaysBrief(deps.store.listDays(c.characterId, 10).filter(r => r.day).map(r => ({ date: r.date, day: r.day!, characterId: c.characterId })), t.date);
+  const instruction = buildDayInstruction({
+    date: t.date, nowHM: hhmm(t.nowMs, t.tz), dayPrompt: c.settings.dayPrompt, forkLevel: c.settings.forkLevel,
+    past, existing: cal.items, threads: threadsEnabled(t.ctx) ? threadLines(t.ctx, t.nowMs, t.tz) : [], routine: cal.routine,
+  });
+  return {
+    characterId: c.characterId, sessionId: c.sessionId, tz: t.tz, nowMs: t.nowMs, window: { onlineRounds: t.ctx.onlineRounds, offlineRounds: t.ctx.offlineRounds },
+    request: snap.request, alt: deps.store.getSnapshot(c.characterId, "chat")?.request || null, instruction, cal, log: [],
+  };
+}
+
+async function writeDay(deps: EngineDeps, prep: DayPrep): Promise<DayOutcome> {
   try {
-    const cal = fixedFor(t, t.date);
     // 生成模板里只有一条任务占位，没有聊天：补上最新聊天，说定的安排、刚取消的事才进得了日程
-    const history = await readHistory(deps.rest, deps.userId, c.sessionId, t.ctx);
-    const chat = historyText(history, t.tz, 60, t.ctx);
-    const past = recentDaysBrief(deps.store.listDays(c.characterId, 10).filter(r => r.day).map(r => ({ date: r.date, day: r.day!, characterId: c.characterId })), t.date);
-    const instruction = buildDayInstruction({
-      date: t.date, nowHM: hhmm(t.nowMs, t.tz), dayPrompt: c.settings.dayPrompt, forkLevel: c.settings.forkLevel,
-      past, existing: cal.items, threads: threadsEnabled(t.ctx) ? threadLines(t.ctx, t.nowMs, t.tz) : [], routine: cal.routine,
-    });
-    const budget = await usageBudget(deps.rest, deps.userId, t.nowMs);
-    const facts = chat ? `\n[最新云端聊天事实，非用户消息；当前当地时间 ${new Date(t.nowMs + t.tz * 60_000).toISOString().slice(0, 16)}。说定的安排、取消的事以这里为准]\n${chat}` : "";
-    const raw = await generateJson(snap.request, instruction + facts, deps.fetchModel,
-      (kind, data) => usageAdd(deps.rest, deps.userId, budget.tz, "cloud-gen", kind, data), log);
-    const full = parseDayResult(raw, cal.items, c.settings, t.nowMs);
-    if (cal.routine.wake) full.wake = cal.routine.wake;
-    if (cal.routine.bed) full.bed = cal.routine.bed;
+    const history = await readHistory(deps.rest, deps.userId, prep.sessionId, prep.window);
+    const chat = historyText(history, prep.tz, 60, prep.window);
+    const budget = await usageBudget(deps.rest, deps.userId, prep.nowMs);
+    const facts = chat ? `\n[最新云端聊天事实，非用户消息；当前当地时间 ${new Date(prep.nowMs + prep.tz * 60_000).toISOString().slice(0, 16)}。说定的安排、取消的事以这里为准]\n${chat}` : "";
+    const raw = await generateJson(prep.request, prep.instruction + facts, deps.fetchModel,
+      (kind, data) => usageAdd(deps.rest, deps.userId, budget.tz, "cloud-gen", kind, data), line => { prep.log.push(line); }, prep.alt);
+    return { raw };
+  } catch (error) { return { error }; }
+}
+
+function applyDay(t: Turn, prep: DayPrep, outcome: DayOutcome): void {
+  const { deps, c, row } = t;
+  row.genLog = prep.log;
+  try {
+    if ("error" in outcome) {
+      // 重启打断的不算一次尝试：次数退回去，重启后接着生成
+      if (deps.stopping?.()) { row.genTries = Math.max(0, row.genTries - 1); row.genAt = 0; deps.store.saveDay(row); return; }
+      throw outcome.error;
+    }
+    const full = parseDayResult(outcome.raw, prep.cal.items, c.settings, prep.nowMs);
+    if (prep.cal.routine.wake) full.wake = prep.cal.routine.wake;
+    if (prep.cal.routine.bed) full.bed = prep.cal.routine.bed;
     row.day = { ...full, tz: t.tz, forkSeed: t.date + "|" + c.characterId, forkBurst: Number(c.settings.forkBurst) === 0 ? 0 : 1 };
     row.genError = "";
     row.source = "server";
@@ -254,6 +383,12 @@ export async function generateDay(t: Turn): Promise<void> {
     decide(t, "gen", `生成失败（第 ${row.genTries} 次）：${row.genError}`);
   }
   deps.store.saveDay(row);
+}
+
+export async function generateDay(t: Turn): Promise<void> {
+  const prep = prepareDay(t);
+  if (prep) applyDay(t, prep, await writeDay(t.deps, prep));
+  else t.deps.store.saveDay(t.row);
 }
 
 /** 那天的已定安排：宿主寄来的（今明两天）优先；更远的日子用存下的固定作息原件自己展开 */
@@ -354,7 +489,9 @@ function reconcilePromises(t: Turn): void {
   if (!threadsEnabled(t.ctx)) return; // 账本关着：已挂的照旧核对，不再挂新约定
   const allItems = rows.flatMap(r => r.items);
   const end = t.nowMs + 31 * 86_400_000;
-  for (const th of threads.filter(x => promiseNeedsTask(x, allItems, t.nowMs, end))) {
+  // 同一个约定、同一版只挂一次：手动撤掉的、到点作罢的都不再挂回去；改期或放回账本会升版本，那时才重新挂
+  const armed = (th: Thread) => allItems.some(w => w.kind === "promise" && w.from === th.id && Number(w.promiseRevision || 1) === Number(th.revision || 1));
+  for (const th of threads.filter(x => promiseNeedsTask(x, allItems, t.nowMs, end) && !armed(x))) {
     const due = Number(th.due);
     const fireAt = Math.max(due, t.nowMs + 15_000);
     const localDue = new Date(due + t.tz * 60_000).toISOString().slice(0, 16);
@@ -373,10 +510,24 @@ function reconcilePromises(t: Turn): void {
 
 // ─── 3–4. 门禁、由头、判断
 type GateResult = {
-  blocked: string; selfKind: string; selfReason: string; selfCurve: number;
+  blocked: string; selfKind: string; selfReason: string; selfCurve: number; selfMineLast?: boolean;
+  /** 这轮是借约定快车道提前判的 */
+  fast?: boolean;
   threadNudged: { id: string; mark: string; reason: string } | null; echoRows: { role: string; content: string; message_at: string }[];
   marks: Partial<Ctx>; wordSettled: WordSettle[];
 };
+
+function selfTryOf(ctx: Ctx, date: string): SelfTry {
+  const s = ctx.selfTry;
+  return s && s.date === date && s.skips && typeof s.skips === "object" ? s : { date, n: 0, at: 0, skips: {} };
+}
+
+/** 断联第几阶段：过了 missDays 算 1，再过 7、14、28 天各加一，之后每 14 天加一 */
+function missStage(absentDays: number, missDays: number): number {
+  let n = [missDays, ...[7, 14, 28].filter(m => m > missDays)].filter(m => absentDays >= m).length;
+  if (absentDays >= 42) n += Math.floor((absentDays - 28) / 14);
+  return n;
+}
 
 async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: boolean, canImpulse: boolean, pending: PlanItem[], litCount: number): Promise<GateResult> {
   const { deps, ctx, row, nowMs, c } = t;
@@ -385,8 +536,17 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
   const promiseUpdate = evidence.promiseUpdate as boolean;
   const block = (why: string): GateResult => { r.blocked = why; return r; };
 
-  if (Number.isFinite(lastJudge) && nowMs - lastJudge < (promiseUpdate ? Math.min(1, gate(ctx, "gateGapMin")) : gate(ctx, "gateGapMin")) * 60_000) return block("离上次判断还不够久");
-  const over = usageExceeded(await usageBudget(deps.rest, deps.userId, nowMs));
+  const gapMin = gate(ctx, "gateGapMin");
+  if (Number.isFinite(lastJudge) && nowMs - lastJudge < gapMin * 60_000) {
+    // 约定快车道：聊天里冒出约定线索可以不等正常间隔。一天头两次 1 分钟就判，之后至少隔 10 分钟；
+    // 上一次没判成（模型不通、回的不是 JSON）就老实等正常间隔，免得同一批消息每分钟重判、几分钟烧光当天次数
+    const fastUsed = ctx.ledgerFast?.date === t.date ? Number(ctx.ledgerFast.n) || 0 : 0;
+    const lastFailed = !!deps.store.lastDecision(c.characterId, "judge")?.data?.failed;
+    const fastGap = !promiseUpdate || lastFailed ? gapMin : Math.min(gapMin, fastUsed < 2 ? 1 : 10);
+    if (nowMs - lastJudge < fastGap * 60_000) return block("离上次判断还不够久");
+    r.fast = true;
+  }
+  const over = await usageBlock(deps, nowMs);
   if (over) return block(over);
   if (row.recheckCount >= gate(ctx, "gateDailyCap")) return block("今天的判断次数用完了");
   if (!canJudge && !canImpulse && !promiseUpdate) {
@@ -396,13 +556,31 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
   // 没新消息就没有新信息；用户一句「好了 / 算了」直接了结账本
   const freshRows = evidence.updates as { role: string; content?: string; message_at: string }[];
   if (threadsEnabled(ctx) && Array.isArray(ctx.threads) && freshRows.length) {
-    r.wordSettled = settleByWords(ctx.threads, freshRows.filter(m => m.role === "user").map(m => String(m.content || "")), nowMs);
+    const said = freshRows.filter(m => m.role === "user").map(m => {
+      const at = Date.parse(m.message_at);
+      const i = history.messages.indexOf(m as CloudHistory["messages"][number]);
+      const before = i > 0 ? history.messages[i - 1] : null;
+      const prev = before && before.role !== "user" && at - Date.parse(before.message_at) <= 30 * 60_000 ? String(before.content || "") : "";
+      return { text: String(m.content || ""), at, prev };
+    });
+    r.wordSettled = settleByWords(ctx.threads, said, nowMs);
   }
   if (!promiseUpdate && freshRows.length < Math.max(1, gate(ctx, "gateMinMsgs"))) {
     const quiet = "上次判断之后你没说几句";
-    const day = ctx.day ? forkDay(ctx.day, nowMs, ctx.affection) : null;
+    // 今天的生活面没生成出来：按昨天的作息顶着，起念不跟着停摆（没有日程，「刚忙完」「碰上事」自然不会出现）
+    const dayRaw = ctx.day || (row.genError ? bridgeDay(t) : null);
+    const day = dayRaw ? forkDay(dayRaw, nowMs, ctx.affection) : null;
     if (!canImpulse || !day || gate(ctx, "selfImpulseCap") <= 0) return block(quiet);
     if ((Number(ctx.selfUsed) || 0) >= gate(ctx, "selfImpulseCap")) return block(`${quiet}，今天的自发起念也用完了`);
+    // 问模型的次数另算一本账：被否不占「自发念头」额度，但一天问的次数、两次之间的间隔都有上限
+    const tries = selfTryOf(ctx, t.date);
+    const maxTries = Math.max(4, gate(ctx, "selfImpulseCap") + 3);
+    const tryGapMin = Math.max(60, gate(ctx, "gateGapMin"));
+    // 只管「刚忙完 / 余韵 / 安静太久」这类随时都有的由头；到日子、想念、碰上事有时效，不受这两条限制
+    const paced = tries.n >= maxTries ? `${quiet}，今天自发起念已经问过 ${maxTries} 次，都没想说的`
+      : tries.at && nowMs - tries.at < tryGapMin * 60_000 ? `${quiet}，离上次自发起念还不到 ${tryGapMin} 分钟` : "";
+    // 同一种由头被否过：歇 3 小时 × 被否次数（最多 9 小时），让别的由头有机会
+    const cooling = (kind: string) => { const s = tries.skips[kind]; return !!s && nowMs - s.at < Math.min(3, s.n) * 3 * HOUR; };
     const qs = String(ctx.quietStart || ""), qe = String(ctx.quietEnd || "");
     const now = guanianNow(day, nowMs, qs, qe);
     if (inWindow(now.hm, qs, qe)) return block(`${quiet}，现在是免打扰时段`);
@@ -422,7 +600,7 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
     }
     // 由头：到日子了
     const nudge = threadNudge(ctx, nowMs, t.tz);
-    if (nudge) {
+    if (nudge && !cooling("thread")) {
       r.selfReason = nudge.reason; r.threadNudged = nudge; r.selfKind = "thread";
       const th = liveThreads(ctx, nowMs).find(x => x.id === nudge.id);
       const due = th ? threadDueMs(th, nowMs, t.tz) : 0;
@@ -439,19 +617,23 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
     const hanging = Number.isFinite(lastMineMs) && (!Number.isFinite(lastUserMs) || lastMineMs > lastUserMs)
       && (!Number.isFinite(lastUserMs) || lastMineMs - lastUserMs > 30 * 60_000
         || items.some(it => it.act && it.fireAt <= nowMs && it.fireAt > lastUserMs));
-    if (hanging) return block(`${quiet}，上一个念头发出去还没回音`);
     const daytime = now.hm >= "10:00" && now.hm < "21:30";
     const absentDays = Number.isFinite(lastUserMs) ? (nowMs - lastUserMs) / 86_400_000 : 0;
-    // 由头：断了好几天。每段断联只掷一次骰子
+    // 由头：断了好几天。分阶段各给一次机会（missDays、7、14、28 天，之后每 14 天），想不想由模型定，不再掷骰子定生死。
+    // 排在「没回音不追」前面：隔了这么多天再想起来不算追；连着没回的条数仍由 maxUnanswered 兜底
     const missDays = Number(ctx.missDays ?? 3);
-    if (missDays > 0 && daytime && absentDays >= missDays && absentDays <= 21 && Number(ctx.missKey) !== lastUserMs) {
-      r.marks.missKey = lastUserMs;
-      if (deps.random() < Math.min(0.9, 0.56 * fbMod(ctx.fb, "miss"))) {
-        r.selfKind = "miss"; r.selfReason = `已经 ${Math.floor(absentDays)} 天没联系了`;
-        r.selfCurve = Math.min(1, 0.5 + absentDays / 14 * 0.5);
-        return r;
-      }
+    const stage = missDays > 0 ? missStage(absentDays, missDays) : 0;
+    const missKey = `${lastUserMs}:${stage}`;
+    const coolTarget = Math.max(0, Number(ctx.maxUnanswered) || 0);
+    if (stage > 0 && daytime && absentDays <= 90 && ctx.missKey !== missKey
+      && !(coolTarget > 0 && unansweredRounds(history, nowMs) >= coolTarget)) {
+      r.marks.missKey = missKey;
+      r.selfKind = "miss"; r.selfReason = `已经 ${Math.floor(absentDays)} 天没联系了`;
+      r.selfCurve = Math.min(1, 0.5 + absentDays / 14 * 0.5);
+      r.selfMineLast = Number.isFinite(lastMineMs) && lastMineMs > lastUserMs;
+      return r;
     }
+    if (hanging) return block(`${quiet}，上一个念头发出去还没回音`);
     // 由头：刚碰上的变数，憋不住想说
     const sameDayAsJudge = Number.isFinite(lastJudge) && localDate(lastJudge, t.tz) === t.date;
     const sinceHM = sameDayAsJudge ? guanianNow(day, lastJudge, qs, qe).hm : "00:00";
@@ -464,8 +646,9 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
       r.selfCurve = Math.max(0.3, 1 - burstMin / 90);
       return r;
     }
+    if (paced) return block(paced);
     // 由头：上次判断之后新开始了一条日程
-    if (now.done && String(now.done.time) > sinceHM) {
+    if (now.done && String(now.done.time) > sinceHM && !cooling("done")) {
       r.selfReason = `刚${now.done.title || "做完一件事"}`; r.selfKind = "done";
       const endHM = String(now.done.end || now.done.time), m = /^(\d{1,2}):(\d{2})$/.exec(endHM);
       const sinceMin = m ? hmMins(now.hm) - (+m[1] * 60 + +m[2]) : 0;
@@ -491,8 +674,9 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
       }
     }
     // 由头：双方都安静太久。断到「想念」那么久之后交给上面的骰子
-    if (missDays > 0 && absentDays >= missDays) return block(`${quiet}，断了 ${Math.floor(absentDays)} 天，这段只想念一次`);
+    if (missDays > 0 && absentDays >= missDays) return block(`${quiet}，断了 ${Math.floor(absentDays)} 天，这一阶段的想念已经问过了`);
     const silentMs = nowMs - lastAnyMs;
+    if (silentMs >= silenceMs && cooling("quiet")) return block(`${quiet}，「安静太久」刚被TA自己否过，先歇一阵`);
     if (silentMs >= silenceMs) {
       const mins = Math.round(silentMs / 60_000);
       r.selfKind = "quiet";
@@ -509,7 +693,13 @@ async function gates(t: Turn, history: CloudHistory, evidence: any, canJudge: bo
 
 async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
   const { deps, ctx, row, nowMs, c } = t;
+  if (deps.stopping?.()) return;
   const threads = threadsEnabled(ctx) && Array.isArray(ctx.threads) ? ctx.threads : [];
+  // 新的一天从前一天判到的地方接着看：不把零点前 6 小时的聊天再判一遍（白花一次判断，旧的「算了」还会误伤后来的约定）
+  if (!row.judgedChatAt) {
+    const carried = deps.store.listDays(c.characterId, 3).filter(r => r.date < t.date).reduce((at, r) => Math.max(at, Number(r.judgedChatAt) || 0), 0);
+    if (carried > nowMs - 7 * 86_400_000) row.judgedChatAt = carried;
+  }
   const evidence = recheckEvidence(history.messages, threads, row.judgedChatAt || nowMs - 6 * HOUR);
   const ledgerOnly = evidence.ledgerOnly as boolean;
   const items = row.items;
@@ -526,6 +716,8 @@ async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
     const value = impulseValue(g.selfKind, g.selfCurve, ctx.fb);
     if (value < valueFloor(remaining)) {
       g.blocked = `额度只剩 ${remaining} 个，「${SELF_KIND[g.selfKind] || g.selfKind}」这种由头分量不够（${value.toFixed(2)}）`;
+      // 没问到模型：想念这一阶段不算问过（余韵的骰子是今天掷过了，照记）
+      if (g.selfKind === "miss") delete g.marks.missKey;
       g.selfKind = ""; g.selfReason = ""; g.threadNudged = null;
     }
   }
@@ -539,6 +731,8 @@ async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
     }
     for (const w of g.wordSettled) decide(t, "settle", `你说「${w.said}」，${w.how}了「${w.text}」`);
   }
+  // 这轮要是没判成（模型不通、回的不是 JSON），想念阶段、余韵骰子不能白白用掉
+  const marksBefore = { missKey: ctx.missKey, echoKey: ctx.echoKey };
   Object.assign(ctx, g.marks);
 
   if (g.blocked) {
@@ -559,15 +753,18 @@ async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
     ctx, nowMs, tz: t.tz, characterName, items, outputs: history.outputs, pending, litCount, chatLines,
     threadLinesNow: threadsOn ? threadLines(ctx, nowMs, t.tz) : [],
     echoLines: g.selfKind === "echo" ? g.echoRows.map(m => `${m.role === "user" ? "用户" : characterName}（${hhmm(Date.parse(m.message_at), t.tz)}）：${String(m.content || "").slice(0, 160)}`).join("\n") : "",
-    ledgerOnly, judge, canJudge, canImpulse, canPost, selfKind: g.selfKind, selfReason: g.selfReason, momentsWeekN: moBudget.weekN, hm: hhmm(nowMs, t.tz),
+    ledgerOnly, judge, canJudge, canImpulse, canPost, selfKind: g.selfKind, selfReason: g.selfReason, selfMineLast: g.selfMineLast, momentsWeekN: moBudget.weekN, hm: hhmm(nowMs, t.tz),
   });
   const chatAt = g.selfReason ? 0 : history.messages.reduce((at, m) => Math.max(at, Date.parse(m.message_at) || 0), 0);
   const what = g.selfReason ? `自发起念（${SELF_KIND[g.selfKind] || g.selfKind}：${g.selfReason}）` : judge ? "聊过之后重判今天的念头" : ledgerOnly ? "核对新承诺" : "看聊天里有没有新念头";
   row.recheckCount += 1;
   row.judgedAt = nowMs;
-  if (g.selfReason) ctx.selfUsed = (Number(ctx.selfUsed) || 0) + 1;
+  if (g.fast) ctx.ledgerFast = { date: t.date, n: (ctx.ledgerFast?.date === t.date ? Number(ctx.ledgerFast.n) || 0 : 0) + 1 };
+  const triesBefore = selfTryOf(ctx, t.date);
+  if (g.selfReason) ctx.selfTry = { ...triesBefore, n: triesBefore.n + 1, at: nowMs };
 
   if (t.mode === "shadow") {
+    if (g.selfReason) ctx.selfUsed = (Number(ctx.selfUsed) || 0) + 1;
     row.judgedChatAt = Math.max(row.judgedChatAt, chatAt);
     decide(t, "judge", `影子：这会儿会去判——${what}`, { promptChars: prompt.length, canJudge, canImpulse, canPost, ledgerOnly, value: g.selfKind ? impulseValue(g.selfKind, g.selfCurve, ctx.fb) : null });
     return;
@@ -575,12 +772,35 @@ async function judgeTurn(t: Turn, history: CloudHistory): Promise<void> {
   if (!snap) { decide(t, "judge", `想判（${what}）但没有提示词快照`); return; }
   saveTurn(t); // 先记下这次判断，模型慢也不会被下一轮重复发起
 
-  const result = await callModel(buildTaskRequest(snap.request, "【后台判断任务：本轮仅按下面要求输出 JSON，不生成聊天回复、不调用工具】\n" + prompt), deps.fetchModel, 120_000);
-  const budget = await usageBudget(deps.rest, deps.userId, nowMs);
-  await usageAdd(deps.rest, deps.userId, budget.tz, "cloud-recheck", snap.request.providerKind, result.data);
-  parseModelJson(result.text); // 无效 JSON 直接抛错，这轮算没判成
+  // 这轮没判成（模型调不通、回的不是 JSON）只记一笔，不拖累后面到点的发送
+  const request = buildTaskRequest(snap.request, "【后台判断任务：本轮仅按下面要求输出 JSON，不生成聊天回复、不调用工具】\n" + prompt);
+  const trail = { selfKind: g.selfKind || null, model: String(request.body?.model || "") };
+  let result: FallbackResult;
+  try {
+    result = await callModelWithFallback(request, altChannel(request, deps.store.getSnapshot(c.characterId, "chat")?.request), deps.fetchModel, 120_000, nowMs);
+  } catch (e) {
+    Object.assign(ctx, marksBefore);
+    // 根本没问到模型：不占当天的判断次数和自发起念的次数，只留下时刻让间隔照常生效
+    row.recheckCount = Math.max(0, row.recheckCount - 1);
+    if (g.selfReason) ctx.selfTry = { ...triesBefore, at: nowMs };
+    // 重启打断的不是模型不通：不记这一笔，自发起念的间隔也不从这次算，重启后照常再判
+    if (deps.stopping?.()) { if (g.selfReason) ctx.selfTry = triesBefore; return; }
+    decide(t, "judge", `${what}——模型没调通，这轮没判成：${errText(e)}`, { ...trail, failed: "call" });
+    deps.log(`[companion] ${c.characterId} 判断没调通：${errText(e)}`);
+    return;
+  }
+  await usageAdd(deps.rest, deps.userId, usageTz(deps.userId), "cloud-recheck", snap.request.providerKind, result.data);
+  const raw = String(result.text || "").slice(0, 6000);
+  if (result.viaAlt) t.steps.push("judge: 判断用的通道调不通，这次换用聊天的模型");
+  let judged: ReturnType<typeof parseJudgeText>;
+  try { judged = parseJudgeText(result.text); }
+  catch {
+    Object.assign(ctx, marksBefore);
+    decide(t, "judge", `${what}——模型回的不是 JSON，这轮没判成`, { ...trail, failed: "json", raw, viaAlt: result.viaAlt });
+    return;
+  }
   row.judgedChatAt = Math.max(row.judgedChatAt, chatAt);
-  applyJudgment(t, history, parseJudgeJson(result.text), { judge, canImpulse, canPost, g, ledgerOnly, litCount, moBudget, what });
+  applyJudgment(t, history, judged, { judge, canImpulse, canPost, g, ledgerOnly, litCount, moBudget, what, raw, viaAlt: result.viaAlt });
 }
 
 function cancelTimer(t: Turn, wakeId: string, note: string): void {
@@ -594,8 +814,10 @@ function addWake(t: Turn, fireAt: number, kind: string): string {
   return wakeId;
 }
 
-function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof parseJudgeJson>, o: {
+function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof parseJudgeText>, o: {
   judge: boolean; canImpulse: boolean; canPost: boolean; g: GateResult; ledgerOnly: boolean; litCount: number; moBudget: ReturnType<typeof momentsBudget>; what: string;
+  /** 模型原话（截断）与是否走了备用通道：跟着这次判断一起落库，事后查得到TA当时怎么想的 */
+  raw?: string; viaAlt?: boolean;
 }): void {
   const { ctx, row, nowMs, tz } = t;
   if (row.day && !o.g.selfReason && !o.ledgerOnly) {
@@ -618,11 +840,6 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
     ? applyThreads({ ...ctx, threads: matters.threads }, judged.keep, judged.settle, nowMs, tz, s => decide(t, "ledger", s), history.messages)
     : null;
   if (!threadsNext && JSON.stringify(matters.threads) !== JSON.stringify(threads)) threadsNext = matters.threads;
-  if (o.g.threadNudged) {
-    const base = threadsNext || threads.map(x => ({ ...x }));
-    const th = base.find(x => x.id === o.g.threadNudged!.id);
-    if (th) { th.nudge = (String(th.nudge || "") + " " + o.g.threadNudged.mark).trim().slice(-200); th.at = nowMs; threadsNext = base; }
-  }
   if (threadsNext) ctx.threads = threadsNext;
   if (o.canPost && judged.post) {
     const post = { id: "mo" + nowMs.toString(36), at: nowMs, hint: judged.post, by: "server" };
@@ -659,7 +876,7 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
   for (const d of decisions) {
     const time = typeof d.time === "string" ? d.time.trim() : "";
     const item = nextItems.find(i => i.kind !== "promise" && i.time === time && i.fireAt > nowMs + LEAD_MS);
-    if (!item) continue;
+    if (!item) { decide(t, "recheck", `模型要改 ${time || "（没写时刻）"}，但今天没有这个还没到点的时刻，没动`); continue; }
     const why = String(d.why || "").slice(0, 200);
     if (d.act === false && item.act) {
       const deferHM = typeof d.defer === "string" && /^\d{1,2}:\d{2}$/.test(d.defer.trim()) ? d.defer.trim().padStart(5, "0") : "";
@@ -680,8 +897,9 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
       continue;
     }
     if (d.act === true && !item.act) {
-      if (matterBlock(item, nextItems, matterThreads, history.outputs, history.messages)) continue;
-      if (lit >= quota || inQuiet(item.time) || tooClose(item.fireAt, item)) continue;
+      const blockedBy = matterBlock(item, nextItems, matterThreads, history.outputs, history.messages)
+        || (lit >= quota ? "今天的念头额度满了" : inQuiet(item.time) ? "落在免打扰或睡着的时段" : tooClose(item.fireAt, item) ? "离上一次主动太近" : "");
+      if (blockedBy) { decide(t, "recheck", `想点亮 ${time}，没点成——${blockedBy}`); continue; }
       item.act = true;
       item.intent = String(d.intent || `刚${item.source}，想到用户`).slice(0, 200);
       item.why = why;
@@ -694,21 +912,35 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
   }
 
   for (const one of extra.slice(0, 1)) {
-    if (threads.some(x => x.kind === "promise" && x.id === String(one.from || "").replace(/[\[\]\s]/g, ""))) continue;
-    if (lit >= quota) break;
+    const about = String(one.intent || one.about || "").slice(0, 40);
+    if (threads.some(x => x.kind === "promise" && x.id === String(one.from || "").replace(/[\[\]\s]/g, ""))) {
+      decide(t, "extra", `想起念「${about}」，但它出自一个约定，约定由账本按时间提醒，不另起`); continue;
+    }
+    if (lit >= quota) { decide(t, "extra", `想起念「${about}」，但今天的念头额度满了，不起`); break; }
     const raw = typeof one.time === "string" ? one.time.trim() : "";
-    if (!/^\d{1,2}:\d{2}$/.test(raw)) continue;
-    const time = raw.padStart(5, "0");
+    const self = !!o.g.selfReason;
+    const soonHM = (min: number) => hhmm(nowMs + min * 60_000, tz);
+    let time = /^\d{1,2}:\d{2}$/.test(raw) ? raw.padStart(5, "0") : "";
+    // 自发起念本来就该落在接下来几十分钟里：时刻没写对就按 5 分钟后算
+    if (!time && self) time = soonHM(5);
+    if (!time) { decide(t, "extra", `想起念「${about}」，但时刻写的是「${raw.slice(0, 20)}」，认不出来，不起`); continue; }
+    let fireAt = localMs(time);
+    // 时刻已过或贴得太近（模型想得慢、看错了钟）：自发的、或只差半小时以内的，挪到 3 分钟后，不整条丢掉
+    if (fireAt <= nowMs + LEAD_MS) {
+      const moved = soonHM(3);
+      if ((self || nowMs - fireAt <= 30 * 60_000) && moved > hhmm(nowMs, tz)) {
+        t.steps.push(`extra: ${time} 已经过了或太近，挪到 ${moved}`);
+        time = moved; fireAt = localMs(moved);
+      } else { decide(t, "extra", `想起念「${about}」，但 ${time} 已经过了，不起`); continue; }
+    }
     if (inQuiet(time)) { decide(t, "extra", `${time} 落在免打扰或睡着的时段，不起`); continue; }
-    const fireAt = localMs(time);
-    if (fireAt <= nowMs + LEAD_MS) continue;
-    if (nextItems.some(i => i.kind !== "promise" && i.time === time)) continue;
+    if (nextItems.some(i => i.kind !== "promise" && i.time === time)) { decide(t, "extra", `${time} 已经有一个念头了，不再起`); continue; }
     if (tooClose(fireAt)) { decide(t, "extra", `${time} 离上一次主动太近，不起`); continue; }
     const candidate = { ...matterFields(one), kind: "extra", from: one.from || "", act: true, fireAt, intent: String(one.intent || one.about || "") };
     const duplicate = matterBlock(candidate, nextItems, matterThreads, history.outputs, history.messages);
     if (duplicate) { decide(t, "dedupe", `${time} ${duplicate}`); continue; }
     const intent = String(one.intent || one.about || "").slice(0, 200);
-    if (!intent) continue;
+    if (!intent) { decide(t, "extra", `${time} 想起念，但没写想说什么，不起`); continue; }
     const same = similarBlock(intent, nextItems, matterThreads, history.messages);
     if (same) { decide(t, "dedupe", `${time} ${same}`); continue; }
     const kind = o.g.selfReason ? o.g.selfKind : "extra";
@@ -728,7 +960,25 @@ function applyJudgment(t: Turn, history: CloudHistory, judged: ReturnType<typeof
   }
   nextItems.sort((a, b) => a.fireAt - b.fireAt);
   row.items = nextItems;
-  decide(t, "judge", `${o.what}——${lit > o.litCount ? "起了一个念头" : decisions.length ? "改了念头" : "想了想，没找你"}`);
+  const rose = lit > o.litCount;
+  // 「到日子了」真起了念头才记这一阶段提过；TA说「太早了、晚点再说」就歇一阵再问，不把这个日子整个用掉
+  if (o.g.threadNudged && rose) {
+    const list = (Array.isArray(ctx.threads) ? ctx.threads : []).map(x => ({ ...x }));
+    const th = list.find(x => x.id === o.g.threadNudged!.id);
+    if (th) { th.nudge = (String(th.nudge || "") + " " + o.g.threadNudged.mark).trim().slice(-200); th.at = nowMs; ctx.threads = list; }
+  }
+  if (o.g.selfReason) {
+    // 自发额度只算真起了的；被否的记在由头名下，这种由头歇一阵再来
+    if (rose) ctx.selfUsed = (Number(ctx.selfUsed) || 0) + 1;
+    else {
+      const tries = selfTryOf(ctx, t.date);
+      const prev = tries.skips[o.g.selfKind];
+      ctx.selfTry = { ...tries, skips: { ...tries.skips, [o.g.selfKind]: { n: (prev?.n || 0) + 1, at: nowMs } } };
+    }
+  }
+  const skip = !rose && judged.skip ? `（${judged.skip}）` : "";
+  decide(t, "judge", `${o.what}——${rose ? "起了一个念头" : decisions.length ? "改了念头" : "想了想，没找你" + skip}`,
+    { selfKind: o.g.selfKind || null, rose, skip: judged.skip || "", raw: o.raw || "", ...(o.viaAlt ? { viaAlt: true } : {}) });
 }
 
 // 同轮后续任务也必须看到刚交付的正文、事项编号和主动发送时间。
@@ -769,9 +1019,16 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
   };
   if (!found) { done("找不到这条念头，作废"); return; }
   const { item, row } = found;
+  // 没发成的收尾：念头同时标成作罢——不再占当天额度、不挡同一件事再起念、也不被当成「发出去没回音」
+  const shelve = (why: string) => {
+    if (t.mode === "shadow") return; // 影子模式只记「会怎么做」，不改念头
+    item.act = false; item.why = why.slice(0, 200);
+    if (row !== t.row) deps.store.saveDay(row);
+  };
+  const drop = (note: string, kind = "skip") => { shelve(note); done(note, kind); };
   // 上次 POST 可能已经提交但响应丢失。按完整任务键查凭据，再决定是否重新生成。
   if (t.mode === "live") {
-    const response = await deps.rest(`push_outbox?user_id=eq.${encodeURIComponent(deps.userId)}&session_id=eq.${encodeURIComponent(c.sessionId)}&trigger_key=eq.${encodeURIComponent("timedwake:" + timer.id)}&select=id,trigger_key,raw_text,created_at,meta&limit=1`);
+    const response = await deps.rest(`push_outbox?user_id=eq.${encodeURIComponent(deps.userId)}&session_id=eq.${encodeURIComponent(c.sessionId)}&trigger_key=eq.${encodeURIComponent("timedwake:" + timer.id)}&select=id,trigger_key,raw_text,created_at,consumed_at,meta&limit=1`);
     if (!response.ok) throw new Error(`发送凭据读取失败 HTTP ${response.status}`);
     const outputs = await response.json() as CloudOutput[];
     if (!Array.isArray(outputs)) throw new Error("发送凭据格式错误");
@@ -803,7 +1060,7 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
         const event = x.meta?.guanianContext as { eventId?: string; revision?: number } | undefined;
         return event?.eventId === item.from && Number(event?.revision || 1) === Number(item.promiseRevision || 1);
       });
-    if (!current) { done("约定已改期、完成或取消"); return; }
+    if (!current) { drop("约定已改期、完成或取消"); return; }
   }
   const draft = t.mode === "live" ? deps.store.getDraft(timer.id) : null;
   if (draft) {
@@ -829,13 +1086,21 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
     };
     const pr = coolTarget > 0 ? Math.min(100, Math.round(rounds / coolTarget * 100)) : 0;
     const pt = Number.isFinite(lastUserAt) ? closeness(nowMs - lastUserAt, cnum(ctx, "presendTalkingMin", 15)) : 0;
+    // 你正说着话（刚过去的时间不到「正聊着」窗口的三分之一）：这一项单独就够押后，不用等综合分；等这阵聊完再看
+    const talkMin = cnum(ctx, "presendTalkingMin", 15);
+    if (pt >= 67) {
+      const until = lastUserAt + talkMin * 60_000;
+      deps.store.updateTimer(timer.id, { fireAt: until, note: "你正说着话，等会儿再说" });
+      decide(t, "hold", `${item.time} 你正说着话，先不插话，${hhmm(until, t.tz)} 再看`, { wakeId: timer.id, until, pt });
+      return;
+    }
     const lp = lastProactiveAt(history);
     const pg = lp ? closeness(nowMs - lp, cnum(ctx, "presendGapMin", 60)) : 0;
     const press = Math.round(pr * 0.4 + pt * 0.4 + pg * 0.2);
     const maxPress = cnum(ctx, "presendMax", 70);
     const blocked = coolTarget > 0 && rounds >= coolTarget ? `连续 ${rounds} 轮没等到你回` : press >= maxPress ? `此刻不合时宜（${press}%）` : "";
     decide(t, "presend", blocked || `${item.time} 到点复核通过（不合时宜度 ${press}%）`, { wakeId: timer.id, pr, pt, pg, press, rounds, max: maxPress });
-    if (blocked) { deps.store.updateTimer(timer.id, { status: t.mode === "shadow" ? "shadow" : "done", note: blocked }); return; }
+    if (blocked) { shelve(blocked); deps.store.updateTimer(timer.id, { status: t.mode === "shadow" ? "shadow" : "done", note: blocked }); return; }
   }
 
   const notes: string[] = [];
@@ -857,14 +1122,14 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
         const wakeHM = /^\d{2}:\d{2}$/.test(String(day.wake || "")) ? String(day.wake) : String(qe || "");
         const untilMs = nextLocalHM(wakeHM, t.tz, nowMs) + bufferMs;
         if (untilMs > nowMs) hold(untilMs, `TA睡着了，押到起床后（${wakeHM}）再发`);
-        else done("TA睡着了，算不出起床时刻");
+        else drop("TA睡着了，算不出起床时刻");
         return;
       }
       if (mode === 2) {
         const r = roll(timer.id), prob = cnum(ctx, "sleepWakeProb", 18);
-        if (r >= prob) { done(`TA睡着了（掷 ${r} ≥ ${prob}，没醒）`); return; }
+        if (r >= prob) { drop(`TA睡着了（掷 ${r} ≥ ${prob}，没醒）`); return; }
         sleepy = true;
-      } else { done("TA睡着了，不发"); return; }
+      } else { drop("TA睡着了，不发"); return; }
     }
     if (!sleepy && cnum(ctx, "busyHold", 0) > 0) {
       const end = busyUntil(day, localHM);
@@ -875,7 +1140,7 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
       const chance = waitingChance(nowMs, orig, cnum(ctx, "busyMaxHoldMin", 180));
       const cooled = roll(timer.id + ":waiting") / 100 >= chance;
       decide(t, "freshness", `等待 ${Math.max(0, Math.round((nowMs - orig) / 60000))} 分钟，保留发送概率 ${Math.round(chance * 100)}%${cooled ? "，这次念头淡去了" : "，继续核对事实"}`, { wakeId: timer.id });
-      if (cooled) { deps.store.updateTimer(timer.id, { status: t.mode === "shadow" ? "shadow" : "done", note: "念头淡去了" }); return; }
+      if (cooled) { shelve("念头淡去了"); deps.store.updateTimer(timer.id, { status: t.mode === "shadow" ? "shadow" : "done", note: "念头淡去了" }); return; }
     }
     let note = bridged
       ? `[系统备忘：这不是对方发来的消息。这是你此刻（本地时间 ${localHM}）的状态：今天的日程还没排，先按昨天的作息过${day.mood ? "，昨天最后的心情「" + day.mood + "」" : ""}。自然带出来就行，别提这段文字。]`
@@ -884,20 +1149,40 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
     notes.push(note);
   }
   const duplicate = matterBlock(item, row.items, threads, history.outputs, history.messages);
-  if (duplicate) { done(`${item.time} ${duplicate}`, "dedupe"); return; }
-  if (item.from && threads.some(x => x.id === item.from && x.done === true) && !isPromise) { done("挂着的这件事已经了结"); return; }
+  if (duplicate) { item.matterSuppressed = true; drop(`${item.time} ${duplicate}`, "dedupe"); return; }
+  if (item.from && threads.some(x => x.id === item.from && x.done === true) && !isPromise) { drop("挂着的这件事已经了结"); return; }
   const promised = isPromise ? null : similarPromise(item.intent || "", threads);
-  if (promised) { done(`${item.time} 和约定「${promised.text}」是同一件事，交给约定`, "dedupe"); return; }
-  const sendBudget = await usageBudget(deps.rest, deps.userId, nowMs);
+  if (promised) { drop(`${item.time} 和约定「${promised.text}」是同一件事，交给约定`, "dedupe"); return; }
+  let sendBudget;
+  try { sendBudget = await usageBudget(deps.rest, deps.userId, nowMs); }
+  catch (e) {
+    if (!(e instanceof UsageUnknown)) throw e;
+    // 上限读不到不是这条消息的错：不算一次发送失败，过几分钟再看
+    deps.store.updateTimer(timer.id, { status: "pending", fireAt: nowMs + 5 * 60_000 });
+    decide(t, "hold", `${item.time} ${e.message}，5 分钟后再看`, { wakeId: timer.id, until: nowMs + 5 * 60_000 });
+    return;
+  }
   const over = usageExceeded(sendBudget);
-  if (over) { done(`用量上限：${over}`); return; }
+  if (over) {
+    // 约定不因为这会儿用量到顶就当场作废：在约定的重试窗口内每小时再看一次
+    const due = Number(item.origFireAt) || item.fireAt || nowMs;
+    if (isPromise && nowMs + HOUR <= due + Math.min(1440, cnum(ctx, "promiseRetryMin", 0)) * 60_000) {
+      deps.store.updateTimer(timer.id, { fireAt: nowMs + HOUR, note: `用量上限：${over}` });
+      decide(t, "hold", `${item.time} 用量到上限了（${over}），约定一小时后再看`, { wakeId: timer.id, until: nowMs + HOUR });
+      return;
+    }
+    drop(`用量上限：${over}`); return;
+  }
 
   if (t.mode === "shadow") {
     done(`影子：${item.time} 会生成并推送——${item.intent}`, "send");
     return;
   }
   const snap = snapshotFor(t, "chat");
-  if (!snap) { done("没有聊天快照，发不了（打开一次 Float 聊天让手机寄一份）"); return; }
+  // 没快照、空回复、思考块不完整都是一时的事：抛出去走失败重试（间隔越拉越长），不当场作废
+  if (!snap) throw new Error("没有聊天快照，发不了（打开一次 Float 聊天让手机寄一份）");
+  // 角色已经切到另一个会话、聊天模板还是旧会话的：不拿旧会话的聊天记录成文写进新会话
+  if (snap.sessionId && snap.sessionId !== c.sessionId) throw new Error("聊天模板还是另一个会话的，这条先不发（在现在这个会话里和TA聊一句，手机会寄来新的）");
 
   // 新式聊天模板（宿主随聊天自动重冻）：聊天记录已在模板里，只补冻结之后的新消息；意图和时间到点填空
   const fresh = !!snap.merge.intentPlaceholder;
@@ -912,7 +1197,13 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
   const intentNote = fresh && !isPromise ? "" : isPromise
     ? `[系统约定任务，非用户消息] ${item.intent}`
     : `[系统备忘：这不是对方发来的消息。到点了，你现在想主动跟对方说的是——${item.intent}。顺着你们刚才聊的往下说，别重复已经说过的话，也别提起这条备忘。]`;
+  // 晚发了（忙着押后、失败重试、你正说着话）：和原定时刻绑着的话过了点就别说了
+  const lateMin = isPromise ? 0 : Math.round((nowMs - (Number(item.origFireAt) || item.fireAt || nowMs)) / 60_000);
+  const lateNote = lateMin >= 20
+    ? `这个念头原定 ${hhmm(Number(item.origFireAt) || item.fireAt, t.tz)} 发，现在已经晚了 ${lateMin} 分钟。如果它和原定那个时刻绑在一起（问午饭、道早安晚安、提醒马上要做的事），现在说已经不合时宜，就按「事情已解决或发生变化」作罢；不依赖时刻的照常说，也不用提迟到。\n`
+    : "";
   const factCheck = `[挂念发送前的事实核对，不是用户消息]\n当前当地时间：${new Date(nowMs + t.tz * 60000).toISOString().slice(0, 16)}\n原念头：${item.intent || "按上文意图"}\n${fresh ? "最新聊天以上方聊天记录为准" + (since.length ? "，模板之后的新消息见「模板冻结之后的新聊天」" : "") : "最新聊天见上方唯一一份「最新云端聊天事实」"}，不可编造。\n`
+    + lateNote
     + "事项编号：" + matterKey(item, threads) + "。必须逐项核对本次意图与已发送正文：问过而未获回复不构成新进展，不可换说法再问；已经完整交代的内容不再补发。早前只约定稍后回答而尚未回答，不等于回答已经完成。\n"
     + "用户已拒绝或取消的事情，不因角色坚持而继续提醒、劝说或跟进；角色替用户安排不等于用户同意。最新聊天中没有用户重新明确答应，就按事情已发生变化作罢。\n"
     + "先核对这个念头是否仍有必要：如果你已经在聊天里问过、说过这件事，用户已经回答或事情已经解决，就不要再发，也不要换个话题凑消息。仅仅出现相关词不等于已经说过，按实际问答与语义判断。具体约定或事件是否过时也按事实判断，不因单纯经过多少分钟而认定失效。\n"
@@ -934,10 +1225,11 @@ async function fireTimerLocked(t: Turn, timer: TimerRow, history: CloudHistory, 
     let rawText = result.text.trim();
     let reasoning: string | undefined;
     try { const parsed = visibleResponse(rawText, snap.merge.onlineThinking); rawText = parsed.text; reasoning = parsed.reasoningText; }
-    catch { done("回复里的思考块不完整，没发", "error"); return; }
-    if (!rawText) { done("回复是空的，没发", "error"); return; }
-    const abandoned = /^\[挂念作罢[：:]([^\]\r\n]{1,120})\]$/.exec(rawText);
-    if (abandoned) { done(`核对后作罢：${abandoned[1]}`, "factcheck"); return; }
+    catch { throw new Error("回复里的思考块不完整，没发"); }
+    if (!rawText) throw new Error("回复是空的，没发");
+    // 作罢标记出现在哪儿都算作罢：后面再跟状态栏、句号、[内心] 块也不把它当台词发出去
+    const abandoned = /[\[【]\s*挂念作罢\s*(?:[：:]\s*([^\]】\r\n]{0,120}))?[\]】]/.exec(rawText);
+    if (abandoned) { drop(`核对后作罢：${(abandoned[1] || "").trim() || "没写原因"}`, "factcheck"); return; }
     // 发送分流：来电 → 快捷动作 → 发到微信，标记都从正文剥掉（顺序与 push-generate 一致）
     const called = extractCall(rawText);
     const shortcut = extractShortcut(called.text);
@@ -1092,12 +1384,30 @@ async function deliverDraft(t: Turn, timer: TimerRow, history: CloudHistory, dra
     decide(t, "send", `${item.time} 发到微信了：${rawText.replace(/\s+/g, " ").slice(0, 60)}`, { wakeId: timer.id, weixin: true, shortcut: command?.actionName });
     return;
   }
+  const notices = (): PushMessage[] => {
+    const parts = splitPreview(rawText).slice(0, 6);
+    return draft.deliverAsCall
+      ? [{ type: "incoming_call", title: `📞 ${draft.notify.title}`, body: "来电话了…", tag: `${timer.id}-0`, url: `/?ring=${encodeURIComponent(c.sessionId)}&rt=${deliveredAt}`, characterId: c.characterId, sessionId: c.sessionId, callTs: deliveredAt }]
+      : (parts.length ? parts : ["发来一条消息"]).map((body, index) => ({
+        type: "chat_outbox", title: draft.notify.title, body: body.slice(0, 80), tag: `${timer.id}-${index}`, url: draft.notify.url, characterId: c.characterId,
+      }));
+  };
+  const notify = async (): Promise<PushResult> => {
+    await guard();
+    const pushed = await deps.push(notices()).catch(e => ({ sent: 0, total: 0, removed: 0, skippedShell: 0, errors: [errText(e)] }));
+    draft.pushed = true;
+    deps.store.updateDraft(draft);
+    return pushed;
+  };
   if (existing) {
     rememberOutput(history, existing);
     markGenerated(t, history);
     markSent(existing.id);
+    // 正文已经在发件箱里，但通知没推过（写入超时其实已提交、推送前进程被重启）：手机还没收走就补推一次，别让消息静静躺着
+    const repushed = !draft.pushed && !existing.consumed_at && deps.now() - deliveredAt < 12 * HOUR ? await notify() : null;
     await afterDelivery();
-    decide(t, "send", `${item.time} 已恢复发送凭据并完成动作交付`, { wakeId: timer.id, outboxId: existing.id });
+    decide(t, "send", `${item.time} 已恢复发送凭据并完成动作交付${repushed ? "，补推了通知" : ""}`,
+      { wakeId: timer.id, outboxId: existing.id, ...(repushed ? { pushed: repushed.sent, pushErrors: repushed.errors } : {}) });
     return;
   }
 
@@ -1113,14 +1423,7 @@ async function deliverDraft(t: Turn, timer: TimerRow, history: CloudHistory, dra
   if (!saved.ok) throw new Error(`outbox 写入失败 HTTP ${saved.status}: ${(await saved.text().catch(() => "")).slice(0, 160)}`);
   rememberOutput(history, { id: outboxId, trigger_key: `timedwake:${timer.id}`, raw_text: rawText, created_at: createdAt, meta });
   markSent(outboxId);
-  const parts = splitPreview(rawText).slice(0, 6);
-  const messages: PushMessage[] = draft.deliverAsCall
-    ? [{ type: "incoming_call", title: `📞 ${draft.notify.title}`, body: "来电话了…", tag: `${timer.id}-0`, url: `/?ring=${encodeURIComponent(c.sessionId)}&rt=${deliveredAt}`, characterId: c.characterId, sessionId: c.sessionId, callTs: deliveredAt }]
-    : (parts.length ? parts : ["发来一条消息"]).map((body, index) => ({
-      type: "chat_outbox", title: draft.notify.title, body: body.slice(0, 80), tag: `${timer.id}-${index}`, url: draft.notify.url, characterId: c.characterId,
-    }));
-  await guard();
-  const pushed = await deps.push(messages).catch(e => ({ sent: 0, total: 0, removed: 0, skippedShell: 0, errors: [errText(e)] }));
+  const pushed = await notify();
   await afterDelivery();
   decide(t, "send", `${item.time} ${draft.deliverAsCall ? "打来电话" : "发出去了"}：${rawText.replace(/\s+/g, " ").slice(0, 60)}`,
     { wakeId: timer.id, outboxId, pushed: pushed.sent, pushErrors: pushed.errors, ...(command ? { shortcut: command.actionName } : {}) });
@@ -1140,6 +1443,9 @@ export async function generateDayNow(deps: EngineDeps, characterId: string, date
 
 export async function tickAll(deps: EngineDeps, mode: Mode): Promise<Trace[]> {
   const traces: Trace[] = [];
-  for (const c of deps.store.listCharacters()) traces.push(await tickCharacter(deps, mode, c.characterId));
+  for (const c of deps.store.listCharacters()) {
+    if (deps.stopping?.()) break;
+    traces.push(await tickCharacter(deps, mode, c.characterId));
+  }
   return traces;
 }

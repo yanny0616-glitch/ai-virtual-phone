@@ -1,6 +1,8 @@
 // 配置只从环境变量读：systemd 用 EnvironmentFile=/etc/float-companion/env 注入。
 // 密钥永远不打印、不写日志。
 
+import { parseAllowHosts } from "./net-guard.ts";
+
 export type Config = {
   personalUrl: string;
   personalKey: string;
@@ -16,6 +18,8 @@ export type Config = {
   wakeEnabled: boolean;
   wakeGatewayUrl: string;
   wakeGatewayTokenFile: string;
+  /** 模型 / MCP 地址默认不许指向本机或内网；这里列的主机名放行（逗号分隔，COMPANION_ALLOW_HOSTS） */
+  allowHosts: Set<string>;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -35,5 +39,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     wakeEnabled: env.COMPANION_WAKE !== "off",
     wakeGatewayUrl: env.WAKE_GATEWAY_URL || "http://127.0.0.1:18062",
     wakeGatewayTokenFile: env.WAKE_GATEWAY_TOKEN_FILE || "/etc/float-garden-wake/backend-token",
+    allowHosts: parseAllowHosts(env.COMPANION_ALLOW_HOSTS),
   };
 }

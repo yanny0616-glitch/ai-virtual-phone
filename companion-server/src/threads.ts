@@ -123,22 +123,39 @@ function wordTokens(text: string): Set<string> {
 }
 
 export type WordSettle = { id: string; text: string; how: string; said: string };
+/** at：这句话的时刻；prev：它前面紧挨着的那句TA的话（用来判断一句很短的话是不是在回应这件事） */
+export type SaidMsg = { text: string; at?: number; prev?: string };
 
-export function settleByWords(threads: Thread[], msgs: string[], nowMs: number): WordSettle[] {
+// 「太好了」「就好了」「快好了」里的「好了」不是做完
+const SOFT_BEFORE_OK = /[太真挺很就才更多最快要]$/;
+
+export function settleByWords(threads: Thread[], msgs: (string | SaidMsg)[], nowMs: number): WordSettle[] {
   const out: WordSettle[] = [];
   const live = threads.filter(t => t && !t.done && t.text && t.kind !== "date");
   for (const raw of msgs) {
-    const msg = String(raw || "").trim();
+    const said: SaidMsg = typeof raw === "string" ? { text: raw } : raw;
+    const msg = String(said.text || "").trim();
     if (!msg || msg.length > 60 || /[吗呢？?]\s*$/.test(msg)) continue; // 长句和问句都不猜
-    const hit = (words: string[]) => words.find(w => { const i = msg.indexOf(w); return i >= 0 && !NEG_BEFORE.test(msg.slice(0, i)); });
+    const hit = (words: string[]) => words.find(w => {
+      const i = msg.indexOf(w);
+      if (i < 0) return false;
+      const before = msg.slice(0, i);
+      return !NEG_BEFORE.test(before) && !(w === "好了" && SOFT_BEFORE_OK.test(before));
+    });
     const drop = hit(DROP_WORDS), done = drop ? "" : hit(DONE_WORDS);
     if (!drop && !done) continue;
-    const pool = live.filter(t => !out.some(o => o.id === t.id) && (drop || t.kind === "promise"));
+    // 这句话比这件事记下 / 改动的时刻还早：说的不可能是它（重判旧聊天时，旧的「算了」不能作废后来才立的约定）
+    const saidAt = Number(said.at);
+    const pool = live.filter(t => !out.some(o => o.id === t.id) && (drop || t.kind === "promise")
+      && !(Number.isFinite(saidAt) && saidAt <= (Number(t.at) || Number(t.since) || 0)));
     if (!pool.length) continue;
     const toks = wordTokens(msg);
     let match = pool.filter(t => [...wordTokens(t.text)].some(k => toks.has(k)));
-    // 撞不上词：只有一条活着、这句又短得像在直接回应时才认；撞上多条也不猜
-    if (!match.length && pool.length === 1 && msg.length <= 8) match = pool;
+    // 撞不上词：只有一条活着、这句又短得像在直接回应，而且TA上一句正说着这件事，才认；否则宁可漏
+    if (!match.length && pool.length === 1 && msg.length <= 8 && said.prev) {
+      const own = [...wordTokens(pool[0].text)], asked = wordTokens(said.prev);
+      if (own.length && own.filter(k => asked.has(k)).length >= Math.min(2, own.length)) match = pool;
+    }
     if (match.length !== 1) continue;
     const t = match[0];
     t.done = true; t.at = nowMs; t.by = "words";

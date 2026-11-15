@@ -12,6 +12,19 @@ export type PushResult = { sent: number; total: number; removed: number; skipped
 
 type Sender = (sub: webpush.PushSubscription, payload: string, options: webpush.RequestOptions) => Promise<{ statusCode: number }>;
 
+/** 单个订阅最多等这么久。推送服务接了连接不回包时，没有超时会把整轮（连同后面每一分钟的轮询）永远挂住 */
+export const PUSH_TIMEOUT_MS = 10_000;
+
+class PushTimeout extends Error {}
+
+/** 库自己的 socket 超时之外再兜一层：不管底下怎么挂，到点就放手 */
+function bounded<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const limit = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new PushTimeout(`推送超时（${Math.round(ms / 1000)} 秒没回）`)), ms); });
+  work.catch(() => undefined); // 超时之后它再失败也没人接，别变成未处理的拒绝
+  return Promise.race([work, limit]).finally(() => clearTimeout(timer));
+}
+
 /** 依次推送多条（一条回复按段拆成几条通知），段与段之间隔 gapMs */
 export async function sendPushMessages(
   rest: Rest,
@@ -20,6 +33,7 @@ export async function sendPushMessages(
   send: Sender = webpush.sendNotification,
   gapMs = 500,
   cloud?: Cloud,
+  timeoutMs = PUSH_TIMEOUT_MS,
 ): Promise<PushResult> {
   const [vapid] = await restJson<VapidRow[]>(rest, "push_server_config?id=eq.main&select=vapid_public_key,vapid_private_key,site_origin&limit=1");
   if (!vapid?.vapid_public_key || !vapid.vapid_private_key) throw new Error("个人云里没有 VAPID 密钥");
@@ -28,6 +42,7 @@ export async function sendPushMessages(
   const result: PushResult = { sent: 0, total: all.length, removed: 0, skippedShell: 0, errors: [] };
   const options: webpush.RequestOptions = {
     TTL: 3600,
+    timeout: timeoutMs,
     vapidDetails: {
       subject: vapid.site_origin || "mailto:push@ai-phone.local",
       publicKey: vapid.vapid_public_key,
@@ -44,7 +59,7 @@ export async function sendPushMessages(
     const alive: SubscriptionRow[] = [];
     for (const sub of subs) {
       try {
-        await send({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, options);
+        await bounded(send({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, options), timeoutMs + 2_000);
         result.sent += 1;
         alive.push(sub);
         await rest(`push_subscriptions?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
@@ -55,6 +70,9 @@ export async function sendPushMessages(
         if (status === 404 || status === 410) {
           await rest(`push_subscriptions?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, { method: "DELETE" }).catch(() => undefined);
           result.removed += 1;
+        } else if (err instanceof PushTimeout || /socket timeout/i.test(String((err as Error)?.message))) {
+          // 这个订阅这会儿不回包：这一批剩下的几段不再等它（订阅留着，下次照常推）
+          result.errors.push("timeout");
         } else {
           alive.push(sub);
           result.errors.push(status ? `http ${status}` : (err instanceof Error ? err.message : String(err)).slice(0, 80));

@@ -17,7 +17,7 @@ import {
 import type { EngineDeps } from "./engine.ts";
 import { acquireGenerationLease, GenerationBusy, type GenerationLease } from "./generation-lease.ts";
 import { historyText, readHistory, unansweredRounds, type CloudHistory } from "./history.ts";
-import { appendUserNote, callModel, splitPreview, usageAdd, usageBudget } from "./llm.ts";
+import { appendUserNote, callModel, splitPreview, usageAdd, usageBudget, usageTz } from "./llm.ts";
 import type { PushMessage } from "./push.ts";
 import type { OfflineJob, Store } from "./store.ts";
 import { advanceCloudReplyTiming, type CloudReplyTiming } from "./reply-timing.ts";
@@ -285,7 +285,7 @@ async function generate(deps: EngineDeps, job: OfflineJob, p: JobPayload, sessio
   if (!rawText) throw new Finish("failed", "empty response");
   p.draft = { rawText, createdAt: new Date(deps.now()).toISOString() };
   deps.store.updateJob(job, { payload: p }, deps.now());
-  await usageAdd(deps.rest, deps.userId, budget?.tz ?? 0, "cloud-chat", request.providerKind as ProviderKind, result.data).catch(() => undefined);
+  await usageAdd(deps.rest, deps.userId, usageTz(deps.userId, budget), "cloud-chat", request.providerKind as ProviderKind, result.data).catch(() => undefined);
 
   if (p.allowSilence === true && isChatSilenceResponse(rawText, p.silenceThinkingTag)) {
     const updates = stripChatSilenceMarker(rawText, p.silenceThinkingTag);

@@ -8,8 +8,11 @@ export class GenerationBusy extends Error {
 
 export type GenerationLease = { check: () => Promise<void>; release: () => Promise<void> };
 
+/** 数据库里租约一次续 10 分钟；留 2 分钟余量，离上次续成不到这么久就还握着锁 */
+const HELD_MS = 8 * 60_000;
+
 export async function acquireGenerationLease(rest: Rest, userId: string, sessionId: string, owner: string,
-  renewMs = 60_000): Promise<GenerationLease> {
+  renewMs = 60_000, now: () => number = Date.now): Promise<GenerationLease> {
   if (!sessionId) throw new Error("会话租约缺少 sessionId");
   const token = `companion:${owner}:${randomUUID()}`;
   const action = async (p_action: string) => {
@@ -22,6 +25,8 @@ export async function acquireGenerationLease(rest: Rest, userId: string, session
     return result;
   };
   if (!await action("claim")) throw new GenerationBusy();
+  let heldAt = now();
+  // 只有个人云明确说「这把锁不是你的了」才算丢；续租请求没问到（超时、5xx）不算
   let lost: Error | null = null;
   let renewing: Promise<void> | null = null;
   let closed = false;
@@ -29,9 +34,16 @@ export async function acquireGenerationLease(rest: Rest, userId: string, session
     if (closed) throw new Error("会话租约已释放");
     if (lost) throw lost;
     if (!renewing) renewing = (async () => {
-      try { if (!await action("renew")) throw new Error("会话生成租约已失效"); }
-      catch (err) { lost = err instanceof Error ? err : new Error(String(err)); throw lost; }
-      finally { renewing = null; }
+      try {
+        if (await action("renew")) { heldAt = now(); return; }
+        lost = new Error("会话生成租约已失效");
+        throw lost;
+      } catch (err) {
+        if (lost) throw lost;
+        // 个人云抖了一下：租约在库里还没到期就照常往下走，下次续租再问；真拖到快到期还续不上才停
+        if (now() - heldAt < HELD_MS) return;
+        throw new Error(`会话租约续不上，已经 ${Math.round((now() - heldAt) / 60_000)} 分钟没续成：${err instanceof Error ? err.message : String(err)}`);
+      } finally { renewing = null; }
     })();
     await renewing;
   };

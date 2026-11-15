@@ -78,6 +78,10 @@
     busyMaxHoldMin: 180,   // 从原时刻起最多押多久，超过就作罢
     sleepMode: 0,          // 睡着时：0 不发 · 1 押到起床后 · 2 按概率醒来发
     sleepWakeProb: 18,     // 概率醒来的百分比
+    // 发送失败后延长重试（只有后端执行时生效）：关着时后端只在 10 分钟内再试两次
+    sendRetry: false,
+    sendRetryMin: 30,      // 普通念头最多再试多久（分钟）
+    promiseRetryMin: 120,  // 约定最多再试多久（分钟）
     // 仅保留用于一次性迁移到「忙碌回复」插件；挂念不再执行或编辑这些规则
     replyGate: true,
     busyPeekMin: 3,        // 忙着时偷空看一眼手机大约要等几分钟（0 = 不等）

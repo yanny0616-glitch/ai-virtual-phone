@@ -12,12 +12,28 @@ export class Runner {
   #ops: (() => Promise<() => void>)[] = [];
   /** 排队中的撤销 / 停用（char:角色、wake:念头）：锁外可见，引擎在发送边界查 */
   #halts = new Map<string, number>();
+  /** 锁外正在跑的「生成一天」（按角色，一个角色同时只有一份） */
+  #flights = new Map<string, Promise<void>>();
   lastTraces = new Map<string, Trace>();
   lastTickAt = 0;
 
-  constructor(deps: EngineDeps, defaultMode: Mode) {
+  /** detachGeneration：生成一天时调模型的那段放到锁外（正式运行开；命令行和测试默认原地跑完） */
+  constructor(deps: EngineDeps, defaultMode: Mode, options: { detachGeneration?: boolean } = {}) {
     this.#deps = deps;
     deps.halted = (characterId, wakeId) => this.#halts.has("char:" + characterId) || (!!wakeId && this.#halts.has("wake:" + wakeId));
+    if (options.detachGeneration) deps.background = {
+      busy: characterId => this.#flights.has(characterId),
+      run: (characterId, work) => {
+        const flight = (async () => {
+          try {
+            const apply = await work();
+            await this.exclusive(apply);
+          } catch (e) { deps.log(`[companion] ${characterId} 后台生成失败：${e instanceof Error ? e.message : String(e)}`); }
+          finally { this.#flights.delete(characterId); }
+        })();
+        this.#flights.set(characterId, flight);
+      },
+    };
     if (!deps.store.getMeta("mode")) deps.store.setMeta("mode", defaultMode);
   }
 
@@ -31,6 +47,14 @@ export class Runner {
   }
 
   get running(): boolean { return this.#running; }
+
+  /** 还有没有活在跑：一轮本身，或锁外的生成 */
+  get busy(): boolean { return this.#running || this.#flights.size > 0; }
+
+  /** 等锁外的生成都落库（测试和退出时用） */
+  async settled(): Promise<void> {
+    while (this.#flights.size) await Promise.all([...this.#flights.values()]);
+  }
 
   /** 在锁里改状态：空闲就马上做，正在跑一轮就排到这轮结束后。返回的 Promise 在真正做完、锁放开后兑现 */
   exclusive<T>(fn: () => T | Promise<T>, halts: string[] = []): Promise<T> {

@@ -5,7 +5,7 @@ import { assertDeliveryActive, checkDelivery, DeliveryPaused } from "./delivery-
 import type { EngineDeps } from "./engine.ts";
 import { acquireGenerationLease, GenerationBusy } from "./generation-lease.ts";
 import { historyText, readHistory } from "./history.ts";
-import { appendUserNote, callModel, splitPreview, usageAdd, usageBudget, usageExceeded, visibleResponse } from "./llm.ts";
+import { appendUserNote, callModel, splitPreview, usageAdd, usageBudget, usageExceeded, usageTz, UsageUnknown, visibleResponse } from "./llm.ts";
 import type { ShortcutResume } from "./store.ts";
 import { fillChatTemplate } from "./templates.ts";
 
@@ -90,8 +90,12 @@ async function resumeOne(deps: EngineDeps, r: ShortcutResume): Promise<boolean> 
         imagePath = read.path;
         injectShortcutImage(request.body, request.providerKind, r.imageMarker, read.image);
       }
-      const budget = await usageBudget(deps.rest, deps.userId, nowMs);
-      const over = fromJob ? "" : usageExceeded(budget);
+      // 回复兜底不受上限管：上限读不到也照常；主动消息读不到就先停着，不算失败
+      const budget = await usageBudget(deps.rest, deps.userId, nowMs).catch(e => {
+        if (fromJob) return null;
+        throw e instanceof UsageUnknown ? new DeliveryPaused(e.message) : e;
+      });
+      const over = fromJob || !budget ? "" : usageExceeded(budget);
       if (over) throw new DeliveryPaused(over);
       await guard();
       const result = await callModel(request, deps.fetchModel, 300_000);
@@ -102,7 +106,7 @@ async function resumeOne(deps: EngineDeps, r: ShortcutResume): Promise<boolean> 
         r.generated = { rawText, createdAt: new Date(deps.now()).toISOString(), ...(parsed.reasoningText ? { reasoningText: parsed.reasoningText } : {}), ...(imagePath ? { imagePath } : {}) };
         deps.store.updateResume(r);
       } finally {
-        await usageAdd(deps.rest, deps.userId, budget.tz, fromJob ? "cloud-chat" : "cloud-wake", request.providerKind, result.data);
+        await usageAdd(deps.rest, deps.userId, usageTz(deps.userId, budget), fromJob ? "cloud-chat" : "cloud-wake", request.providerKind, result.data);
       }
     }
     await guard();

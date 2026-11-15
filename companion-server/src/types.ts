@@ -53,6 +53,7 @@ export type Extra = {
   matterId?: string; matterRelation?: string; matterEvidenceId?: string;
 };
 export type Outbox = { id: string; at: number; hint: string; by?: string };
+export type SelfTry = { date: string; n: number; at: number; skips: Record<string, { n: number; at: number }> };
 export type FbBook = Record<string, [number, number]>;
 
 /** 规则函数看到的上下文：设置 + 跨天状态 + 当天状态拼在一起，形状与云端 PlanContext 相同。 */
@@ -66,13 +67,20 @@ export type Ctx = {
   selfImpulseCap?: number; selfSilenceMin?: number; missDays?: number; echoOn?: number;
   busyHold?: number; busyBufferMin?: number; busyMaxHoldMin?: number; sleepMode?: number; sleepWakeProb?: number;
   presendMax?: number; presendTalkingMin?: number; presendGapMin?: number;
+  /** 到点没发成延长重试多久（分钟）。0 / 没设 = 不延长，只在 10 分钟内再试两次 */
+  sendRetryMin?: number; promiseRetryMin?: number;
   momentsOn?: number; momentsWeekly?: number; momentsGapH?: number;
   threadDays?: number; recheckEnabled?: number; genEnabled?: number;
   chatEditsDay?: boolean; threadsOn?: number | boolean; autoGenAt?: string; forkLevel?: number; forkBurst?: number; dayPrompt?: string; moodGate?: number;
   affection?: { score?: number; tier?: string; relation?: string } | null;
   // 跨天状态
   callInviteAt?: number;
-  threads?: Thread[]; fb?: FbBook; fbSeen?: string[]; missKey?: number; echoKey?: number;
+  /** missKey：`最后一条用户消息时刻:想念阶段`（旧数据是纯数字，自然不相等） */
+  threads?: Thread[]; fb?: FbBook; fbSeen?: string[]; missKey?: number | string; echoKey?: number;
+  /** 当天自发起念的尝试账：问了模型几次、上次什么时候、各由头被否了几次 */
+  selfTry?: SelfTry;
+  /** 约定快车道（刚判过又冒出约定线索，1 分钟就再判）当天用了几次 */
+  ledgerFast?: { date: string; n: number };
   momentsLast?: number; momentsWeekStart?: number; momentsWeekN?: number; momentsRollHour?: number; outbox?: Outbox[];
   // 当天
   day?: GuanianDay | null; selfUsed?: number;
@@ -85,10 +93,10 @@ export const SETTING_KEYS = [
   "minGapMin", "maxUnanswered", "chatCandidates", "bias", "onlineRounds", "offlineRounds", "judgeLines",
   "gateDailyCap", "gateGapMin", "gateHorizonMin", "gateFreshMin", "gateMinMsgs", "selfImpulseCap", "selfSilenceMin",
   "missDays", "echoOn", "busyHold", "busyBufferMin", "busyMaxHoldMin", "sleepMode", "sleepWakeProb",
-  "presendMax", "presendTalkingMin", "presendGapMin", "momentsOn", "momentsWeekly", "momentsGapH", "threadDays",
+  "presendMax", "presendTalkingMin", "presendGapMin", "sendRetryMin", "promiseRetryMin", "momentsOn", "momentsWeekly", "momentsGapH", "threadDays",
   "chatEditsDay", "threadsOn", "recheckEnabled", "genEnabled", "autoGenAt", "forkLevel", "forkBurst", "dayPrompt", "moodGate", "affection", "tzOffsetMin",
 ] as const;
 
 export const STATE_KEYS = [
-  "threads", "fb", "fbSeen", "missKey", "echoKey", "momentsLast", "momentsWeekStart", "momentsWeekN", "momentsRollHour", "outbox", "callInviteAt",
+  "threads", "fb", "fbSeen", "missKey", "echoKey", "momentsLast", "momentsWeekStart", "momentsWeekN", "momentsRollHour", "outbox", "callInviteAt", "selfTry", "ledgerFast",
 ] as const;

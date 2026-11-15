@@ -141,10 +141,53 @@ export async function callModel(request: ModelRequest, fetchImpl: ModelFetch = f
   return { text: extractResponseText(request.providerKind, data), data };
 }
 
+/**
+ * 备用通道：沿用任务模板的正文，只把地址、密钥、模型换成另一份快照的（一般是聊天快照）。
+ * 协议不同、或两份本来就是同一个地址同一个模型时返回 null。
+ */
+export function altChannel(primary: ModelRequest, alt: ModelRequest | null | undefined): ModelRequest | null {
+  if (!alt?.url || alt.providerKind !== primary.providerKind) return null;
+  const model = alt.body?.model;
+  if (alt.url === primary.url && model === primary.body?.model) return null;
+  const body = structuredClone(primary.body);
+  if (typeof model === "string" && model) body.model = model;
+  return { ...primary, url: alt.url, headers: alt.headers, body };
+}
+
+// 主通道刚失败过：半小时内先走备用，省得每次都白等一次失败
+const downUntil = new Map<string, number>();
+const channelKey = (r: ModelRequest) => `${r.url}|${String(r.body?.model || "")}`;
+
+export type FallbackResult = ModelResult & { viaAlt: boolean; primaryError: string };
+
+/** 主通道调不通就换备用通道再调一次；两边都不通抛主通道的错 */
+export async function callModelWithFallback(request: ModelRequest, alt: ModelRequest | null, fetchImpl: ModelFetch = fetch,
+  timeoutMs = 240_000, nowMs = Date.now()): Promise<FallbackResult> {
+  if (!alt) return { ...await callModel(request, fetchImpl, timeoutMs), viaAlt: false, primaryError: "" };
+  const altFirst = (downUntil.get(channelKey(request)) || 0) > nowMs;
+  const order = altFirst ? [alt, request] : [request, alt];
+  let firstError = "";
+  for (const one of order) {
+    try {
+      const result = await callModel(one, fetchImpl, timeoutMs);
+      if (one === request) downUntil.delete(channelKey(request));
+      return { ...result, viaAlt: one === alt, primaryError: one === alt && !altFirst ? firstError : "" };
+    } catch (e) {
+      const text = e instanceof Error ? e.message : String(e);
+      if (one === request) downUntil.set(channelKey(request), nowMs + 30 * 60_000);
+      if (!firstError) firstError = text;
+      else throw new Error(`${firstError}；备用通道也不通：${text}`.slice(0, 400));
+    }
+  }
+  throw new Error(firstError);
+}
+
 /** 模型爱把 JSON 裹在解释或 ``` 里：先整体解析，再逐个截取平衡的花括号 */
-export function parseModelJson(text: unknown): any {
-  const t = String(text || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```(?:json)?/gi, "").trim();
-  try { return JSON.parse(t); } catch { /* 继续截取 */ }
+/** accept：正文里有好几个 JSON 对象时（思考里顺手写的、正文后面又举例的）挑哪个；都不合意就用第一个 */
+export function parseModelJson(text: unknown, accept: (value: unknown) => boolean = () => true): any {
+  const t = String(text || "").replace(/<(think|thinking|thought)>[\s\S]*?<\/\1>/gi, "").replace(/```(?:json)?/gi, "").trim();
+  try { const whole = JSON.parse(t); if (accept(whole)) return whole; } catch { /* 继续截取 */ }
+  let first: unknown, found = false;
   for (let a = t.indexOf("{"); a >= 0; a = t.indexOf("{", a + 1)) {
     let depth = 0, inStr = false, escaped = false;
     for (let i = a; i < t.length; i++) {
@@ -155,18 +198,27 @@ export function parseModelJson(text: unknown): any {
       if (inStr) continue;
       if (ch === "{") depth++;
       else if (ch === "}" && --depth === 0) {
-        try { return JSON.parse(t.slice(a, i + 1)); } catch { break; }
+        try {
+          const value = JSON.parse(t.slice(a, i + 1));
+          if (accept(value)) return value;
+          if (!found) { first = value; found = true; }
+          a = i; // 这个对象不合意：从它后面接着找，不钻进它里面
+        } catch { /* 这一段不是 JSON，从下一个花括号再试 */ }
+        break;
       }
     }
   }
+  if (found) return first;
   throw new Error("模型没回 JSON，它说的是：「" + t.slice(0, 100) + (t.length > 100 ? "…" : "") + "」");
 }
 
 /** 第一次没拿到 JSON 就追加严格指令再试一次（与 App generateJson 一致） */
 export async function generateJson(template: ModelRequest, instruction: string, fetchImpl: ModelFetch,
-  record: (providerKind: ProviderKind, data: unknown) => Promise<void>, log: (line: string) => void): Promise<any> {
+  record: (providerKind: ProviderKind, data: unknown) => Promise<void>, log: (line: string) => void, alt: ModelRequest | null = null): Promise<any> {
   const once = async (inst: string) => {
-    const result = await callModel(buildTaskRequest(template, inst), fetchImpl);
+    const request = buildTaskRequest(template, inst);
+    const result = await callModelWithFallback(request, altChannel(request, alt), fetchImpl);
+    if (result.viaAlt) log("原通道调不通" + (result.primaryError ? "（" + result.primaryError.slice(0, 120) + "）" : "") + "，这次换用聊天的模型");
     await record(template.providerKind, result.data);
     return parseModelJson(result.text);
   };
@@ -243,13 +295,35 @@ function usageLocalDay(nowMs: number, tz: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
+// 上次读到的记账时区：个人云一时读不到上限时，记账仍按它落在对的那一天（不退回 UTC）
+const knownTz = new Map<string, number>();
+
+/** 上限或今天的用量读不到：不能当成「没上限」照常调模型，这一轮先不调 */
+export class UsageUnknown extends Error {
+  constructor(what: string) { super(`个人云读不到${what}，这轮先不调模型`); }
+}
+
+/** 记账用的时区：读得到用读到的，读不到用上次读到的 */
+export function usageTz(userId: string, budget?: UsageBudget | null): number {
+  return budget ? budget.tz : knownTz.get(userId) ?? 0;
+}
+
+async function usageRows<T>(rest: Rest, path: string, what: string): Promise<T[]> {
+  const res = await rest(path).catch(() => null);
+  const rows = res?.ok ? await res.json().catch(() => null) : null;
+  if (!Array.isArray(rows)) throw new UsageUnknown(what);
+  return rows as T[];
+}
+
 export async function usageBudget(rest: Rest, userId: string, nowMs = Date.now()): Promise<UsageBudget> {
-  const limitsRes = await rest(`push_api_limits?user_id=eq.${encodeURIComponent(userId)}&select=daily_calls,daily_tokens,tz&limit=1`).catch(() => null);
-  const limits = limitsRes?.ok ? (await limitsRes.json().catch(() => []) as { daily_calls?: number; daily_tokens?: number; tz?: number }[])[0] : undefined;
+  // 没有这一行 = 没设上限；读失败是另一回事，抛 UsageUnknown
+  const [limits] = await usageRows<{ daily_calls?: number; daily_tokens?: number; tz?: number }>(rest,
+    `push_api_limits?user_id=eq.${encodeURIComponent(userId)}&select=daily_calls,daily_tokens,tz&limit=1`, "用量上限");
   const tz = Number(limits?.tz) || 0;
+  knownTz.set(userId, tz);
   const day = usageLocalDay(nowMs, tz);
-  const rowsRes = await rest(`push_api_usage?user_id=eq.${encodeURIComponent(userId)}&day=eq.${encodeURIComponent(day)}&source=neq.cloud-chat&select=calls,prompt_tokens,completion_tokens`).catch(() => null);
-  const rows = rowsRes?.ok ? await rowsRes.json().catch(() => []) as { calls: number; prompt_tokens: number; completion_tokens: number }[] : [];
+  const rows = await usageRows<{ calls: number; prompt_tokens: number; completion_tokens: number }>(rest,
+    `push_api_usage?user_id=eq.${encodeURIComponent(userId)}&day=eq.${encodeURIComponent(day)}&source=neq.cloud-chat&select=calls,prompt_tokens,completion_tokens`, "今天的用量");
   let calls = 0, tokens = 0;
   for (const r of rows) { calls += Number(r.calls) || 0; tokens += (Number(r.prompt_tokens) || 0) + (Number(r.completion_tokens) || 0); }
   return { day, tz, calls, tokens, dailyCalls: Number(limits?.daily_calls) || 0, dailyTokens: Number(limits?.daily_tokens) || 0 };

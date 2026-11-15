@@ -7,6 +7,8 @@ export type CloudMessage = { id: string; role: string; content: string; message_
 export type CloudOutput = { id: string; trigger_key?: string; raw_text: string; created_at: string; consumed_at?: string; meta?: Record<string, unknown> };
 export type CloudHistory = {
   messages: CloudMessage[]; outputs: CloudOutput[]; lastGeneratedAt: number;
+  /** 格式坏掉、被跳过的记录条数（一行坏数据不该让整个角色停摆） */
+  skipped?: number;
   uncertainLegacy?: { message: CloudMessage; outputIds: string[]; exactText: boolean }[];
 };
 export type HistoryWindow = { onlineRounds?: unknown; offlineRounds?: unknown };
@@ -47,6 +49,33 @@ export function selectHistory(messages: CloudMessage[], window: HistoryWindow): 
 
 const MIRROR_FIELDS = "select=id,role,content,message_at,response_batch_id,media_type";
 
+/** 镜像行按字段挑：id 和时间不成样的整行丢掉，正文不是字符串的当空（空气泡后面本来就不算数） */
+function cleanMirrors(rows: unknown[], bad: { n: number }): CloudMessage[] {
+  const out: CloudMessage[] = [];
+  for (const raw of rows) {
+    const m = raw as Partial<CloudMessage> | null;
+    if (!m || typeof m !== "object" || typeof m.id !== "string" || !m.id || typeof m.message_at !== "string" || !Number.isFinite(Date.parse(m.message_at))) { bad.n++; continue; }
+    if (typeof m.content !== "string") { if (m.content != null) bad.n++; m.content = ""; }
+    if (typeof m.role !== "string") m.role = "";
+    out.push(m as CloudMessage);
+  }
+  return out;
+}
+
+function cleanOutputs(rows: unknown[], bad: { n: number }): CloudOutput[] {
+  const out: CloudOutput[] = [];
+  for (const raw of rows) {
+    const o = raw as Partial<CloudOutput> | null;
+    if (!o || typeof o !== "object" || (typeof o.id !== "string" && typeof o.id !== "number") || o.id === "") { bad.n++; continue; }
+    o.id = String(o.id);
+    if (typeof o.raw_text !== "string") o.raw_text = o.raw_text == null ? "" : String(o.raw_text);
+    if (typeof o.created_at !== "string") o.created_at = "";
+    if (o.meta != null && typeof o.meta !== "object") delete o.meta;
+    out.push(o as CloudOutput);
+  }
+  return out;
+}
+
 export async function readHistory(rest: Rest, userId: string, sessionId: string, window?: HistoryWindow): Promise<CloudHistory> {
   if (!sessionId) throw new Error("缺少聊天会话，不能核对云端消息");
   const scope = `user_id=eq.${encodeURIComponent(userId)}&session_id=eq.${encodeURIComponent(sessionId)}`;
@@ -56,8 +85,11 @@ export async function readHistory(rest: Rest, userId: string, sessionId: string,
     rest(`push_outbox?${scope}&meta->>pushGenerated=eq.true&select=id,trigger_key,raw_text,created_at,consumed_at,meta&order=created_at.desc&limit=200`),
   ]);
   if (responses.some(r => !r.ok)) throw new Error("云端聊天读取失败");
-  const [mirrors, outputs] = await Promise.all(responses.map(r => r.json())) as [CloudMessage[], CloudOutput[]];
-  if (!Array.isArray(mirrors) || !Array.isArray(outputs)) throw new Error("云端聊天数据格式错误");
+  const [rawMirrors, rawOutputs] = await Promise.all(responses.map(r => r.json())) as [unknown[], unknown[]];
+  if (!Array.isArray(rawMirrors) || !Array.isArray(rawOutputs)) throw new Error("云端聊天数据格式错误");
+  const bad = { n: 0 };
+  const mirrors = cleanMirrors(rawMirrors, bad);
+  const outputs = cleanOutputs(rawOutputs, bad);
   if (hasWindow(window)) {
     // 线上轮次取够完整轮；摘要单独取，挤不掉线上的
     let pageSize = mirrors.length;
@@ -65,15 +97,15 @@ export async function readHistory(rest: Rest, userId: string, sessionId: string,
       if (mirrors.length >= 5000) throw new Error("最近对话气泡过多，请减少线上回看轮数");
       const response = await rest(`push_chat_mirror?${scope}&${MIRROR_FIELDS}&${onlineFilter}&order=message_at.desc,id.desc&limit=200&offset=${mirrors.length}`);
       if (!response.ok) throw new Error("线上历史分页读取失败");
-      const page = await response.json() as CloudMessage[];
+      const page = await response.json() as unknown[];
       if (!Array.isArray(page)) throw new Error("线上历史分页格式错误");
-      mirrors.push(...page); pageSize = page.length;
+      mirrors.push(...cleanMirrors(page, bad)); pageSize = page.length;
     }
     const response = await rest(`push_chat_mirror?${scope}&media_type=eq.offline_summary&select=id,role,content,message_at,media_type&order=message_at.desc,id.desc&limit=${roundLimit(window?.offlineRounds)}`);
     if (!response.ok) throw new Error("线下摘要读取失败");
-    const summaries = await response.json() as CloudMessage[];
+    const summaries = await response.json() as unknown[];
     if (!Array.isArray(summaries)) throw new Error("线下摘要格式错误");
-    mirrors.push(...summaries);
+    mirrors.push(...cleanMirrors(summaries, bad));
   }
   const records = new Map<string, CloudMessage>();
   const cloudIds = new Set(outputs.map(o => `push-outbox:${o.id}`));
@@ -84,12 +116,17 @@ export async function readHistory(rest: Rest, userId: string, sessionId: string,
     const ids = batchIds.slice(start, start + 50).map(id => JSON.stringify(id)).join(",");
     const response = await rest(`push_chat_mirror?${scope}&media_type=eq.response_batch&response_batch_id=in.(${encodeURIComponent(ids)})&select=id,content,response_batch_id,media_type&limit=50`);
     if (!response.ok) throw new Error("整轮聊天镜像读取失败");
-    for (const row of await response.json() as CloudMessage[]) {
-      if (row.media_type !== "response_batch" || !row.response_batch_id || !cloudIds.has(row.response_batch_id)) continue;
-      const value = JSON.parse(row.content) as { v?: number; messages?: CloudMessage[] };
-      if (value.v !== 1 || !Array.isArray(value.messages) || value.messages.some(m =>
-        typeof m.id !== "string" || typeof m.content !== "string" || !Number.isFinite(Date.parse(m.message_at)))) {
-        throw new Error("整轮聊天镜像格式异常");
+    const batchRows = await response.json() as CloudMessage[];
+    if (!Array.isArray(batchRows)) throw new Error("整轮聊天镜像读取失败");
+    for (const row of batchRows) {
+      if (!row || row.media_type !== "response_batch" || !row.response_batch_id || !cloudIds.has(row.response_batch_id)) continue;
+      // 这一行坏了就不用它：那一轮退回发件箱里的原文，不让一行坏数据把角色每一轮都卡在「聊天历史读取失败」
+      let value: { v?: number; messages?: CloudMessage[] } | null = null;
+      try { value = JSON.parse(row.content) as { v?: number; messages?: CloudMessage[] }; } catch { /* 下面按坏行处理 */ }
+      if (!value || value.v !== 1 || !Array.isArray(value.messages) || value.messages.some(m =>
+        !m || typeof m.id !== "string" || typeof m.content !== "string" || !Number.isFinite(Date.parse(m.message_at)))) {
+        bad.n++;
+        continue;
       }
       snapshots.set(row.response_batch_id, value.messages);
     }
@@ -154,7 +191,7 @@ export async function readHistory(rest: Rest, userId: string, sessionId: string,
   for (const [key, m] of records) if (!String(m.content || "").trim()) records.delete(key);
   return {
     messages: [...records.values()].sort((a, b) => Date.parse(a.message_at) - Date.parse(b.message_at) || a.id.localeCompare(b.id)),
-    outputs, lastGeneratedAt, uncertainLegacy,
+    outputs, lastGeneratedAt, uncertainLegacy, ...(bad.n ? { skipped: bad.n } : {}),
   };
 }
 
@@ -171,14 +208,25 @@ export function historyText(history: CloudHistory, tz: number, limit = 80, windo
       + (exactText ? "正文已见对应云端输出，不重复列出。" : "待核对原文：" + m.content.slice(0, 4000))).join("\n");
 }
 
-/** TA连续几轮主动没等到回：最新一轮要晾满 30 分钟才计数 */
+/**
+ * TA连续几轮主动没等到回。接你话的那一轮不算：你说完 30 分钟内跟上的第一轮是回复（到点主动发的除外）；
+ * 最新一轮要晾满 30 分钟才计数。
+ */
 export function unansweredRounds(history: CloudHistory, nowMs: number): number {
-  let rounds = 0, last = Infinity;
-  for (const m of [...history.messages].filter(m => m.media_type !== "offline_summary").reverse()) {
-    if (m.role === "user") break;
+  const msgs = history.messages.filter(m => m.media_type !== "offline_summary");
+  let lastUser = msgs.length - 1;
+  while (lastUser >= 0 && msgs[lastUser].role !== "user") lastUser--;
+  const userAt = lastUser >= 0 ? Date.parse(msgs[lastUser].message_at) : NaN;
+  const timed = new Set(history.outputs.filter(o => o.trigger_key?.startsWith("timedwake:")).map(o => `push-outbox:${o.id}`));
+  let rounds = 0, prev = -Infinity, first = true;
+  for (const m of msgs.slice(lastUser + 1)) {
     const at = Date.parse(m.message_at);
-    if (last - at > 3 * 60_000 && nowMs - at >= 30 * 60_000) rounds++;
-    last = at;
+    const opens = at - prev > 3 * 60_000;
+    prev = at;
+    if (!opens) continue;
+    const reply = first && lastUser >= 0 && !timed.has(m.id) && at - userAt <= 30 * 60_000;
+    first = false;
+    if (!reply && nowMs - at >= 30 * 60_000) rounds++;
   }
   return rounds;
 }
