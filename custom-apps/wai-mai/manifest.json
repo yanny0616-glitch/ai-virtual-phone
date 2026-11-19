@@ -1,0 +1,83 @@
+{
+  "sdkVersion": "1.0",
+  "id": "float.waimai",
+  "name": "外卖",
+  "version": "0.1.0",
+  "author": "Float",
+  "description": "逛店点餐、看着外卖一步步送到；能给角色点、请 TA 代付，TA 也会主动给你点。聊天时 TA 知道外卖到哪了，送到之前不会问你好不好吃。搜不到想吃的，可以让 AI 现编几家店。",
+  "icon": "icon.svg",
+  "entry": "index.html",
+  "permissions": [
+    "app.data.read",
+    "app.data.write",
+    "characters.read",
+    "user.profile.read",
+    "ai.generate",
+    "ai.chat",
+    "chat.read",
+    "chat.read.background",
+    "chat.write",
+    "chat.sendCard",
+    "chat.requestReply",
+    "chat.context",
+    "notifications.read",
+    "notifications.write",
+    "ui.notification",
+    "tasks.schedule",
+    "wallet.read",
+    "wallet.pay"
+  ],
+  "resources": {
+    "presets": ["presets.json"]
+  },
+  "extensions": {
+    "chat": {
+      "directives": [
+        {
+          "id": "wm-order",
+          "label": "给对方点外卖",
+          "syntax": "[点外卖:店铺:餐品:想说的话]",
+          "description": "想请对方吃点什么、主动给对方点一份外卖送过去时使用，由你付钱。店铺写店名；餐品用顿号分隔，可带份数（如 皮蛋瘦肉粥、煎饺×2）；最后是随单附的一句话，没有就写 无。外卖要过一阵才送到，送到之前不要问味道。",
+          "card": {
+            "appLabel": "外卖",
+            "title": "给你点了外卖",
+            "subtitle": "{{店铺}}",
+            "body": "{{餐品}}",
+            "status": "待接单",
+            "accentColor": "#f5a800",
+            "sections": [{ "rows": [{ "label": "留言", "value": "{{想说的话}}" }] }],
+            "actions": [{ "label": "查看" }]
+          }
+        },
+        {
+          "id": "wm-pay",
+          "label": "回应外卖代付",
+          "syntax": "[外卖代付:结果:想说的话]",
+          "description": "对方发来外卖代付请求时，用它回应要不要帮忙付款。结果只写 同意 或 拒绝；后面是你想说的一句话。没有收到代付请求时不要使用。",
+          "card": {
+            "appLabel": "外卖",
+            "title": "外卖代付",
+            "body": "{{想说的话}}",
+            "status": "{{结果}}",
+            "accentColor": "#f5a800",
+            "actions": [{ "label": "查看订单" }]
+          }
+        }
+      ],
+      "plusActions": [
+        {
+          "id": "wm-gift",
+          "label": "给TA点外卖",
+          "entry": "gift",
+          "presentation": "app",
+          "description": "打开外卖，给当前聊天对象点一份。"
+        }
+      ]
+    },
+    "prompt": { "contextProvider": { "timeoutMs": 2000 } },
+    "events": [
+      { "event": "chat.message.created", "entry": "events", "background": true, "description": "角色发出外卖卡片（给你点外卖、回应代付）时建单或更新订单；APP 没打开也处理。" }
+    ]
+  },
+  "primaryTags": []
+}

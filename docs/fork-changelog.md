@@ -1620,3 +1620,12 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 验证：`gua-nian:build`、`apps:build-dist`、`gua-nian:check`、`check:apps-dist`、`check:sdk`、`check-gua-nian-day-prompt.mjs` 通过。用本机 Chromium 以 390px 宽打开产物，自动点开关核对 23 项（开关尺寸、✓ 不再出现、整行点击、各项显隐、藏起来的值读表不丢、没有行溢出）并看过截图。没有在真机上看过。
 - 顺带发现（不是这次引起的，没修）：`scripts/check-gua-nian-backend-browser.mjs` 在改动前的代码上就失败，`#cloud-sync` 在「后台」页找不到。
 
+## 2026-11-19：外卖 APP 0.1.0
+
+用户要求：自己做一个类似的外卖系统，逛店点餐加钱包结算、配送进度加送达、和聊天打通三块一起做；样式做成常见外卖 APP 那种黄黑版式，只要小字号；功能向美团 / 淘宝闪购看齐。
+
+- 新增 `custom-apps/wai-mai/`（`float.waimai`），做成自定义 APP，宿主没有改动。源码在 `src/` 分文件，`scripts/build-wai-mai.mjs` 合成单 HTML 并打 zip；`package.json` 加 `waimai:build` / `waimai:check` / `waimai:test`，`public/custom-apps/index.json` 多一项。
+- 功能：10 家内置店（含水果鲜花、买药、超市便利）+ AI 现编店铺；排序和筛选；店铺页点菜 / 评价 / 商家；选规格（温度甜度、辣度）；购物车抽屉；收藏；天天红包；结算页选送给谁、送达时间、钱包付款或找 TA 代付；订单分类、地图上的配送进度、催单、改速度、评价、售后退红包。
+- 聊天联动：指令 `wm-order`（角色给你点）、`wm-pay`（回应代付）、「+」面板 `wm-gift`；`chat.message.created` 后台事件建单；送达走 `tasks.schedule`（`wm_arrive_<订单 id>`）；`chat.setContext` + `registerContextProvider` 让角色知道外卖进度。
+- 验证：`waimai:check`、`check-wai-mai-domain.mjs`、`check-wai-mai-browser.mjs`（无头 Chromium + 假 SDK，390px 宽，截图在 `float/docs-draft/wai-mai-0.1.0-shots/`）、`apps:build-dist`、`check:apps-dist`、`check:sdk` 通过。zip 存到 `float/releases/wai-mai/wai-mai-0.1.0.zip`。
+- 没验证的：没有在真机和真实宿主里装过；没调过真实模型；聊天界面里送达那条历史记录的样子没看过。月售、距离、好评度是哈希出来的装饰数字。

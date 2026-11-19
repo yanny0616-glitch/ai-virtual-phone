@@ -1,0 +1,14 @@
+[
+  "core/runtime.js",
+  "domain/delivery.js",
+  "data/seed.js",
+  "data/storage.js",
+  "gen/ai.js",
+  "chat/link.js",
+  "ui/art.js",
+  "ui/home.js",
+  "ui/checkout.js",
+  "ui/orders.js",
+  "ui/me.js",
+  "bootstrap.js"
+]

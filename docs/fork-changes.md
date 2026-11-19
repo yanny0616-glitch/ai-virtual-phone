@@ -122,6 +122,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 | 拾光 `shiguang` | 2.1.1 | 重要记忆：每 20 轮整理、关键词三档召回、当轮同步注入。宿主侧原管线已删，只留只读接口 | `custom-apps/shiguang/ARCHITECTURE.md` |
 | 用量 `usage-dashboard` | 2.8.1 | 按角色/来源看 token 与缓存、日志分页筛选、保留条数设置。来源名由宿主 `lib/usage-source-names.ts` 下发 | — |
 | 小剧场 `xiao-ju-chang` | 0.1.1 | 单角色小剧场生成：部件各自成库随意组合，整段 HTML/JS 在沙盒 iframe 里渲染，四套换布局的主题 | `custom-apps/xiao-ju-chang/ARCHITECTURE.md` |
+| 外卖 `wai-mai` | 0.1.0 | 逛店点餐、钱包付款、带地图的配送进度；给角色点 / 请 TA 代付 / 角色主动点单，聊天上下文带外卖进度；AI 现编店铺。排序筛选、选规格、购物车抽屉、收藏、天天红包。宿主未改，全走通用 SDK | `custom-apps/wai-mai/ARCHITECTURE.md` |
 | `online-plaza` | 1.1.0 | 上游原有 | — |
 
 ## 8. 宿主功能与修补
@@ -154,6 +155,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 | `npm run check:sdk` | 自定义 APP SDK / 派发 / 权限 / 文档四处一致 |
 | `npm run check:weixin` | 微信助手提示词等价 |
 | `npm run gua-nian:test` / `check:shiguang-app` | 两个 APP 的领域层 + 产物一致 |
+| `npm run waimai:check` / `waimai:test` | 外卖 APP 产物一致；配送时间线与计价 + 无头 Chromium 主流程 |
 | `npm run check:chat-silence` / `check:reply-delivery` / `check:cloud-messages` | 沉默、回复投递、云端消息链路 |
 | `node scripts/check-fork-regressions.mjs` | fork 回归总集（40+ 项） |
 | `node scripts/check-<feature>.mjs` | 其余 60 来个单项脚本，各自的名字见 `scripts/`，changelog 每段末尾写了对应哪个 |

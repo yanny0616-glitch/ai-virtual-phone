@@ -1,0 +1,48 @@
+# 外卖 APP 架构
+
+独立 APP，不改宿主。数据全在 APP 自己的 db；和聊天、钱包、通知的联动都走通用 SDK（`chat.sendCard` / `chat.updateCard` / `chat.setContext`、聊天指令和 `chat.message.created` 后台事件、`tasks.schedule`、`wallet.pay`、`ai.chat` / `ai.generate`）。
+
+## 目录
+
+`src/**/*.js` 共享一个闭包（`core/runtime.js` 开头、`bootstrap.js` 结尾），顺序见 `src/bundle.json`。`scripts/build-wai-mai.mjs` 把脚本和 `styles.css` 注入 `src/page.html`，合成单文件 `index.html` 并更新 `public/custom-apps/wai-mai.zip`。
+
+| 文件 | 职责 |
+|---|---|
+| `core/runtime` | `state`、`$` / `esc` / `yuan`、toast、底部抽屉、确认框、视图切换（`views[name] = { title, tone, render, after }`）、`data-act` / `data-change` 事件委托 |
+| `domain/delivery` | 配送时间线（下单时一次算好，带种子随机的延误和小插曲）、`stageAt(order, now)`、催单和改速度（按比例缩放剩余路程）、计价 `priceOrder` |
+| `data/seed` | 分类、热词、10 家内置店和菜单、按菜名猜 emoji 的规则、`normalizeShop` |
+| `data/storage` | 四个集合：`settings` 一行、`shops`（只存 AI 店）、`orders`、`coupons`；全量读进内存，写时同步回库 |
+| `gen/ai` | 本地搜店、AI 现编店铺（`ai.chat` 返回 JSON）、问角色想吃什么（`ai.generate` + `waimai-crave` 预设） |
+| `chat/link` | 和聊天的全部联动：礼物卡片、代付卡片和回应、角色主动点单、送达任务、上下文文本 |
+| `ui/art` | 内联 SVG 图标、CSS 画的店铺 / 菜品封面、示意地图和骑手位置、装饰数字、菜单分组、规格规则 |
+| `ui/home` | 首页、店铺页、购物车和选规格 |
+| `ui/checkout` | 结算页和下单 |
+| `ui/orders` | 订单列表、订单详情、评价、售后、每 2 秒一次的 `tick()` |
+| `ui/me` | 我的 |
+| `bootstrap` | 启动、从聊天卡片或「+」面板进来时跳到对应页面、注册聊天钩子 |
+
+## 关键决定
+
+- **做成自定义 APP 而不是宿主内置**。现有 SDK 已经够用：卡片、指令、后台事件、定时任务、钱包都有。宿主一行没改。
+- **时间线在付款那一刻算好，存在订单上**。之后任何时候只用 `stageAt(order, now)` 读状态，APP 关掉再开、换设备都一致，不需要后台计时。催单和改速度是把还没走完的那段按比例压缩或拉长，再重挂送达任务。
+- **送达的副作用交给宿主定时任务**。任务 id 固定为 `wm_arrive_<订单 id>`，同 id 重挂即覆盖；任务里依次是通知、改卡片、写一条聊天历史、更新上下文、请角色回复（按订单类型取其中几项）。礼物卡片要先发出去拿到消息 id，再挂一次任务，任务里才带得上改卡片。
+- **角色点单靠后台事件**。`chat.message.created` 里看到 `wm-order` / `wm-pay` 指令卡片就处理，APP 没打开也行；同一条消息只建一张单（按 `directiveMessageId` 去重）。
+- **上下文两条路**：`chat.setContext` 写一份常驻的（给不会调用 provider 的场景），`registerContextProvider` 在每次请求时现算一份更准的。只写和这位角色有关的订单；送到之前明说「还没拿到，别问味道」。
+- **钱包没有退款接口**，取消已付款订单、少送和洒漏都发成 `coupons` 里的红包，下次下单自动抵扣。天天红包也是往这张表里加一行，`settings.claimDay` 记当天领过。
+- **购物车的行名带规格**。`cart.items` 的键是「菜名·规格·规格」，`cart.base[行名]` 记原菜名；订单的 `items[].name` 直接存行名，所以聊天卡片、历史和上下文里都带着规格。`dishOf(name, shop)` 用「等于菜名或以菜名加 `·` 开头」把行名找回菜。规格本身不存在菜单数据里，由 `dishSpecs` 按品类和菜名规则推出来，AI 现编的店也能用。
+- **不带图片**。封面全是 CSS：店铺是带条纹雨棚的小铺面，菜品是铺格子桌布的小桌，上面放一个 emoji。安装包因此只有 55KB。月售、距离、好评度用店名和菜名的哈希算，固定不变，但不是统计。
+- **版式**：黄色主色配黑字，首页地址顶在标题那一行，店铺页左分类右菜单加黑色购物车条，订单详情地图在上。只参考了常见外卖 APP 的布局习惯，没有用任何一家的名字、标志和素材。字号整体偏小（正文 13px，辅助 10–11px）。
+
+## 样式里踩过的坑
+
+单词式的修饰类很容易撞名，撞了就是整块版式错位：`.live`（首页在途卡片）撞 `.st.live`，`.hot` 撞 `.mini.hot`，`.dock.pay` 撞 `.pay i`（付款方式图标）。现在这几处分别叫 `.live-card`、`.hotwords`、`.dock.flat`。新加修饰类先搜一遍。封面和头像是 `span`，`> span` 选择器要写成 `:not(.cv)` / `:not(.ava)`。
+
+## 验证
+
+- `npm run waimai:check`：源码、`index.html`、zip 一致，脚本语法。
+- `node scripts/check-wai-mai-domain.mjs`：时间线、阶段、催单、改速度、计价。
+- `node scripts/check-wai-mai-browser.mjs [--shots <目录>] [--emoji-font <ttf>]`：无头 Chromium 加内存里的假 SDK，走完逛店、选规格、购物车、结算、配送、评价、给角色点、角色点单、代付同意和拒绝、取消退红包、AI 找店、天天红包、排序筛选、设置开关。Debian 11 的 Chromium 120 画不出 COLRv1 彩色 emoji，截图要用 `--emoji-font` 指一份 CBDT 的 `NotoColorEmoji.ttf`。
+
+没验证的：没有在真机和真实宿主里跑过；聊天界面里 `chat.history` 写入的那条记录长什么样没看过；没调过真实模型。
+
+未做：跑腿、请群聊里的人一起吃、经营模式。

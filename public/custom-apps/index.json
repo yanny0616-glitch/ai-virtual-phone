@@ -35,6 +35,13 @@
     "file": "usage-dashboard.zip"
   },
   {
+    "id": "float.waimai",
+    "name": "外卖",
+    "version": "0.1.0",
+    "description": "逛店点餐、看着外卖一步步送到；能给角色点、请 TA 代付，TA 也会主动给你点。聊天时 TA 知道外卖到哪了，送到之前不会问你好不好吃。搜不到想吃的，可以让 AI 现编几家店。",
+    "file": "wai-mai.zip"
+  },
+  {
     "id": "float.xiaojuchang",
     "name": "小剧场",
     "version": "0.1.1",

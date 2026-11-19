@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>外卖</title><style>{{STYLES}}</style></head>
+<body><div id="app" data-view="home" data-tone="brand">
+  <header class="topbar">
+    <button type="button" id="btn-back" class="back" aria-label="返回" hidden><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+    <h1 id="title">外卖</h1>
+  </header>
+  <main class="main" id="main"><div class="empty"><p>正在打开…</p></div></main>
+  <div class="dock" id="cartbar" hidden></div>
+  <nav class="tabs" id="tabs">
+    <button type="button" data-tab="home" class="on"><i><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11h16a8 8 0 0 1-16 0z"/><path d="M9 19.5h6"/><path d="M9 7c0-1.2 1-1.6 1-2.8M13 7c0-1.2 1-1.6 1-2.8"/></svg></i><span>首页</span></button>
+    <button type="button" data-tab="orders"><i><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5h12v17l-2.4-1.6-1.8 1.6-1.8-1.6-1.8 1.6-1.8-1.6L6 20.5z"/><path d="M9.5 8.5h5M9.5 12h5"/></svg></i><span>订单</span></button>
+    <button type="button" data-tab="me"><i><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.6"/><path d="M4.8 20c.8-3.6 3.7-5.4 7.2-5.4s6.4 1.8 7.2 5.4"/></svg></i><span>我的</span></button>
+  </nav>
+  <div class="scrim" id="scrim"></div>
+  <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <header><h2 id="sheet-title"></h2><button type="button" id="sheet-close" aria-label="关闭">×</button></header>
+    <div id="sheet-body"></div>
+  </section>
+  <div class="busy" role="status"><span class="spin"></span><span id="busy"></span></div>
+  <div class="toast" id="toast" role="status"></div>
+</div>
+<script>{{SCRIPTS}}</script>
+</body></html>
