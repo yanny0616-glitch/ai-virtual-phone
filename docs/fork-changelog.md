@@ -1653,3 +1653,12 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 验证：`waimai:build`、`check-wai-mai-domain.mjs`、`check-wai-mai-browser.mjs`（新增 8 段流程，今日特价随日期变，金额改用页面计价算）、`waimai:check`、`apps:build-dist`、`check:apps-dist`、`check:sdk`。截图在 `float/docs-draft/wai-mai-0.2.0-shots/`。zip 存到 `float/releases/wai-mai/wai-mai-0.2.0.zip`。
 - 没验证的：没有在真机和真实宿主里装过；群聊「+」面板带进来的 `participants` 字段按宿主源码写的，没在真实群里点过；没调过真实模型（群里每人一句的解析只用假数据测过）。
 
+## 2026-11-19：外卖 0.2.1 规格按菜名判断
+
+用户在手机上看到小酒馆的「炸薯角」要选温度和甜度。
+
+- 原因：`dishSpecs` 按店的分类判断，「夜色小酒馆」归在奶茶咖啡，店里每样东西都要选冰度和糖度。
+- `custom-apps/wai-mai/src/ui/art.js`：改成按每道菜的名字判断，拆成 `drinkSpecs` / `spicySpecs`。现调茶饮选温度和甜度；鲜果茶只选冰量和甜度；咖啡只选温度（冰美式、冷萃只选冰量）；酒只分冰镇 / 常温，名字里已经是「冰」的不用选；热饮只选甜度；瓶装、榨汁、椰子水、小吃甜点不选。辣度排除了拉面、炸酱面、清炒，补上串串、酸汤水饺、凉面。
+- 把 39 家店每道菜推出来的规格逐个列出来核对过。
+- 验证：`waimai:build`、`waimai:check`、浏览器主流程、`apps:build-dist`、`check:apps-dist`。zip 存到 `float/releases/wai-mai/wai-mai-0.2.1.zip`。
+

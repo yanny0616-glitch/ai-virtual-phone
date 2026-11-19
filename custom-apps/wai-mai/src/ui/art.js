@@ -80,17 +80,40 @@ function dishGroups(shop) {
   if (sp) list.unshift({ title: "今日特价", dishes: [sp] });
   return list;
 }
-/** 要选规格的菜：饮品选温度和甜度，带辣的主食选辣度 */
+/**
+ * 要选规格的菜：按每道菜自己的名字判断，店的分类只用来排除。
+ * 现调的茶饮选温度和甜度；咖啡只选温度；酒和气泡类只分冰镇 / 常温；瓶装、小吃、甜点、零售都不用选。
+ * 现做的辣口主食和串串选辣度。
+ */
+const SPEC_ICE = ["正常冰", "少冰", "去冰", "热"], SPEC_COLD = ["正常冰", "少冰", "去冰"], SPEC_HOT = ["热", "温"], SPEC_SUGAR = ["三分糖", "五分糖", "七分糖", "不另加糖"];
+const SPEC_NO = ["超市便利", "水果鲜花", "买药"];
+const spec = (title, options) => ({ title, options });
 function dishSpecs(dish, shop) {
-  if (shop.category === "奶茶咖啡") {
-    const ice = /热/.test(dish.name) ? ["热", "温"] : ["正常冰", "少冰", "去冰", "热"];
-    return /美式|拿铁|咖啡|摩卡/.test(dish.name) ? [{ title: "温度", options: ice }] : [{ title: "温度", options: ice }, { title: "甜度", options: ["三分糖", "五分糖", "七分糖", "不另加糖"] }];
-  }
-  if (["快餐简餐", "面食粉面", "烧烤小吃", "夜宵"].includes(shop.category) && dish.price >= 10 && !DRINK_EMOJI.includes(dish.emoji)
-    && /面|粉|米线|麻辣|串|烤|炒|鱼香|黄牛肉|火锅|冒菜/.test(dish.name) && !/番茄|骨汤|葱油|馒头/.test(dish.name)) {
-    return [{ title: "辣度", options: ["不辣", "微辣", "中辣", "特辣"] }];
-  }
-  return [];
+  const name = String(dish.name || ""), cat = shop && shop.category;
+  const hot = /^热|热$|桂圆|红枣|姜茶|可可/.test(name);
+  if (SPEC_NO.includes(cat)) return [];
+  return drinkSpecs(name, hot) || spicySpecs(dish, name, cat) || [];
+}
+/** 现调饮品的规格；不是饮品返回 null。瓶装罐装、天然果汁、带「奶」「茶」字的小吃甜点都不算 */
+function drinkSpecs(name, hot) {
+  if (/瓶|罐|听装|矿泉水|苏打水|可乐|雪碧|气泡水$|汽水|盒装|整箱|ml|椰子水|榨|豆奶|豆浆|酸奶|炸|蛋糕|面包|布丁$|冰粉|饼|卷|泡芙|酥|糕|班戟|千层|冰淇淋|雪糕|鸡|饭|面$|双皮奶|西米露|烧仙草|红豆沙|雪梨|汤/i.test(name)
+    && !/奶茶/.test(name)) return null;
+  if (/莫吉托|冷萃|冰美式|冰拿铁|气泡(?!酒)/.test(name)) return [spec("冰量", ["正常冰", "少冰"])];
+  if (/酒|啤|鸡尾|嗨棒/.test(name)) return /^冰/.test(name) ? [] : [spec("温度", ["冰镇", "常温"])];
+  if (/冰沙|沙冰|奶昔|雪顶/.test(name)) return [spec("甜度", SPEC_SUGAR)];
+  if (/美式|拿铁|咖啡|摩卡|澳白|卡布|浓缩|手冲/.test(name)) return [spec("温度", /手冲/.test(name) ? ["热", "冰"] : hot ? SPEC_HOT : SPEC_ICE)];
+  if (hot && /茶|可可|饮/.test(name)) return [spec("甜度", SPEC_SUGAR)];
+  // 鲜果茶：只分冰量，不做热的
+  if (/橙|葡萄|西瓜|杨枝|草莓|芒果|柠檬|椰椰|生椰|桃|荔枝|百香果|芝芝|芝士葡萄/.test(name)) return [spec("冰量", SPEC_COLD), spec("甜度", SPEC_SUGAR)];
+  if (/奶茶|奶绿|奶盖|烤奶|鲜奶|乌龙|茉莉|红茶|绿茶|普洱|铁观音|四季春|珍珠|波波|豆乳|奶霜|水果茶|果茶/.test(name)) return [spec("温度", SPEC_ICE), spec("甜度", SPEC_SUGAR)];
+  return null;
+}
+/** 辣度：现做的辣口主食、串串、小龙虾这类 */
+function spicySpecs(dish, name, cat) {
+  if (!["快餐简餐", "面食粉面", "烧烤小吃", "夜宵"].includes(cat) || dish.price < 10 || DRINK_EMOJI.includes(dish.emoji)) return null;
+  if (!/面|粉|米线|麻辣|串|签|烤|炒|鱼香|黄牛肉|火锅|冒菜|小龙虾|香锅|干锅|酸汤|酸辣/.test(name)) return null;
+  if (/番茄|骨汤|葱油|馒头|蒜蓉|清汤|清炒|炸酱|拉面|甜|蛋挞|面包|饼$|面饼/.test(name)) return null;
+  return [spec("辣度", ["不辣", "微辣", "中辣", "特辣"])];
 }
 function orderShop(order) {
   if (order.mode === "errand") return { color: "#2f8f5a", emoji: "🛵", dishes: [], category: "", name: order.shopName };

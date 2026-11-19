@@ -2,7 +2,7 @@
   "sdkVersion": "1.0",
   "id": "float.waimai",
   "name": "外卖",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "Float",
   "description": "逛四十来家店点餐、看着外卖一步步送到；可以到店自取、跑腿帮买、领券抽奖开会员。能给角色点、请 TA 代付、和 TA 拼单、请群聊吃，把店和订单分享给 TA，还能让角色当骑手。聊天时 TA 知道外卖到哪了。",
   "icon": "icon.svg",

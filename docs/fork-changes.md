@@ -122,7 +122,7 @@ zip 放 `/root/vibe-coding/float/releases/<app>/`，旧版不删。挂念和拾�
 | 拾光 `shiguang` | 2.1.1 | 重要记忆：每 20 轮整理、关键词三档召回、当轮同步注入。宿主侧原管线已删，只留只读接口 | `custom-apps/shiguang/ARCHITECTURE.md` |
 | 用量 `usage-dashboard` | 2.8.1 | 按角色/来源看 token 与缓存、日志分页筛选、保留条数设置。来源名由宿主 `lib/usage-source-names.ts` 下发 | — |
 | 小剧场 `xiao-ju-chang` | 0.1.1 | 单角色小剧场生成：部件各自成库随意组合，整段 HTML/JS 在沙盒 iframe 里渲染，四套换布局的主题 | `custom-apps/xiao-ju-chang/ARCHITECTURE.md` |
-| 外卖 `wai-mai` | 0.2.0 | 逛店点餐（39 家店 + AI 现编）、钱包付款、带地图的配送进度；到店自取、跑腿帮买、地址簿、今日特价、包装费、顺手带一件；领券中心、天天抽奖、会员；给角色点 / 请 TA 代付 / 和 TA 拼单 / 请群聊 / 角色主动点单 / 分享给 TA / 角色当骑手，聊天上下文带外卖进度；详细售后、骑手打赏、批量删除。宿主未改，全走通用 SDK | `custom-apps/wai-mai/ARCHITECTURE.md` |
+| 外卖 `wai-mai` | 0.2.1 | 逛店点餐（39 家店 + AI 现编）、钱包付款、带地图的配送进度；到店自取、跑腿帮买、地址簿、今日特价、包装费、顺手带一件；领券中心、天天抽奖、会员；给角色点 / 请 TA 代付 / 和 TA 拼单 / 请群聊 / 角色主动点单 / 分享给 TA / 角色当骑手，聊天上下文带外卖进度；详细售后、骑手打赏、批量删除。宿主未改，全走通用 SDK | `custom-apps/wai-mai/ARCHITECTURE.md` |
 | `online-plaza` | 1.1.0 | 上游原有 | — |
 
 ## 8. 宿主功能与修补
