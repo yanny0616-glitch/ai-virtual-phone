@@ -47,14 +47,21 @@ function makeRng(seed) {
  * @param o.items       [{ name, price, qty }]，少送时从里面挑一样
  * @param o.scheduledFor 约定送达时刻（毫秒），早于最快送达时间就当「尽快」
  * @param o.shopFactor  店铺快慢系数，1 为正常
+ * @param o.mode        "" 外卖配送 / "pickup" 到店自取（只有备餐，餐好即「送达」）/ "errand" 跑腿帮买（骑手先去买）
+ * @param o.code        自取的取餐码
+ * @param o.storeName   跑腿去的店
+ * @param o.riderName   指定骑手名字（让某位角色来送），不填就随机
  * @returns {{ timeline: {at:number,key:string,text:string}[], deliverAt:number, rider:string, issue:null|object }}
  */
 function buildTimeline(o) {
   const rng = makeRng(hashSeed(o.seed));
   const speed = SPEEDS[o.speed] || SPEEDS.fast;
   const [lo, hi] = speed.minutes;
+  const mode = o.mode === "pickup" || o.mode === "errand" ? o.mode : "";
   let total = (lo + (hi - lo) * rng()) * 60000 * clampNumber(o.shopFactor || 1, 0.7, 1.5);
-  const rider = RIDERS[Math.floor(rng() * RIDERS.length)];
+  const randomRider = RIDERS[Math.floor(rng() * RIDERS.length)];
+  const rider = mode === "pickup" ? "" : String(o.riderName || "").trim() || randomRider;
+  if (mode === "pickup") total *= 0.55;          // 只有备餐，没有路上的时间
 
   let delay = null, issue = null;
   const roll = rng();
@@ -62,6 +69,9 @@ function buildTimeline(o) {
     if (roll < 0.22) delay = DELAYS[Math.floor(rng() * DELAYS.length)];
     else if (roll < 0.3) issue = pickIssue(o.items || [], rng);
   }
+  if (mode === "pickup") { issue = null; if (delay && !delay.text.startsWith("商家")) delay = null; }
+  if (mode === "errand" && issue) issue = issue.type === "missing" ? { ...issue, text: `「${issue.item}」店里卖完了，没买到` } : null;
+  if (mode === "errand" && delay && delay.text.startsWith("商家")) delay = { text: "收银台排队的人有点多", extra: delay.extra };
   if (delay) total *= 1 + delay.extra;
 
   // 预约单：商家先接单，到点前再开始做
@@ -71,16 +81,33 @@ function buildTimeline(o) {
   const at = f => Math.round(kitchenStart + total * f);
 
   const timeline = [{ at: o.startAt, key: "placed", text: "订单已提交" }];
-  if (scheduled) {
+  if (mode === "pickup") {
+    timeline.push({ at: scheduled ? o.startAt + Math.min(60000, total * 0.03) : at(0.05), key: "accepted", text: scheduled ? `商家已接单，会在 ${clock(o.scheduledFor)} 前做好` : "商家已接单" });
+    timeline.push({ at: at(0.15), key: "cooking", text: "商家正在备餐" });
+    if (delay) timeline.push({ at: at(0.5), key: "cooking", text: delay.text });
+    const readyAt = at(1);
+    timeline.push({ at: readyAt, key: "delivered", text: `餐做好了，凭取餐码 ${o.code || ""} 到店取`.trim() });
+    timeline.sort((a, b) => a.at - b.at);
+    return { timeline, deliverAt: readyAt, rider: "", issue: null };
+  }
+  if (mode === "errand") {
+    const store = o.storeName || "附近的店";
+    timeline.push({ at: at(0.03), key: "accepted", text: `骑手${rider}接单了，正在去${store}` });
+    timeline.push({ at: at(0.15), key: "cooking", text: `骑手${rider}到${store}了，在帮你挑东西` });
+    if (delay) timeline.push({ at: at(0.32), key: "cooking", text: delay.text });
+    timeline.push({ at: at(0.45), key: "picked", text: `东西买齐了，骑手${rider}正在送来` });
+  } else if (scheduled) {
     timeline.push({ at: o.startAt + Math.min(60000, total * 0.03), key: "accepted", text: `商家已接单，会按约定时间 ${clock(o.scheduledFor)} 送达` });
   } else {
     timeline.push({ at: at(0.03), key: "accepted", text: "商家已接单" });
   }
-  timeline.push({ at: at(0.1), key: "cooking", text: "商家正在备餐" });
-  if (delay && delay.text.startsWith("商家")) timeline.push({ at: at(0.3), key: "cooking", text: delay.text });
-  timeline.push({ at: at(0.45), key: "picked", text: `骑手${rider}已取餐，正在赶来` });
+  if (mode !== "errand") {
+    timeline.push({ at: at(0.1), key: "cooking", text: "商家正在备餐" });
+    if (delay && delay.text.startsWith("商家")) timeline.push({ at: at(0.3), key: "cooking", text: delay.text });
+    timeline.push({ at: at(0.45), key: "picked", text: `骑手${rider}已取餐，正在赶来` });
+  }
   timeline.push({ at: at(0.6), key: "riding", text: `骑手${rider}距离收货地还有 ${(1.2 + rng() * 1.6).toFixed(1)} 公里` });
-  if (delay && !delay.text.startsWith("商家")) timeline.push({ at: at(0.7), key: "riding", text: delay.text });
+  if (delay && !delay.text.startsWith("商家") && !delay.text.startsWith("收银台")) timeline.push({ at: at(0.7), key: "riding", text: delay.text });
   timeline.push({ at: at(0.82), key: "riding", text: `骑手${rider}距离收货地还有 ${(0.3 + rng() * 0.5).toFixed(1)} 公里` });
   timeline.push({ at: at(0.93), key: "near", text: "骑手已到楼下，马上送到" });
   const deliverAt = at(1);
@@ -159,13 +186,27 @@ function remainText(ms) {
   return `约 ${Math.round(ms / 60000)} 分钟后送达`;
 }
 
-/** 订单金额：小计 + 配送费 - 满减 - 红包，不会低于 0 */
-function priceOrder(items, shop, couponAmount) {
+/**
+ * 订单金额。opts 可以直接传一个数当红包金额（旧写法），或者：
+ *   coupon   红包抵扣多少
+ *   pickup   到店自取：不收配送费、没有起送价、自取立减一成（最多 10 元）
+ *   freeFee  免配送费（会员或运费券）
+ * 合计 = 小计 + 包装费 + 配送费 − 免运费 − 满减 − 自取立减 − 红包，不会低于 0
+ */
+function priceOrder(items, shop, opts) {
+  const o = typeof opts === "number" ? { coupon: opts } : (opts || {});
   const subtotal = round1(items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0));
-  const fee = Number(shop && shop.fee) || 0;
+  const pickup = !!o.pickup;
+  const pack = subtotal > 0 ? Number(shop && shop.pack) || 0 : 0;
+  const fee = pickup ? 0 : Number(shop && shop.fee) || 0;
+  const feeOff = !pickup && o.freeFee ? fee : 0;
   const off = shop && Array.isArray(shop.off) && subtotal >= Number(shop.off[0]) ? Number(shop.off[1]) || 0 : 0;
-  const before = Math.max(0, round1(subtotal + fee - off));
-  const coupon = Math.min(before, Math.max(0, Number(couponAmount) || 0));
-  return { subtotal, fee, off, coupon: round1(coupon), total: round1(before - coupon), short: Math.max(0, round1((Number(shop && shop.minOrder) || 0) - subtotal)) };
+  const pickupOff = pickup ? Math.min(10, round1(subtotal * 0.1)) : 0;
+  const before = Math.max(0, round1(subtotal + pack + fee - feeOff - off - pickupOff));
+  const coupon = Math.min(before, Math.max(0, Number(o.coupon) || 0));
+  return {
+    subtotal, pack, fee, feeOff, off, pickupOff, coupon: round1(coupon), total: round1(before - coupon),
+    short: pickup ? 0 : Math.max(0, round1((Number(shop && shop.minOrder) || 0) - subtotal)),
+  };
 }
 function round1(n) { return Math.round(n * 10) / 10; }

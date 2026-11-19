@@ -36,7 +36,8 @@ svg { display: block; flex: none; }
 .topbar { flex: none; display: flex; align-items: center; gap: 4px; min-height: calc(var(--top) + 34px); padding: var(--top) var(--ai-phone-app-bar-clear-right, 96px) 0 12px; }
 .topbar h1 { margin: 0; font-size: 16px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .back { width: 28px; height: 28px; margin-left: -6px; border-radius: 50%; display: grid; place-items: center; }
-.main { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 10px 20px; -webkit-overflow-scrolling: touch; }
+/* overscroll-behavior：iOS 上滚到顶还能往下拽出一截回弹，露出标题栏和头图之间的底色。宿主只给 html / body 关了，里面的滚动容器要自己关 */
+.main { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 10px 20px; -webkit-overflow-scrolling: touch; overscroll-behavior: none; }
 #app[data-view="shop"] .main, #app[data-view="checkout"] .main { padding-bottom: 84px; }
 /* 顶栏和头图：brand 是黄色往下渐隐，hue 是店铺主色调出来的浅色 */
 #app[data-tone="brand"] .topbar { background: var(--head); color: var(--on-head); }
@@ -44,6 +45,9 @@ svg { display: block; flex: none; }
 #app[data-tone="hue"] .topbar, #app[data-tone="hue"] .hero { background: linear-gradient(rgba(255, 255, 255, .5), rgba(255, 255, 255, .5)), var(--hue); }
 @media (prefers-color-scheme: dark) { #app[data-tone="hue"] .topbar, #app[data-tone="hue"] .hero { background: linear-gradient(rgba(18, 18, 19, .62), rgba(18, 18, 19, .62)), var(--hue); } }
 .hero { position: relative; margin: 0 -10px; padding: 2px 12px 12px; }
+/* 不认 overscroll-behavior 的旧系统还是会回弹：头图上方垫一块同色，拽出来的那截和标题栏连成一片 */
+.hero::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 100vh; background: inherit; pointer-events: none; }
+#app[data-tone="brand"] .hero::before { background: var(--head); }
 
 .tabs { display: flex; flex: none; padding: 5px 16px calc(4px + var(--safe-b)); background: var(--card); box-shadow: 0 -1px 0 var(--line); }
 .tabs button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 10px; color: var(--sub); }
@@ -394,17 +398,197 @@ svg { display: block; flex: none; }
 .stats div { display: flex; flex-direction: column; }
 .stats b { font: 700 18px/1.25 var(--num); }
 .stats b i { font-size: 11px; margin-right: 1px; }
-.coupons { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -12px; padding: 0 12px 2px; }
-.coupons::-webkit-scrollbar { display: none; }
-.coupon { position: relative; flex: none; width: 150px; display: flex; align-items: center; border-radius: 8px; background: var(--red-soft); overflow: hidden; }
-.coupon::before, .coupon::after { content: ""; position: absolute; left: 50px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--card); }
-.coupon::before { top: -5px; } .coupon::after { bottom: -5px; }
-.coupon b { flex: none; width: 50px; padding: 12px 0; text-align: center; border-right: 1px dashed rgba(255, 75, 51, .35); }
-.coupon > span { flex: 1; min-width: 0; padding: 0 8px; font-size: 10px; color: var(--sub); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.me-entries { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.member-strip { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: linear-gradient(110deg, #2f2a1f, #4a3d22); color: #f7dc9a; }
+.member-strip > span { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.member-strip b { font-size: 13px; font-weight: 800; }
+.member-strip small { color: inherit; opacity: .7; font-size: 10px; }
+.me-entry { position: relative; display: flex; align-items: center; gap: 6px; padding: 9px 10px; border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 12px; font-weight: 700; }
+.me-entry i { font: 18px/1 var(--emoji); }
+.me-entry em { margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; display: grid; place-items: center; background: var(--red); color: #fff; font: 700 10px var(--num); }
+.frow[data-act] { cursor: pointer; }
+.frow[data-act] > b { text-align: right; font-weight: 400; font-size: 12px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 券：左边面额，右边说明，中间一道齿孔 ── */
+.coupon-list, .offers { display: flex; flex-direction: column; gap: 6px; }
+.coupon, .offer, .shop-coupon { position: relative; display: flex; align-items: center; min-height: 52px; border-radius: 8px; background: var(--red-soft); overflow: hidden; }
+.coupon::before, .coupon::after, .offer::before, .offer::after, .shop-coupon::before, .shop-coupon::after { content: ""; position: absolute; left: 64px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--card); }
+.coupon::before, .offer::before, .shop-coupon::before { top: -5px; } .coupon::after, .offer::after, .shop-coupon::after { bottom: -5px; }
+.coupon > b, .offer > b, .shop-coupon > b { flex: none; width: 64px; align-self: stretch; display: grid; place-items: center; border-right: 1px dashed rgba(255, 75, 51, .35); }
+.coupon > b > i, .offer > b > i { font-size: 12px; font-weight: 800; color: var(--red); }
+.coupon > span, .offer > span, .shop-coupon > span { flex: 1; min-width: 0; padding: 0 10px; display: flex; flex-direction: column; }
+.coupon em, .offer em, .shop-coupon em { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coupon small, .offer small, .shop-coupon small { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.offer .mini, .shop-coupon .mini { margin-right: 10px; }
+.offer .go { cursor: pointer; }
+.coupon.fee, .offer.fee { background: var(--ok-soft); }
+.coupon.fee > b, .offer.fee > b { border-right-color: rgba(31, 165, 111, .35); }
+.coupon.fee > b > i, .offer.fee > b > i { color: var(--ok); }
+.shop-coupon { margin-top: 8px; min-height: 44px; }
+.shop-coupon::before, .shop-coupon::after { background: var(--card); }
+.promo-hero { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 14px 26px; }
+.promo-hero > b { font-size: 18px; font-weight: 800; }
+.promo-hero small { color: inherit; opacity: .7; }
+.promo-hero .btn { min-height: 30px; margin-top: 8px; padding: 0 16px; background: #2b2b2d; color: #ffd426; font-size: 12px; }
+.promo-hero + .card { margin-top: -18px; position: relative; }
+
+/* ── 天天抽奖：八格转盘，指针朝上 ── */
+.wheel-box { position: relative; width: 210px; height: 210px; margin: 6px auto 4px; }
+.wheel { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 5px var(--y2), 0 0 0 7px var(--y-soft), 0 6px 16px rgba(0, 0, 0, .14);
+  background: conic-gradient(#fff3c4 0 45deg, #ffe08a 0 90deg, #fff3c4 0 135deg, #ffe08a 0 180deg, #fff3c4 0 225deg, #ffe08a 0 270deg, #fff3c4 0 315deg, #ffe08a 0 360deg); }
+.wheel.spinning { transition: transform 2.2s cubic-bezier(.15, .7, .2, 1); }
+.wheel span { position: absolute; left: 50%; top: 0; width: 44px; height: 50%; margin-left: -22px; transform-origin: 50% 100%; transform: rotate(calc(var(--i) * 45deg + 22.5deg)); display: flex; justify-content: center; padding-top: 14px; }
+.wheel span b { font-size: 12px; font-weight: 800; color: #7a4a00; white-space: nowrap; }
+.wheel-go { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; z-index: 2; border-radius: 50%; display: grid; place-items: center; text-align: center; background: linear-gradient(180deg, #ff6a4d, #ff3b22); color: #fff; font-size: 15px; font-weight: 800; line-height: 1.15; box-shadow: 0 0 0 4px #fff, 0 4px 10px rgba(255, 59, 34, .35); }
+.wheel-go:disabled { background: #c8c8cc; font-size: 11px; box-shadow: 0 0 0 4px #fff; }
+.wheel-pin { position: absolute; left: 50%; top: -10px; z-index: 3; margin-left: -8px; border: 8px solid transparent; border-top: 16px solid var(--red); filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .2)); }
+@media (prefers-color-scheme: dark) {
+  .wheel { background: conic-gradient(#4a3d18 0 45deg, #5c4a1a 0 90deg, #4a3d18 0 135deg, #5c4a1a 0 180deg, #4a3d18 0 225deg, #5c4a1a 0 270deg, #4a3d18 0 315deg, #5c4a1a 0 360deg); }
+  .wheel span b { color: #ffe3a0; }
+  .wheel-go, .wheel-go:disabled { box-shadow: 0 0 0 4px var(--card); }
+}
+
+/* ── 会员 ── */
+.member-hero { display: flex; align-items: center; gap: 10px; padding: 6px 14px 30px; }
+.member-hero .crown { font: 34px/1 var(--emoji); filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .18)); }
+.member-hero > span { display: flex; flex-direction: column; }
+.member-hero b { font-size: 18px; font-weight: 800; }
+.member-hero small { color: inherit; opacity: .7; }
+.member-card { position: relative; margin-top: -22px; background: linear-gradient(110deg, #2f2a1f, #4a3d22); color: #f7dc9a; }
+.member-card small { color: inherit; opacity: .7; }
+.perks { display: flex; flex-direction: column; gap: 10px; }
+.perks > div { display: grid; grid-template-columns: 30px 1fr; column-gap: 8px; align-items: center; }
+.perks i { grid-row: span 2; font: 22px/1 var(--emoji); text-align: center; }
+.perks b { font-size: 12px; }
+.perks small { font-size: 10px; }
+.plans { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.plan { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px; border-radius: 10px; background: var(--y-soft); box-shadow: inset 0 0 0 1px var(--y2); }
+.plan b { font-size: 12px; }
+.plan .price { font-size: 20px; }
+.plan small { font-size: 10px; }
+.tag.vip { background: #2f2a1f; color: #f7dc9a; }
+.tag.addr { background: var(--ok-soft); color: var(--ok); }
+.tag.bought { background: var(--y-soft); color: var(--quote); }
+
+/* ── 首页新加：五个入口、买过、AI 再找几家、店铺页的分享 / 配送自取切换、特价划线价 ── */
+.entries { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 8px; }
+.entry { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 0 6px; border-radius: 10px; background: var(--card); box-shadow: var(--shadow); font-size: 10px; color: var(--ink); }
+.entry i { font: 20px/1 var(--emoji); }
+.entry em { position: absolute; right: -2px; top: -5px; padding: 0 4px; border-radius: 7px 7px 7px 0; background: var(--red); color: #fff; font-size: 9px; line-height: 14px; white-space: nowrap; }
+.entry.on { background: var(--y-soft); box-shadow: inset 0 0 0 1px var(--y2); font-weight: 800; }
+.more-shops { width: 100%; display: flex; align-items: center; justify-content: center; gap: 4px; height: 36px; margin-bottom: 8px; border-radius: 12px; background: var(--ai-soft); color: var(--ai); font-size: 12px; font-weight: 700; }
+.pricebox { display: inline-flex; align-items: baseline; gap: 3px; }
+.pricebox s { font-size: 10px; color: var(--mute); }
+.head-btns { margin-left: auto; display: flex; gap: 6px; }
+.head-btns .like-btn { margin-left: 0; }
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+.modes button { display: flex; flex-direction: column; align-items: center; padding: 5px 4px; border-radius: 8px; background: var(--soft); color: var(--sub); line-height: 1.3; font-size: 12px; }
+.modes button b { font-size: 12px; }
+.modes button small { font-size: 10px; color: inherit; }
+.modes button.on { background: var(--y-soft); color: var(--ink); box-shadow: inset 0 0 0 1px var(--y2); }
+.modes.slim { margin: 10px 0 2px; }
+.modes.slim button { min-height: 28px; justify-content: center; font-weight: 700; }
+.ava.grp { background: var(--ok); color: #fff; }
+.addr-row { padding: 0 !important; }
+.addr-use { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 9px 4px; text-align: left; }
+.addr-use > span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr-use .tag { margin-left: 0; }
+.addr-del { flex: none; width: 26px; height: 26px; border-radius: 50%; color: var(--mute); font-size: 16px; line-height: 1; text-align: center; }
+.addr-new { margin-top: 10px; }
+.addr-new .seg { margin-bottom: 8px; }
+.cart-foot { display: flex; }
+.cart-foot .link { flex: 1; display: flex; align-items: center; justify-content: center; gap: 3px; }
+
+/* ── 结算新加：地址簿快捷、顺手带一件、开会员省运费 ── */
+.addr-chips { display: flex; gap: 6px; padding: 8px 0 2px; overflow-x: auto; scrollbar-width: none; }
+.addr-chips::-webkit-scrollbar { display: none; }
+.addr-chips button { flex: none; display: flex; align-items: center; gap: 4px; max-width: 70%; height: 24px; padding: 0 8px 0 3px; border-radius: 12px; background: var(--soft); font-size: 11px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr-chips i { padding: 0 4px; border-radius: 9px; background: var(--card); font-size: 10px; line-height: 16px; }
+.addr-chips .on { background: var(--y-soft); color: var(--ink); box-shadow: inset 0 0 0 1px var(--y2); }
+.addons { margin: 8px -12px 0; padding: 8px 12px 0; border-top: 1px solid var(--line); }
+.addons > small { display: block; margin-bottom: 6px; font-weight: 700; color: var(--ink); }
+.addons > div { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.addons > div::-webkit-scrollbar { display: none; }
+.addon { position: relative; flex: none; width: 76px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; border-radius: 8px; background: var(--soft); }
+.addon > span { max-width: 100%; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addon .plus-dot { position: absolute; right: 4px; top: 4px; width: 16px; height: 16px; font-size: 13px; }
+.upsell { width: 100%; display: flex; align-items: center; gap: 5px; margin-top: 6px; padding: 7px 9px; border-radius: 8px; background: #2f2a1f; color: #f7dc9a; font-size: 11px; }
+.upsell > span { flex: 1; min-width: 0; }
+.card.after .upsell { background: var(--soft); color: var(--ink); }
+.card.after .upsell svg { color: var(--orange); }
+.line b s { color: var(--mute); font-weight: 400; margin-right: 3px; }
+.line .tag { vertical-align: 0; }
+
+/* ── 分享给 TA ── */
+.share-card { display: flex; align-items: center; gap: 9px; padding: 9px; margin-bottom: 10px; border-radius: 10px; background: var(--soft); }
+.share-card > span:not(.cv) { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.share-card b { font-size: 13px; }
+.share-card small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-to { display: flex; gap: 10px; margin: 0 -14px 10px; padding: 0 14px; overflow-x: auto; scrollbar-width: none; }
+.share-to::-webkit-scrollbar { display: none; }
+.share-to button { flex: none; width: 52px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10px; color: var(--sub); }
+.share-to button > span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-to .ava { width: 40px; height: 40px; box-shadow: 0 0 0 2px transparent; }
+.share-to .on { color: var(--ink); font-weight: 800; }
+.share-to .on .ava { box-shadow: 0 0 0 2px var(--y2); }
+.sheet .sw-row { margin-bottom: 10px; border-bottom: 0; }
+
+/* ── 跑腿帮买 ── */
+.errand-head { display: flex; flex-direction: column; gap: 2px; background: linear-gradient(120deg, #e6f6ee, #d3efe0); box-shadow: none; }
+.errand-head b { font-size: 14px; }
+@media (prefers-color-scheme: dark) { .errand-head { background: linear-gradient(120deg, #173225, #1d3a2b); } }
+.errand-stores { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.errand-stores button { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0; border-radius: 8px; background: var(--soft); font-size: 11px; color: var(--sub); }
+.errand-stores i { font: 20px/1 var(--emoji); }
+.errand-stores small { font-size: 9px; }
+.errand-stores .on { background: var(--y-soft); color: var(--ink); font-weight: 800; box-shadow: inset 0 0 0 1px var(--y2); }
+.errand-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.errand-item > input { flex: 1; min-width: 0; height: 32px; padding: 0 9px; border: 0; outline: 0; border-radius: 6px; background: var(--soft); font-size: 12px; }
+.yuan-in { flex: none; display: flex; align-items: center; gap: 2px; width: 72px; height: 32px; padding: 0 7px; border-radius: 6px; background: var(--soft); color: var(--sub); font-size: 11px; }
+.yuan-in input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; font: 600 12px var(--num); text-align: right; }
+.add-row { width: 100%; margin-top: 6px; height: 30px; border-radius: 6px; border: 1px dashed var(--mute); color: var(--sub); font-size: 12px; text-align: center; }
+#app[data-view="errand"] .main { padding-bottom: 84px; }
+
+/* ── 订单新加：管理、自取码、给骑手捎话、打赏、群里怎么说、售后 ── */
+.stabs .manage-btn { margin-left: auto; font-size: 12px; color: var(--sub); }
+.chk { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; box-shadow: inset 0 0 0 1.2px var(--mute); color: transparent; }
+.chk.on { background: var(--y1); box-shadow: none; color: var(--on-y); }
+.order.locked { opacity: .5; }
+.orders.managing { padding-bottom: 60px; }
+.manage-bar { position: absolute; z-index: 6; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px calc(8px + var(--safe-b)) 14px; background: var(--card); box-shadow: 0 -1px 0 var(--line); }
+.manage-bar small { flex: 1; font-size: 10px; }
+.pick-all { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.btn.sm { min-height: 32px; padding: 0 16px; font-size: 12px; }
+.btn.sm.danger:not(:disabled) { background: var(--red); color: #fff; }
+.code-sm { font: 800 12px var(--num); color: var(--ink); letter-spacing: .04em; }
+.status.pickup { padding-top: 14px; }
+.code-box { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 10px 0 12px; border-radius: 10px; background: var(--y-soft); }
+.code-box b { font: 800 34px/1.1 var(--num); letter-spacing: .08em; }
+.code-box span { font-size: 11px; color: var(--sub); }
+.rider-notes { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 8px; }
+.rider-notes small { width: 100%; font-size: 10px; }
+.rider-notes button { height: 22px; padding: 0 8px; border-radius: 11px; background: var(--soft); font-size: 11px; }
+.rider-notes button:disabled { background: var(--y-soft); color: var(--sub); }
+.rider-card .rider-row { padding-top: 0; border-top: 0; gap: 6px; }
+.rider-card .rider-row > i .ava { width: 32px; height: 32px; }
+.rider-row > i .ava.sm { width: 32px; height: 32px; }
+.tips { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.tips small { margin-right: auto; }
+.tips button { height: 26px; padding: 0 12px; border-radius: 13px; background: var(--orange-soft); color: var(--orange); font: 700 12px var(--num); }
+.feed li.me { color: var(--quote); }
+.talk { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.talk > div { display: flex; align-items: flex-start; gap: 7px; }
+.talk > div > span { padding: 5px 9px; border-radius: 3px 10px 10px 10px; background: var(--soft); font-size: 12px; }
+.talk b { display: block; font-size: 10px; color: var(--sub); font-weight: 600; }
+.group-talk .hint { margin: 0 0 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+.chips button { height: 24px; padding: 0 10px; border-radius: 12px; background: var(--soft); font-size: 11px; }
+.chips .on { background: var(--y-soft); box-shadow: inset 0 0 0 1px var(--y2); font-weight: 700; }
+.m-rider .ava { width: 28px; height: 28px; box-shadow: 0 0 0 2px var(--y1), 0 4px 10px rgba(0, 0, 0, .28); animation: bob .5s ease-in-out infinite alternate; }
 
 /* ── 抽屉、忙碌、提示 ── */
 .scrim { position: absolute; inset: 0; z-index: 20; background: rgba(0, 0, 0, .45); opacity: 0; pointer-events: none; transition: opacity .2s; }
-.sheet { position: absolute; z-index: 21; left: 0; right: 0; bottom: 0; max-height: 78%; overflow-y: auto; padding: 8px 14px calc(14px + var(--safe-b)); border-radius: 16px 16px 0 0; background: var(--card); transform: translateY(105%); transition: transform .24s cubic-bezier(.2, .8, .2, 1); }
+.sheet { position: absolute; z-index: 21; left: 0; right: 0; bottom: 0; max-height: 78%; overflow-y: auto; overscroll-behavior: contain; padding: 8px 14px calc(14px + var(--safe-b)); border-radius: 16px 16px 0 0; background: var(--card); transform: translateY(105%); transition: transform .24s cubic-bezier(.2, .8, .2, 1); }
 .sheet::before { content: ""; display: block; width: 32px; height: 4px; margin: 0 auto 8px; border-radius: 2px; background: var(--line); }
 .sheet-open .scrim { opacity: 1; pointer-events: auto; }
 .sheet-open .sheet { transform: none; }
@@ -482,7 +666,9 @@ const state = {
   params: {},
   recipient: "",                      // "" = 自己，否则角色 id
   category: "全部", query: "",
-  sort: "all", onlyLiked: false, onlyOff: false,   // 首页店铺列表的排序和筛选
+  sort: "all", onlyLiked: false, onlyOff: false, onlyBought: false,   // 首页店铺列表的排序和筛选
+  mode: "delivery",                   // delivery 外卖配送 / pickup 到店自取
+  orderManage: false, orderPicked: [], // 订单页「管理」：批量删除时选中的订单 id
   orderTab: "all",                                 // 订单页的分类标签
   cart: { shopId: "", items: {}, base: {} }, // items[行名] = 份数；带规格的行名是「菜名·规格」，base[行名] = 菜名
   busy: "",                           // 正在进行的长操作说明，空 = 空闲
@@ -631,14 +817,21 @@ function makeRng(seed) {
  * @param o.items       [{ name, price, qty }]，少送时从里面挑一样
  * @param o.scheduledFor 约定送达时刻（毫秒），早于最快送达时间就当「尽快」
  * @param o.shopFactor  店铺快慢系数，1 为正常
+ * @param o.mode        "" 外卖配送 / "pickup" 到店自取（只有备餐，餐好即「送达」）/ "errand" 跑腿帮买（骑手先去买）
+ * @param o.code        自取的取餐码
+ * @param o.storeName   跑腿去的店
+ * @param o.riderName   指定骑手名字（让某位角色来送），不填就随机
  * @returns {{ timeline: {at:number,key:string,text:string}[], deliverAt:number, rider:string, issue:null|object }}
  */
 function buildTimeline(o) {
   const rng = makeRng(hashSeed(o.seed));
   const speed = SPEEDS[o.speed] || SPEEDS.fast;
   const [lo, hi] = speed.minutes;
+  const mode = o.mode === "pickup" || o.mode === "errand" ? o.mode : "";
   let total = (lo + (hi - lo) * rng()) * 60000 * clampNumber(o.shopFactor || 1, 0.7, 1.5);
-  const rider = RIDERS[Math.floor(rng() * RIDERS.length)];
+  const randomRider = RIDERS[Math.floor(rng() * RIDERS.length)];
+  const rider = mode === "pickup" ? "" : String(o.riderName || "").trim() || randomRider;
+  if (mode === "pickup") total *= 0.55;          // 只有备餐，没有路上的时间
 
   let delay = null, issue = null;
   const roll = rng();
@@ -646,6 +839,9 @@ function buildTimeline(o) {
     if (roll < 0.22) delay = DELAYS[Math.floor(rng() * DELAYS.length)];
     else if (roll < 0.3) issue = pickIssue(o.items || [], rng);
   }
+  if (mode === "pickup") { issue = null; if (delay && !delay.text.startsWith("商家")) delay = null; }
+  if (mode === "errand" && issue) issue = issue.type === "missing" ? { ...issue, text: `「${issue.item}」店里卖完了，没买到` } : null;
+  if (mode === "errand" && delay && delay.text.startsWith("商家")) delay = { text: "收银台排队的人有点多", extra: delay.extra };
   if (delay) total *= 1 + delay.extra;
 
   // 预约单：商家先接单，到点前再开始做
@@ -655,16 +851,33 @@ function buildTimeline(o) {
   const at = f => Math.round(kitchenStart + total * f);
 
   const timeline = [{ at: o.startAt, key: "placed", text: "订单已提交" }];
-  if (scheduled) {
+  if (mode === "pickup") {
+    timeline.push({ at: scheduled ? o.startAt + Math.min(60000, total * 0.03) : at(0.05), key: "accepted", text: scheduled ? `商家已接单，会在 ${clock(o.scheduledFor)} 前做好` : "商家已接单" });
+    timeline.push({ at: at(0.15), key: "cooking", text: "商家正在备餐" });
+    if (delay) timeline.push({ at: at(0.5), key: "cooking", text: delay.text });
+    const readyAt = at(1);
+    timeline.push({ at: readyAt, key: "delivered", text: `餐做好了，凭取餐码 ${o.code || ""} 到店取`.trim() });
+    timeline.sort((a, b) => a.at - b.at);
+    return { timeline, deliverAt: readyAt, rider: "", issue: null };
+  }
+  if (mode === "errand") {
+    const store = o.storeName || "附近的店";
+    timeline.push({ at: at(0.03), key: "accepted", text: `骑手${rider}接单了，正在去${store}` });
+    timeline.push({ at: at(0.15), key: "cooking", text: `骑手${rider}到${store}了，在帮你挑东西` });
+    if (delay) timeline.push({ at: at(0.32), key: "cooking", text: delay.text });
+    timeline.push({ at: at(0.45), key: "picked", text: `东西买齐了，骑手${rider}正在送来` });
+  } else if (scheduled) {
     timeline.push({ at: o.startAt + Math.min(60000, total * 0.03), key: "accepted", text: `商家已接单，会按约定时间 ${clock(o.scheduledFor)} 送达` });
   } else {
     timeline.push({ at: at(0.03), key: "accepted", text: "商家已接单" });
   }
-  timeline.push({ at: at(0.1), key: "cooking", text: "商家正在备餐" });
-  if (delay && delay.text.startsWith("商家")) timeline.push({ at: at(0.3), key: "cooking", text: delay.text });
-  timeline.push({ at: at(0.45), key: "picked", text: `骑手${rider}已取餐，正在赶来` });
+  if (mode !== "errand") {
+    timeline.push({ at: at(0.1), key: "cooking", text: "商家正在备餐" });
+    if (delay && delay.text.startsWith("商家")) timeline.push({ at: at(0.3), key: "cooking", text: delay.text });
+    timeline.push({ at: at(0.45), key: "picked", text: `骑手${rider}已取餐，正在赶来` });
+  }
   timeline.push({ at: at(0.6), key: "riding", text: `骑手${rider}距离收货地还有 ${(1.2 + rng() * 1.6).toFixed(1)} 公里` });
-  if (delay && !delay.text.startsWith("商家")) timeline.push({ at: at(0.7), key: "riding", text: delay.text });
+  if (delay && !delay.text.startsWith("商家") && !delay.text.startsWith("收银台")) timeline.push({ at: at(0.7), key: "riding", text: delay.text });
   timeline.push({ at: at(0.82), key: "riding", text: `骑手${rider}距离收货地还有 ${(0.3 + rng() * 0.5).toFixed(1)} 公里` });
   timeline.push({ at: at(0.93), key: "near", text: "骑手已到楼下，马上送到" });
   const deliverAt = at(1);
@@ -743,21 +956,35 @@ function remainText(ms) {
   return `约 ${Math.round(ms / 60000)} 分钟后送达`;
 }
 
-/** 订单金额：小计 + 配送费 - 满减 - 红包，不会低于 0 */
-function priceOrder(items, shop, couponAmount) {
+/**
+ * 订单金额。opts 可以直接传一个数当红包金额（旧写法），或者：
+ *   coupon   红包抵扣多少
+ *   pickup   到店自取：不收配送费、没有起送价、自取立减一成（最多 10 元）
+ *   freeFee  免配送费（会员或运费券）
+ * 合计 = 小计 + 包装费 + 配送费 − 免运费 − 满减 − 自取立减 − 红包，不会低于 0
+ */
+function priceOrder(items, shop, opts) {
+  const o = typeof opts === "number" ? { coupon: opts } : (opts || {});
   const subtotal = round1(items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0));
-  const fee = Number(shop && shop.fee) || 0;
+  const pickup = !!o.pickup;
+  const pack = subtotal > 0 ? Number(shop && shop.pack) || 0 : 0;
+  const fee = pickup ? 0 : Number(shop && shop.fee) || 0;
+  const feeOff = !pickup && o.freeFee ? fee : 0;
   const off = shop && Array.isArray(shop.off) && subtotal >= Number(shop.off[0]) ? Number(shop.off[1]) || 0 : 0;
-  const before = Math.max(0, round1(subtotal + fee - off));
-  const coupon = Math.min(before, Math.max(0, Number(couponAmount) || 0));
-  return { subtotal, fee, off, coupon: round1(coupon), total: round1(before - coupon), short: Math.max(0, round1((Number(shop && shop.minOrder) || 0) - subtotal)) };
+  const pickupOff = pickup ? Math.min(10, round1(subtotal * 0.1)) : 0;
+  const before = Math.max(0, round1(subtotal + pack + fee - feeOff - off - pickupOff));
+  const coupon = Math.min(before, Math.max(0, Number(o.coupon) || 0));
+  return {
+    subtotal, pack, fee, feeOff, off, pickupOff, coupon: round1(coupon), total: round1(before - coupon),
+    short: pickup ? 0 : Math.max(0, round1((Number(shop && shop.minOrder) || 0) - subtotal)),
+  };
 }
 function round1(n) { return Math.round(n * 10) / 10; }
 
 // ── 内置店铺：不调模型也能点。店名、菜单都是本 APP 自己编的 ──
 const CATEGORIES = ["全部", "快餐简餐", "面食粉面", "奶茶咖啡", "烧烤小吃", "甜品面包", "夜宵", "轻食", "超市便利", "水果鲜花", "买药"];
 const CATEGORY_EMOJI = { "全部": "🍽️", "快餐简餐": "🍱", "面食粉面": "🍜", "奶茶咖啡": "🧋", "烧烤小吃": "🍢", "甜品面包": "🍰", "夜宵": "🌙", "轻食": "🥗", "超市便利": "🏪", "水果鲜花": "🍉", "买药": "💊" };
-const HOT_WORDS = ["牛肉面", "奶茶", "粥", "烤串", "蛋糕", "麻辣烫", "退热贴"];
+const HOT_WORDS = ["牛肉面", "奶茶", "炸鸡", "粥", "烤串", "蛋糕", "麻辣烫", "小龙虾", "退热贴"];
 
 // 菜名里出现这些字就配对应的图标；从上往下第一个命中的算数，所以具体的词放前面
 const EMOJI_RULES = [
@@ -811,8 +1038,106 @@ const SEED_SHOPS = [
   { id: "seed_pharmacy", name: "小药箱 · 24 小时药房", category: "买药", emoji: "💊", tagline: "半夜也送，常备药和小器械都有", rating: 4.9, minOrder: 0, fee: 4, factor: 0.8, color: "#2f9e7a", d: [
     ["布洛芬缓释胶囊", 22, "发烧、头疼、痛经时用", "常备", "💊"], ["感冒灵颗粒", 16, "一盒 9 袋", "", "💊"], ["退热贴（4 片）", 15, "大人小孩都能用", "", "🩹"],
     ["创可贴（20 片）", 8, "防水款", "", "🩹"], ["电子体温计", 35, "一分钟出结果", "", "🌡️"], ["一次性口罩（10 只）", 9, "", "", "😷"], ["维生素 C 泡腾片", 28, "橙子味", "", "🍊"]] },
+  // ── 快餐简餐 ──
+  { id: "seed_chicken", name: "脆皮研究所 · 炸鸡汉堡", category: "快餐简餐", emoji: "🍗", tagline: "现点现炸，八分钟出锅", rating: 4.6, minOrder: 20, fee: 3, factor: 1, off: [40, 6], color: "#e5873a", d: [
+    ["招牌脆皮炸鸡（半只）", 32, "外壳咔嚓响，里面多汁", "招牌", "🍗"], ["双层牛肉汉堡", 26, "两片现煎牛肉饼", "", "🍔"], ["香辣鸡腿堡", 19, "整块去骨鸡腿", "", "🍔"],
+    ["波浪薯条", 10, "撒海盐，配番茄酱", "", "🍟"], ["芝士鸡块（6 块）", 14, "拉丝的", "", "🧀"], ["无糖可乐", 6, "冰的", "", "🥤"]] },
+  { id: "seed_dumpling", name: "老张家饺子馆", category: "快餐简餐", emoji: "🥟", tagline: "手擀皮，馅是早上现剁的", rating: 4.8, minOrder: 15, fee: 2, factor: 0.95, color: "#b8743a", d: [
+    ["猪肉白菜水饺（15 只）", 18, "最家常的那一口", "招牌", "🥟"], ["韭菜鸡蛋水饺（15 只）", 16, "素馅，鸡蛋炒过再拌", "", "🥟"], ["三鲜虾仁水饺（12 只）", 26, "整只虾仁", "", "🥟"],
+    ["酸汤水饺", 20, "醋和辣油调的汤底", "", "🍲"], ["拍黄瓜", 7, "", "", "🥒"], ["饺子汤", 2, "原汤化原食", "", "🍲"]] },
+  { id: "seed_canteen", name: "妈妈的小饭桌", category: "快餐简餐", emoji: "🍱", tagline: "一荤两素一汤，像在家吃饭", rating: 4.7, minOrder: 18, fee: 3, factor: 1.05, off: [30, 3], color: "#d06a4e", d: [
+    ["红烧肉套餐", 28, "肥瘦五花，炖到入口即化", "招牌", "🍱"], ["可乐鸡翅套餐", 24, "甜口，小朋友最爱", "", "🍗"], ["番茄牛腩套餐", 30, "番茄炖出汁，泡饭绝了", "", "🍅"],
+    ["清蒸鲈鱼套餐", 32, "鱼是当天的", "", "🐟"], ["加一份米饭", 2, "", "", "🍚"], ["玉米排骨汤", 9, "小火炖了两小时", "", "🍲"]] },
+  // ── 面食粉面 ──
+  { id: "seed_spicy", name: "老陈麻辣烫", category: "面食粉面", emoji: "🍲", tagline: "骨汤底，麻辣能调到不辣", rating: 4.6, minOrder: 18, fee: 3, factor: 1, off: [35, 5], color: "#d24b33", d: [
+    ["招牌麻辣烫（荤素自选）", 26, "十二样配菜，默认中辣", "招牌", "🍲"], ["番茄麻辣烫", 24, "番茄熬的汤，不辣也好吃", "", "🍅"], ["麻辣香锅（小份）", 32, "干锅版，香得很", "", "🌶️"],
+    ["加份宽粉", 4, "", "", "🍜"], ["加份午餐肉", 5, "", "", "🥩"], ["冰粉", 7, "红糖汁加山楂碎", "", "🍧"]] },
+  { id: "seed_rice_noodle", name: "螺狮粉研究会", category: "面食粉面", emoji: "🍜", tagline: "酸笋自己泡的，敢点就敢做", rating: 4.5, minOrder: 15, fee: 2.5, factor: 0.95, color: "#9b7a3c", d: [
+    ["经典螺狮粉", 18, "酸笋、腐竹、花生全都有", "招牌", "🍜"], ["加炸蛋螺狮粉", 22, "炸蛋吸满了汤", "", "🍳"], ["桂林米粉", 16, "卤水拌粉", "", "🍜"],
+    ["炸腐竹", 6, "", "", "🧈"], ["卤鸡爪（3 只）", 12, "", "", "🍗"], ["柠檬茶", 8, "手打的", "", "🍋"]] },
+  { id: "seed_ramen", name: "一碗拉面屋", category: "面食粉面", emoji: "🍜", tagline: "猪骨汤熬十八小时", rating: 4.7, minOrder: 20, fee: 3.5, factor: 1.05, off: [50, 6], color: "#a2563a", d: [
+    ["豚骨叉烧拉面", 36, "两片叉烧，一颗溏心蛋", "招牌", "🍜"], ["味噌拉面", 32, "味噌汤底，玉米甜", "", "🍜"], ["黑蒜油拉面", 34, "焦香，有点苦", "", "🍜"],
+    ["溏心蛋", 5, "", "", "🥚"], ["煎饺（5 只）", 15, "", "", "🥟"], ["乌龙茶", 6, "", "", "🍵"]] },
+  // ── 奶茶咖啡 ──
+  { id: "seed_coffee", name: "清晨咖啡实验室", category: "奶茶咖啡", emoji: "☕", tagline: "每天早上七点开门，豆子一周一换", rating: 4.8, minOrder: 15, fee: 3, factor: 0.85, color: "#7a5a40", d: [
+    ["燕麦拿铁", 22, "燕麦奶更清爽", "招牌", "☕"], ["澳白", 20, "奶少，咖啡味重", "", "☕"], ["手冲耶加雪菲", 28, "花香，柠檬尾韵", "", "☕"],
+    ["脏脏可颂", 16, "巧克力外壳", "", "🥐"], ["冷萃", 18, "泡了十二小时", "", "🧊"], ["香草拿铁", 23, "", "", "☕"]] },
+  { id: "seed_fruit_tea", name: "满杯果研所", category: "奶茶咖啡", emoji: "🍹", tagline: "果肉多到吸管要选粗的", rating: 4.7, minOrder: 12, fee: 2, factor: 0.8, off: [30, 5], color: "#ef7f4a", d: [
+    ["满杯橙子", 15, "一整颗橙子榨的", "人气", "🍊"], ["多肉葡萄冻", 19, "葡萄冻嚼着玩", "", "🍇"], ["杨枝甘露", 18, "", "", "🥭"],
+    ["暴打柠檬茶", 12, "鸭屎香底", "", "🍋"], ["草莓芝芝", 21, "季节限定", "", "🍓"], ["椰椰西瓜", 16, "", "", "🍉"]] },
+  { id: "seed_milk_tea", name: "茶话会 · 手作奶茶", category: "奶茶咖啡", emoji: "🧋", tagline: "茶底现泡，小料现煮", rating: 4.6, minOrder: 10, fee: 2, factor: 0.8, color: "#a07850", d: [
+    ["招牌珍珠奶茶", 12, "阿萨姆茶底", "招牌", "🧋"], ["烤奶", 13, "焦糖香", "", "🧋"], ["芋泥波波奶茶", 16, "芋泥是蒸的", "", "🧋"],
+    ["桂花乌龙", 11, "清茶，不加奶", "", "🍵"], ["布丁奶茶", 14, "", "", "🍮"], ["红豆双皮奶", 13, "", "", "🍮"]] },
+  { id: "seed_drinks_night", name: "夜色小酒馆", category: "奶茶咖啡", emoji: "🍹", tagline: "低度微醺，下班来一杯", rating: 4.5, minOrder: 30, fee: 4, factor: 1.1, color: "#5b4a8a", d: [
+    ["青梅气泡酒", 28, "8 度，酸甜", "招牌", "🍹"], ["荔枝乌龙酒", 32, "", "", "🍸"], ["莫吉托（无酒精）", 22, "薄荷很多", "", "🍹"],
+    ["柚子啤酒", 18, "精酿，一罐", "", "🍺"], ["炸薯角", 15, "", "", "🍟"], ["芝士拼盘", 38, "三种芝士配饼干", "", "🧀"]] },
+  // ── 烧烤小吃 ──
+  { id: "seed_skewer", name: "串串香 · 签签计价", category: "烧烤小吃", emoji: "🍢", tagline: "锅底牛油炒的，签子论把卖", rating: 4.6, minOrder: 25, fee: 3, factor: 1.1, off: [50, 7], color: "#c43d2f", d: [
+    ["荤素拼一把（20 签）", 30, "牛肉、鸭肠、藕片、土豆…", "招牌", "🍢"], ["嫩牛肉（10 签）", 22, "", "", "🥩"], ["郡肝（10 签）", 18, "", "", "🍢"],
+    ["冰汤圆", 8, "解辣神器", "", "🍡"], ["红糖糍粑", 12, "", "", "🍡"], ["豆奶", 5, "玻璃瓶的", "", "🥛"]] },
+  { id: "seed_snack_street", name: "巷口小吃铺", category: "烧烤小吃", emoji: "🍡", tagline: "放学路上那家，现在也送外卖了", rating: 4.7, minOrder: 12, fee: 2, factor: 0.85, color: "#d68a3a", d: [
+    ["炸串拼盘", 18, "里脊、年糕、鸡柳", "人气", "🍢"], ["鸡蛋灌饼", 9, "加里脊加生菜", "", "🌯"], ["臭豆腐", 12, "闻着臭吃着香", "", "🧈"],
+    ["烤冷面", 10, "", "", "🍜"], ["炸鲜奶", 8, "", "", "🥛"], ["酸梅汤", 5, "", "", "🧃"]] },
+  { id: "seed_crayfish", name: "夏夜小龙虾", category: "烧烤小吃", emoji: "🦞", tagline: "只做虾，个大肉满", rating: 4.5, minOrder: 60, fee: 5, factor: 1.2, off: [100, 15], color: "#d1402e", d: [
+    ["麻辣小龙虾（2 斤）", 128, "约 30 只", "招牌", "🦞"], ["蒜蓉小龙虾（2 斤）", 128, "不辣，蒜很多", "", "🦞"], ["十三香小龙虾（1 斤）", 68, "", "", "🦞"],
+    ["毛豆", 12, "", "", "🫛"], ["凉面", 10, "拌虾汤", "", "🍜"], ["冰啤酒", 9, "", "", "🍺"]] },
+  // ── 甜品面包 ──
+  { id: "seed_cake", name: "糖分补给站", category: "甜品面包", emoji: "🎂", tagline: "生日蛋糕提前两小时订，当天能送", rating: 4.9, minOrder: 20, fee: 4, factor: 1.1, color: "#e57a9a", d: [
+    ["草莓奶油蛋糕（6 寸）", 168, "动物奶油，送蜡烛和刀叉", "招牌", "🎂"], ["巧克力淋面蛋糕（6 寸）", 158, "", "", "🎂"], ["抹茶千层（一块）", 32, "", "", "🍰"],
+    ["芒果班戟（2 个）", 22, "", "", "🥭"], ["蛋糕卷", 18, "", "", "🍰"], ["手写贺卡", 5, "写你想说的话", "", "💌"]] },
+  { id: "seed_dessert", name: "糖水铺 · 陈记", category: "甜品面包", emoji: "🍧", tagline: "广式糖水，冬天热夏天冰", rating: 4.8, minOrder: 15, fee: 2.5, factor: 0.9, off: [30, 4], color: "#c08a5a", d: [
+    ["双皮奶", 12, "奶皮厚", "招牌", "🍮"], ["杨枝甘露", 18, "", "", "🥭"], ["红豆沙", 10, "陈皮熬的", "", "🍲"],
+    ["芋圆烧仙草", 15, "", "", "🍧"], ["椰汁西米露", 12, "", "", "🥥"], ["炖雪梨", 14, "润喉", "", "🍐"]] },
+  { id: "seed_donut", name: "圈圈甜甜圈", category: "甜品面包", emoji: "🍩", tagline: "每天限量，卖完就关", rating: 4.6, minOrder: 15, fee: 3, factor: 0.9, color: "#e48ab5", d: [
+    ["原味糖霜甜甜圈", 8, "", "人气", "🍩"], ["巧克力脆甜甜圈", 10, "", "", "🍩"], ["开心果甜甜圈", 14, "", "", "🍩"],
+    ["半打混装（6 个）", 49, "店员随机挑", "", "🍩"], ["冰拿铁", 16, "", "", "☕"], ["热可可", 15, "", "", "☕"]] },
+  // ── 夜宵 ──
+  { id: "seed_hotpot_night", name: "深夜食堂 · 小火锅", category: "夜宵", emoji: "🫕", tagline: "一人份小火锅，凌晨四点前都送", rating: 4.6, minOrder: 30, fee: 4, factor: 1.15, off: [60, 8], color: "#b2382f", d: [
+    ["一人份牛油小火锅", 48, "带电热锅，到了就能煮", "招牌", "🫕"], ["番茄小火锅", 45, "", "", "🍅"], ["肥牛卷", 22, "", "", "🥩"],
+    ["虾滑", 20, "", "", "🍤"], ["方便面饼", 3, "最后煮", "", "🍜"], ["酸奶", 6, "", "", "🥛"]] },
+  { id: "seed_midnight_noodle", name: "凌晨两点的面", category: "夜宵", emoji: "🍜", tagline: "加班的人都认识老板", rating: 4.8, minOrder: 15, fee: 3, factor: 1, color: "#4a5a7a", d: [
+    ["番茄鸡蛋面", 15, "汤多面少，暖胃", "招牌", "🍜"], ["肥肠面", 22, "", "", "🍜"], ["炸酱面", 16, "", "", "🍝"],
+    ["煎蛋", 3, "", "", "🍳"], ["卤豆干", 5, "", "", "🧈"], ["热豆浆", 4, "", "", "🥛"]] },
+  { id: "seed_bbq_night", name: "宵夜烤鱼", category: "夜宵", emoji: "🐟", tagline: "整条鱼烤好再焖，配菜铺满", rating: 4.5, minOrder: 50, fee: 5, factor: 1.2, off: [100, 12], color: "#c25a2a", d: [
+    ["香辣烤鱼（清江鱼）", 88, "两斤左右", "招牌", "🐟"], ["豆豉烤鱼", 88, "", "", "🐟"], ["加份土豆片", 6, "", "", "🥔"],
+    ["加份豆皮", 6, "", "", "🧈"], ["米饭", 2, "", "", "🍚"], ["冰镇酸梅汤（1L）", 12, "", "", "🧃"]] },
+  // ── 轻食 ──
+  { id: "seed_poke", name: "海岛波奇饭", category: "轻食", emoji: "🍣", tagline: "一碗里有鱼有菜有饭", rating: 4.6, minOrder: 25, fee: 3, factor: 1, off: [50, 6], color: "#3a8fb0", d: [
+    ["三文鱼波奇饭", 39, "约 520 千卡", "招牌", "🍣"], ["金枪鱼牛油果碗", 36, "约 480 千卡", "", "🥑"], ["照烧鸡腿碗", 29, "约 560 千卡", "", "🍗"],
+    ["毛豆", 8, "", "", "🫛"], ["味噌汤", 6, "", "", "🍲"], ["椰子水", 12, "", "", "🥥"]] },
+  { id: "seed_sandwich", name: "早安三明治", category: "轻食", emoji: "🥪", tagline: "全麦面包每天早上烤", rating: 4.7, minOrder: 15, fee: 2.5, factor: 0.85, color: "#c9a14a", d: [
+    ["火腿芝士三明治", 18, "约 390 千卡", "人气", "🥪"], ["牛油果鸡蛋三明治", 22, "约 420 千卡", "", "🥑"], ["金枪鱼三明治", 20, "", "", "🥪"],
+    ["希腊酸奶碗", 19, "燕麦和莓果", "", "🥣"], ["美式", 10, "", "", "☕"], ["鲜榨橙汁", 15, "", "", "🍊"]] },
+  { id: "seed_soup", name: "炖汤小屋", category: "轻食", emoji: "🥣", tagline: "瓦罐慢炖，一人一盅", rating: 4.8, minOrder: 20, fee: 3, factor: 1.05, color: "#9a6b3a", d: [
+    ["莲藕排骨汤", 22, "炖了四小时", "招牌", "🍲"], ["菌菇鸡汤", 26, "", "", "🍄"], ["玉米胡萝卜猪骨汤", 20, "", "", "🌽"],
+    ["蒸蛋", 6, "", "", "🥚"], ["杂粮饭", 4, "", "", "🍚"], ["清炒菜心", 12, "", "", "🥬"]] },
+  // ── 超市便利 ──
+  { id: "seed_market", name: "邻家超市 · 30 分钟达", category: "超市便利", emoji: "🛒", tagline: "米面粮油、零食饮料、日用品", rating: 4.7, minOrder: 20, fee: 3, factor: 0.85, off: [59, 8], color: "#2f8f5a", d: [
+    ["矿泉水（12 瓶）", 18, "", "", "💧"], ["方便面五连包", 15, "", "", "🍜"], ["鸡蛋（10 个）", 12, "", "", "🥚"],
+    ["卷纸（10 卷）", 25, "", "", "🧻"], ["薯片大包", 9, "", "", "🥔"], ["速冻水饺", 22, "", "", "🥟"], ["洗衣凝珠", 35, "", "", "🫧"], ["酸奶（4 杯）", 16, "", "", "🥛"]] },
+  { id: "seed_snack_shop", name: "零食铺子", category: "超市便利", emoji: "🍿", tagline: "追剧必备，满 39 包邮", rating: 4.6, minOrder: 15, fee: 3, factor: 0.85, color: "#e09a3a", d: [
+    ["辣条大礼包", 19, "", "人气", "🌶️"], ["坚果每日一包（7 包）", 29, "", "", "🥜"], ["巧克力", 15, "", "", "🍫"],
+    ["海苔", 12, "", "", "🍙"], ["果冻", 10, "", "", "🍮"], ["爆米花", 12, "焦糖味", "", "🍿"]] },
+  { id: "seed_beauty", name: "小美妆 · 闪送", category: "超市便利", emoji: "💄", tagline: "卸妆水、面膜、急用的都有", rating: 4.7, minOrder: 30, fee: 4, factor: 0.9, color: "#d45d8a", d: [
+    ["卸妆水（大瓶）", 59, "", "", "🧴"], ["补水面膜（5 片）", 45, "", "", "🧖"], ["润唇膏", 25, "", "", "💄"],
+    ["发圈（一盒）", 12, "", "", "🎀"], ["棉签", 8, "", "", "🧻"], ["护手霜", 29, "", "", "🧴"]] },
+  // ── 水果鲜花 ──
+  { id: "seed_fruit_shop", name: "鲜果时光", category: "水果鲜花", emoji: "🍊", tagline: "产地直采，坏果包赔", rating: 4.7, minOrder: 20, fee: 3, factor: 0.85, off: [49, 5], color: "#f08a2a", d: [
+    ["砂糖橘（3 斤）", 22, "", "人气", "🍊"], ["红富士苹果（4 个）", 18, "", "", "🍎"], ["香蕉（一把）", 10, "", "", "🍌"],
+    ["车厘子（一斤）", 69, "", "", "🍒"], ["猕猴桃（6 个）", 20, "", "", "🥝"], ["西瓜（半个）", 25, "", "", "🍉"]] },
+  { id: "seed_flower", name: "花间信 · 鲜花", category: "水果鲜花", emoji: "💐", tagline: "附手写卡片，替你把话说出口", rating: 4.9, minOrder: 50, fee: 6, factor: 1.05, color: "#c75a7a", d: [
+    ["红玫瑰（19 枝）", 199, "", "招牌", "🌹"], ["香槟玫瑰（11 枝）", 129, "", "", "🌹"], ["郁金香（10 枝）", 99, "", "", "🌷"],
+    ["满天星一束", 59, "", "", "💐"], ["绣球花", 79, "", "", "💐"], ["小盆多肉", 29, "放桌上", "", "🪴"]] },
+  // ── 买药 ──
+  { id: "seed_pharmacy2", name: "康宁大药房", category: "买药", emoji: "🏥", tagline: "执业药师在线，夜里也有人", rating: 4.8, minOrder: 0, fee: 3, factor: 0.85, color: "#3a7fb0", d: [
+    ["肠胃药（蒙脱石散）", 18, "", "常备", "💊"], ["止咳糖浆", 26, "", "", "🧴"], ["碘伏棉签", 12, "", "", "🩹"],
+    ["口罩（50 只）", 29, "", "", "😷"], ["暖宫贴（5 片）", 19, "", "", "♨️"], ["眼药水", 22, "", "", "💧"], ["维 B 片", 32, "", "", "💊"]] },
+  { id: "seed_health", name: "健康小站", category: "买药", emoji: "🩺", tagline: "护具、器械、保健品", rating: 4.6, minOrder: 20, fee: 4, factor: 0.9, color: "#3f9c88", d: [
+    ["血压计", 159, "", "", "🩺"], ["护腰", 59, "", "", "🩹"], ["蒸汽眼罩（10 片）", 39, "", "", "😴"],
+    ["电解质水", 8, "", "", "🥤"], ["益生菌", 69, "", "", "💊"], ["鱼油", 89, "", "", "💊"]] },
 ];
 
+const NO_PACK = ["超市便利", "水果鲜花", "买药"];
 function normalizeShop(raw, source) {
   const category = CATEGORIES.includes(raw.category) && raw.category !== "全部" ? raw.category : "快餐简餐";
   const dishes = (raw.dishes || raw.d || []).map(d => Array.isArray(d)
@@ -827,6 +1152,8 @@ function normalizeShop(raw, source) {
     minOrder: clamp(Number(raw.minOrder) || 15, 0, 80), fee: clamp(Number(raw.fee) || 3, 0, 15), factor: clamp(Number(raw.factor) || 1, 0.7, 1.5),
     off: Array.isArray(raw.off) && raw.off.length === 2 && Number(raw.off[1]) > 0 ? [Number(raw.off[0]) || 0, Number(raw.off[1])] : null,
     color: /^#[0-9a-f]{6}$/i.test(raw.color || "") ? raw.color : "#f0703a",
+    // 包装费：吃的喝的每单 1 元，超市、水果鲜花、药房不收
+    pack: Number.isFinite(Number(raw.pack)) && raw.pack !== "" && raw.pack != null ? clamp(Number(raw.pack), 0, 5) : (NO_PACK.includes(category) ? 0 : 1),
     dishes, source: source || raw.source || "seed", query: String(raw.query || ""), hidden: raw.hidden === true,
   };
 }
@@ -846,6 +1173,12 @@ const DEFAULT_SETTINGS = {
   hiddenSeeds: [],          // 隐藏的内置店 id
   likedShops: [],           // 收藏的店 id
   claimDay: "",             // 上次领每日红包的日期（YYYY-MM-DD）
+  addresses: [],            // 我的收货地址簿 [{ id, tag, text }]；userAddress 是当前默认那条的文字
+  claimed: { day: "", ids: [] },   // 领券中心今天领过哪些
+  lotteryDay: "",           // 上次抽奖的日期
+  member: { until: 0, saved: 0, month: "", monthSaved: 0, granted: "" },  // 会员到期时刻、累计省下、本月省下（记在哪个月）、会员红包发到哪个月
+  riderChar: "",            // 让哪位角色来当骑手；空 = 平台骑手
+  groups: [],               // 见过的群聊 [{ sessionId, name, participants: [{ id, name }] }]，从群聊「+」进来时记下
 };
 
 async function listAll(collection) {
@@ -870,6 +1203,12 @@ async function loadAll() {
   if (!state.settings.charAddress || typeof state.settings.charAddress !== "object") state.settings.charAddress = {};
   if (!Array.isArray(state.settings.hiddenSeeds)) state.settings.hiddenSeeds = [];
   if (!Array.isArray(state.settings.likedShops)) state.settings.likedShops = [];
+  if (!Array.isArray(state.settings.addresses)) state.settings.addresses = [];
+  if (!Array.isArray(state.settings.groups)) state.settings.groups = [];
+  if (!state.settings.claimed || typeof state.settings.claimed !== "object") state.settings.claimed = { day: "", ids: [] };
+  state.settings.member = { ...DEFAULT_SETTINGS.member, ...(state.settings.member || {}) };
+  // 老版本只有一条 userAddress：搬进地址簿
+  if (!state.settings.addresses.length && state.settings.userAddress) state.settings.addresses = [{ id: "addr_home", tag: "家", text: state.settings.userAddress }];
   state.aiShops = shops.map(s => ({ ...normalizeShop(s, s.source || "ai"), id: s.id })).filter(s => s.name && s.dishes.length);
   state.orders = orders.filter(o => o && o.id).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   state.coupons = coupons.filter(c => c && c.id);
@@ -924,18 +1263,32 @@ async function deleteOrder(order) {
 }
 function orderById(id) { return state.orders.find(o => o.id === id) || null; }
 
-async function addCoupon(amount, reason) {
-  const data = { amount: Math.round(amount * 10) / 10, reason, used: false, createdAt: Date.now() };
+// ── 红包和券 ──
+// kind: "cash" 抵现金（min 是满多少可用，0 = 无门槛；shopId 非空 = 只能在这家店用）/ "fee" 运费券（免这一单的配送费）
+// expireAt 为 0 表示不过期（退款、补偿发的都不过期）
+async function addCoupon(amount, reason, extra) {
+  const data = { amount: Math.round((Number(amount) || 0) * 10) / 10, reason, used: false, createdAt: Date.now(), kind: "cash", min: 0, shopId: "", expireAt: 0, ...(extra || {}) };
   const row = await api.db.create("coupons", data);
   const coupon = { ...data, id: row.id };
   state.coupons.push(coupon);
   return coupon;
 }
-function usableCoupons() { return state.coupons.filter(c => !c.used).sort((a, b) => b.amount - a.amount); }
+const couponKind = c => c.kind === "fee" ? "fee" : "cash";
+const couponLive = (c, now) => !c.used && (!c.expireAt || c.expireAt > (now || Date.now()));
+/** 能用的红包（抵现金的）。给了 ctx 就只留这一单能用的：满额够了、店对得上 */
+function usableCoupons(ctx) {
+  const now = Date.now();
+  return state.coupons.filter(c => couponLive(c, now) && couponKind(c) === "cash"
+    && (!ctx || ((Number(c.min) || 0) <= ctx.subtotal && (!c.shopId || c.shopId === ctx.shopId))))
+    .sort((a, b) => b.amount - a.amount);
+}
+function feeCoupons() { const now = Date.now(); return state.coupons.filter(c => couponLive(c, now) && couponKind(c) === "fee").sort((a, b) => (a.expireAt || 9e15) - (b.expireAt || 9e15)); }
 async function useCoupon(coupon, orderId) {
   coupon.used = true; coupon.usedOrderId = orderId;
   await api.db.update("coupons", coupon.id, { used: true, usedOrderId: orderId });
 }
+/** 会员：到期时刻在未来就算 */
+const isMember = now => Number(state.settings.member.until) > (now || Date.now());
 
 /** 某个人最近常点的菜（从订单里数），给聊天上下文和「猜你想吃」用 */
 function favorites(recipient, limit = 4) {
@@ -1020,6 +1373,9 @@ async function askCraving(charId) {
 //   recipient = 角色 id、payer = "user"   你给 TA 点
 //   recipient = ""、payer = "char"、source = "payreq"     你点、请 TA 代付
 //   recipient = ""、payer = "char"、source = "directive"  TA 主动给你点
+//   recipient = ""、payer = "split"、source = "split"     你和 TA 拼单，一人一半
+//   groupId = 群会话 id                                  你请群聊（宿主不能往群里发卡片，群里靠全局上下文知道）
+//   riderCharId = 角色 id                                 这位角色来送
 const ACCENT = "#f5a800";
 
 async function namesFor(charId) {
@@ -1042,7 +1398,8 @@ function isOnTheWay(order, now) { return order.status === "active" && Number(ord
 function cardSections(order, etaLabel) {
   const rows = (order.items || []).slice(0, 6).map(it => ({ label: it.name, value: `×${it.qty}${it.price ? " · " + yuan(it.price * it.qty) : ""}` }));
   const info = [{ label: "店铺", value: order.shopName }];
-  if (etaLabel) info.push({ label: "预计送达", value: etaLabel });
+  if (order.mode === "pickup" && order.code) info.push({ label: "取餐码", value: order.code });
+  if (etaLabel) info.push({ label: order.mode === "pickup" ? "做好时间" : "预计送达", value: etaLabel });
   if (order.note) info.push({ label: "备注", value: order.note });
   info.push({ label: "订单号", value: order.no });
   return [{ title: "餐品", rows }, { title: "配送", rows: info }];
@@ -1053,6 +1410,7 @@ async function startDelivery(order, now) {
   const built = buildTimeline({
     seed: `${order.no}|${order.shopName}|${order.createdAt}`, startAt: now, speed: order.speed || state.settings.speed,
     incidents: state.settings.incidents, items: order.items, scheduledFor: order.scheduledFor || 0, shopFactor: order.shopFactor || 1,
+    mode: order.mode || "", code: order.code || "", storeName: order.storeName || "", riderName: order.riderName || "",
   });
   await patchOrder(order, { status: "active", paidAt: now, speed: order.speed || state.settings.speed, timeline: built.timeline, deliverAt: built.deliverAt, rider: built.rider, issue: built.issue });
   await scheduleArrival(order);
@@ -1063,7 +1421,7 @@ async function startDelivery(order, now) {
 /** 送达那一刻要做的事交给宿主的定时任务：APP 关着也会执行，小手机整个关着则重开后补跑 */
 async function scheduleArrival(order) {
   const actions = [];
-  const title = order.recipient ? "TA 的外卖送到了" : "外卖到了";
+  const title = order.mode === "pickup" ? `餐做好了，取餐码 ${order.code}` : order.groupId ? "请群里的外卖送到了" : order.recipient ? "TA 的外卖送到了" : order.mode === "errand" ? "跑腿送到了" : "外卖到了";
   let body = `${order.shopName}：${itemsText(order)}`;
   let names = null;
   if (order.charId) names = await namesFor(order.charId);
@@ -1077,6 +1435,10 @@ async function scheduleArrival(order) {
     if (state.settings.contextOn) actions.push({ type: "chat.setContext", characterId: order.charId, label: "外卖", text: contextText(order.charId, order.deliverAt + 1000, false) });
     if (state.settings.replyOnArrive) actions.push({ type: "chat.reply", characterId: order.charId });
   }
+  if (order.riderCharId && order.riderCharId !== order.charId) {
+    const rn = await namesFor(order.riderCharId);
+    actions.push({ type: "chat.history", characterId: order.riderCharId, role: "user", content: `[外卖：${rn.charName}在 ${hhmm(order.deliverAt)} 把「${order.shopName}」的外卖送到了${order.recipient && names ? names.charName : rn.userName}手上。]` });
+  }
   await api.tasks.schedule({ id: `wm_arrive_${order.id}`, delayMs: Math.max(1000, order.deliverAt - Date.now()), actions });
 }
 async function cancelArrival(order) { try { await api.tasks.cancel(`wm_arrive_${order.id}`); } catch { /* 任务可能已经跑完 */ } }
@@ -1085,7 +1447,8 @@ function arrivalHistory(order, names) {
   const what = `「${order.shopName}」的外卖（${itemsText(order)}）`;
   const at = hhmm(order.deliverAt);
   if (order.recipient) return `[外卖：${names.userName}给${names.charName}点的${what}已在 ${at} 送到${names.charName}手上。${issueText(order)}]`;
-  const how = order.source === "payreq" ? `${names.charName}帮${names.userName}付款的` : `${names.charName}给${names.userName}点的`;
+  if (order.mode === "pickup") return `[外卖：${names.userName}和${names.charName}拼单的${what}在 ${at} 做好了，${names.userName}要去店里自取。]`;
+  const how = order.source === "payreq" ? `${names.charName}帮${names.userName}付款的` : order.source === "split" ? `${names.userName}和${names.charName}拼单（一人一半）的` : `${names.charName}给${names.userName}点的`;
   return `[外卖：${how}${what}已在 ${at} 送到${names.userName}手上。${issueText(order)}]`;
 }
 
@@ -1190,6 +1553,8 @@ async function onChatMessage(payload) {
     await acceptCharOrder({ messageId: msg.id, sessionId: payload.sessionId, charId: payload.characterId, args });
   } else if (data.appDirectiveId === "wm-pay") {
     await onPayReply(payload.characterId, args);
+  } else if (data.appDirectiveId === "wm-split") {
+    await onSplitReply(payload.characterId, args);
   } else return;
   if (!state.background) render();
 }
@@ -1203,15 +1568,25 @@ function contextText(charId, now, precise) {
   if (!names) return "";
   const u = names.userName, lines = [];
   for (const o of state.orders) {
-    if (o.charId !== charId) continue;
     const what = `「${o.shopName}」的外卖（${itemsText(o)}）`;
+    if (o.riderCharId === charId && o.charId !== charId && o.status === "active" && o.deliverAt) {
+      const to = o.recipient && state.names[o.recipient] ? state.names[o.recipient].charName : u;
+      if (now < o.deliverAt) lines.push(`你今天在兼职送外卖，正在给${to}送${what}，${precise ? `现在${stageAt(o, now).label}，${remainText(stageAt(o, now).remainMs)}` : `要在 ${hhmm(o.deliverAt)} 左右送到`}。`);
+      else if (now - o.deliverAt < 90 * 60000) lines.push(`你在 ${hhmm(o.deliverAt)} 把${what}送到了${to}手上。${o.riderTip ? `${u}给你打赏了 ${yuan(o.riderTip)}。` : ""}`);
+      continue;
+    }
+    if (o.charId !== charId) continue;
     if (o.status === "pending_pay" && o.source === "payreq") {
       lines.push(`${u}请你代付${what}，共 ${yuan(o.total)}，还在等你答复：同意写 [外卖代付:同意:想说的话]，拒绝写 [外卖代付:拒绝:想说的话]。`);
       continue;
     }
+    if (o.status === "pending_pay" && o.source === "split") {
+      lines.push(`${u}想和你拼单${what}，一共 ${yuan(o.total)}，${u}已经付了自己那一半 ${yuan(o.userPaid)}，在等你答复：愿意出另一半写 [外卖拼单:同意:想说的话]，不愿意写 [外卖拼单:拒绝:想说的话]。`);
+      continue;
+    }
     if (o.status !== "active" || !o.deliverAt) continue;
     const mine = o.recipient === charId;            // 送给角色的
-    const whose = mine ? `${u}给你点的` : o.source === "payreq" ? `你帮${u}付款的` : `你给${u}点的`;
+    const whose = mine ? `${u}给你点的` : o.source === "payreq" ? `你帮${u}付款的` : o.source === "split" ? `你和${u}拼单（一人一半）的` : `你给${u}点的`;
     if (now < o.deliverAt) {
       const stage = stageAt(o, now);
       const progress = precise ? `现在${stage.label}，${remainText(stage.remainMs)}（预计 ${hhmm(o.deliverAt)}）` : `预计 ${hhmm(o.deliverAt)} 送到，在那之前都还在路上`;
@@ -1229,12 +1604,25 @@ function contextText(charId, now, precise) {
 
 /** 常驻那份上下文：群聊、线下、云端主动消息用它；普通私聊由下面的 provider 当轮现算 */
 let contextChars = new Set();
+let groupContextOn = true;   // 启动时先清一次，免得留着上回的群单
+/** 请群聊的单：只在群聊里有用，写进不分角色的那份上下文 */
+function groupContextText(now) {
+  const lines = [];
+  for (const o of state.orders) {
+    if (!o.groupId || o.status !== "active" || !o.deliverAt) continue;
+    const u = o.userName || "用户";
+    const what = `「${o.shopName}」的外卖（${itemsText(o)}）`;
+    if (now < o.deliverAt) lines.push(`在群聊「${o.groupName}」里：${u}请群里每个人吃${what}，预计 ${hhmm(o.deliverAt)} 送到，在那之前大家都还没拿到。${o.note ? `${u}说：${o.note}` : ""}`);
+    else if (now - o.deliverAt < 90 * 60000) lines.push(`在群聊「${o.groupName}」里：${u}请大家吃的${what}已在 ${hhmm(o.deliverAt)} 送到每个人手上。${issueText(o)}`);
+  }
+  return lines.length ? lines.join("\n") + "\n（这件事只发生在那个群里；不在那个群里的人不知道。）" : "";
+}
 async function syncContext() {
   if (!api.chat || !api.chat.setContext) return;
   try {
     const now = Date.now(), next = new Set();
     if (state.settings.contextOn) {
-      const ids = [...new Set(state.orders.filter(o => o.charId).map(o => o.charId))];
+      const ids = [...new Set(state.orders.flatMap(o => [o.charId, o.riderCharId]).filter(Boolean))];
       for (const id of ids) {
         await namesFor(id);
         const text = contextText(id, now, false);
@@ -1245,6 +1633,10 @@ async function syncContext() {
     }
     for (const id of contextChars) if (!next.has(id)) await api.chat.setContext({ characterId: id, label: "外卖", text: "" });
     contextChars = next;
+    // 群聊只读不带角色的那一份上下文
+    const group = state.settings.contextOn ? groupContextText(now) : "";
+    if (group || groupContextOn) await api.chat.setContext({ label: "外卖", text: group });
+    groupContextOn = !!group;
   } catch (error) { console.warn("[外卖] 同步聊天上下文失败", error); }
 }
 
@@ -1260,6 +1652,152 @@ async function registerChatHooks() {
     } catch (error) { console.warn("[外卖] 注册当轮上下文失败", error); }
   }
 }
+
+// ── 拼单（一人一半）、请群聊、把店 / 购物车 / 订单分享给 TA ──
+
+/** 和 TA 拼单：你已经付了一半，发卡片问 TA 要不要出另一半；TA 用 [外卖拼单:同意/拒绝:…] 回应 */
+async function sendSplitRequest(order) {
+  const names = await namesFor(order.charId);
+  const half = round1c(order.total - order.userPaid);
+  const sent = await api.chat.sendCard({
+    characterId: order.charId, role: "user", historyRole: "user",
+    summary: `${names.userName}想和${names.charName}拼单外卖：${itemsText(order)}，一人 ${yuan(half)}。`,
+    historyText: `[外卖拼单：${names.userName}在「${order.shopName}」点了${itemsText(order)}，一共 ${yuan(order.total)}，想和${names.charName}一人一半，${names.userName}已经付了自己那 ${yuan(order.userPaid)}。${names.charName}愿意出另一半 ${yuan(half)} 就在回复里写 [外卖拼单:同意:想说的话]，不愿意就写 [外卖拼单:拒绝:想说的话]。]`,
+    card: { appLabel: "外卖", title: "一起拼个单？", subtitle: order.shopName, body: `一共 ${yuan(order.total)}，一人 ${yuan(half)}`, status: "等 TA 拼单", accentColor: ACCENT, sections: cardSections(order, ""), actions: [{ label: "查看订单" }] },
+  });
+  await patchOrder(order, { cardMessageId: sent.messageId, cardSessionId: sent.sessionId });
+  await syncContext();
+  api.chat.requestReply({ characterId: order.charId }).catch(error => console.warn("[外卖] 请求回复失败", error));
+}
+
+async function onSplitReply(charId, args) {
+  const order = state.orders.find(o => o.status === "pending_pay" && o.source === "split" && o.charId === charId);
+  if (!order) return null;
+  const verdict = String(args[0] || ""), words = String(args[1] || "").trim();
+  if (/拒|不|否/.test(verdict) && !/同意|可以|好/.test(verdict)) {
+    await patchOrder(order, { status: "pay_declined", payWords: words });
+    await updateOrderCard(order, { status: "TA 没有拼", actions: [{ label: "查看订单" }] });
+    await api.notifications.create({ title: "TA 不想拼这单", body: words || "可以自己补上另一半，或者取消订单。", badgeDelta: 1, data: { orderId: order.id } }).catch(() => {});
+    await syncContext();
+    return order;
+  }
+  await patchOrder(order, { payWords: words });
+  await startDelivery(order, Date.now());
+  await updateOrderCard(order, { status: "拼单成功 · 配送中", sections: cardSections(order, hhmm(order.deliverAt)), actions: [{ label: "查看订单" }] });
+  await api.notifications.create({ title: "拼单成功", body: `${order.shopName}，预计 ${hhmm(order.deliverAt)} 送到。`, badgeDelta: 1, data: { orderId: order.id } }).catch(() => {});
+  return order;
+}
+
+/**
+ * 请群聊：宿主不能往群会话里发卡片，所以群里靠不分角色的那份上下文知道这件事（见 groupContextText），
+ * 订单页里再请大家各说一句，记在订单上。
+ */
+async function sendGroupCard(order) {
+  let userName = "我";
+  try { const profile = await api.user.getProfile(); if (profile && profile.name) userName = profile.name; } catch { /* 读不到就叫「我」 */ }
+  await patchOrder(order, { userName });
+  await syncContext();
+  groupReactions(order).then(() => { if (!state.background) render(); }).catch(error => console.warn("[外卖] 群里的反应没生成出来", error));
+}
+
+/** 群里每个人对这顿外卖说一句：[名字:一句话] 一行一个 */
+async function groupReactions(order) {
+  const members = (order.groupMembers || []).map(id => state.characters.find(c => c.id === id)).filter(Boolean);
+  if (!members.length) return [];
+  const delivered = Date.now() >= Number(order.deliverAt);
+  const instruction = `${order.userName || "我"}在群里请大家吃外卖：「${order.shopName}」的${itemsText(order)}，每人一份。${order.note ? `${order.userName || "我"}说：「${order.note}」。` : ""}${delivered ? "外卖刚送到大家手上。" : `外卖还在路上，预计 ${hhmm(order.deliverAt)} 送到，大家都还没吃到。`}`;
+  const record = { appTags: ["waimai", "group"], instruction, historyLimit: 8 };
+  let result;
+  try { result = await api.ai.generate({ ...record, sessionId: order.groupId }); }
+  catch { result = await api.ai.generate({ ...record, characterIds: members.map(c => c.id), groupName: order.groupName }); }   // 群可能被删了
+  const text = String(result && result.text || "");
+  const talk = [];
+  for (const m of text.matchAll(/[\[【]([^:：\]】\n]{1,20})[:：]\s*([^\]】\n]{1,80})[\]】]/g)) {
+    const who = members.find(c => c.name === m[1].trim() || m[1].includes(c.name));
+    if (who && !talk.some(t => t.id === who.id)) talk.push({ id: who.id, name: who.name, line: m[2].trim() });
+  }
+  if (!talk.length) throw new Error("没按格式回");
+  await patchOrder(order, { groupTalk: talk, groupTalkAt: Date.now() });
+  return talk;
+}
+actions["group-talk"] = async d => {
+  const order = state.orders.find(o => o.id === d.id);
+  if (!order) return;
+  try { await busy("在问群里…", () => groupReactions(order)); render(); }
+  catch (error) { fail(error, "群里没人接话"); }
+};
+
+// ── 分享给 TA：店、购物车（帮我看看）、订单（晒单）──
+let shareDraft = null;
+function shareTarget(kind, id) {
+  if (kind === "shop") { const shop = shopById(id); return shop ? { kind, shop } : null; }
+  if (kind === "cart") { const shop = shopById(state.cart.shopId), items = cartItems(); return shop && items.length ? { kind, shop, items } : null; }
+  const order = state.orders.find(o => o.id === id);
+  return order ? { kind, order, shop: orderShop(order) } : null;
+}
+const SHARE_TITLE = { shop: "推荐给 TA", cart: "让 TA 帮我看看", order: "晒给 TA 看" };
+
+actions["share-open"] = d => {
+  const target = shareTarget(d.kind, d.id);
+  if (!target) return;
+  if (!state.characters.length) { toast("还没有角色，先在小手机里创建一个"); return; }
+  shareDraft = { kind: d.kind, id: d.id || "", to: shareDraft && state.characters.some(c => c.id === shareDraft.to) ? shareDraft.to : state.characters[0].id, reply: true, words: "" };
+  openSheet(SHARE_TITLE[d.kind], shareSheetHtml());
+};
+function shareSheetHtml() {
+  const t = shareTarget(shareDraft.kind, shareDraft.id);
+  if (!t) return "";
+  const preview = t.kind === "shop"
+    ? `${shopCover(t.shop, 36)}<span><b>${esc(t.shop.name)}</b><small>${esc(t.shop.tagline || t.shop.category)}</small></span>`
+    : t.kind === "cart"
+      ? `${shopCover(t.shop, 36)}<span><b>${esc(t.shop.name)}</b><small>${esc(t.items.map(it => `${it.name}×${it.qty}`).join("、"))}</small></span>`
+      : `${shopCover(t.shop, 36)}<span><b>${esc(t.order.shopName)}</b><small>${esc(itemsText(t.order))}${t.order.review ? ` · ${t.order.review.stars} 星` : ""}</small></span>`;
+  return `<div class="share-card">${preview}</div>
+    <div class="share-to">${state.characters.map(c => `<button type="button" class="${c.id === shareDraft.to ? "on" : ""}" data-act="share-to" data-id="${esc(c.id)}">${avatarHtml(c)}<span>${esc(c.name)}</span></button>`).join("")}</div>
+    <input id="share-words" maxlength="60" placeholder="${t.kind === "cart" ? "比如：点这些够不够？" : t.kind === "order" ? "比如：这家真的好吃！" : "比如：下次一起吃这家"}" value="${esc(shareDraft.words)}">
+    <div class="frow sw-row" data-act="share-reply"><span class="grow"><b>请 TA 回一句</b><small>发完让 TA 接着说</small></span><button type="button" class="sw${shareDraft.reply ? " on" : ""}" role="switch" aria-checked="${shareDraft.reply}" aria-label="请 TA 回一句"></button></div>
+    <button type="button" class="btn" data-act="share-send">发给 ${esc((state.characters.find(c => c.id === shareDraft.to) || {}).name || "TA")}</button>`;
+}
+const keepWords = () => { const n = $("share-words"); if (n && shareDraft) shareDraft.words = n.value; };
+actions["share-to"] = d => { keepWords(); shareDraft.to = d.id; $("sheet-body").innerHTML = shareSheetHtml(); };
+actions["share-reply"] = () => { keepWords(); shareDraft.reply = !shareDraft.reply; $("sheet-body").innerHTML = shareSheetHtml(); };
+actions["share-send"] = async () => {
+  keepWords();
+  const t = shareTarget(shareDraft.kind, shareDraft.id), to = shareDraft.to, words = shareDraft.words.trim();
+  if (!t || !to) return;
+  try {
+    await busy("正在发…", async () => {
+      const names = await namesFor(to), u = names.userName, c = names.charName;
+      const say = words ? `，还说：「${words}」` : "";
+      let card, historyText, summary;
+      if (t.kind === "shop") {
+        const top = t.shop.dishes.filter(x => x.tag).concat(t.shop.dishes).filter((x, i, a) => a.indexOf(x) === i).slice(0, 3);
+        historyText = `[外卖分享：${u}给${c}分享了一家外卖店「${t.shop.name}」（${t.shop.category}，评分 ${t.shop.rating}）：${t.shop.tagline || ""}。招牌有 ${top.map(x => x.name).join("、")}${say}。]`;
+        summary = `${u}分享了一家店：${t.shop.name}`;
+        card = { appLabel: "外卖", title: "给你看家店", subtitle: t.shop.name, body: t.shop.tagline || t.shop.category, status: `${t.shop.rating} 分`, accentColor: ACCENT,
+          sections: [{ title: "招牌", rows: top.map(x => ({ label: x.name, value: yuan(dishPrice(x, t.shop)) })) }] };
+      } else if (t.kind === "cart") {
+        const p = priceOrder(t.items, t.shop, { pickup: state.mode === "pickup", freeFee: isMember() });
+        const list = t.items.map(it => `${it.name}×${it.qty}`).join("、");
+        historyText = `[外卖分享：${u}在「${t.shop.name}」挑了 ${list}，大概 ${yuan(p.total)}，还没下单，想听听${c}的意见${say}。]`;
+        summary = `${u}想让你帮忙看看：${list}`;
+        card = { appLabel: "外卖", title: "帮我看看点这些行不行", subtitle: t.shop.name, body: `大概 ${yuan(p.total)}`, status: "还没下单", accentColor: ACCENT,
+          sections: [{ rows: t.items.slice(0, 6).map(it => ({ label: it.name, value: `×${it.qty}` })) }] };
+      } else {
+        const o = t.order, r = o.review;
+        historyText = `[外卖分享：${u}给${c}晒了一单「${o.shopName}」的外卖：${itemsText(o)}${r ? `，打了 ${r.stars} 星${r.text ? `，评价是「${r.text}」` : ""}` : ""}${say}。]`;
+        summary = `${u}晒了一单外卖：${o.shopName}`;
+        card = { appLabel: "外卖", title: "晒一下这单", subtitle: o.shopName, body: itemsText(o), status: r ? "★".repeat(r.stars) : "已送达", accentColor: ACCENT,
+          sections: words ? [{ rows: [{ label: "说", value: words }] }] : [] };
+      }
+      await api.chat.sendCard({ characterId: to, role: "user", historyRole: "user", summary, historyText, card });
+      if (shareDraft.reply) api.chat.requestReply({ characterId: to }).catch(error => console.warn("[外卖] 请求回复失败", error));
+    });
+    closeSheet();
+    toast(`已发给 ${(state.characters.find(x => x.id === to) || {}).name || "TA"}`);
+    shareDraft.words = "";
+  } catch (error) { fail(error, "没发出去"); }
+};
 
 // ── 画面素材：图标、店铺和菜品的封面、配送地图。全部用 CSS、SVG 和表情符号画，不带图片文件 ──
 const svgIcon = (body, size) => `<svg viewBox="0 0 24 24" width="${size || 16}" height="${size || 16}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -1281,6 +1819,11 @@ const ICON = {
   store: '<path d="M4 10 5.5 5h13L20 10M5 10v9h14v-9M4 10a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0M10 19v-4.5h4V19"/>',
   box: '<path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5zM4 8.5l8 4.5 8-4.5M12 13v7"/>',
   cog: '<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.5M12 18v2.5M3.5 12H6M18 12h2.5M6 6l1.8 1.8M16.2 16.2 18 18M18 6l-1.8 1.8M7.8 16.2 6 18"/>',
+  share: '<circle cx="17.5" cy="6" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/><path d="m8.7 10.8 6.6-3.6M8.7 13.2l6.6 3.6"/>',
+  crown: '<path d="M4 17.5 3 8l5 4 4-6 4 6 5-4-1 9.5z"/><path d="M5 20.5h14"/>',
+  phone: '<path d="M6.5 4h3l1.5 4-2 1.5a10 10 0 0 0 5.5 5.5l1.5-2 4 1.5v3a2 2 0 0 1-2.2 2A15.5 15.5 0 0 1 4.5 6.2 2 2 0 0 1 6.5 4z"/>',
+  shield: '<path d="M12 3.5 5 6v5.5c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6z"/><path d="m9 12 2.2 2.2L15.5 10"/>',
+  trash: '<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>',
   scooter: '<circle cx="6" cy="17" r="2.6"/><circle cx="18.5" cy="17" r="2.6"/><path d="M8.6 17h7.3l2.3-7.5h2.3M4 12.5h6l1.6 4.5"/><rect x="3" y="7" width="6" height="4.5" rx="1" fill="currentColor" stroke="none"/>',
 };
 const icon = (name, size) => svgIcon(ICON[name] || "", size);
@@ -1333,7 +1876,10 @@ function dishGroups(shop) {
     else push(MAIN_GROUP[shop.category] || "主食", d);
   }
   const order = ["招牌热销"];
-  return [...groups.entries()].sort((a, b) => (order.includes(b[0]) ? 1 : 0) - (order.includes(a[0]) ? 1 : 0)).map(([title, dishes]) => ({ title, dishes }));
+  const list = [...groups.entries()].sort((a, b) => (order.includes(b[0]) ? 1 : 0) - (order.includes(a[0]) ? 1 : 0)).map(([title, dishes]) => ({ title, dishes }));
+  const sp = specialDish(shop);
+  if (sp) list.unshift({ title: "今日特价", dishes: [sp] });
+  return list;
 }
 /** 要选规格的菜：饮品选温度和甜度，带辣的主食选辣度 */
 function dishSpecs(dish, shop) {
@@ -1348,7 +1894,25 @@ function dishSpecs(dish, shop) {
   return [];
 }
 function orderShop(order) {
+  if (order.mode === "errand") return { color: "#2f8f5a", emoji: "🛵", dishes: [], category: "", name: order.shopName };
   return shopById(order.shopId) || { color: "#f0703a", emoji: emojiFor((order.items && order.items[0] && order.items[0].name) || "", ""), dishes: [], category: "" };
+}
+
+/** 今日特价：每家店每天挑一道（不挑几块钱的小料），七折。按日期和店算，同一天看到的都一样 */
+function specialDish(shop) {
+  if (!shop || !shop.dishes) return null;
+  const list = shop.dishes.filter(d => d.price >= 8);
+  return list.length ? list[hashSeed(`${shop.id}|${today()}`) % list.length] : null;
+}
+/** 这道菜现在卖多少：特价菜按七折（凑到 5 角） */
+function dishPrice(dish, shop) {
+  const sp = specialDish(shop);
+  return sp && sp.name === dish.name ? Math.max(1, Math.round(dish.price * 0.7 * 2) / 2) : dish.price;
+}
+/** 价格：特价时现价旁边带划掉的原价 */
+function dishPriceHtml(dish, shop) {
+  const now = dishPrice(dish, shop);
+  return now < dish.price ? `<span class="pricebox">${priceHtml(now)}<s>${yuan(dish.price)}</s></span>` : priceHtml(now);
 }
 
 /** 预计多久送到，按当前速度档和这家店的出餐快慢估 */
@@ -1397,7 +1961,8 @@ function riderSpot(order, now) {
   return { x, y, done: f };
 }
 const mapAt = (x, y) => `left:${x.toFixed(1)}%;top:${(y * 2).toFixed(1)}%`;
-function mapHtml(order, shop, now, bubble, homeHtml) {
+function mapHtml(order, shop, now, bubble, homeHtml, opts) {
+  const o = opts || {};
   const spot = riderSpot(order, now);
   return `<div class="map">
     <svg viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true">
@@ -1411,15 +1976,20 @@ function mapHtml(order, shop, now, bubble, homeHtml) {
       <path class="m-route" d="${ROUTE_PATH}"/>
       <path class="m-done" d="${ROUTE_PATH}" pathLength="100" stroke-dasharray="${(spot.done * 100).toFixed(1)} 100"/>
     </svg>
-    <span class="m-pin from" style="${mapAt(ROUTE.p0[0], ROUTE.p0[1])};--hue:${esc(shop.color)}"><b>${esc(shop.emoji)}</b><i>商家</i></span>
+    <span class="m-pin from" style="${mapAt(ROUTE.p0[0], ROUTE.p0[1])};--hue:${esc(shop.color)}"><b>${esc(shop.emoji)}</b><i>${esc(o.fromLabel || "商家")}</i></span>
     <span class="m-pin home" style="${mapAt(ROUTE.p3[0], ROUTE.p3[1])}">${homeHtml}<i>收货</i></span>
-    <span class="m-rider" style="${mapAt(spot.x, spot.y)}"><em>${esc(bubble)}</em><b>${icon("scooter", 15)}</b></span>
+    <span class="m-rider" style="${mapAt(spot.x, spot.y)}"><em>${esc(bubble)}</em>${o.riderHtml || `<b>${icon("scooter", 15)}</b>`}</span>
   </div>`;
 }
 
 // ── 首页（地址、搜索、分类、红包、排序筛选、店铺列表）和店铺页（点菜 / 评价 / 商家、选规格、购物车）──
+// 送给谁：state.recipient 是 "" 自己 / 角色 id / "g:群会话 id" 请群聊
+const isGroupRecipient = () => String(state.recipient || "").startsWith("g:");
+function recipientGroup() { return isGroupRecipient() ? state.settings.groups.find(g => g.sessionId === state.recipient.slice(2)) || null : null; }
+const groupSize = g => (g && g.participants ? g.participants.length : 0) + 1;   // 群里的角色加上你自己
 function recipientName() {
   if (!state.recipient) return "我自己";
+  if (isGroupRecipient()) { const g = recipientGroup(); return g ? `「${g.name || "群聊"}」` : "群聊"; }
   const c = state.characters.find(x => x.id === state.recipient);
   return c ? c.name : "TA";
 }
@@ -1428,18 +1998,23 @@ function avatarHtml(c, cls) {
   return src ? `<img class="ava ${cls || ""}" src="${esc(src)}" alt="">` : `<span class="ava ph ${cls || ""}">${esc((c && c.name || "我").slice(0, 1))}</span>`;
 }
 function recipientAvatar(cls) {
+  if (isGroupRecipient()) return `<span class="ava ph grp ${cls || ""}">群</span>`;
   return state.recipient ? avatarHtml(state.characters.find(c => c.id === state.recipient), cls) : `<span class="ava ph ${cls || ""}">我</span>`;
 }
 /** 这一单的收货地址：给自己点用自己的，给角色点用记在这位角色名下的 */
 function currentAddress() {
+  if (isGroupRecipient()) return "";
   return state.recipient ? (state.settings.charAddress[state.recipient] || "") : (state.settings.userAddress || "");
 }
 function addressLabel() {
+  if (isGroupRecipient()) return `请${recipientName()}大家吃`;
   const address = currentAddress();
   if (state.recipient) return `${recipientName()} · ${address || "TA 那边"}`;
   return address || "添加收货地址";
 }
 const isLiked = id => state.settings.likedShops.includes(id);
+/** 在这家店下过几次单（自己付的、送到了的才算） */
+const boughtCount = id => state.orders.filter(o => o.shopId === id && o.status === "active" && o.payer !== "char").length;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 
 function shopPills(s) {
@@ -1451,7 +2026,7 @@ function shopCard(s) {
   return `<button type="button" class="shop" data-act="open-shop" data-id="${esc(s.id)}">
     ${shopCover(s, 64)}
     <span class="shop-main">
-      <span class="shop-name">${esc(s.name)}${s.source === "ai" ? '<i class="tag ai">AI</i>' : ""}${isLiked(s.id) ? '<i class="tag like">收藏</i>' : ""}</span>
+      <span class="shop-name">${esc(s.name)}${s.source === "ai" ? '<i class="tag ai">AI</i>' : ""}${isLiked(s.id) ? '<i class="tag like">收藏</i>' : ""}${boughtCount(s.id) ? `<i class="tag bought">买过 ${boughtCount(s.id)} 次</i>` : ""}</span>
       <span class="shop-meta"><b>★${s.rating.toFixed(1)}</b><span>月售 ${st.salesText}</span><span class="eta-hint">${etaHint(s)} · ${st.km}km</span></span>
       <span class="shop-meta"><span>起送 ${yuan(s.minOrder)}</span><span>配送 ${s.fee ? yuan(s.fee) : "免费"}</span></span>
       ${s.tagline ? `<span class="quote">“${esc(s.tagline)}”</span>` : ""}
@@ -1463,7 +2038,7 @@ function pickCards(shops) {
   return shops.map(s => { const d = s.dishes.find(x => x.tag) || s.dishes[0]; return d ? { s, d } : null; }).filter(Boolean).slice(0, 8)
     .map(({ s, d }) => `<button type="button" class="pick" data-act="open-shop" data-id="${esc(s.id)}">
       ${dishCover(d.emoji, s.color, 70, d.tag, true)}
-      <b>${esc(d.name)}</b><small>${esc(s.name)}</small><span class="pick-foot">${priceHtml(d.price)}<i class="plus-dot">+</i></span></button>`).join("");
+      <b>${esc(d.name)}</b><small>${esc(s.name)}</small><span class="pick-foot">${dishPriceHtml(d, s)}<i class="plus-dot">+</i></span></button>`).join("");
 }
 const SORTS = [["all", "综合排序"], ["rating", "评分最高"], ["min", "起送最低"], ["fast", "配送最快"]];
 function sortShops(list) {
@@ -1476,15 +2051,17 @@ views.home = {
   tone: "brand",
   render() {
     const q = state.query.trim(), now = Date.now();
-    const filtering = state.onlyLiked || state.onlyOff;
+    const filtering = state.onlyLiked || state.onlyOff || state.onlyBought;
     const browsing = !q && state.category === "全部" && !filtering;
     let shops = q ? searchLocal(q) : allShops();
     if (state.category !== "全部") shops = shops.filter(s => s.category === state.category);
     if (state.onlyLiked) shops = shops.filter(s => isLiked(s.id));
     if (state.onlyOff) shops = shops.filter(s => s.off);
+    if (state.onlyBought) shops = shops.filter(s => boughtCount(s.id) > 0);
     shops = sortShops(shops);
     const live = state.orders.filter(o => isOnTheWay(o, now));
-    const toChar = !!state.recipient;
+    const toChar = !!state.recipient && !isGroupRecipient();
+    const group = recipientGroup();
     const crave = state.craving && state.craving.charId === state.recipient ? state.craving : null;
     const speed = SPEEDS[state.settings.speed] || SPEEDS.fast;
     const claimed = state.settings.claimDay === today();
@@ -1494,6 +2071,7 @@ views.home = {
       liveHtml = `<button type="button" class="live-card" data-act="open-order" data-id="${esc(live[0].id)}"><i class="live-ico">${icon("scooter", 16)}</i>
         <span class="live-main"><span><em>${esc(live[0].shopName)} · ${esc(st.label)}</em><small>${esc(remainText(st.remainMs))}</small></span><span class="bar"><i style="width:${Math.round(st.progress * 100)}%"></i></span></span>${icon("right", 14)}</button>`;
     }
+    const groupHtml = group ? `<div class="crave">${recipientAvatar()}<div class="crave-main"><b>请${esc(recipientName())}吃外卖</b><small>群里共 ${groupSize(group)} 人，结算时可以每样按人数点</small></div><button type="button" class="crave-x" data-act="set-recipient" data-id="" aria-label="不请了">×</button></div>` : "";
     const craveHtml = toChar ? `<div class="crave">${recipientAvatar()}<div class="crave-main">${crave
       ? `<small>${esc(recipientName())} 说</small><p class="crave-line">${esc(crave.line || "随便，你挑。")}</p>`
       : `<b>给 ${esc(recipientName())} 点一份</b><small>不知道点什么？问问 TA 现在想吃什么</small>`}</div>${crave
@@ -1516,14 +2094,21 @@ views.home = {
         <div class="hotwords">${state.settings.aiShops ? `<button type="button" class="ai" data-act="ai-focus">${icon("spark", 11)}AI 找店</button>` : ""}${HOT_WORDS.map(w => `<button type="button" data-act="search-word" data-word="${esc(w)}">${esc(w)}</button>`).join("")}</div>
       </div>
       <div class="cats">${cats.map(c => `<button type="button" class="cat${c === state.category ? " on" : ""}" data-act="set-category" data-c="${esc(c)}"><i>${CATEGORY_EMOJI[c]}</i>${esc(c)}</button>`).join("")}</div>
-      ${liveHtml}${craveHtml}
+      <div class="entries">${[
+        ["open-coupons", "🎟️", "领券中心", claimableCount() ? `${claimableCount()} 张可领` : ""],
+        ["open-lottery", "🎡", "天天抽奖", state.settings.lotteryDay === today() ? "" : "今日可抽"],
+        ["open-member", "👑", isMember() ? "会员中心" : "开会员", isMember() ? "" : "免配送费"],
+        ["open-errand", "🛵", "跑腿帮买", ""],
+        ["toggle-filter", "🧾", "买过的店", "", "onlyBought"],
+      ].map(([act, emo, label, badge, key]) => `<button type="button" class="entry${key && state[key] ? " on" : ""}" data-act="${act}"${key ? ` data-key="${key}"` : ""}><i>${emo}</i>${label}${badge ? `<em>${esc(badge)}</em>` : ""}</button>`).join("")}</div>
+      ${liveHtml}${craveHtml}${groupHtml}
       ${browsing ? promos : ""}
       ${browsing && shops.length ? `<div class="sec-h"><h2>招牌推荐</h2><small>每家店最拿手的那一道</small></div><div class="picks">${pickCards(shops)}</div>` : ""}
       <div class="sec-h"><h2>${q ? `「${esc(q)}」的搜索结果` : state.category === "全部" ? "附近商家" : esc(state.category)}</h2><small>${shops.length} 家</small><span class="hero-eta">${icon("bolt", 12)}${speed.label}配送 · ${speed.hint}</span></div>
       <div class="sorts">${SORTS.map(([key, label]) => `<button type="button" class="${state.sort === key ? "on" : ""}" data-act="set-sort" data-sort="${key}">${label}</button>`).join("")}
-        <button type="button" class="chip${state.onlyOff ? " on" : ""}" data-act="toggle-filter" data-key="onlyOff">满减</button><button type="button" class="chip${state.onlyLiked ? " on" : ""}" data-act="toggle-filter" data-key="onlyLiked">收藏</button></div>
+        <button type="button" class="chip${state.onlyOff ? " on" : ""}" data-act="toggle-filter" data-key="onlyOff">满减</button><button type="button" class="chip${state.onlyLiked ? " on" : ""}" data-act="toggle-filter" data-key="onlyLiked">收藏</button>${state.onlyBought ? '<button type="button" class="chip on" data-act="toggle-filter" data-key="onlyBought">买过</button>' : ""}</div>
       <div class="shops">${shops.map(shopCard).join("") || emptyHtml}</div>
-      ${q && shops.length && state.settings.aiShops ? `<button type="button" class="link" data-act="ai-shops">没有想要的？让 AI 再找几家</button>` : ""}`;
+      ${shops.length && state.settings.aiShops && !filtering ? `<button type="button" class="more-shops" data-act="ai-shops">${icon("spark", 13)}${q ? "没有想要的？让 AI 再找几家" : `看完了？让 AI 再找几家${state.category === "全部" ? "" : esc(state.category)}`}</button>` : ""}`;
   },
   after() {
     const form = document.querySelector('[data-form="search"]');
@@ -1538,9 +2123,10 @@ actions["open-shop"] = d => go("shop", { id: d.id });
 actions["search-word"] = d => { state.query = d.word; state.category = "全部"; render(true); };
 actions["ai-focus"] = () => { const q = $("q"); if (q) q.focus(); toast("写下想吃的，本地搜不到就让 AI 现编几家"); };
 actions["ai-shops"] = async () => {
-  const q = ($("q") ? $("q").value : state.query).trim();
-  if (!q) { toast("先写下想吃什么"); return; }
-  state.query = q;
+  const typed = ($("q") ? $("q").value : state.query).trim();
+  // 没写搜索词时按当前分类找；分类也是「全部」就随便找几家附近口碑好的
+  const q = typed || (state.category !== "全部" ? state.category : "附近口碑好的店");
+  if (typed) state.query = typed;
   const added = await busy(`正在找卖「${q}」的店…`, () => generateShops(q));
   if (added) { toast(`找到 ${added.length} 家`); render(true); }
 };
@@ -1562,20 +2148,62 @@ actions["claim-daily"] = async () => {
 };
 actions["pick-recipient"] = () => {
   const row = (id, ava, name, hint) => `<button type="button" class="row${state.recipient === id ? " on" : ""}" data-act="set-recipient" data-id="${esc(id)}">${ava}<span>${esc(name)}${hint ? `<small> · ${hint}</small>` : ""}</span><em>${icon("check", 12)}</em></button>`;
-  const rows = [row("", '<span class="ava ph">我</span>', "我自己", "")].concat(state.characters.map(c => row(c.id, avatarHtml(c), c.name, "送到 TA 那边")));
+  const rows = [row("", '<span class="ava ph">我</span>', "我自己", "")].concat(state.characters.map(c => row(c.id, avatarHtml(c), c.name, "送到 TA 那边")))
+    .concat(state.settings.groups.map(g => row("g:" + g.sessionId, '<span class="ava ph grp">群</span>', g.name || "群聊", `请大家吃 · ${groupSize(g)} 人`)));
   openSheet("这一单送给谁", `<div class="rows">${rows.join("")}</div>${state.characters.length ? "" : '<p class="hint">还没有角色。先在小手机里创建角色，就能给 TA 点外卖了。</p>'}`);
 };
-actions["set-recipient"] = d => { state.recipient = d.id; draft.address = null; closeSheet(); render(); };
-actions["edit-address"] = () => {
-  const who = state.recipient ? `${recipientName()} 那边的地址` : "我的收货地址";
-  openSheet(who, `<input id="addr-input" maxlength="80" placeholder="小区、楼栋、门牌…（可不填）" value="${esc(currentAddress())}"><p class="hint">只是写给外卖小票和角色看的，不会真的定位。送给谁在结算时选。</p><button type="button" class="btn" data-act="save-address">保存</button>`);
+actions["set-recipient"] = d => {
+  state.recipient = d.id; draft.address = null;
+  if (d.id && state.mode === "pickup") state.mode = "delivery";   // 给别人点就得送过去
+  closeSheet(); render();
 };
+// ── 收货地址：给自己点用地址簿（家 / 公司 / 学校…），给角色点每人记一条 ──
+const ADDR_TAGS = ["家", "公司", "学校", "其他"];
+let addrTag = "家";
+function addressBookHtml() {
+  const list = state.settings.addresses, cur = state.settings.userAddress;
+  return `${list.length ? `<div class="rows">${list.map(a => `<div class="row addr-row${a.text === cur ? " on" : ""}"><button type="button" class="addr-use" data-act="addr-use" data-id="${esc(a.id)}"><i class="tag addr">${esc(a.tag || "其他")}</i><span>${esc(a.text)}</span><em>${icon("check", 12)}</em></button><button type="button" class="addr-del" data-act="addr-del" data-id="${esc(a.id)}" aria-label="删除">×</button></div>`).join("")}</div>` : ""}
+    <div class="addr-new"><div class="seg wrap">${ADDR_TAGS.map(t => `<button type="button" class="${addrTag === t ? "on" : ""}" data-act="addr-tag" data-tag="${t}">${t}</button>`).join("")}</div>
+      <input id="addr-input" maxlength="80" placeholder="新地址：小区、楼栋、门牌…" value="">
+      <button type="button" class="btn" data-act="save-address">添加并设为默认</button></div>
+    <p class="hint">只是写给外卖小票和角色看的，不会真的定位。点一条就设为默认；送给谁在结算时选。</p>`;
+}
+let addrForSelf = false;   // 从「我的」点进地址簿时，就算首页选着角色也改自己的
+actions["my-address"] = () => { addrForSelf = true; openSheet("我的收货地址", addressBookHtml(), () => { addrForSelf = false; }); };
+actions["edit-address"] = () => {
+  addrForSelf = false;
+  if (isGroupRecipient()) { actions["pick-recipient"](); return; }
+  if (state.recipient) {
+    openSheet(`${recipientName()} 那边的地址`, `<input id="addr-input" maxlength="80" placeholder="小区、楼栋、门牌…（可不填）" value="${esc(currentAddress())}"><p class="hint">只是写给外卖小票和角色看的，不会真的定位。</p><button type="button" class="btn" data-act="save-address">保存</button>`);
+    return;
+  }
+  openSheet("我的收货地址", addressBookHtml());
+};
+actions["addr-tag"] = d => { addrTag = d.tag; const v = $("addr-input").value; $("sheet-body").innerHTML = addressBookHtml(); $("addr-input").value = v; };
 actions["save-address"] = async () => {
   const address = ($("addr-input").value || "").trim().slice(0, 80);
-  if (state.recipient) await saveSettings({ charAddress: { ...state.settings.charAddress, [state.recipient]: address } });
-  else await saveSettings({ userAddress: address });
+  if (state.recipient && !addrForSelf) await saveSettings({ charAddress: { ...state.settings.charAddress, [state.recipient]: address } });
+  else if (address) {
+    const rest = state.settings.addresses.filter(a => a.text !== address);
+    await saveSettings({ addresses: [{ id: uid("addr"), tag: addrTag, text: address }, ...rest].slice(0, 12), userAddress: address });
+  }
   draft.address = null;
   closeSheet(); render();
+};
+actions["addr-use"] = async d => {
+  const a = state.settings.addresses.find(x => x.id === d.id);
+  if (!a) return;
+  await saveSettings({ userAddress: a.text });
+  draft.address = null;
+  closeSheet(); render();
+};
+actions["addr-del"] = async d => {
+  const a = state.settings.addresses.find(x => x.id === d.id);
+  if (!a) return;
+  const rest = state.settings.addresses.filter(x => x.id !== d.id);
+  await saveSettings({ addresses: rest, userAddress: state.settings.userAddress === a.text ? (rest[0] ? rest[0].text : "") : state.settings.userAddress });
+  $("sheet-body").innerHTML = addressBookHtml();
+  render();
 };
 
 // ── 购物车：items[行名] = 份数；带规格的行名是「菜名·规格·规格」，base[行名] 记着它是哪道菜 ──
@@ -1586,7 +2214,7 @@ function cartItems() {
   if (!shop) return [];
   return Object.entries(state.cart.items).filter(([, qty]) => qty > 0).map(([key, qty]) => {
     const dish = dishOf((state.cart.base || {})[key] || key, shop);
-    return dish ? { name: key, price: dish.price, qty } : null;
+    return dish ? { name: key, price: dishPrice(dish, shop), qty } : null;
   }).filter(Boolean);
 }
 /** 这道菜（所有规格加起来）在购物车里有几份 */
@@ -1612,23 +2240,25 @@ function dropFromCart(key) {
 /** 底部停靠条：店铺页是购物车，结算页是合计和提交按钮（见 checkout.js 的 payDock） */
 function renderCartBar() {
   const bar = $("cartbar");
-  bar.className = state.view === "checkout" ? "dock flat" : "dock";
-  if (state.view === "checkout") { const html = payDock(); bar.hidden = !html; bar.innerHTML = html; return; }
+  const flat = state.view === "checkout" || state.view === "errand";
+  bar.className = flat ? "dock flat" : "dock";
+  if (flat) { const html = state.view === "checkout" ? payDock() : errandDock(); bar.hidden = !html; bar.innerHTML = html; return; }
   const shop = shopById(state.params.id);
   const show = state.view === "shop" && shop && (state.params.tab || "menu") === "menu";
   bar.hidden = !show;
   if (!show) return;
   const mine = state.cart.shopId === shop.id, count = mine ? cartCount() : 0;
-  const p = priceOrder(mine ? cartItems() : [], shop, 0);
+  const pickup = state.mode === "pickup";
+  const p = priceOrder(mine ? cartItems() : [], shop, { pickup, freeFee: isMember() });
   bar.innerHTML = `<button type="button" class="dock-bag${count ? " on" : ""}" data-act="open-cart" aria-label="购物车">${icon("bag", 20)}${count ? `<em>${count}</em>` : ""}</button>
-    <span class="dock-sum">${count ? priceHtml(p.subtotal) : '<b class="dock-empty">还没有选商品</b>'}<small>${count && p.off ? `已减 ${yuan(p.off)} · ` : ""}另需配送费 ${shop.fee ? yuan(shop.fee) : "0"}</small></span>
+    <span class="dock-sum">${count ? priceHtml(p.subtotal) : '<b class="dock-empty">还没有选商品</b>'}<small>${count && p.off ? `已减 ${yuan(p.off)} · ` : ""}${pickup ? "到店自取 · 立减一成" : !shop.fee ? "免配送费" : isMember() ? "会员免配送费" : `另需配送费 ${yuan(shop.fee)}`}${p.pack ? ` · 包装费 ${yuan(p.pack)}` : ""}</small></span>
     <button type="button" class="btn" data-act="to-checkout"${!count || p.short > 0 ? " disabled" : ""}>${!count ? `${yuan(shop.minOrder)} 起送` : p.short > 0 ? `差 ${yuan(p.short)} 起送` : "去结算"}</button>`;
 }
 function cartSheetHtml() {
   const shop = shopById(state.cart.shopId);
   return `<div class="cart-rows">${cartItems().map(it => `<div class="line">${dishCover(itemEmoji(it.name, shop), shop.color, 34)}<span>${esc(it.name)}</span>${priceHtml(it.price * it.qty, "sm")}
       <div class="stepper"><button type="button" data-act="cart-line" data-key="${esc(it.name)}" data-d="-1" aria-label="减一份">−</button><span>${it.qty}</span><button type="button" class="plus" data-act="cart-line" data-key="${esc(it.name)}" data-d="1" aria-label="加一份">+</button></div></div>`).join("")}</div>
-    <button type="button" class="link danger" data-act="cart-clear">清空购物车</button>`;
+    <div class="cart-foot">${state.characters.length ? `<button type="button" class="link" data-act="share-open" data-kind="cart">${icon("share", 12)}让 TA 帮我看看</button>` : ""}<button type="button" class="link danger" data-act="cart-clear">清空购物车</button></div>`;
 }
 actions["open-cart"] = () => { if (cartCount()) openSheet("购物车", cartSheetHtml()); else toast("购物车还是空的"); };
 actions["cart-line"] = d => {
@@ -1648,7 +2278,7 @@ function dishRow(shop, d) {
     : `<div class="stepper">${qty ? `<button type="button" data-act="cart-dec" data-name="${name}" aria-label="减一份">−</button><span>${qty}</span>` : ""}<button type="button" class="plus" data-act="cart-inc" data-name="${name}" aria-label="加一份">+</button></div>`;
   return `<div class="dish">${dishCover(d.emoji, shop.color, 70, d.tag)}
     <div class="dish-main"><b>${name}</b>${d.desc ? `<small>${esc(d.desc)}</small>` : ""}<span class="dish-stat">月售 ${stat.sales} · 好评度 ${stat.good}%</span>
-      <div class="dish-buy">${priceHtml(d.price)}${buy}</div></div></div>`;
+      <div class="dish-buy">${dishPriceHtml(d, shop)}${buy}</div></div></div>`;
 }
 
 views.shop = {
@@ -1685,15 +2315,29 @@ views.shop = {
             <p class="shop-meta"><b>★${s.rating.toFixed(1)}</b><span>月售 ${st.salesText}</span><span>${etaHint(s)} · ${st.km}km</span></p>
             <p class="shop-meta"><span>起送 ${yuan(s.minOrder)}</span><span>配送 ${s.fee ? yuan(s.fee) : "免费"}</span></p></div>${shopCover(s, 56)}</div>
         <div class="pills">${s.off ? `<i class="pill off">${s.off[0]}减${s.off[1]}</i>` : ""}${s.fee ? "" : '<i class="pill off">免配送费</i>'}<i class="pill grey">${esc(s.category)}</i>
-          <button type="button" class="like-btn${liked ? " on" : ""}" data-act="toggle-like" data-id="${esc(s.id)}">${icon("heart", 12)}${liked ? "已收藏" : "收藏"}</button></div>
+          <span class="head-btns"><button type="button" class="like-btn" data-act="share-open" data-kind="shop" data-id="${esc(s.id)}">${icon("share", 12)}分享</button><button type="button" class="like-btn${liked ? " on" : ""}" data-act="toggle-like" data-id="${esc(s.id)}">${icon("heart", 12)}${liked ? "已收藏" : "收藏"}</button></span></div>
+        ${shopCouponHtml(s)}
         ${s.tagline ? `<p class="notice"><b>公告</b>${esc(s.tagline)}</p>` : ""}
         ${state.recipient ? `<p class="notice"><b>代点</b>这一单送给 ${esc(recipientName())}</p>` : ""}
+        <div class="modes"><button type="button" class="${state.mode !== "pickup" ? "on" : ""}" data-act="set-mode" data-mode="delivery"><b>外卖配送</b><small>${etaHint(s)} · ${st.km}km</small></button><button type="button" class="${state.mode === "pickup" ? "on" : ""}" data-act="set-mode" data-mode="pickup"><b>到店自取</b><small>${pickupHint(s)} · 立减一成</small></button></div>
       </section>
       <div class="stabs">${SHOP_TABS.map(([key, label]) => `<button type="button" class="${tab === key ? "on" : ""}" data-act="shop-tab" data-tab="${key}">${label}${key === "reviews" && reviews.length ? `<small>${reviews.length}</small>` : ""}</button>`).join("")}</div>
       ${body}`;
   },
 };
 
+/** 自取大概多久能取：只算备餐，约是配送时间的一半 */
+function pickupHint(shop) {
+  const speed = SPEEDS[state.settings.speed] || SPEEDS.fast;
+  const minutes = (speed.minutes[0] + speed.minutes[1]) / 2 * (shop.factor || 1) * 0.55;
+  return minutes < 1.5 ? "1 分钟内可取" : `约 ${Math.round(minutes)} 分钟可取`;
+}
+actions["set-mode"] = d => {
+  if (d.mode === "pickup" && isGroupRecipient()) { toast("请群聊只能送过去，不能自取"); return; }
+  state.mode = d.mode === "pickup" ? "pickup" : "delivery";
+  if (state.mode === "pickup" && state.recipient) { state.recipient = ""; toast("自取只能自己去拿，这一单改成给自己点"); }
+  render();
+};
 actions["shop-tab"] = d => { state.params = { ...state.params, tab: d.tab }; render(); };
 actions["menu-jump"] = d => {
   state.params = { ...state.params, g: Number(d.g) }; render();
@@ -1711,7 +2355,7 @@ let specDraft = null;
 function specSheetHtml() {
   const shop = shopById(specDraft.shopId), dish = dishOf(specDraft.name, shop);
   return `${dishSpecs(dish, shop).map((g, gi) => `<div class="spec-g"><small>${g.title}</small><div class="seg wrap">${g.options.map((o, oi) => `<button type="button" class="${specDraft.picks[gi] === oi ? "on" : ""}" data-act="spec-pick" data-g="${gi}" data-i="${oi}">${o}</button>`).join("")}</div></div>`).join("")}
-    <div class="spec-foot">${priceHtml(dish.price)}<button type="button" class="btn" data-act="spec-add">加入购物车</button></div>`;
+    <div class="spec-foot">${dishPriceHtml(dish, shop)}<button type="button" class="btn" data-act="spec-add">加入购物车</button></div>`;
 }
 actions["cart-inc"] = async d => {
   const shop = shopById(state.params.id), dish = shop && dishOf(d.name, shop);
@@ -1740,21 +2384,193 @@ actions["remove-shop"] = async d => {
   back();
 };
 
-// ── 结算：送给谁、地址、时间、红包、付款方式（钱包 / 找 TA 代付）──
-const draft = { when: "asap", time: "", note: "", payMode: "wallet", accountId: "", payChar: "", couponId: "auto", address: null };
+// ── 优惠：领券中心（平台券、运费券、商家券）、天天抽奖、会员 ──
+const DAY_MS = 86400000;
+/** 某天结束的时刻；plusDays = 2 就是后天晚上 23:59 */
+function endOfDay(now, plusDays) { const d = new Date(now); d.setHours(23, 59, 59, 999); return d.getTime() + (plusDays || 0) * DAY_MS; }
+const monthKey = now => { const d = new Date(now || Date.now()); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; };
+const claimedToday = () => (state.settings.claimed.day === today() ? state.settings.claimed.ids : []);
+
+/** 今天领券中心里有哪些券。商家券每天换 6 家店，按日期算，同一天看到的都一样 */
+function todaysOffers() {
+  const day = today();
+  const list = [
+    { id: "p_free", kind: "cash", amount: 3, min: 0, title: "3 元无门槛", note: "全场通用" },
+    { id: "p_full30", kind: "cash", amount: 5, min: 30, title: "满 30 减 5", note: "全场通用" },
+    { id: "p_full60", kind: "cash", amount: 12, min: 60, title: "满 60 减 12", note: "全场通用" },
+    { id: "p_fee", kind: "fee", amount: 0, min: 0, title: "运费券", note: "免一单配送费" },
+  ];
+  const pool = SEEDS.filter(s => s.minOrder > 0 && !state.settings.hiddenSeeds.includes(s.id));
+  for (let i = 0; i < 6 && pool.length; i++) {
+    const s = pool.splice(hashSeed(`${day}|${i}`) % pool.length, 1)[0];
+    const amount = 3 + hashSeed(day + s.id) % 6;
+    const min = Math.max(s.minOrder + 10, amount * 5);
+    list.push({ id: "s_" + s.id, kind: "cash", amount, min, shopId: s.id, title: `满 ${min} 减 ${amount}`, note: s.name });
+  }
+  return list;
+}
+function claimableCount() { const got = claimedToday(); return todaysOffers().filter(o => !got.includes(o.id)).length; }
+async function claimOffer(offer) {
+  const got = claimedToday();
+  if (got.includes(offer.id)) return false;
+  const reason = offer.kind === "fee" ? "运费券" : offer.shopId ? `${offer.note} 店铺红包` : `领券中心 · ${offer.title}`;
+  await addCoupon(offer.amount, reason, { kind: offer.kind, min: offer.min, shopId: offer.shopId || "", expireAt: endOfDay(Date.now(), 2) });
+  await saveSettings({ claimed: { day: today(), ids: [...got, offer.id] } });
+  return true;
+}
+/** 店铺页信息卡里那一条店铺券 */
+function shopCouponHtml(shop) {
+  const offer = todaysOffers().find(o => o.shopId === shop.id);
+  if (!offer) return "";
+  const got = claimedToday().includes(offer.id);
+  return `<div class="shop-coupon"><b>${priceHtml(offer.amount)}</b><span><em>店铺红包</em><small>满 ${offer.min} 可用 · 本店专享 · 3 天内有效</small></span><button type="button" class="mini${got ? "" : " hot"}" data-act="claim-offer" data-id="${esc(offer.id)}"${got ? " disabled" : ""}>${got ? "已领" : "领取"}</button></div>`;
+}
+function couponLimit(c) {
+  if (couponKind(c) === "fee") return "免一单配送费";
+  const shop = c.shopId ? shopById(c.shopId) : null;
+  return `${c.min ? `满 ${c.min} 可用` : "无门槛"}${shop ? ` · 仅限${shop.name}` : ""}`;
+}
+function couponExpire(c, now) {
+  if (!c.expireAt) return "长期有效";
+  const days = Math.floor((endOfDay(c.expireAt) - endOfDay(now)) / DAY_MS);
+  return days <= 0 ? "今天到期" : days === 1 ? "明天到期" : `${days} 天后到期`;
+}
+function couponCard(c, now) {
+  const fee = couponKind(c) === "fee";
+  return `<div class="coupon${fee ? " fee" : ""}"><b>${fee ? "<i>免运费</i>" : priceHtml(c.amount)}</b><span><em>${esc(c.reason)}</em><small>${esc(couponLimit(c))} · ${esc(couponExpire(c, now))}</small></span></div>`;
+}
+
+// ── 天天抽奖：一天一次，转盘八格 ──
+const PRIZES = [
+  { label: "¥1", amount: 1, w: 20 }, { label: "¥2", amount: 2, w: 20 }, { label: "¥3", amount: 3, w: 15 }, { label: "运费券", fee: true, w: 15 },
+  { label: "¥5", amount: 5, w: 10 }, { label: "谢谢参与", w: 12 }, { label: "¥8", amount: 8, w: 6 }, { label: "¥18", amount: 18, w: 2 },
+];
+let wheelTurn = 0;   // 转盘已经转到的角度，下一次接着往后转
+function wheelHtml() {
+  const done = state.settings.lotteryDay === today();
+  return `<section class="card lottery" id="lottery">
+    <h3>${icon("gift", 14)}天天抽奖<small>${done ? "今天抽过了，明天再来" : "每天一次，抽到的红包自动放进券包"}</small></h3>
+    <div class="wheel-box"><div class="wheel" id="wheel" style="transform:rotate(${wheelTurn}deg)">${PRIZES.map((p, i) => `<span style="--i:${i}"><b>${esc(p.label)}</b></span>`).join("")}</div>
+      <button type="button" class="wheel-go" data-act="spin"${done ? " disabled" : ""}>${done ? "明天<br>再来" : "抽"}</button><i class="wheel-pin"></i></div>
+  </section>`;
+}
+actions["spin"] = async () => {
+  if (state.settings.lotteryDay === today()) { toast("今天已经抽过啦"); return; }
+  const total = PRIZES.reduce((s, p) => s + p.w, 0);
+  let r = Math.random() * total, idx = 0;
+  while (idx < PRIZES.length - 1 && (r -= PRIZES[idx].w) >= 0) idx++;
+  const prize = PRIZES[idx];
+  await saveSettings({ lotteryDay: today() });          // 先记下，转的时候再点也不会抽第二次
+  // 第 i 格的中心在 i*45+22.5 度；把它转到正上方的指针下面
+  wheelTurn += 360 * 5 + (360 - (idx * 45 + 22.5) - wheelTurn % 360);
+  const wheel = $("wheel");
+  if (wheel) { wheel.classList.add("spinning"); wheel.style.transform = `rotate(${wheelTurn}deg)`; }
+  const btn = document.querySelector('[data-act="spin"]'); if (btn) btn.disabled = true;
+  await new Promise(r2 => setTimeout(r2, 2300));
+  if (prize.fee) await addCoupon(0, "抽奖 · 运费券", { kind: "fee", expireAt: endOfDay(Date.now(), 2) });
+  else if (prize.amount) await addCoupon(prize.amount, "抽奖红包", { expireAt: endOfDay(Date.now(), 2) });
+  toast(prize.fee ? "抽中一张运费券！" : prize.amount ? `抽中 ${yuan(prize.amount)} 红包！` : "差一点点，明天再来");
+  render();
+};
+
+views.coupons = {
+  title: "领券中心",
+  tone: "brand",
+  render() {
+    const now = Date.now(), got = claimedToday(), offers = todaysOffers();
+    const offerRow = o => {
+      const taken = got.includes(o.id);
+      return `<div class="offer${o.kind === "fee" ? " fee" : ""}"><b>${o.kind === "fee" ? "<i>免运费</i>" : priceHtml(o.amount)}</b><span><em>${esc(o.title)}</em><small>${esc(o.note)} · 领后 3 天内有效</small></span>
+        <button type="button" class="mini${taken ? "" : " hot"}" data-act="claim-offer" data-id="${esc(o.id)}"${taken ? " disabled" : ""}>${taken ? "已领" : "领取"}</button></div>`;
+    };
+    const mine = [...usableCoupons(), ...feeCoupons()];
+    const gone = state.coupons.filter(c => !couponLive(c, now)).length;
+    return `
+      <div class="hero promo-hero"><b>${claimableCount() ? `今天还能领 ${claimableCount()} 张` : "今天的券都领完了"}</b><small>领到的券下单时自动挑最划算的那张</small>
+        ${claimableCount() ? '<button type="button" class="btn" data-act="claim-all">一键全领</button>' : ""}</div>
+      ${wheelHtml()}
+      <section class="card"><h3>${icon("ticket", 14)}平台券</h3><div class="offers">${offers.filter(o => !o.shopId).map(offerRow).join("")}</div></section>
+      <section class="card"><h3>${icon("store", 14)}今日商家券<small>每天换一批店</small></h3><div class="offers">${offers.filter(o => o.shopId).map(o => offerRow(o).replace('<span><em>', `<span class="go" data-act="open-shop" data-id="${esc(o.shopId)}"><em>`)).join("")}</div></section>
+      <section class="card"><h3>${icon("wallet", 14)}我的券包<small>${mine.length} 张可用${gone ? ` · ${gone} 张已用或过期` : ""}</small></h3>
+        ${mine.length ? `<div class="coupon-list">${mine.map(c => couponCard(c, now)).join("")}</div>` : '<p class="hint">还没有能用的券。退款、补偿、抽奖、领到的券都会放在这里。</p>'}</section>`;
+  },
+};
+actions["open-coupons"] = () => go("coupons");
+actions["open-lottery"] = () => { go("coupons"); const node = $("lottery"); if (node) node.scrollIntoView({ block: "start" }); };
+actions["claim-offer"] = async d => {
+  const offer = todaysOffers().find(o => o.id === d.id);
+  if (!offer || !await claimOffer(offer)) { toast("今天已经领过这张了"); return; }
+  toast(offer.kind === "fee" ? "运费券已放进券包" : `领到 ${yuan(offer.amount)} 红包`);
+  render();
+};
+actions["claim-all"] = async () => {
+  let n = 0;
+  for (const offer of todaysOffers()) if (await claimOffer(offer)) n++;
+  toast(n ? `领到 ${n} 张券` : "今天的都领过了");
+  render();
+};
+
+// ── 会员：每单免配送费（自取除外），每月发 4 张会员红包 ──
+const MEMBER_PLANS = [{ id: "m30", days: 30, price: 15, label: "月卡" }, { id: "m90", days: 90, price: 39, label: "季卡" }];
+const MEMBER_MONTHLY = { count: 4, amount: 4, min: 20 };
+/** 会员每个月第一次打开时发当月的会员红包 */
+async function grantMemberCoupons() {
+  const now = Date.now(), month = monthKey(now);
+  if (!isMember(now) || state.settings.member.granted === month) return;
+  const d = new Date(now), monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+  for (let i = 0; i < MEMBER_MONTHLY.count; i++) await addCoupon(MEMBER_MONTHLY.amount, "会员红包", { min: MEMBER_MONTHLY.min, expireAt: monthEnd });
+  await saveSettings({ member: { ...state.settings.member, granted: month } });
+}
+/** 这一单会员免了多少配送费，记到会员卡上 */
+async function noteMemberSaving(amount) {
+  if (!(amount > 0)) return;
+  const m = state.settings.member, month = monthKey();
+  await saveSettings({ member: { ...m, saved: Math.round(((Number(m.saved) || 0) + amount) * 10) / 10, month, monthSaved: Math.round(((m.month === month ? Number(m.monthSaved) || 0 : 0) + amount) * 10) / 10 } });
+}
+views.member = {
+  title: "外卖会员",
+  tone: "brand",
+  render() {
+    const m = state.settings.member, now = Date.now(), on = isMember(now);
+    const monthSaved = m.month === monthKey(now) ? Number(m.monthSaved) || 0 : 0;
+    return `
+      <div class="hero member-hero"><i class="crown">👑</i><span><b>${on ? "外卖会员" : "开通外卖会员"}</b><small>${on ? `有效期至 ${new Date(m.until).getMonth() + 1} 月 ${new Date(m.until).getDate()} 日` : "每单免配送费，每月再送 4 张红包"}</small></span></div>
+      <section class="card member-card">
+        <div class="stats"><div><b><i>¥</i>${monthSaved}</b><small>本月已省</small></div><div><b><i>¥</i>${Number(m.saved) || 0}</b><small>累计已省</small></div><div><b>${on ? Math.max(1, Math.ceil((m.until - now) / DAY_MS)) : 0}</b><small>剩余天数</small></div></div>
+      </section>
+      <section class="card"><h3>${icon("crown", 14)}会员权益</h3>
+        <div class="perks"><div><i>🛵</i><b>每单免配送费</b><small>外卖配送全免，跑腿减 3 元</small></div>
+          <div><i>🧧</i><b>每月 ${MEMBER_MONTHLY.count} 张 ${yuan(MEMBER_MONTHLY.amount)} 红包</b><small>满 ${MEMBER_MONTHLY.min} 可用，当月有效</small></div>
+          <div><i>📒</i><b>省下的钱都记着</b><small>每次免掉的配送费算进会员卡</small></div></div></section>
+      <section class="card"><h3>${icon("wallet", 14)}${on ? "续费" : "开通"}<small>从小手机钱包扣</small></h3>
+        <div class="plans">${MEMBER_PLANS.map(p => `<button type="button" class="plan" data-act="buy-member" data-id="${p.id}"><b>${p.label}</b>${priceHtml(p.price)}<small>${p.days} 天 · 约 ${yuan(Math.round(p.price / p.days * 30 * 10) / 10)}/月</small></button>`).join("")}</div></section>`;
+  },
+};
+actions["open-member"] = () => go("member");
+actions["buy-member"] = async d => {
+  const plan = MEMBER_PLANS.find(p => p.id === d.id);
+  if (!plan || !await confirmBox(`${isMember() ? "续费" : "开通"}外卖会员${plan.label}？`, `从钱包付 ${yuan(plan.price)}，有效 ${plan.days} 天。`)) return;
+  const ok = await busy("正在付款…", async () => {
+    const paid = await api.wallet.pay({ amount: plan.price, title: `外卖会员 · ${plan.label}`, detail: `${plan.days} 天`, category: "外卖" });
+    if (!paid || paid.ok === false) throw new Error((paid && paid.error) || "付款失败");
+    const m = state.settings.member, now = Date.now();
+    await saveSettings({ member: { ...m, until: Math.max(now, Number(m.until) || 0) + plan.days * DAY_MS } });
+    await grantMemberCoupons();
+    return true;
+  });
+  if (ok) { toast("会员已开通，配送费全免"); render(); }
+};
+
+// ── 结算：送给谁（自己 / 角色 / 群聊）、配送或自取、地址、时间、优惠、付款方式（钱包 / 找 TA 代付 / 和 TA 拼单）──
+const draft = { when: "asap", time: "", note: "", payMode: "wallet", accountId: "", payChar: "", couponId: "auto", address: null, perHead: true, useFeeCoupon: true };
 
 function draftAddress() {
   if (draft.address !== null) return draft.address;
+  if (isGroupRecipient()) return "";
   if (state.recipient) return state.settings.charAddress[state.recipient] || "";
   return state.settings.userAddress || "";
 }
-function draftCoupon(total) {
-  const list = usableCoupons();
-  if (draft.couponId === "none" || !list.length) return null;
-  if (draft.couponId === "auto") return list.find(c => c.amount <= total) || list[list.length - 1];
-  return list.find(c => c.id === draft.couponId) || null;
-}
-/** 约定的送达时刻（毫秒）；尽快返回 0 */
+/** 约定的送达 / 取餐时刻（毫秒）；尽快返回 0 */
 function draftSchedule(now) {
   if (draft.when === "asap") return 0;
   if (draft.when === "custom") {
@@ -1766,84 +2582,127 @@ function draftSchedule(now) {
   }
   return now + Number(draft.when) * 60000;
 }
+const round1c = n => Math.round(n * 10) / 10;
 
-/** 结算页要用的一整套数：店、购物车、选中的红包、算好的价钱、付款账户够不够 */
+/** 结算页要用的一整套数：店、商品（请群聊按人数乘过）、优惠、算好的价钱、这次要从钱包付多少 */
 function checkoutState() {
-  const shop = shopById(state.cart.shopId), items = cartItems();
+  const shop = shopById(state.cart.shopId);
+  let items = cartItems();
   if (!shop || !items.length) return null;
-  const coupon = draftCoupon(priceOrder(items, shop, 0).total);
-  const p = priceOrder(items, shop, coupon ? coupon.amount : 0);
+  const group = recipientGroup();
+  const heads = group && draft.perHead ? groupSize(group) : 1;
+  if (heads > 1) items = items.map(it => ({ ...it, qty: it.qty * heads }));
+  const pickup = state.mode === "pickup" && !state.recipient;
+  const member = isMember();
+  const feeCoupon = !pickup && !member && shop.fee > 0 && draft.useFeeCoupon ? feeCoupons()[0] || null : null;
+  const opts = { pickup, freeFee: member || !!feeCoupon };
+  const base = priceOrder(items, shop, opts);
+  const list = usableCoupons({ subtotal: base.subtotal, shopId: shop.id });
+  const coupon = draft.couponId === "none" || !list.length ? null
+    : draft.couponId === "auto" ? list.find(c => c.amount <= base.total) || list[list.length - 1]
+    : list.find(c => c.id === draft.couponId) || null;
+  const p = priceOrder(items, shop, { ...opts, coupon: coupon ? coupon.amount : 0 });
+  const solo = !state.recipient;                       // 只有给自己点才能找人代付、拼单
+  const mode = solo ? draft.payMode : "wallet";
+  const payNow = mode === "char" ? 0 : mode === "split" ? round1c(p.total / 2) : p.total;
   const accounts = (state.wallet && state.wallet.accounts) || [];
   const account = accounts.find(a => a.id === draft.accountId);
-  const lack = draft.payMode === "wallet" && !!account && Number(account.balance) < p.total;
-  return { shop, items, coupon, p, accounts, account, lack };
+  const lack = payNow > 0 && !!account && Number(account.balance) < payNow;
+  return { shop, items, heads, group, pickup, member, feeCoupon, coupons: list, coupon, p, mode, payNow, accounts, account, lack };
 }
 /** 结算页底部的停靠条：合计 + 付款按钮 */
 function payDock() {
   const c = checkoutState();
   if (!c) return "";
-  const saved = c.p.off + c.p.coupon;
-  return `<span class="dock-sum"><span class="dock-total">合计 ${priceHtml(c.p.total)}</span><small>${saved > 0 ? `已优惠 ${yuan(saved)}` : `含配送费 ${c.p.fee ? yuan(c.p.fee) : "0"}`}</small></span>
-    <button type="button" class="btn" data-act="place-order"${c.lack ? " disabled" : ""}>${draft.payMode === "char" ? "发给 TA 代付" : c.lack ? "余额不足" : "提交订单"}</button>`;
+  const saved = round1c(c.p.off + c.p.coupon + c.p.feeOff + c.p.pickupOff);
+  const label = c.lack ? "余额不足" : c.mode === "char" ? "发给 TA 代付" : c.mode === "split" ? `付我那一半 ${yuan(c.payNow)}` : "提交订单";
+  return `<span class="dock-sum"><span class="dock-total">合计 ${priceHtml(c.p.total)}</span><small>${saved > 0 ? `已优惠 ${yuan(saved)}` : c.pickup ? "到店自取" : `含配送费 ${c.p.fee ? yuan(c.p.fee) : "0"}`}</small></span>
+    <button type="button" class="btn" data-act="place-order"${c.lack ? " disabled" : ""}>${label}</button>`;
+}
+/** 顺手带一件：这家店里几块钱的小东西，购物车里还没有的 */
+function addonDishes(shop) {
+  const inCart = new Set(Object.keys(state.cart.items).map(k => (state.cart.base || {})[k] || k));
+  return shop.dishes.filter(d => !inCart.has(d.name) && d.price <= 12 && !dishSpecs(d, shop).length).slice(0, 4);
 }
 
 views.checkout = {
   title: "确认订单",
   tone: "plain",
   render() {
-    const toChar = !!state.recipient;
-    if (toChar && draft.payMode === "char") draft.payMode = "wallet";
     const wallet = state.wallet, list = (wallet && wallet.accounts) || [];
     if (!draft.accountId && wallet) draft.accountId = wallet.defaultAccountId || (list[0] && list[0].id) || "";
     if (!draft.payChar && state.characters[0]) draft.payChar = state.characters[0].id;
     const c = checkoutState();
     if (!c) return '<div class="empty"><span class="big">🛒</span><p>购物车是空的</p></div>';
-    const { shop, items, p, accounts, account, lack } = c;
+    const { shop, items, heads, group, pickup, member, feeCoupon, coupons, p, mode, accounts, account, lack } = c;
+    const toChar = !!state.recipient && !group, solo = !state.recipient;
     const sched = draftSchedule(Date.now());
     const seg = (key, value, label) => `<button type="button" class="${draft[key] === value ? "on" : ""}" data-act="draft-set" data-key="${key}" data-value="${esc(value)}">${esc(label)}</button>`;
-    const pay = (value, ico, label, hint) => `<button type="button" class="pay${draft.payMode === value ? " on" : ""}" data-act="draft-set" data-key="payMode" data-value="${value}"><i>${icon(ico, 15)}</i><span>${label}<small>${esc(hint)}</small></span></button>`;
+    const pay = (value, ico, label, hint) => `<button type="button" class="pay${mode === value ? " on" : ""}" data-act="draft-set" data-key="payMode" data-value="${value}"><i>${icon(ico, 15)}</i><span>${label}<small>${esc(hint)}</small></span></button>`;
     const payChar = state.characters.find(x => x.id === draft.payChar);
+    const who = (id, ava, name) => `<button type="button" class="who${state.recipient === id ? " on" : ""}" data-act="set-recipient" data-id="${esc(id)}">${ava}${esc(name)}</button>`;
+    const whos = [who("", '<span class="ava ph sm">我</span>', "我自己")]
+      .concat(state.characters.map(x => who(x.id, avatarHtml(x, "sm"), x.name)))
+      .concat(state.settings.groups.map(g => who("g:" + g.sessionId, '<span class="ava ph grp sm">群</span>', g.name || "群聊")));
+    const addrChips = solo && !pickup && state.settings.addresses.length > 1
+      ? `<div class="addr-chips">${state.settings.addresses.map(a => `<button type="button" class="${draftAddress() === a.text ? "on" : ""}" data-act="draft-set" data-key="address" data-value="${esc(a.text)}"><i>${esc(a.tag)}</i>${esc(a.text)}</button>`).join("")}</div>` : "";
+    const where = pickup
+      ? `<div class="frow"><span>自取地点</span><b>${esc(shop.name)} · 距你 ${shopStats(shop).km}km</b></div>`
+      : group
+        ? `<div class="frow"><span>送到</span><b>群里大家手上（${groupSize(group)} 人）</b></div>
+           <div class="frow sw-row" data-act="draft-toggle" data-key="perHead"><span class="grow"><b>每样按人数点</b><small>${draft.perHead ? `每样 ×${groupSize(group)}，一人一份` : "按购物车里的份数点"}</small></span><button type="button" class="sw${draft.perHead ? " on" : ""}" role="switch" aria-checked="${draft.perHead}" aria-label="每样按人数点"></button></div>`
+        : `${addrChips}<label class="frow"><span>地址</span><input data-change="draft-input" data-key="address" placeholder="${toChar ? esc(recipientName()) + " 那边的地址（可不填）" : "你的收货地址（可不填）"}" value="${esc(draftAddress())}"></label>`;
+    const addons = addonDishes(shop);
+    const feeLine = pickup ? "" : `<div class="line sub"><span>配送费${p.feeOff ? `<i class="tag ${member ? "vip" : "addr"}">${member ? "会员免" : "运费券"}</i>` : ""}</span><b>${p.fee ? (p.feeOff ? `<s>${yuan(p.fee)}</s> 0` : yuan(p.fee)) : "免费"}</b></div>`;
     return `
       <section class="card addr">
         <h3>${icon("pin", 14)}送给谁</h3>
-        <div class="whos">${[{ id: "", name: "我自己" }].concat(state.characters).map(x => `<button type="button" class="who${state.recipient === x.id ? " on" : ""}" data-act="set-recipient" data-id="${esc(x.id)}">${x.id ? avatarHtml(x, "sm") : '<span class="ava ph sm">我</span>'}${esc(x.name)}</button>`).join("")}</div>
-        <label class="frow"><span>地址</span><input data-change="draft-input" data-key="address" placeholder="${toChar ? esc(recipientName()) + " 那边的地址（可不填）" : "你的收货地址（可不填）"}" value="${esc(draftAddress())}"></label>
-        <label class="frow"><span>备注</span><input data-change="draft-input" data-key="note" maxlength="60" placeholder="少辣、不要香菜、放门口…" value="${esc(draft.note)}"></label>
+        <div class="whos">${whos.join("")}</div>
+        ${solo ? `<div class="modes slim"><button type="button" class="${pickup ? "" : "on"}" data-act="set-mode" data-mode="delivery">外卖配送</button><button type="button" class="${pickup ? "on" : ""}" data-act="set-mode" data-mode="pickup">到店自取 · 立减一成</button></div>` : ""}
+        ${where}
+        <label class="frow"><span>${group ? "附言" : "备注"}</span><input data-change="draft-input" data-key="note" maxlength="60" placeholder="${group ? "群里的大家会知道，比如：今天我请客！" : pickup ? "比如：少辣、晚点来拿" : "少辣、不要香菜、放门口…"}" value="${esc(draft.note)}"></label>
       </section>
       <section class="card">
-        <h3>${icon("clock", 14)}送达时间<small>${sched ? `约定 ${esc(when(sched))}` : esc(etaHint(shop))}</small></h3>
-        <div class="seg">${seg("when", "asap", "尽快")}${seg("when", "30", "30 分钟后")}${seg("when", "60", "1 小时后")}${seg("when", "custom", "指定")}</div>
-        ${draft.when === "custom" ? `<label class="frow"><span>几点送到</span><input type="time" data-change="draft-input" data-key="time" data-rerender="1" value="${esc(draft.time)}"></label>` : ""}
-        ${sched ? `<p class="hint">如果约定的时间比最快送达还早，就按尽快送。</p>` : ""}
+        <h3>${icon("clock", 14)}${pickup ? "取餐时间" : "送达时间"}<small>${sched ? `约定 ${esc(when(sched))}` : esc(pickup ? pickupHint(shop) : etaHint(shop))}</small></h3>
+        <div class="seg">${seg("when", "asap", pickup ? "尽快做好" : "尽快")}${seg("when", "30", "30 分钟后")}${seg("when", "60", "1 小时后")}${seg("when", "custom", "指定")}</div>
+        ${draft.when === "custom" ? `<label class="frow"><span>${pickup ? "几点来取" : "几点送到"}</span><input type="time" data-change="draft-input" data-key="time" data-rerender="1" value="${esc(draft.time)}"></label>` : ""}
+        ${sched ? `<p class="hint">如果约定的时间比最快${pickup ? "做好" : "送达"}还早，就按尽快。</p>` : ""}
       </section>
       <section class="card receipt">
-        <div class="receipt-head">${shopCover(shop, 30)}<span><b>${esc(shop.name)}</b><small>共 ${items.reduce((n, it) => n + it.qty, 0)} 件</small></span></div>
+        <div class="receipt-head">${shopCover(shop, 30)}<span><b>${esc(shop.name)}</b><small>共 ${items.reduce((n, it) => n + it.qty, 0)} 件${heads > 1 ? ` · 按 ${heads} 人份` : ""}</small></span></div>
         ${items.map(it => `<div class="line">${dishCover(itemEmoji(it.name, shop), shop.color, 30)}<span>${esc(it.name)}</span><span>×${it.qty}</span><b>${yuan(it.price * it.qty)}</b></div>`).join("")}
+        ${addons.length ? `<div class="addons"><small>顺手带一件</small><div>${addons.map(d => `<button type="button" class="addon" data-act="addon-add" data-name="${esc(d.name)}">${dishCover(d.emoji, shop.color, 34)}<span>${esc(d.name)}</span>${priceHtml(dishPrice(d, shop), "sm")}<i class="plus-dot">+</i></button>`).join("")}</div></div>` : ""}
         <div class="cut"></div>
-        <div class="line sub"><span>配送费</span><b>${p.fee ? yuan(p.fee) : "免费"}</b></div>
+        ${p.pack ? `<div class="line sub"><span>包装费</span><b>${yuan(p.pack)}</b></div>` : ""}
+        ${feeLine}
+        ${p.pickupOff ? `<div class="line sub"><span>自取立减</span><b class="minus">−${yuan(p.pickupOff)}</b></div>` : ""}
         ${p.off ? `<div class="line sub"><span>满减</span><b class="minus">−${yuan(p.off)}</b></div>` : ""}
-        ${usableCoupons().length ? `<label class="line sub"><span>红包</span><select data-change="draft-input" data-key="couponId" data-rerender="1">
-            <option value="auto"${draft.couponId === "auto" ? " selected" : ""}>自动选一张</option>
-            ${usableCoupons().map(x => `<option value="${esc(x.id)}"${draft.couponId === x.id ? " selected" : ""}>${yuan(x.amount)} · ${esc(x.reason)}</option>`).join("")}
+        ${coupons.length ? `<label class="line sub"><span>红包</span><select data-change="draft-input" data-key="couponId" data-rerender="1">
+            <option value="auto"${draft.couponId === "auto" ? " selected" : ""}>自动选最划算的</option>
+            ${coupons.map(x => `<option value="${esc(x.id)}"${draft.couponId === x.id ? " selected" : ""}>${yuan(x.amount)} · ${esc(x.reason)}${x.min ? `（满 ${x.min}）` : ""}</option>`).join("")}
             <option value="none"${draft.couponId === "none" ? " selected" : ""}>不用红包</option></select><b class="minus">${p.coupon ? "−" + yuan(p.coupon) : ""}</b></label>` : ""}
+        ${!pickup && !member && shop.fee > 0 && !feeCoupon ? `<button type="button" class="upsell" data-act="open-member">${icon("crown", 13)}<span>开通会员，这单就能省 ${yuan(shop.fee)} 配送费</span>${icon("right", 12)}</button>` : ""}
         <div class="line total"><span>合计</span><b>${yuan(p.total)}</b></div>
       </section>
       <section class="card">
         <h3>${icon("wallet", 14)}付款方式</h3>
-        <div class="pays">${pay("wallet", "wallet", "钱包付款", account ? `${account.title || "账户"} ${account.balanceLabel || yuan(account.balance)}` : "从小手机钱包扣")}${toChar ? "" : pay("char", "heart", "找 TA 代付", payChar ? `请 ${payChar.name} 帮忙付` : "TA 同意后才配送")}</div>
-        ${draft.payMode === "wallet"
-          ? (wallet
-            ? `${accounts.length > 1 ? `<label class="frow"><span>付款账户</span><select data-change="draft-input" data-key="accountId" data-rerender="1">${accounts.map(a => `<option value="${esc(a.id)}"${a.id === draft.accountId ? " selected" : ""}>${esc(a.title || "账户")}（${esc(a.balanceLabel || yuan(a.balance))}）</option>`).join("")}</select><span class="chev">${icon("right", 12)}</span></label>` : ""}${lack ? '<p class="hint warn">这个账户余额不够，换一个账户，或者找 TA 代付。</p>' : ""}`
-            : '<p class="hint warn">读不到钱包。请在权限里允许本 APP 读取钱包和付款。</p>')
-          : (state.characters.length
-            ? `<label class="frow"><span>请谁付</span><select data-change="draft-input" data-key="payChar" data-rerender="1">${state.characters.map(x => `<option value="${esc(x.id)}"${x.id === draft.payChar ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select><span class="chev">${icon("right", 12)}</span></label><p class="hint">会在聊天里发一张代付请求，由 TA 按自己的性格决定付不付。TA 同意后才开始配送。</p>`
-            : '<p class="hint warn">还没有角色可以代付。</p>')}
+        <div class="pays">${pay("wallet", "wallet", "钱包付款", account ? `${account.title || "账户"} ${account.balanceLabel || yuan(account.balance)}` : "从小手机钱包扣")}${solo && state.characters.length ? pay("char", "heart", "找 TA 代付", "TA 看心情决定") + pay("split", "gift", "和 TA 拼单", `一人一半，你付 ${yuan(round1c(p.total / 2))}`) : ""}</div>
+        ${mode !== "wallet" ? `<label class="frow"><span>${mode === "char" ? "请谁付" : "和谁拼"}</span><select data-change="draft-input" data-key="payChar" data-rerender="1">${state.characters.map(x => `<option value="${esc(x.id)}"${x.id === draft.payChar ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select><span class="chev">${icon("right", 12)}</span></label>
+          <p class="hint">${mode === "char" ? `会在聊天里发一张代付请求，由 ${esc(payChar ? payChar.name : "TA")} 按自己的性格决定付不付。TA 同意后才开始配送。` : `你先付自己那一半，再问 ${esc(payChar ? payChar.name : "TA")} 要不要一起拼。TA 答应了才开始配送；不答应可以自己补上另一半，或者取消（你付的那一半退成红包）。`}</p>` : ""}
+        ${mode !== "char" ? (wallet
+          ? `${accounts.length > 1 ? `<label class="frow"><span>付款账户</span><select data-change="draft-input" data-key="accountId" data-rerender="1">${accounts.map(a => `<option value="${esc(a.id)}"${a.id === draft.accountId ? " selected" : ""}>${esc(a.title || "账户")}（${esc(a.balanceLabel || yuan(a.balance))}）</option>`).join("")}</select><span class="chev">${icon("right", 12)}</span></label>` : ""}${lack ? '<p class="hint warn">这个账户余额不够，换一个账户，或者找 TA 代付。</p>' : ""}`
+          : '<p class="hint warn">读不到钱包。请在权限里允许本 APP 读取钱包和付款。</p>') : ""}
       </section>`;
   },
 };
 
 actions["draft-set"] = d => { draft[d.key] = d.value; render(); };
 actions["draft-input"] = (d, node) => { draft[d.key] = node.value; if (d.rerender) render(); };
+actions["draft-toggle"] = d => { draft[d.key] = !draft[d.key]; render(); };
+actions["addon-add"] = async d => {
+  const shop = shopById(state.cart.shopId), dish = shop && dishOf(d.name, shop);
+  if (dish && await addToCart(shop.id, dish, dish.name)) { toast(`加了一份${dish.name}`); render(); }
+};
 
 actions["to-checkout"] = async () => {
   try { state.wallet = await api.wallet.get(); } catch (error) { state.wallet = null; console.warn("[外卖] 读取钱包失败", error); }
@@ -1852,27 +2711,33 @@ actions["to-checkout"] = async () => {
 };
 
 actions["place-order"] = async () => {
-  const shop = shopById(state.cart.shopId), items = cartItems();
-  if (!shop || !items.length) return;
-  const now = Date.now();
-  const coupon = draftCoupon(priceOrder(items, shop, 0).total);
-  const p = priceOrder(items, shop, coupon ? coupon.amount : 0);
+  const c = checkoutState();
+  if (!c) return;
+  const { shop, items, group, pickup, member, feeCoupon, coupon, p, mode, payNow } = c;
   if (p.short > 0) { toast(`还差 ${yuan(p.short)} 起送`); return; }
-  const byChar = draft.payMode === "char" && !state.recipient;
-  if (byChar && !draft.payChar) { toast("先选一位角色"); return; }
-  const address = draftAddress().trim();
+  const byChar = mode === "char", split = mode === "split";
+  if ((byChar || split) && !draft.payChar) { toast("先选一位角色"); return; }
+  const now = Date.now();
+  const address = pickup || group ? "" : draftAddress().trim();
+  const rider = !pickup && state.settings.riderChar ? state.characters.find(x => x.id === state.settings.riderChar) : null;
   const data = {
     no: nextOrderNo(now), shopId: shop.id, shopName: shop.name, shopFactor: shop.factor, items,
-    subtotal: p.subtotal, fee: p.fee, off: p.off, coupon: p.coupon, couponId: coupon ? coupon.id : "", total: p.total,
-    recipient: state.recipient, charId: state.recipient || (byChar ? draft.payChar : ""), payer: byChar ? "char" : "user", source: byChar ? "payreq" : "app",
+    mode: pickup ? "pickup" : "", code: pickup ? `A${100 + Math.floor(Math.random() * 900)}` : "",
+    subtotal: p.subtotal, pack: p.pack, fee: p.fee, feeOff: p.feeOff, pickupOff: p.pickupOff, off: p.off, coupon: p.coupon, couponId: coupon ? coupon.id : "", total: p.total,
+    freeBy: p.feeOff ? (member ? "member" : "coupon") : "",
+    recipient: group ? "" : state.recipient,
+    groupId: group ? group.sessionId : "", groupName: group ? group.name || "群聊" : "", groupMembers: group ? (group.participants || []).map(x => x.id) : [],
+    charId: group ? "" : state.recipient || (byChar || split ? draft.payChar : ""),
+    payer: byChar ? "char" : split ? "split" : "user", source: byChar ? "payreq" : split ? "split" : "app", userPaid: payNow,
+    riderName: rider ? rider.name : "", riderCharId: rider ? rider.id : "",
     note: draft.note.trim(), address, scheduledFor: draftSchedule(now), speed: state.settings.speed, status: "pending_pay", createdAt: now,
   };
-  const order = await busy(byChar ? "正在发给 TA…" : "正在下单…", async () => {
+  const order = await busy(byChar || split ? "正在发给 TA…" : "正在下单…", async () => {
     // 先建单再扣款：扣款失败就把单删掉，不会出现「钱扣了却没有订单」
     const created = await createOrder(data);
-    if (!byChar && p.total > 0) {
+    if (payNow > 0) {
       let paid = null, payError = null;
-      try { paid = await api.wallet.pay({ amount: p.total, accountId: draft.accountId, title: `外卖 · ${shop.name}`, detail: items.map(it => `${it.name}×${it.qty}`).join("、").slice(0, 200), category: "外卖", relatedOrderId: data.no }); }
+      try { paid = await api.wallet.pay({ amount: payNow, accountId: draft.accountId, title: `外卖 · ${shop.name}${split ? "（拼单我那一半）" : ""}`, detail: items.map(it => `${it.name}×${it.qty}`).join("、").slice(0, 200), category: "外卖", relatedOrderId: data.no }); }
       catch (error) { payError = error; }
       if (payError || !paid || paid.ok === false) {
         await deleteOrder(created);
@@ -1880,79 +2745,258 @@ actions["place-order"] = async () => {
       }
     }
     if (coupon && p.coupon > 0) await useCoupon(coupon, created.id);
+    if (feeCoupon && p.feeOff > 0 && !member) await useCoupon(feeCoupon, created.id);
+    if (member && p.feeOff > 0) await noteMemberSaving(p.feeOff);
     // 记住这次填的地址，下次不用再写
-    if (address) {
-      if (state.recipient) await saveSettings({ charAddress: { ...state.settings.charAddress, [state.recipient]: address } });
-      else await saveSettings({ userAddress: address });
+    if (address && state.recipient && !group) await saveSettings({ charAddress: { ...state.settings.charAddress, [state.recipient]: address } });
+    else if (address && !state.recipient && address !== state.settings.userAddress) {
+      const rest = state.settings.addresses.filter(a => a.text !== address);
+      await saveSettings({ userAddress: address, addresses: [{ id: uid("addr"), tag: "其他", text: address }, ...rest].slice(0, 12) });
     }
     if (byChar) await sendPayRequest(created);
+    else if (split) await sendSplitRequest(created);
     else {
       await startDelivery(created, now);
       if (created.recipient) await sendGiftCard(created);
+      if (created.groupId) await sendGroupCard(created);
     }
     return created;
   });
   if (!order) return;
   state.cart = emptyCart();
-  draft.note = ""; draft.when = "asap"; draft.couponId = "auto"; draft.address = null;
-  toast(byChar ? "已发给 TA，等 TA 回复" : "下单成功");
+  draft.note = ""; draft.when = "asap"; draft.couponId = "auto"; draft.address = null; draft.payMode = "wallet"; draft.perHead = true;
+  if (state.mode === "pickup") state.mode = "delivery";
+  toast(byChar ? "已发给 TA，等 TA 回复" : split ? "已付你那一半，等 TA 答应拼单" : pickup ? `下单成功，取餐码 ${order.code}` : "下单成功");
   state.stack = []; state.view = "orders"; state.params = {};
   go("order", { id: order.id });
 };
 
-// ── 订单列表和订单详情（配送进度、催单、换速度、少送退款、评价）──
+// ── 跑腿帮买：列个清单，骑手去店里买齐了送过来。东西钱按你估的价先付，跑腿费按距离 ──
+const ERRAND_STORES = [
+  { key: "超市", emoji: "🛒", km: 1.2 },
+  { key: "药店", emoji: "💊", km: 0.9 },
+  { key: "便利店", emoji: "🏪", km: 0.4 },
+  { key: "水果店", emoji: "🍉", km: 0.8 },
+  { key: "就近随便买", emoji: "📍", km: 0.6 },
+];
+const errand = { store: "便利店", items: [{ name: "", price: "" }], to: "", note: "" };
+const errandFee = km => round1c(6 + km * 2);
+
+function errandState() {
+  const store = ERRAND_STORES.find(s => s.key === errand.store) || ERRAND_STORES[0];
+  const items = errand.items.map(it => ({ name: String(it.name || "").trim().slice(0, 30), qty: 1, price: Math.max(0, round1c(Number(it.price) || 0)) })).filter(it => it.name);
+  const goods = round1c(items.reduce((s, it) => s + it.price, 0));
+  const fee = errandFee(store.km), feeOff = isMember() ? Math.min(fee, 3) : 0;
+  return { store, items, goods, fee, feeOff, total: round1c(goods + fee - feeOff) };
+}
+
+views.errand = {
+  title: "跑腿帮买",
+  tone: "plain",
+  render() {
+    const e = errandState();
+    const toName = errand.to ? (state.characters.find(c => c.id === errand.to) || {}).name || "TA" : "";
+    return `
+      <section class="card errand-head"><b>🛵 帮你跑一趟</b><small>写下要买的东西，骑手去店里买齐了送到。估个价先付，多退少不补（做成红包退）。</small></section>
+      <section class="card">
+        <h3>${icon("store", 14)}去哪买</h3>
+        <div class="errand-stores">${ERRAND_STORES.map(s => `<button type="button" class="${s.key === e.store.key ? "on" : ""}" data-act="errand-store" data-key="${esc(s.key)}"><i>${s.emoji}</i>${esc(s.key)}<small>${s.km}km</small></button>`).join("")}</div>
+      </section>
+      <section class="card">
+        <h3>${icon("bag", 14)}买什么<small>价格估个大概</small></h3>
+        <div class="errand-items">${errand.items.map((it, i) => `<div class="errand-item"><input data-change="errand-input" data-i="${i}" data-key="name" maxlength="30" placeholder="${["一瓶冰可乐", "一盒创可贴", "两卷纸巾", "一把雨伞"][i % 4]}" value="${esc(it.name)}"><span class="yuan-in">¥<input type="number" inputmode="decimal" min="0" step="0.5" data-change="errand-input" data-i="${i}" data-key="price" data-rerender="1" placeholder="0" value="${esc(it.price)}"></span>${errand.items.length > 1 ? `<button type="button" class="addr-del" data-act="errand-del" data-i="${i}" aria-label="删掉这样">×</button>` : ""}</div>`).join("")}</div>
+        ${errand.items.length < 8 ? `<button type="button" class="add-row" data-act="errand-add">+ 再加一样</button>` : ""}
+      </section>
+      <section class="card addr">
+        <h3>${icon("pin", 14)}送给谁</h3>
+        <div class="whos">${[["", '<span class="ava ph sm">我</span>', "我自己"]].concat(state.characters.map(c => [c.id, avatarHtml(c, "sm"), c.name])).map(([id, ava, name]) => `<button type="button" class="who${errand.to === id ? " on" : ""}" data-act="errand-to" data-id="${esc(id)}">${ava}${esc(name)}</button>`).join("")}</div>
+        <div class="frow"><span>送到</span><b>${esc(errand.to ? state.settings.charAddress[errand.to] || `${toName} 那边` : state.settings.userAddress || "你这边")}</b></div>
+        <label class="frow"><span>备注</span><input data-change="errand-input" data-key="note" maxlength="60" placeholder="比如：可乐要冰的、买不到就换同类" value="${esc(errand.note)}"></label>
+      </section>
+      <section class="card receipt">
+        <div class="line sub"><span>商品（估价）</span><b>${yuan(e.goods)}</b></div>
+        <div class="line sub"><span>跑腿费 · ${e.store.km}km${e.feeOff ? '<i class="tag vip">会员减 3</i>' : ""}</span><b>${e.feeOff ? `<s>${yuan(e.fee)}</s> ${yuan(e.fee - e.feeOff)}` : yuan(e.fee)}</b></div>
+        <div class="line total"><span>合计</span><b>${yuan(e.total)}</b></div>
+      </section>`;
+  },
+};
+function errandDock() {
+  const e = errandState();
+  return `<span class="dock-sum"><span class="dock-total">合计 ${priceHtml(e.total)}</span><small>${e.items.length ? `${e.items.length} 样 · 跑腿费 ${yuan(e.fee - e.feeOff)}` : "先写要买什么"}</small></span>
+    <button type="button" class="btn" data-act="errand-place"${e.items.length ? "" : " disabled"}>去下单</button>`;
+}
+
+actions["open-errand"] = () => go("errand", {});
+actions["errand-store"] = d => { errand.store = d.key; render(); };
+actions["errand-to"] = d => { errand.to = d.id; render(); };
+actions["errand-add"] = () => { errand.items.push({ name: "", price: "" }); render(); setTimeout(() => { const list = document.querySelectorAll(".errand-item input[data-key=name]"); if (list.length) list[list.length - 1].focus(); }, 30); };
+actions["errand-del"] = d => { errand.items.splice(Number(d.i), 1); render(); };
+actions["errand-input"] = (d, node) => {
+  if (d.key === "note") errand.note = node.value;
+  else if (errand.items[Number(d.i)]) errand.items[Number(d.i)][d.key] = node.value;
+  if (d.rerender) render(); else renderCartBar();
+};
+actions["errand-place"] = async () => {
+  const e = errandState();
+  if (!e.items.length) { toast("先写要买什么"); return; }
+  const now = Date.now(), to = errand.to;
+  const rider = state.settings.riderChar ? state.characters.find(x => x.id === state.settings.riderChar) : null;
+  const data = {
+    no: nextOrderNo(now), shopId: "", shopName: `跑腿帮买 · ${e.store.key}`, storeName: e.store.key, shopFactor: 0.8, items: e.items,
+    mode: "errand", subtotal: e.goods, pack: 0, fee: e.fee, feeOff: e.feeOff, pickupOff: 0, off: 0, coupon: 0, couponId: "", total: e.total,
+    recipient: to, charId: to, payer: "user", source: "app", userPaid: e.total,
+    riderName: rider ? rider.name : "", riderCharId: rider ? rider.id : "",
+    note: errand.note.trim(), address: to ? state.settings.charAddress[to] || "" : state.settings.userAddress || "",
+    scheduledFor: 0, speed: state.settings.speed, status: "pending_pay", createdAt: now,
+  };
+  let order;
+  try {
+    order = await busy("正在下单…", async () => {
+      const created = await createOrder(data);
+      if (e.total > 0) {
+        let paid = null, payError = null;
+        try { paid = await api.wallet.pay({ amount: e.total, title: `跑腿帮买 · ${e.store.key}`, detail: e.items.map(it => it.name).join("、").slice(0, 200), category: "外卖", relatedOrderId: data.no }); }
+        catch (error) { payError = error; }
+        if (payError || !paid || paid.ok === false) { await deleteOrder(created); throw new Error((payError && payError.message) || (paid && paid.error) || "付款失败"); }
+      }
+      if (e.feeOff) await noteMemberSaving(e.feeOff);
+      await startDelivery(created, now);
+      if (created.recipient) await sendGiftCard(created);
+      return created;
+    });
+  } catch (error) { fail(error, "没下成"); return; }
+  errand.items = [{ name: "", price: "" }]; errand.note = "";
+  toast("骑手接单了");
+  state.stack = []; state.view = "orders"; state.params = {};
+  go("order", { id: order.id });
+};
+
+// ── 订单列表和订单详情（配送进度、催单、换速度、给骑手留话、自取码、售后、骑手打赏、评价、批量删除）──
+/** 这一单你自己掏了多少（老订单没有 userPaid，自己付的就是合计） */
+const paidOf = o => o.payer === "user" ? (o.userPaid != null ? Number(o.userPaid) : Number(o.total) || 0) : o.payer === "split" ? Number(o.userPaid) || 0 : 0;
+const refundable = o => Math.max(0, round1c(paidOf(o) - (Number(o.refunded) || 0)));
+const isPickup = o => o.mode === "pickup";
+
 function orderStatus(o, now) {
-  if (o.status === "pending_pay") return o.source === "payreq" ? { text: "等 TA 代付", tone: "wait" } : { text: "待付款", tone: "wait" };
-  if (o.status === "pay_declined") return { text: "TA 没有代付", tone: "warn" };
+  if (o.status === "pending_pay") return o.source === "payreq" ? { text: "等 TA 代付", tone: "wait" } : o.source === "split" ? { text: "等 TA 拼单", tone: "wait" } : { text: "待付款", tone: "wait" };
+  if (o.status === "pay_declined") return { text: o.source === "split" ? "TA 没有拼" : "TA 没有代付", tone: "warn" };
   if (o.status === "canceled") return { text: "已取消", tone: "off" };
   const st = stageAt(o, now);
   if (!st) return { text: "处理中", tone: "wait" };
+  if (isPickup(o)) return !st.delivered ? { text: st.key === "accepted" || st.key === "placed" ? "商家已接单" : "正在做", tone: "live" } : o.pickedUpAt ? { text: "已取餐", tone: "done" } : { text: "待取餐", tone: "live" };
   return st.delivered ? { text: "已送达", tone: "done" } : { text: st.label, tone: "live" };
 }
 function orderWho(o) {
   const c = o.charId ? state.characters.find(x => x.id === o.charId) : null;
   const name = c ? c.name : "TA";
+  if (o.groupId) return `请「${o.groupName || "群聊"}」`;
   if (o.recipient) return `送给 ${name}`;
   if (o.source === "directive") return `${name} 请客`;
   if (o.source === "payreq") return `${name} 代付`;
+  if (o.source === "split") return `和 ${name} 拼单`;
+  if (isPickup(o)) return "到店自取";
   return "";
 }
 const itemCount = o => (o.items || []).reduce((n, it) => n + it.qty, 0);
+const canDelete = (o, now) => !["live", "wait"].includes(orderStatus(o, now).tone);
 
-const ORDER_TABS = [["all", "全部"], ["live", "进行中"], ["rate", "待评价"]];
+const ORDER_TABS = [["all", "全部"], ["live", "进行中"], ["rate", "待评价"], ["after", "退款/售后"]];
 views.orders = {
   title: "订单",
   tone: "plain",
   render() {
-    const now = Date.now();
+    const now = Date.now(), manage = state.orderManage;
     const rows = state.orders.map(o => ({ o, s: orderStatus(o, now) })).filter(({ o, s }) => state.orderTab === "live" ? ["live", "wait"].includes(s.tone)
-      : state.orderTab === "rate" ? s.tone === "done" && !o.review && !o.recipient : true);
-    const tabs = `<div class="stabs">${ORDER_TABS.map(([key, label]) => `<button type="button" class="${state.orderTab === key ? "on" : ""}" data-act="order-tab" data-tab="${key}">${label}</button>`).join("")}</div>`;
+      : state.orderTab === "rate" ? s.tone === "done" && !o.review && !o.recipient && !o.groupId
+      : state.orderTab === "after" ? (o.afterSales && o.afterSales.length) || (o.issue && o.issue.resolved === "refund") || (o.status === "canceled" && paidOf(o) > 0) : true);
+    const deletable = rows.filter(({ o }) => canDelete(o, now)).map(({ o }) => o.id);
+    const picked = state.orderPicked.filter(id => deletable.includes(id));
+    const tabs = `<div class="stabs">${ORDER_TABS.map(([key, label]) => `<button type="button" class="${state.orderTab === key ? "on" : ""}" data-act="order-tab" data-tab="${key}">${label}</button>`).join("")}${state.orders.length ? `<button type="button" class="manage-btn" data-act="order-manage">${manage ? "完成" : "管理"}</button>` : ""}</div>`;
     if (!rows.length) return `${tabs}<div class="empty"><span class="big">🧾</span><p>${state.orders.length ? "这一类下面没有订单" : "还没有订单"}</p><small>去首页挑一家店吧</small></div>`;
-    return `${tabs}<div class="orders">${rows.map(({ o, s }) => {
+    return `${tabs}<div class="orders${manage ? " managing" : ""}">${rows.map(({ o, s }) => {
       const who = orderWho(o), shop = orderShop(o), items = o.items || [];
-      const st = s.tone === "live" ? stageAt(o, now) : null;
-      const id = esc(o.id);
-      return `<div class="order" data-act="open-order" data-id="${id}">
-        <div class="order-top">${shopCover(shop, 32)}<span><b>${esc(o.shopName)}</b><small>${esc(when(o.createdAt, now))}${who ? " · " + esc(who) : ""}</small></span><i class="st ${s.tone}">${esc(s.text)}</i></div>
+      const st = s.tone === "live" && !(isPickup(o) && o.deliverAt <= now) ? stageAt(o, now) : null;
+      const id = esc(o.id), can = deletable.includes(o.id);
+      return `<div class="order${manage && !can ? " locked" : ""}" data-act="${manage ? (can ? "order-pick" : "noop") : "open-order"}" data-id="${id}">
+        <div class="order-top">${manage ? `<i class="chk${picked.includes(o.id) ? " on" : ""}">${can ? icon("check", 11) : ""}</i>` : ""}${shopCover(shop, 32)}<span><b>${esc(o.shopName)}</b><small>${esc(when(o.createdAt, now))}${who ? " · " + esc(who) : ""}</small></span><i class="st ${s.tone}">${esc(s.text)}</i></div>
         <div class="order-mid">${items.slice(0, 4).map(it => dishCover(itemEmoji(it.name, shop), shop.color, 40)).join("")}<span class="more">${items.length === 1 ? esc(items[0].name) : ""}</span>
           <span class="sum">${o.source === "directive" ? "<b>TA 请客</b>" : priceHtml(o.total, "ink")}<small>共 ${itemCount(o)} 件</small></span></div>
         ${st ? `<span class="bar"><i style="width:${Math.round(st.progress * 100)}%"></i></span>` : ""}
-        <div class="order-foot"><small>${st ? esc(remainText(st.remainMs)) : s.tone === "done" ? `${esc(when(o.deliverAt, now))} 送达` : ""}</small>
+        ${manage ? "" : `<div class="order-foot"><small>${isPickup(o) && o.code && s.text === "待取餐" ? `取餐码 <b class="code-sm">${esc(o.code)}</b>` : st ? esc(remainText(st.remainMs)) : s.tone === "done" ? `${esc(when(o.deliverAt, now))} ${isPickup(o) ? "做好" : "送达"}` : ""}</small>
           ${shopById(o.shopId) ? `<button type="button" class="mini" data-act="order-again" data-id="${id}">再来一单</button>` : ""}
-          <button type="button" class="mini hot" data-act="open-order" data-id="${id}">${st ? "看进度" : s.tone === "done" && !o.review && !o.recipient ? "去评价" : "查看"}</button></div>
+          <button type="button" class="mini hot" data-act="open-order" data-id="${id}">${st ? "看进度" : s.tone === "done" && !o.review && !o.recipient && !o.groupId ? "去评价" : "查看"}</button></div>`}
       </div>`;
-    }).join("")}</div>`;
+    }).join("")}</div>
+    ${manage ? `<div class="manage-bar"><button type="button" class="pick-all" data-act="order-pick-all"><i class="chk${picked.length && picked.length === deletable.length ? " on" : ""}">${icon("check", 11)}</i>全选</button><small>进行中的订单不能删</small><button type="button" class="btn sm danger" data-act="order-delete-picked"${picked.length ? "" : " disabled"}>删除${picked.length ? `（${picked.length}）` : ""}</button></div>` : ""}`;
   },
 };
 actions["order-tab"] = d => { state.orderTab = d.tab; render(true); };
+actions["noop"] = () => toast("进行中的订单不能删");
+actions["order-manage"] = () => { state.orderManage = !state.orderManage; state.orderPicked = []; render(); };
+actions["order-pick"] = d => {
+  const list = state.orderPicked;
+  state.orderPicked = list.includes(d.id) ? list.filter(x => x !== d.id) : list.concat(d.id);
+  render();
+};
+actions["order-pick-all"] = () => {
+  const now = Date.now(), all = state.orders.filter(o => canDelete(o, now)).map(o => o.id);
+  state.orderPicked = state.orderPicked.length === all.length ? [] : all;
+  render();
+};
+actions["order-delete-picked"] = async () => {
+  const now = Date.now(), list = state.orders.filter(o => state.orderPicked.includes(o.id) && canDelete(o, now));
+  if (!list.length || !await confirmBox(`删除 ${list.length} 张订单？`, "只删除外卖 APP 里的记录，聊天里的卡片不受影响。")) return;
+  await busy("正在删除…", async () => { for (const o of list) { await cancelArrival(o); await deleteOrder(o); } });
+  await syncContext();
+  state.orderPicked = []; state.orderManage = false;
+  toast(`删掉了 ${list.length} 张`);
+  render();
+};
 actions["open-order"] = d => {
   if (state.view === "order") { state.params = { id: d.id }; render(true); return; }
   go("order", { id: d.id });
 };
 
 const TRACK_STEPS = [["accepted", "接单"], ["cooking", "备餐"], ["picked", "取餐"], ["riding", "配送"], ["delivered", "送达"]];
+const ERRAND_STEPS = [["accepted", "接单"], ["cooking", "购买"], ["picked", "买齐"], ["riding", "配送"], ["delivered", "送达"]];
+const PICKUP_STEPS = [["accepted", "接单"], ["cooking", "制作"], ["delivered", "做好"]];
 const STATE_EMOJI = { pending_pay: "⏳", pay_declined: "🙅", canceled: "🚫" };
+const RIDER_NOTES = ["放门口就好", "到了打电话", "麻烦快一点", "小心别洒了"];
+const RIDER_ACK = ["好的，收到", "好嘞，知道了", "收到，放心", "OK 马上"];
+const TIPS = [2, 5, 10];
+
+function stepsHtml(steps, stageIdx) {
+  const lastOn = steps.reduce((last, [key], i) => STAGE_ORDER.indexOf(key) <= stageIdx ? i : last, -1);
+  return `<div class="steps">${steps.map(([, label], i) => `<span class="${i <= lastOn ? "on" : ""}${i === lastOn ? " now" : ""}"><i>${i <= lastOn ? icon("check", 10) : ""}</i>${label}</span>`).join("")}</div>`;
+}
+/** 骑手头像：是角色就用角色头像 */
+function riderChar(o) { return o.riderCharId ? state.characters.find(x => x.id === o.riderCharId) || null : null; }
+
+/** 自取单的头部：大号取餐码 + 做好没有 */
+function pickupHead(o, st, now) {
+  const ready = st.delivered, stageIdx = STAGE_ORDER.indexOf(st.key);
+  const [n, unit] = remainParts(st.remainMs), left = unit.replace("后送达", "");
+  return `<section class="card status pickup">
+      <div class="code-box"><small>取餐码</small><b>${esc(o.code || "—")}</b><span>${ready ? (o.pickedUpAt ? `${esc(when(o.pickedUpAt, now))} 取走了` : "餐做好了，报码取餐") : `预计 ${hhmm(o.deliverAt)} 做好，还要 ${n} ${left}`}</span></div>
+      ${stepsHtml(PICKUP_STEPS, stageIdx)}
+      <div class="rider-row"><i>${icon("pin", 16)}</i><span><b>${esc(o.shopName)}</b><small>距你 ${shopStats(orderShop(o)).km}km · 到店报取餐码</small></span>
+        ${ready && !o.pickedUpAt ? `<button type="button" class="mini hot" data-act="order-picked-up" data-id="${esc(o.id)}">我已取餐</button>` : ""}</div>
+    </section>`;
+}
+
+/** 骑手那一行之后：给骑手留话（配送中）/ 评价骑手、打赏（送到后） */
+function riderExtras(o, live, delivered) {
+  if (isPickup(o) || !o.rider) return "";
+  const id = esc(o.id), rc = riderChar(o);
+  if (live) {
+    const sent = (o.notes || []).map(x => x.text);
+    return `<div class="rider-notes"><small>给骑手捎句话</small>${RIDER_NOTES.map(t => `<button type="button" class="${sent.includes(t) ? "on" : ""}" data-act="rider-note" data-id="${id}" data-text="${esc(t)}"${sent.includes(t) ? " disabled" : ""}>${esc(t)}</button>`).join("")}</div>`;
+  }
+  if (!delivered) return "";
+  return `<section class="card rider-card"><div class="rider-row"><i>${rc ? avatarHtml(rc, "sm") : icon("scooter", 17)}</i><span><b>骑手 ${esc(o.rider)}</b><small>${o.riderRate ? (o.riderRate === "good" ? "你给了好评" : "你给了差评") : "这次送得怎么样？"}${o.riderTip ? ` · 打赏了 ${yuan(o.riderTip)}` : ""}</small></span>
+      ${o.riderRate ? "" : `<button type="button" class="mini" data-act="rider-rate" data-id="${id}" data-rate="bad">不满意</button><button type="button" class="mini hot" data-act="rider-rate" data-id="${id}" data-rate="good">满意</button>`}</div>
+    ${o.riderTip ? "" : `<div class="tips"><small>打赏骑手</small>${TIPS.map(n => `<button type="button" data-act="rider-tip" data-id="${id}" data-amount="${n}">${yuan(n)}</button>`).join("")}</div>`}</section>`;
+}
 
 views.order = {
   title: "订单详情",
@@ -1961,69 +3005,90 @@ views.order = {
     const o = orderById(p.id);
     if (!o) return '<div class="empty"><span class="big">🧾</span><p>这张订单已经删除了</p></div>';
     const now = Date.now(), s = orderStatus(o, now), st = o.status === "active" ? stageAt(o, now) : null;
-    const who = orderWho(o), shop = orderShop(o), id = esc(o.id);
+    const who = orderWho(o), shop = orderShop(o), id = esc(o.id), errand = o.mode === "errand";
     const live = st && !st.delivered;
     const stageIdx = st ? STAGE_ORDER.indexOf(st.key) : -1;
     const chatBtn = o.charId ? `<button type="button" class="mini" data-act="open-chat" data-id="${esc(o.charId)}">去聊天</button>` : "";
     const againBtn = shopById(o.shopId) ? `<button type="button" class="mini" data-act="order-again" data-id="${id}">再来一单</button>` : "";
+    const shareBtn = state.characters.length && st && st.delivered ? `<button type="button" class="mini" data-act="share-open" data-kind="order" data-id="${id}">${icon("share", 11)}晒单</button>` : "";
     let head = "";
-    if (live) {
+    if (st && isPickup(o)) {
+      head = pickupHead(o, st, now);
+    } else if (live) {
       const [n, unit] = remainParts(st.remainMs), left = unit.replace("后送达", "");
       const picked = stageIdx >= STAGE_ORDER.indexOf("picked");
-      const lastOn = TRACK_STEPS.reduce((last, [key], i) => STAGE_ORDER.indexOf(key) <= stageIdx ? i : last, -1);
-      const homeAva = o.recipient ? avatarHtml(state.characters.find(x => x.id === o.recipient)) : '<span class="ava ph">我</span>';
+      const rc = riderChar(o);
+      const homeAva = o.groupId ? '<span class="ava ph grp">群</span>' : o.recipient ? avatarHtml(state.characters.find(x => x.id === o.recipient)) : '<span class="ava ph">我</span>';
       const latest = st.passed[st.passed.length - 1];
-      head = `<div class="mapwrap">${mapHtml(o, shop, now, picked ? `${n} ${left}` : "去取餐", homeAva)}</div>
+      head = `<div class="mapwrap">${mapHtml(o, shop, now, picked ? `${n} ${left}` : errand ? "去买东西" : "去取餐", homeAva, { fromLabel: errand ? o.storeName || "店里" : "商家", riderHtml: rc ? avatarHtml(rc, "sm") : "" })}</div>
         <section class="card status">
           <h2>${esc(s.text)}</h2>
           <p class="eta-line">预计 <b>${hhmm(o.deliverAt)}</b> 送达，还有 <b>${n}</b> ${left}${who ? ` · ${esc(who)}` : ""}</p>
-          <div class="steps">${TRACK_STEPS.map(([key, label], i) => `<span class="${i <= lastOn ? "on" : ""}${i === lastOn ? " now" : ""}"><i>${i <= lastOn ? icon("check", 10) : ""}</i>${label}</span>`).join("")}</div>
-          <div class="rider-row"><i>${icon("scooter", 17)}</i><span><b>骑手 ${esc(o.rider || "")}</b><small>${esc(latest ? latest.text : s.text)}</small></span>
-            <button type="button" class="mini hot" data-act="order-urge" data-id="${id}"${o.urged ? " disabled" : ""}>${o.urged ? "已催单" : "催单"}</button>${chatBtn}</div>
+          ${stepsHtml(errand ? ERRAND_STEPS : TRACK_STEPS, stageIdx)}
+          <div class="rider-row"><i>${rc ? avatarHtml(rc, "sm") : icon("scooter", 17)}</i><span><b>骑手 ${esc(o.rider || "")}</b><small>${esc(latest ? latest.text : s.text)}</small></span>
+            <button type="button" class="mini hot" data-act="order-urge" data-id="${id}"${o.urged ? " disabled" : ""}>${o.urged ? "已催单" : "催单"}</button>${rc ? `<button type="button" class="mini" data-act="open-chat" data-id="${esc(rc.id)}">${icon("phone", 11)}</button>` : chatBtn}</div>
+          ${riderExtras(o, true, false)}
           <div class="rider-row speed"><span>配送速度</span><div class="seg">${Object.entries(SPEEDS).map(([k, v]) => `<button type="button" class="${o.speed === k ? "on" : ""}" data-act="order-speed" data-id="${id}" data-speed="${k}">${v.label}</button>`).join("")}</div></div>
         </section>`;
     } else if (st) {
       const took = Math.max(1, Math.round((o.deliverAt - (o.paidAt || o.createdAt)) / 60000));
-      head = `<section class="card status"><div class="status-top"><div><h2>订单已送达</h2><p class="eta-line">${esc(when(o.deliverAt, now))} 送到${who ? " · " + esc(who) : ""} · 用时 ${took} 分钟</p></div><i class="big">🛍️</i></div>
-        ${againBtn || chatBtn ? `<div class="quick">${againBtn}${chatBtn}</div>` : ""}</section>`;
+      head = `<section class="card status"><div class="status-top"><div><h2>${errand ? "跑腿已送达" : "订单已送达"}</h2><p class="eta-line">${esc(when(o.deliverAt, now))} 送到${who ? " · " + esc(who) : ""} · 用时 ${took} 分钟</p></div><i class="big">🛍️</i></div>
+        ${againBtn || chatBtn || shareBtn ? `<div class="quick">${againBtn}${shareBtn}${chatBtn}</div>` : ""}</section>`;
     } else {
-      const tip = o.status === "pending_pay" ? (o.source === "payreq" ? "代付请求已经发到聊天里，TA 同意后开始配送。" : "这张订单还没付款。")
-        : o.status === "pay_declined" ? `TA 没有帮你付${o.payWords ? `：「${esc(o.payWords)}」` : "。"}` : "订单已取消。";
+      const tip = o.status === "pending_pay" ? (o.source === "payreq" ? "代付请求已经发到聊天里，TA 同意后开始配送。" : o.source === "split" ? `你已经付了自己那一半 ${yuan(o.userPaid)}，TA 答应拼单后开始配送。` : "这张订单还没付款。")
+        : o.status === "pay_declined" ? `TA ${o.source === "split" ? "不想拼" : "没有帮你付"}${o.payWords ? `：「${esc(o.payWords)}」` : "。"}` : "订单已取消。";
       head = `<section class="card status"><div class="status-top"><div><h2>${esc(s.text)}</h2><p class="eta-line">${tip}</p></div><i class="big">${STATE_EMOJI[o.status] || "🧾"}</i></div></section>`;
     }
     const delivered = !!(st && st.delivered);
     const issue = o.issue && delivered ? o.issue : null;
-    const canCancel = o.status === "pending_pay" || o.status === "pay_declined" || (live && stageIdx < STAGE_ORDER.indexOf("picked") && o.payer === "user");
+    const mine = o.payer === "user" || o.payer === "split";
+    const canCancel = o.status === "pending_pay" || o.status === "pay_declined" || (live && stageIdx < STAGE_ORDER.indexOf("picked") && mine);
+    const rest = round1c(o.total - paidOf(o));
+    const waitingChar = o.status === "pay_declined" || (o.status === "pending_pay" && (o.source === "payreq" || o.source === "split"));
+    const feed = st ? st.passed.map(e => ({ at: e.at, text: e.text })).concat((o.notes || []).filter(x => x.at <= now).flatMap(x => [{ at: x.at, text: `你：${x.text}`, me: true }, ...(x.reply && x.replyAt <= now ? [{ at: x.replyAt, text: `骑手：${x.reply}` }] : [])])).sort((a, b) => b.at - a.at) : [];
+    const sales = o.afterSales || [];
     return `${head}
-      ${o.status === "pay_declined" || (o.status === "pending_pay" && o.source === "payreq") ? `<div class="btns"><button type="button" class="btn" data-act="order-pay-self" data-id="${id}">改成自己付 ${yuan(o.total)}</button><button type="button" class="btn ghost" data-act="open-chat" data-id="${esc(o.charId)}">去聊天</button></div>` : ""}
+      ${waitingChar ? `<div class="btns"><button type="button" class="btn" data-act="order-pay-self" data-id="${id}">${o.source === "split" ? `另一半我来付 ${yuan(rest)}` : `改成自己付 ${yuan(rest)}`}</button><button type="button" class="btn ghost" data-act="open-chat" data-id="${esc(o.charId)}">去聊天</button></div>` : ""}
       ${issue ? `<section class="card issue"><h3>这一单出了点状况</h3><p>${esc(issue.text)}。</p>${issue.resolved
         ? `<p class="hint">${issue.resolved === "refund" ? `已退 ${yuan(issue.amount)} 红包，下次下单自动抵扣。` : "你选择了不计较。"}</p>`
-        : (o.payer === "user" ? `<div class="btns"><button type="button" class="btn" data-act="issue-refund" data-id="${id}">申请退款 ${yuan(issue.amount)}</button><button type="button" class="btn ghost" data-act="issue-skip" data-id="${id}">算了</button></div><p class="hint">退款以红包形式返还（钱包暂不支持原路退回）。</p>` : "")}</section>` : ""}
-      ${delivered && !o.recipient ? `<section class="card rate-card"><h3>${o.review ? "我的评价" : "这一单怎么样？"}</h3>${o.review
+        : (mine ? `<div class="btns"><button type="button" class="btn" data-act="issue-refund" data-id="${id}">申请退款 ${yuan(Math.min(issue.amount, refundable(o)))}</button><button type="button" class="btn ghost" data-act="issue-skip" data-id="${id}">算了</button></div><p class="hint">退款以红包形式返还（钱包暂不支持原路退回）。</p>` : "")}</section>` : ""}
+      ${o.groupId && st ? `<section class="card group-talk"><h3>${icon("chat", 14)}群里怎么说<small>${esc(o.groupName || "群聊")}</small></h3>${o.groupTalk && o.groupTalk.length
+        ? `<div class="talk">${o.groupTalk.map(t => `<div>${avatarHtml(state.characters.find(c => c.id === t.id), "sm")}<span><b>${esc(t.name)}</b>${esc(t.line)}</span></div>`).join("")}</div>${delivered && o.groupTalkAt < o.deliverAt ? `<button type="button" class="mini" data-act="group-talk" data-id="${id}">送到了，再听听</button>` : ""}`
+        : `<p class="hint">群聊里的大家已经知道你请客了。</p><button type="button" class="mini hot" data-act="group-talk" data-id="${id}">看看大家怎么说</button>`}</section>` : ""}
+      ${riderExtras(o, false, delivered)}
+      ${delivered && !o.recipient && !o.groupId ? `<section class="card rate-card"><h3>${o.review ? "我的评价" : "这一单怎么样？"}</h3>${o.review
         ? `<p class="stars">${"★".repeat(o.review.stars)}${"☆".repeat(5 - o.review.stars)}</p>${o.review.text ? `<p class="hint">${esc(o.review.text)}</p>` : ""}`
         : `<div class="rate">${[1, 2, 3, 4, 5].map(n => `<button type="button" data-act="order-rate" data-id="${id}" data-stars="${n}" aria-label="${n} 星">★</button>`).join("")}</div><p class="hint">点星星打分${o.charId ? "，TA 之后聊天时会知道你觉得怎么样" : ""}。</p>`}</section>` : ""}
-      ${st ? `<section class="card"><h3>${icon("box", 14)}配送动态${delivered && chatBtn ? `<small>${chatBtn}</small>` : ""}</h3><ol class="feed">${st.passed.slice().reverse().map((e, i) => `<li class="${i === 0 ? "now" : ""}"><time>${hhmm(e.at)}</time><span>${esc(e.text)}</span></li>`).join("")}</ol></section>` : ""}
+      ${st ? `<section class="card"><h3>${icon("box", 14)}${isPickup(o) ? "订单动态" : "配送动态"}${delivered && chatBtn ? `<small>${chatBtn}</small>` : ""}</h3><ol class="feed">${feed.map((e, i) => `<li class="${i === 0 ? "now" : ""}${e.me ? " me" : ""}"><time>${hhmm(e.at)}</time><span>${esc(e.text)}</span></li>`).join("")}</ol></section>` : ""}
       <section class="card receipt">
         <div class="receipt-head">${shopCover(shop, 30)}<span><b>${esc(o.shopName)}</b><small>共 ${itemCount(o)} 件${who ? " · " + esc(who) : ""}</small></span>${live ? againBtn : ""}</div>
         ${(o.items || []).map(it => `<div class="line">${dishCover(itemEmoji(it.name, shop), shop.color, 30)}<span>${esc(it.name)}</span><span>×${it.qty}</span><b>${it.price ? yuan(it.price * it.qty) : ""}</b></div>`).join("")}
         <div class="cut"></div>
         ${o.source === "directive" ? '<div class="line total"><span>合计</span><b>TA 请客</b></div>' : `
-          <div class="line sub"><span>配送费</span><b>${o.fee ? yuan(o.fee) : "免费"}</b></div>
+          ${o.pack ? `<div class="line sub"><span>包装费</span><b>${yuan(o.pack)}</b></div>` : ""}
+          ${isPickup(o) ? "" : `<div class="line sub"><span>${errand ? "跑腿费" : "配送费"}</span><b>${o.fee ? (o.feeOff ? `<s>${yuan(o.fee)}</s> ${o.feeOff >= o.fee ? "0" : yuan(round1c(o.fee - o.feeOff))}` : yuan(o.fee)) : "免费"}</b></div>`}
+          ${o.pickupOff ? `<div class="line sub"><span>自取立减</span><b class="minus">−${yuan(o.pickupOff)}</b></div>` : ""}
           ${o.off ? `<div class="line sub"><span>满减</span><b class="minus">−${yuan(o.off)}</b></div>` : ""}
           ${o.coupon ? `<div class="line sub"><span>红包</span><b class="minus">−${yuan(o.coupon)}</b></div>` : ""}
-          <div class="line total"><span>合计</span><b>${yuan(o.total)}</b></div>`}
-        ${delivered ? '<i class="stamp">已<br>送达</i>' : ""}
+          <div class="line total"><span>合计</span><b>${yuan(o.total)}</b></div>
+          ${o.payer === "split" ? `<div class="line sub"><span>你付了</span><b>${yuan(o.userPaid)}</b></div>` : ""}
+          ${o.refunded ? `<div class="line sub"><span>已退（红包）</span><b class="minus">${yuan(o.refunded)}</b></div>` : ""}`}
+        ${delivered ? `<i class="stamp">已<br>${isPickup(o) ? "做好" : "送达"}</i>` : ""}
       </section>
+      ${delivered && mine ? `<section class="card after"><h3>${icon("shield", 14)}售后${sales.length ? `<small>已处理 ${sales.length} 次</small>` : ""}</h3>
+        ${sales.map(x => `<div class="line sub"><span>${esc(x.label)}${x.item ? `「${esc(x.item)}」` : ""}</span><b class="minus">退 ${yuan(x.amount)}</b></div>`).join("")}
+        ${refundable(o) > 0 ? `<button type="button" class="upsell" data-act="after-open" data-id="${id}">${icon("chat", 13)}<span>少送、洒了、送错、太慢？申请售后</span>${icon("right", 12)}</button>` : '<p class="hint">已经全额退完了。</p>'}</section>` : ""}
       <section class="card kv">
         <div><span>订单号</span><b>${esc(o.no)}</b></div>
         <div><span>下单时间</span><b>${esc(when(o.createdAt, now))}</b></div>
+        ${o.code ? `<div><span>取餐码</span><b>${esc(o.code)}</b></div>` : ""}
         ${o.address ? `<div><span>地址</span><b>${esc(o.address)}</b></div>` : ""}
-        ${o.note ? `<div><span>${o.source === "directive" ? "TA 的留言" : "备注"}</span><b>${esc(o.note)}</b></div>` : ""}
+        ${o.note ? `<div><span>${o.source === "directive" ? "TA 的留言" : o.groupId ? "附言" : "备注"}</span><b>${esc(o.note)}</b></div>` : ""}
         ${o.rider && st ? `<div><span>骑手</span><b>${esc(o.rider)}</b></div>` : ""}
       </section>
       <div class="btns">
         ${canCancel ? `<button type="button" class="btn ghost danger" data-act="order-cancel" data-id="${id}">取消订单</button>` : ""}
-        ${!live && o.status !== "pending_pay" ? `<button type="button" class="btn ghost danger" data-act="order-delete" data-id="${id}">删除订单</button>` : ""}
+        ${!live && o.status !== "pending_pay" && !(isPickup(o) && st && !o.pickedUpAt) ? `<button type="button" class="btn ghost danger" data-act="order-delete" data-id="${id}">删除订单</button>` : ""}
       </div>`;
   },
 };
@@ -2048,38 +3113,83 @@ actions["order-urge"] = async d => {
   toast("已催单");
   render();
 };
+actions["rider-note"] = async d => {
+  const o = orderById(d.id), now = Date.now();
+  if (!o || !isOnTheWay(o, now) || (o.notes || []).some(x => x.text === d.text)) return;
+  const reply = RIDER_ACK[(hashSeed(o.id + d.text) >>> 0) % RIDER_ACK.length];
+  await patchOrder(o, { notes: (o.notes || []).concat({ at: now, text: d.text, reply, replyAt: Math.min(now + 6000, o.deliverAt - 1000) }) });
+  toast("已经告诉骑手了");
+  render();
+};
+actions["rider-rate"] = async d => {
+  const o = orderById(d.id);
+  if (!o || o.riderRate) return;
+  await patchOrder(o, { riderRate: d.rate === "bad" ? "bad" : "good" });
+  toast(d.rate === "bad" ? "已反馈，我们会提醒骑手" : "谢谢你的好评");
+  render();
+};
+actions["rider-tip"] = async d => {
+  const o = orderById(d.id), amount = Number(d.amount) || 0;
+  if (!o || o.riderTip || !amount) return;
+  if (!await confirmBox(`打赏骑手 ${yuan(amount)}？`, "从钱包默认账户付款。")) return;
+  try {
+    await busy("正在打赏…", async () => {
+      const paid = await api.wallet.pay({ amount, title: `外卖 · 打赏骑手${o.rider}`, detail: o.shopName, category: "外卖", relatedOrderId: o.no });
+      if (!paid || paid.ok === false) throw new Error((paid && paid.error) || "付款失败");
+      await patchOrder(o, { riderTip: amount });
+      const rc = riderChar(o);
+      if (rc) {
+        const names = await namesFor(rc.id);
+        await api.chat.writeHistory({ characterId: rc.id, role: "user", content: `[外卖：${names.userName}给送外卖的${names.charName}打赏了 ${yuan(amount)}。]` }).catch(() => {});
+        await syncContext();
+      }
+    });
+    toast(`打赏了 ${yuan(amount)}`);
+    render();
+  } catch (error) { fail(error, "打赏没成功"); }
+};
+actions["order-picked-up"] = async d => {
+  const o = orderById(d.id);
+  if (!o || o.pickedUpAt) return;
+  await patchOrder(o, { pickedUpAt: Date.now() });
+  toast("取到啦，趁热吃");
+  render();
+};
 actions["order-pay-self"] = async d => {
   const o = orderById(d.id);
   if (!o || !["pending_pay", "pay_declined"].includes(o.status)) return;
+  const rest = round1c(o.total - paidOf(o));
   const wallet = await api.wallet.get();
   const account = (wallet.accounts || []).find(a => a.id === wallet.defaultAccountId) || (wallet.accounts || [])[0];
-  if (!await confirmBox("改成自己付？", `从「${account ? account.title || "钱包" : "钱包"}」付 ${yuan(o.total)}，付完马上开始配送。`)) return;
-  await busy("正在付款…", async () => {
-    if (o.total > 0) {
-      const paid = await api.wallet.pay({ amount: o.total, accountId: account ? account.id : undefined, title: `外卖 · ${o.shopName}`, detail: itemsText(o).slice(0, 200), category: "外卖", relatedOrderId: o.no });
-      if (!paid || paid.ok === false) throw new Error((paid && paid.error) || "付款失败");
-    }
-    await patchOrder(o, { payer: "user", source: "app", charId: "" });
-    await startDelivery(o, Date.now());
-    await updateOrderCard(o, { status: "已自己付款", actions: [{ label: "查看订单" }] });
-  });
+  if (!await confirmBox(o.source === "split" ? "另一半自己付？" : "改成自己付？", `从「${account ? account.title || "钱包" : "钱包"}」付 ${yuan(rest)}，付完马上开始配送。`)) return;
+  try {
+    await busy("正在付款…", async () => {
+      if (rest > 0) {
+        const paid = await api.wallet.pay({ amount: rest, accountId: account ? account.id : undefined, title: `外卖 · ${o.shopName}`, detail: itemsText(o).slice(0, 200), category: "外卖", relatedOrderId: o.no });
+        if (!paid || paid.ok === false) throw new Error((paid && paid.error) || "付款失败");
+      }
+      await patchOrder(o, { payer: "user", source: "app", charId: "", userPaid: o.total });
+      await startDelivery(o, Date.now());
+      await updateOrderCard(o, { status: "已自己付款", actions: [{ label: "查看订单" }] });
+    });
+  } catch (error) { fail(error, "付款没成功"); return; }
   render();
 };
 actions["order-cancel"] = async d => {
   const o = orderById(d.id);
   if (!o) return;
-  const paid = o.status === "active" && o.payer === "user" && o.total > 0;
-  if (!await confirmBox("取消这张订单？", paid ? `已付的 ${yuan(o.total)} 会以红包返还（钱包暂不支持原路退回）。` : "取消后不会配送。")) return;
+  const refund = refundable(o);
+  if (!await confirmBox("取消这张订单？", refund > 0 ? `已付的 ${yuan(refund)} 会以红包返还（钱包暂不支持原路退回）。` : "取消后不会配送。")) return;
   await cancelArrival(o);
-  await patchOrder(o, { status: "canceled", canceledAt: Date.now() });
-  if (paid) await addCoupon(o.total, `订单 ${o.no} 取消退回`);
+  await patchOrder(o, { status: "canceled", canceledAt: Date.now(), refunded: round1c((Number(o.refunded) || 0) + refund) });
+  if (refund > 0) await addCoupon(refund, `订单 ${o.no} 取消退回`);
   await updateOrderCard(o, { status: "已取消", actions: [{ label: "查看订单" }] });
   if (o.charId && o.cardMessageId) {
     const names = await namesFor(o.charId);
     await api.chat.writeHistory({ characterId: o.charId, role: "user", content: `[外卖：${names.userName}取消了「${o.shopName}」的这份外卖，不会送来了。]` }).catch(() => {});
   }
   await syncContext();
-  toast(paid ? "已取消，退款已发成红包" : "已取消");
+  toast(refund > 0 ? "已取消，退款已发成红包" : "已取消");
   render();
 };
 actions["order-delete"] = async d => {
@@ -2097,15 +3207,24 @@ actions["order-again"] = d => {
   for (const it of o.items) { const dish = dishOf(it.name, shop); if (dish) { items[it.name] = it.qty; base[it.name] = dish.name; } }
   if (!Object.keys(items).length) { toast("这家店现在没有这些商品了"); return; }
   state.cart = { shopId: shop.id, items, base };
-  state.recipient = o.recipient || "";
+  state.recipient = o.groupId ? "g:" + o.groupId : o.recipient || "";
+  state.mode = isPickup(o) && !state.recipient ? "pickup" : "delivery";
   go("shop", { id: shop.id });
 };
+
+/** 退一笔售后：记在订单上，不超过你实际付的钱，以红包退回 */
+async function refundOrder(o, amount, reason, extra) {
+  const n = Math.min(round1c(amount), refundable(o));
+  if (n <= 0) return 0;
+  await addCoupon(n, reason);
+  await patchOrder(o, { refunded: round1c((Number(o.refunded) || 0) + n), ...extra });
+  return n;
+}
 actions["issue-refund"] = async d => {
   const o = orderById(d.id);
   if (!o || !o.issue || o.issue.resolved) return;
-  await addCoupon(o.issue.amount, o.issue.type === "missing" ? `少送「${o.issue.item}」退款` : "餐品洒漏补偿");
-  await patchOrder(o, { issue: { ...o.issue, resolved: "refund" } });
-  toast(`已退 ${yuan(o.issue.amount)} 红包`);
+  const n = await refundOrder(o, o.issue.amount, o.issue.type === "missing" ? `少送「${o.issue.item}」退款` : "餐品洒漏补偿", { issue: { ...o.issue, resolved: "refund", amount: Math.min(o.issue.amount, refundable(o)) } });
+  toast(n ? `已退 ${yuan(n)} 红包` : "这一单已经退完了");
   render();
 };
 actions["issue-skip"] = async d => {
@@ -2114,6 +3233,58 @@ actions["issue-skip"] = async d => {
   await patchOrder(o, { issue: { ...o.issue, resolved: "skip" } });
   render();
 };
+
+// ── 售后：少送（退那一件）、洒了（退一半餐费）、送错（全退）、太慢（退配送费）──
+const AFTER_TYPES = [
+  { key: "missing", label: "少送了", hint: "选少了哪样，退那一份" },
+  { key: "spilled", label: "洒了 / 漏了", hint: "退一半餐费" },
+  { key: "wrong", label: "送错了", hint: "整单退" },
+  { key: "slow", label: "送得太慢", hint: "退配送费" },
+];
+function afterAmount(o, key, item) {
+  if (key === "missing") { const it = (o.items || []).find(x => x.name === item); return it ? it.price : 0; }
+  if (key === "spilled") return round1c((o.subtotal || 0) / 2);
+  if (key === "wrong") return refundable(o);
+  if (key === "slow") return Math.max(0, (o.fee || 0) - (o.feeOff || 0));
+  return 0;
+}
+let afterDraft = null;
+function afterSheetHtml(o) {
+  const done = (o.afterSales || []).map(x => x.type);
+  const types = AFTER_TYPES.filter(t => !done.includes(t.key) && !(t.key === "slow" && (isPickup(o) || afterAmount(o, "slow") <= 0)));
+  if (!types.some(t => t.key === afterDraft.type)) afterDraft.type = types[0] ? types[0].key : "";
+  const priced = (o.items || []).filter(it => it.price > 0);
+  if (afterDraft.type === "missing" && !priced.some(it => it.name === afterDraft.item)) afterDraft.item = priced[0] ? priced[0].name : "";
+  const amount = Math.min(afterAmount(o, afterDraft.type, afterDraft.item), refundable(o));
+  if (!types.length) return '<p class="hint">能申请的售后都申请过了。</p>';
+  return `<div class="rows">${types.map(t => `<button type="button" class="row${afterDraft.type === t.key ? " on" : ""}" data-act="after-type" data-type="${t.key}"><span>${esc(t.label)}<small> · ${esc(t.hint)}</small></span><em>${icon("check", 12)}</em></button>`).join("")}</div>
+    ${afterDraft.type === "missing" ? `<div class="chips after-items">${priced.map(it => `<button type="button" class="${afterDraft.item === it.name ? "on" : ""}" data-act="after-item" data-name="${esc(it.name)}">${esc(it.name)}</button>`).join("")}</div>` : ""}
+    <p class="hint">预计退 <b>${yuan(amount)}</b>，以红包返还，下次下单自动抵扣。这一单还能退 ${yuan(refundable(o))}。</p>
+    <button type="button" class="btn" data-act="after-submit" data-id="${esc(o.id)}"${amount > 0 ? "" : " disabled"}>提交售后</button>`;
+}
+actions["after-open"] = d => {
+  const o = orderById(d.id);
+  if (!o) return;
+  afterDraft = { id: o.id, type: "", item: "" };
+  openSheet("申请售后", afterSheetHtml(o));
+};
+actions["after-type"] = d => { const o = orderById(afterDraft.id); afterDraft.type = d.type; $("sheet-body").innerHTML = afterSheetHtml(o); };
+actions["after-item"] = d => { const o = orderById(afterDraft.id); afterDraft.item = d.name; $("sheet-body").innerHTML = afterSheetHtml(o); };
+actions["after-submit"] = async d => {
+  const o = orderById(d.id);
+  if (!o || !afterDraft || (o.afterSales || []).some(x => x.type === afterDraft.type)) return;
+  const t = AFTER_TYPES.find(x => x.key === afterDraft.type);
+  if (!t) return;
+  const item = t.key === "missing" ? afterDraft.item : "";
+  const want = afterAmount(o, t.key, item);
+  const n = Math.min(round1c(want), refundable(o));
+  if (n <= 0) return;
+  await refundOrder(o, n, `售后：${t.label}${item ? `「${item}」` : ""}`, { afterSales: (o.afterSales || []).concat({ type: t.key, label: t.label, item, amount: n, at: Date.now() }) });
+  closeSheet();
+  toast(`已退 ${yuan(n)} 红包`);
+  render();
+};
+
 actions["order-rate"] = async d => {
   const o = orderById(d.id);
   if (!o || o.review) return;
@@ -2136,7 +3307,7 @@ function tick() {
   const now = Date.now();
   const arrived = state.orders.filter(o => o.status === "active" && o.deliverAt > lastTick && o.deliverAt <= now);
   lastTick = now;
-  if (arrived.length) { toast(`${arrived[0].shopName} 的外卖送到了`); syncContext(); }
+  if (arrived.length) { const a = arrived[0]; toast(isPickup(a) ? `${a.shopName} 的餐做好了，取餐码 ${a.code}` : `${a.shopName} 的外卖送到了`); syncContext(); }
   const moving = state.orders.some(o => isOnTheWay(o, now));
   if ((moving || arrived.length) && ["orders", "order", "home"].includes(state.view) && !$("app").classList.contains("sheet-open") && document.activeElement && document.activeElement.tagName !== "INPUT") render();
 }
@@ -2154,10 +3325,11 @@ views.me = {
   title: "我的",
   tone: "brand",
   render() {
-    const s = state.settings, coupons = usableCoupons();
+    const s = state.settings, now = Date.now(), coupons = usableCoupons(), fees = feeCoupons();
     const hidden = SEEDS.filter(x => s.hiddenSeeds.includes(x.id));
-    const paid = state.orders.filter(o => o.status === "active" && o.payer === "user");
-    const spent = Math.round(paid.reduce((sum, o) => sum + (Number(o.total) || 0), 0) * 10) / 10;
+    const spent = round1c(state.orders.filter(o => o.status === "active").reduce((sum, o) => sum + paidOf(o) - (Number(o.refunded) || 0), 0));
+    const rider = s.riderChar ? state.characters.find(c => c.id === s.riderChar) : null;
+    const vip = isMember(now);
     const gifts = state.orders.filter(o => o.recipient && o.status === "active").length;
     const treats = state.orders.filter(o => o.source === "directive" && o.status === "active").length;
     return `
@@ -2167,13 +3339,18 @@ views.me = {
         <div><b><i>¥</i>${spent}</b><small>累计花费</small></div>
         <div><b><i>¥</i>${Math.round(coupons.reduce((sum, c) => sum + c.amount, 0) * 10) / 10}</b><small>可用红包</small></div>
       </section>
+      <div class="me-entries">
+        <button type="button" class="member-strip${vip ? " on" : ""}" data-act="open-member">${icon("crown", 15)}<span><b>${vip ? "外卖会员" : "开通外卖会员"}</b><small>${vip ? `${esc(when(s.member.until, now))} 到期 · 本月省 ${yuan(s.member.monthSaved || 0)}` : "每月 4 张红包 · 免配送费"}</small></span>${icon("right", 12)}</button>
+        <button type="button" class="me-entry" data-act="open-coupons"><i>🎟️</i><span>领券中心</span>${claimableCount() ? `<em>${claimableCount()}</em>` : ""}</button>
+        <button type="button" class="me-entry" data-act="open-errand"><i>🛵</i><span>跑腿帮买</span></button>
+      </div>
       <section class="card">
-        <h3>${icon("ticket", 14)}红包<small>${coupons.length} 张可用</small></h3>
-        ${coupons.length ? `<div class="coupons">${coupons.map(c => `<div class="coupon"><b>${priceHtml(c.amount)}</b><span>${esc(c.reason)}</span></div>`).join("")}</div>` : '<p class="hint">退款和补偿会以红包发到这里，下单时自动抵扣。</p>'}
+        <h3>${icon("ticket", 14)}我的券包<small>${coupons.length + fees.length} 张可用</small></h3>
+        ${coupons.length + fees.length ? `<div class="coupon-list">${fees.concat(coupons).slice(0, 6).map(c => couponCard(c, now)).join("")}</div>${coupons.length + fees.length > 6 ? '<button type="button" class="link" data-act="open-coupons">看全部</button>' : ""}` : '<p class="hint">退款、补偿和领到的券都在这里，下单时自动抵扣。</p>'}
       </section>
       <section class="card">
         <h3>${icon("pin", 14)}我的收货信息</h3>
-        <label class="frow"><span>地址</span><input data-change="set-text" data-key="userAddress" placeholder="可不填" value="${esc(s.userAddress)}"></label>
+        <div class="frow" data-act="my-address"><span>地址簿</span><b>${s.addresses.length ? `${s.addresses.length} 个 · ${esc(s.userAddress || "未选")}` : "还没有"}</b><span class="chev">${icon("right", 12)}</span></div>
         <label class="frow"><span>忌口</span><input data-change="set-text" data-key="userTaboo" placeholder="比如 不吃香菜、海鲜过敏" value="${esc(s.userTaboo)}"></label>
         <p class="hint">忌口会告诉给你点外卖的角色，AI 找店时也会参考。</p>
       </section>
@@ -2181,6 +3358,8 @@ views.me = {
         <h3>${icon("scooter", 14)}配送</h3>
         <div class="frow col"><span>新订单的速度</span><div class="seg">${Object.entries(SPEEDS).map(([k, v]) => `<button type="button" class="${s.speed === k ? "on" : ""}" data-act="set-speed" data-speed="${k}">${v.label}<small>${v.hint}</small></button>`).join("")}</div></div>
         ${TOGGLES.slice(0, 1).map(toggleRow).join("")}
+        <label class="frow"><span>谁来送</span><select data-change="set-rider">${['<option value="">随机骑手</option>'].concat(state.characters.map(c => `<option value="${esc(c.id)}"${c.id === s.riderChar ? " selected" : ""}>${esc(c.name)}</option>`)).join("")}</select><span class="chev">${icon("right", 12)}</span></label>
+        <p class="hint">${rider ? `之后的外卖都由 ${esc(rider.name)} 来送。TA 在聊天里知道自己正在给谁送、送到了没有，打赏也会告诉 TA。` : "选一位角色当骑手，之后的外卖就由 TA 来送。"}</p>
       </section>
       <section class="card">
         <h3>${icon("chat", 14)}和聊天的联动</h3>
@@ -2206,6 +3385,7 @@ function toggleRow([key, label, hint]) {
   return `<div class="frow sw-row" data-act="toggle" data-key="${key}"><span class="grow"><b>${label}</b><small>${hint}</small></span><button type="button" class="sw${on ? " on" : ""}" role="switch" aria-checked="${on}" aria-label="${label}"></button></div>`;
 }
 
+actions["set-rider"] = async (d, node) => { await saveSettings({ riderChar: node.value }); render(); };
 actions["toggle"] = async d => {
   await saveSettings({ [d.key]: !state.settings[d.key] });
   if (d.key === "contextOn") await syncContext();
@@ -2255,7 +3435,8 @@ async function openFromCard(ctx) {
     return;
   }
   const order = state.orders.find(o => o.cardMessageId === ctx.messageId)
-    || (directiveId === "wm-pay" && ctx.characterId ? state.orders.find(o => o.charId === ctx.characterId && o.source === "payreq") : null);
+    || (directiveId === "wm-pay" && ctx.characterId ? state.orders.find(o => o.charId === ctx.characterId && o.source === "payreq") : null)
+    || (directiveId === "wm-split" && ctx.characterId ? state.orders.find(o => o.charId === ctx.characterId && o.source === "split") : null);
   if (order) go("order", { id: order.id });
 }
 
@@ -2277,16 +3458,25 @@ async function boot() {
   $("scrim").addEventListener("click", closeSheet);
   document.querySelectorAll("#tabs button").forEach(b => b.addEventListener("click", () => go(b.dataset.tab)));
 
-  if (ctx && ctx.source === "chat_plus_action" && ctx.characterId && state.characters.some(c => c.id === ctx.characterId)) state.recipient = ctx.characterId;
+  if (ctx && ctx.source === "chat_plus_action" && ctx.isGroup && ctx.sessionId) {
+    // 从群聊的「+」进来：记住这个群，以后首页也能直接选
+    const participants = (Array.isArray(ctx.participants) ? ctx.participants : []).map(p => ({ id: String(p.id || ""), name: String(p.name || "") })).filter(p => p.id)
+      .concat((Array.isArray(ctx.participantIds) ? ctx.participantIds : []).map(id => ({ id: String(id), name: "" })));
+    const uniq = participants.filter((p, i) => participants.findIndex(x => x.id === p.id) === i).map(p => ({ id: p.id, name: p.name || (state.characters.find(c => c.id === p.id) || {}).name || "" }));
+    const group = { sessionId: String(ctx.sessionId), name: String(ctx.groupName || "群聊").slice(0, 40), participants: uniq.slice(0, 30) };
+    await saveSettings({ groups: [group, ...state.settings.groups.filter(g => g.sessionId !== group.sessionId)].slice(0, 12) });
+    state.recipient = "g:" + group.sessionId;
+  } else if (ctx && ctx.source === "chat_plus_action" && ctx.characterId && state.characters.some(c => c.id === ctx.characterId)) state.recipient = ctx.characterId;
+  grantMemberCoupons().catch(error => console.warn("[外卖] 发会员红包失败", error));
   render(true);
   if (ctx && ctx.messageId) await openFromCard(ctx).catch(fail);
 
   // 打开时把角标清掉，并按现在的订单重写一遍常驻上下文（上次留下的过期内容在这里收掉）
   if (api.notifications && api.notifications.clearBadge) api.notifications.clearBadge().catch(() => {});
-  for (const id of new Set(state.orders.filter(o => o.charId).map(o => o.charId))) contextChars.add(id);
+  for (const id of new Set(state.orders.flatMap(o => [o.charId, o.riderCharId]).filter(Boolean))) contextChars.add(id);
   syncContext();
   setInterval(tick, 2000);
-  if (api.__mock) window.__wm = { state, go, render, shopById, actions, stageAt, contextText, namesFor, onChatMessage, syncContext, tick, draft };
+  if (api.__mock) window.__wm = { state, go, render, shopById, actions, stageAt, contextText, groupContextText, namesFor, onChatMessage, syncContext, tick, draft, errand, checkoutState, priceOrder, cartItems, todaysOffers, usableCoupons, feeCoupons, isMember };
 }
 boot().catch(error => {
   console.error(error);

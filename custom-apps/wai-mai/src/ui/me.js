@@ -11,10 +11,11 @@ views.me = {
   title: "我的",
   tone: "brand",
   render() {
-    const s = state.settings, coupons = usableCoupons();
+    const s = state.settings, now = Date.now(), coupons = usableCoupons(), fees = feeCoupons();
     const hidden = SEEDS.filter(x => s.hiddenSeeds.includes(x.id));
-    const paid = state.orders.filter(o => o.status === "active" && o.payer === "user");
-    const spent = Math.round(paid.reduce((sum, o) => sum + (Number(o.total) || 0), 0) * 10) / 10;
+    const spent = round1c(state.orders.filter(o => o.status === "active").reduce((sum, o) => sum + paidOf(o) - (Number(o.refunded) || 0), 0));
+    const rider = s.riderChar ? state.characters.find(c => c.id === s.riderChar) : null;
+    const vip = isMember(now);
     const gifts = state.orders.filter(o => o.recipient && o.status === "active").length;
     const treats = state.orders.filter(o => o.source === "directive" && o.status === "active").length;
     return `
@@ -24,13 +25,18 @@ views.me = {
         <div><b><i>¥</i>${spent}</b><small>累计花费</small></div>
         <div><b><i>¥</i>${Math.round(coupons.reduce((sum, c) => sum + c.amount, 0) * 10) / 10}</b><small>可用红包</small></div>
       </section>
+      <div class="me-entries">
+        <button type="button" class="member-strip${vip ? " on" : ""}" data-act="open-member">${icon("crown", 15)}<span><b>${vip ? "外卖会员" : "开通外卖会员"}</b><small>${vip ? `${esc(when(s.member.until, now))} 到期 · 本月省 ${yuan(s.member.monthSaved || 0)}` : "每月 4 张红包 · 免配送费"}</small></span>${icon("right", 12)}</button>
+        <button type="button" class="me-entry" data-act="open-coupons"><i>🎟️</i><span>领券中心</span>${claimableCount() ? `<em>${claimableCount()}</em>` : ""}</button>
+        <button type="button" class="me-entry" data-act="open-errand"><i>🛵</i><span>跑腿帮买</span></button>
+      </div>
       <section class="card">
-        <h3>${icon("ticket", 14)}红包<small>${coupons.length} 张可用</small></h3>
-        ${coupons.length ? `<div class="coupons">${coupons.map(c => `<div class="coupon"><b>${priceHtml(c.amount)}</b><span>${esc(c.reason)}</span></div>`).join("")}</div>` : '<p class="hint">退款和补偿会以红包发到这里，下单时自动抵扣。</p>'}
+        <h3>${icon("ticket", 14)}我的券包<small>${coupons.length + fees.length} 张可用</small></h3>
+        ${coupons.length + fees.length ? `<div class="coupon-list">${fees.concat(coupons).slice(0, 6).map(c => couponCard(c, now)).join("")}</div>${coupons.length + fees.length > 6 ? '<button type="button" class="link" data-act="open-coupons">看全部</button>' : ""}` : '<p class="hint">退款、补偿和领到的券都在这里，下单时自动抵扣。</p>'}
       </section>
       <section class="card">
         <h3>${icon("pin", 14)}我的收货信息</h3>
-        <label class="frow"><span>地址</span><input data-change="set-text" data-key="userAddress" placeholder="可不填" value="${esc(s.userAddress)}"></label>
+        <div class="frow" data-act="my-address"><span>地址簿</span><b>${s.addresses.length ? `${s.addresses.length} 个 · ${esc(s.userAddress || "未选")}` : "还没有"}</b><span class="chev">${icon("right", 12)}</span></div>
         <label class="frow"><span>忌口</span><input data-change="set-text" data-key="userTaboo" placeholder="比如 不吃香菜、海鲜过敏" value="${esc(s.userTaboo)}"></label>
         <p class="hint">忌口会告诉给你点外卖的角色，AI 找店时也会参考。</p>
       </section>
@@ -38,6 +44,8 @@ views.me = {
         <h3>${icon("scooter", 14)}配送</h3>
         <div class="frow col"><span>新订单的速度</span><div class="seg">${Object.entries(SPEEDS).map(([k, v]) => `<button type="button" class="${s.speed === k ? "on" : ""}" data-act="set-speed" data-speed="${k}">${v.label}<small>${v.hint}</small></button>`).join("")}</div></div>
         ${TOGGLES.slice(0, 1).map(toggleRow).join("")}
+        <label class="frow"><span>谁来送</span><select data-change="set-rider">${['<option value="">随机骑手</option>'].concat(state.characters.map(c => `<option value="${esc(c.id)}"${c.id === s.riderChar ? " selected" : ""}>${esc(c.name)}</option>`)).join("")}</select><span class="chev">${icon("right", 12)}</span></label>
+        <p class="hint">${rider ? `之后的外卖都由 ${esc(rider.name)} 来送。TA 在聊天里知道自己正在给谁送、送到了没有，打赏也会告诉 TA。` : "选一位角色当骑手，之后的外卖就由 TA 来送。"}</p>
       </section>
       <section class="card">
         <h3>${icon("chat", 14)}和聊天的联动</h3>
@@ -63,6 +71,7 @@ function toggleRow([key, label, hint]) {
   return `<div class="frow sw-row" data-act="toggle" data-key="${key}"><span class="grow"><b>${label}</b><small>${hint}</small></span><button type="button" class="sw${on ? " on" : ""}" role="switch" aria-checked="${on}" aria-label="${label}"></button></div>`;
 }
 
+actions["set-rider"] = async (d, node) => { await saveSettings({ riderChar: node.value }); render(); };
 actions["toggle"] = async d => {
   await saveSettings({ [d.key]: !state.settings[d.key] });
   if (d.key === "contextOn") await syncContext();

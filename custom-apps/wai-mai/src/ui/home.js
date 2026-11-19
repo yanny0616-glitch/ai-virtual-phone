@@ -1,6 +1,11 @@
 // ── 首页（地址、搜索、分类、红包、排序筛选、店铺列表）和店铺页（点菜 / 评价 / 商家、选规格、购物车）──
+// 送给谁：state.recipient 是 "" 自己 / 角色 id / "g:群会话 id" 请群聊
+const isGroupRecipient = () => String(state.recipient || "").startsWith("g:");
+function recipientGroup() { return isGroupRecipient() ? state.settings.groups.find(g => g.sessionId === state.recipient.slice(2)) || null : null; }
+const groupSize = g => (g && g.participants ? g.participants.length : 0) + 1;   // 群里的角色加上你自己
 function recipientName() {
   if (!state.recipient) return "我自己";
+  if (isGroupRecipient()) { const g = recipientGroup(); return g ? `「${g.name || "群聊"}」` : "群聊"; }
   const c = state.characters.find(x => x.id === state.recipient);
   return c ? c.name : "TA";
 }
@@ -9,18 +14,23 @@ function avatarHtml(c, cls) {
   return src ? `<img class="ava ${cls || ""}" src="${esc(src)}" alt="">` : `<span class="ava ph ${cls || ""}">${esc((c && c.name || "我").slice(0, 1))}</span>`;
 }
 function recipientAvatar(cls) {
+  if (isGroupRecipient()) return `<span class="ava ph grp ${cls || ""}">群</span>`;
   return state.recipient ? avatarHtml(state.characters.find(c => c.id === state.recipient), cls) : `<span class="ava ph ${cls || ""}">我</span>`;
 }
 /** 这一单的收货地址：给自己点用自己的，给角色点用记在这位角色名下的 */
 function currentAddress() {
+  if (isGroupRecipient()) return "";
   return state.recipient ? (state.settings.charAddress[state.recipient] || "") : (state.settings.userAddress || "");
 }
 function addressLabel() {
+  if (isGroupRecipient()) return `请${recipientName()}大家吃`;
   const address = currentAddress();
   if (state.recipient) return `${recipientName()} · ${address || "TA 那边"}`;
   return address || "添加收货地址";
 }
 const isLiked = id => state.settings.likedShops.includes(id);
+/** 在这家店下过几次单（自己付的、送到了的才算） */
+const boughtCount = id => state.orders.filter(o => o.shopId === id && o.status === "active" && o.payer !== "char").length;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 
 function shopPills(s) {
@@ -32,7 +42,7 @@ function shopCard(s) {
   return `<button type="button" class="shop" data-act="open-shop" data-id="${esc(s.id)}">
     ${shopCover(s, 64)}
     <span class="shop-main">
-      <span class="shop-name">${esc(s.name)}${s.source === "ai" ? '<i class="tag ai">AI</i>' : ""}${isLiked(s.id) ? '<i class="tag like">收藏</i>' : ""}</span>
+      <span class="shop-name">${esc(s.name)}${s.source === "ai" ? '<i class="tag ai">AI</i>' : ""}${isLiked(s.id) ? '<i class="tag like">收藏</i>' : ""}${boughtCount(s.id) ? `<i class="tag bought">买过 ${boughtCount(s.id)} 次</i>` : ""}</span>
       <span class="shop-meta"><b>★${s.rating.toFixed(1)}</b><span>月售 ${st.salesText}</span><span class="eta-hint">${etaHint(s)} · ${st.km}km</span></span>
       <span class="shop-meta"><span>起送 ${yuan(s.minOrder)}</span><span>配送 ${s.fee ? yuan(s.fee) : "免费"}</span></span>
       ${s.tagline ? `<span class="quote">“${esc(s.tagline)}”</span>` : ""}
@@ -44,7 +54,7 @@ function pickCards(shops) {
   return shops.map(s => { const d = s.dishes.find(x => x.tag) || s.dishes[0]; return d ? { s, d } : null; }).filter(Boolean).slice(0, 8)
     .map(({ s, d }) => `<button type="button" class="pick" data-act="open-shop" data-id="${esc(s.id)}">
       ${dishCover(d.emoji, s.color, 70, d.tag, true)}
-      <b>${esc(d.name)}</b><small>${esc(s.name)}</small><span class="pick-foot">${priceHtml(d.price)}<i class="plus-dot">+</i></span></button>`).join("");
+      <b>${esc(d.name)}</b><small>${esc(s.name)}</small><span class="pick-foot">${dishPriceHtml(d, s)}<i class="plus-dot">+</i></span></button>`).join("");
 }
 const SORTS = [["all", "综合排序"], ["rating", "评分最高"], ["min", "起送最低"], ["fast", "配送最快"]];
 function sortShops(list) {
@@ -57,15 +67,17 @@ views.home = {
   tone: "brand",
   render() {
     const q = state.query.trim(), now = Date.now();
-    const filtering = state.onlyLiked || state.onlyOff;
+    const filtering = state.onlyLiked || state.onlyOff || state.onlyBought;
     const browsing = !q && state.category === "全部" && !filtering;
     let shops = q ? searchLocal(q) : allShops();
     if (state.category !== "全部") shops = shops.filter(s => s.category === state.category);
     if (state.onlyLiked) shops = shops.filter(s => isLiked(s.id));
     if (state.onlyOff) shops = shops.filter(s => s.off);
+    if (state.onlyBought) shops = shops.filter(s => boughtCount(s.id) > 0);
     shops = sortShops(shops);
     const live = state.orders.filter(o => isOnTheWay(o, now));
-    const toChar = !!state.recipient;
+    const toChar = !!state.recipient && !isGroupRecipient();
+    const group = recipientGroup();
     const crave = state.craving && state.craving.charId === state.recipient ? state.craving : null;
     const speed = SPEEDS[state.settings.speed] || SPEEDS.fast;
     const claimed = state.settings.claimDay === today();
@@ -75,6 +87,7 @@ views.home = {
       liveHtml = `<button type="button" class="live-card" data-act="open-order" data-id="${esc(live[0].id)}"><i class="live-ico">${icon("scooter", 16)}</i>
         <span class="live-main"><span><em>${esc(live[0].shopName)} · ${esc(st.label)}</em><small>${esc(remainText(st.remainMs))}</small></span><span class="bar"><i style="width:${Math.round(st.progress * 100)}%"></i></span></span>${icon("right", 14)}</button>`;
     }
+    const groupHtml = group ? `<div class="crave">${recipientAvatar()}<div class="crave-main"><b>请${esc(recipientName())}吃外卖</b><small>群里共 ${groupSize(group)} 人，结算时可以每样按人数点</small></div><button type="button" class="crave-x" data-act="set-recipient" data-id="" aria-label="不请了">×</button></div>` : "";
     const craveHtml = toChar ? `<div class="crave">${recipientAvatar()}<div class="crave-main">${crave
       ? `<small>${esc(recipientName())} 说</small><p class="crave-line">${esc(crave.line || "随便，你挑。")}</p>`
       : `<b>给 ${esc(recipientName())} 点一份</b><small>不知道点什么？问问 TA 现在想吃什么</small>`}</div>${crave
@@ -97,14 +110,21 @@ views.home = {
         <div class="hotwords">${state.settings.aiShops ? `<button type="button" class="ai" data-act="ai-focus">${icon("spark", 11)}AI 找店</button>` : ""}${HOT_WORDS.map(w => `<button type="button" data-act="search-word" data-word="${esc(w)}">${esc(w)}</button>`).join("")}</div>
       </div>
       <div class="cats">${cats.map(c => `<button type="button" class="cat${c === state.category ? " on" : ""}" data-act="set-category" data-c="${esc(c)}"><i>${CATEGORY_EMOJI[c]}</i>${esc(c)}</button>`).join("")}</div>
-      ${liveHtml}${craveHtml}
+      <div class="entries">${[
+        ["open-coupons", "🎟️", "领券中心", claimableCount() ? `${claimableCount()} 张可领` : ""],
+        ["open-lottery", "🎡", "天天抽奖", state.settings.lotteryDay === today() ? "" : "今日可抽"],
+        ["open-member", "👑", isMember() ? "会员中心" : "开会员", isMember() ? "" : "免配送费"],
+        ["open-errand", "🛵", "跑腿帮买", ""],
+        ["toggle-filter", "🧾", "买过的店", "", "onlyBought"],
+      ].map(([act, emo, label, badge, key]) => `<button type="button" class="entry${key && state[key] ? " on" : ""}" data-act="${act}"${key ? ` data-key="${key}"` : ""}><i>${emo}</i>${label}${badge ? `<em>${esc(badge)}</em>` : ""}</button>`).join("")}</div>
+      ${liveHtml}${craveHtml}${groupHtml}
       ${browsing ? promos : ""}
       ${browsing && shops.length ? `<div class="sec-h"><h2>招牌推荐</h2><small>每家店最拿手的那一道</small></div><div class="picks">${pickCards(shops)}</div>` : ""}
       <div class="sec-h"><h2>${q ? `「${esc(q)}」的搜索结果` : state.category === "全部" ? "附近商家" : esc(state.category)}</h2><small>${shops.length} 家</small><span class="hero-eta">${icon("bolt", 12)}${speed.label}配送 · ${speed.hint}</span></div>
       <div class="sorts">${SORTS.map(([key, label]) => `<button type="button" class="${state.sort === key ? "on" : ""}" data-act="set-sort" data-sort="${key}">${label}</button>`).join("")}
-        <button type="button" class="chip${state.onlyOff ? " on" : ""}" data-act="toggle-filter" data-key="onlyOff">满减</button><button type="button" class="chip${state.onlyLiked ? " on" : ""}" data-act="toggle-filter" data-key="onlyLiked">收藏</button></div>
+        <button type="button" class="chip${state.onlyOff ? " on" : ""}" data-act="toggle-filter" data-key="onlyOff">满减</button><button type="button" class="chip${state.onlyLiked ? " on" : ""}" data-act="toggle-filter" data-key="onlyLiked">收藏</button>${state.onlyBought ? '<button type="button" class="chip on" data-act="toggle-filter" data-key="onlyBought">买过</button>' : ""}</div>
       <div class="shops">${shops.map(shopCard).join("") || emptyHtml}</div>
-      ${q && shops.length && state.settings.aiShops ? `<button type="button" class="link" data-act="ai-shops">没有想要的？让 AI 再找几家</button>` : ""}`;
+      ${shops.length && state.settings.aiShops && !filtering ? `<button type="button" class="more-shops" data-act="ai-shops">${icon("spark", 13)}${q ? "没有想要的？让 AI 再找几家" : `看完了？让 AI 再找几家${state.category === "全部" ? "" : esc(state.category)}`}</button>` : ""}`;
   },
   after() {
     const form = document.querySelector('[data-form="search"]');
@@ -119,9 +139,10 @@ actions["open-shop"] = d => go("shop", { id: d.id });
 actions["search-word"] = d => { state.query = d.word; state.category = "全部"; render(true); };
 actions["ai-focus"] = () => { const q = $("q"); if (q) q.focus(); toast("写下想吃的，本地搜不到就让 AI 现编几家"); };
 actions["ai-shops"] = async () => {
-  const q = ($("q") ? $("q").value : state.query).trim();
-  if (!q) { toast("先写下想吃什么"); return; }
-  state.query = q;
+  const typed = ($("q") ? $("q").value : state.query).trim();
+  // 没写搜索词时按当前分类找；分类也是「全部」就随便找几家附近口碑好的
+  const q = typed || (state.category !== "全部" ? state.category : "附近口碑好的店");
+  if (typed) state.query = typed;
   const added = await busy(`正在找卖「${q}」的店…`, () => generateShops(q));
   if (added) { toast(`找到 ${added.length} 家`); render(true); }
 };
@@ -143,20 +164,62 @@ actions["claim-daily"] = async () => {
 };
 actions["pick-recipient"] = () => {
   const row = (id, ava, name, hint) => `<button type="button" class="row${state.recipient === id ? " on" : ""}" data-act="set-recipient" data-id="${esc(id)}">${ava}<span>${esc(name)}${hint ? `<small> · ${hint}</small>` : ""}</span><em>${icon("check", 12)}</em></button>`;
-  const rows = [row("", '<span class="ava ph">我</span>', "我自己", "")].concat(state.characters.map(c => row(c.id, avatarHtml(c), c.name, "送到 TA 那边")));
+  const rows = [row("", '<span class="ava ph">我</span>', "我自己", "")].concat(state.characters.map(c => row(c.id, avatarHtml(c), c.name, "送到 TA 那边")))
+    .concat(state.settings.groups.map(g => row("g:" + g.sessionId, '<span class="ava ph grp">群</span>', g.name || "群聊", `请大家吃 · ${groupSize(g)} 人`)));
   openSheet("这一单送给谁", `<div class="rows">${rows.join("")}</div>${state.characters.length ? "" : '<p class="hint">还没有角色。先在小手机里创建角色，就能给 TA 点外卖了。</p>'}`);
 };
-actions["set-recipient"] = d => { state.recipient = d.id; draft.address = null; closeSheet(); render(); };
-actions["edit-address"] = () => {
-  const who = state.recipient ? `${recipientName()} 那边的地址` : "我的收货地址";
-  openSheet(who, `<input id="addr-input" maxlength="80" placeholder="小区、楼栋、门牌…（可不填）" value="${esc(currentAddress())}"><p class="hint">只是写给外卖小票和角色看的，不会真的定位。送给谁在结算时选。</p><button type="button" class="btn" data-act="save-address">保存</button>`);
+actions["set-recipient"] = d => {
+  state.recipient = d.id; draft.address = null;
+  if (d.id && state.mode === "pickup") state.mode = "delivery";   // 给别人点就得送过去
+  closeSheet(); render();
 };
+// ── 收货地址：给自己点用地址簿（家 / 公司 / 学校…），给角色点每人记一条 ──
+const ADDR_TAGS = ["家", "公司", "学校", "其他"];
+let addrTag = "家";
+function addressBookHtml() {
+  const list = state.settings.addresses, cur = state.settings.userAddress;
+  return `${list.length ? `<div class="rows">${list.map(a => `<div class="row addr-row${a.text === cur ? " on" : ""}"><button type="button" class="addr-use" data-act="addr-use" data-id="${esc(a.id)}"><i class="tag addr">${esc(a.tag || "其他")}</i><span>${esc(a.text)}</span><em>${icon("check", 12)}</em></button><button type="button" class="addr-del" data-act="addr-del" data-id="${esc(a.id)}" aria-label="删除">×</button></div>`).join("")}</div>` : ""}
+    <div class="addr-new"><div class="seg wrap">${ADDR_TAGS.map(t => `<button type="button" class="${addrTag === t ? "on" : ""}" data-act="addr-tag" data-tag="${t}">${t}</button>`).join("")}</div>
+      <input id="addr-input" maxlength="80" placeholder="新地址：小区、楼栋、门牌…" value="">
+      <button type="button" class="btn" data-act="save-address">添加并设为默认</button></div>
+    <p class="hint">只是写给外卖小票和角色看的，不会真的定位。点一条就设为默认；送给谁在结算时选。</p>`;
+}
+let addrForSelf = false;   // 从「我的」点进地址簿时，就算首页选着角色也改自己的
+actions["my-address"] = () => { addrForSelf = true; openSheet("我的收货地址", addressBookHtml(), () => { addrForSelf = false; }); };
+actions["edit-address"] = () => {
+  addrForSelf = false;
+  if (isGroupRecipient()) { actions["pick-recipient"](); return; }
+  if (state.recipient) {
+    openSheet(`${recipientName()} 那边的地址`, `<input id="addr-input" maxlength="80" placeholder="小区、楼栋、门牌…（可不填）" value="${esc(currentAddress())}"><p class="hint">只是写给外卖小票和角色看的，不会真的定位。</p><button type="button" class="btn" data-act="save-address">保存</button>`);
+    return;
+  }
+  openSheet("我的收货地址", addressBookHtml());
+};
+actions["addr-tag"] = d => { addrTag = d.tag; const v = $("addr-input").value; $("sheet-body").innerHTML = addressBookHtml(); $("addr-input").value = v; };
 actions["save-address"] = async () => {
   const address = ($("addr-input").value || "").trim().slice(0, 80);
-  if (state.recipient) await saveSettings({ charAddress: { ...state.settings.charAddress, [state.recipient]: address } });
-  else await saveSettings({ userAddress: address });
+  if (state.recipient && !addrForSelf) await saveSettings({ charAddress: { ...state.settings.charAddress, [state.recipient]: address } });
+  else if (address) {
+    const rest = state.settings.addresses.filter(a => a.text !== address);
+    await saveSettings({ addresses: [{ id: uid("addr"), tag: addrTag, text: address }, ...rest].slice(0, 12), userAddress: address });
+  }
   draft.address = null;
   closeSheet(); render();
+};
+actions["addr-use"] = async d => {
+  const a = state.settings.addresses.find(x => x.id === d.id);
+  if (!a) return;
+  await saveSettings({ userAddress: a.text });
+  draft.address = null;
+  closeSheet(); render();
+};
+actions["addr-del"] = async d => {
+  const a = state.settings.addresses.find(x => x.id === d.id);
+  if (!a) return;
+  const rest = state.settings.addresses.filter(x => x.id !== d.id);
+  await saveSettings({ addresses: rest, userAddress: state.settings.userAddress === a.text ? (rest[0] ? rest[0].text : "") : state.settings.userAddress });
+  $("sheet-body").innerHTML = addressBookHtml();
+  render();
 };
 
 // ── 购物车：items[行名] = 份数；带规格的行名是「菜名·规格·规格」，base[行名] 记着它是哪道菜 ──
@@ -167,7 +230,7 @@ function cartItems() {
   if (!shop) return [];
   return Object.entries(state.cart.items).filter(([, qty]) => qty > 0).map(([key, qty]) => {
     const dish = dishOf((state.cart.base || {})[key] || key, shop);
-    return dish ? { name: key, price: dish.price, qty } : null;
+    return dish ? { name: key, price: dishPrice(dish, shop), qty } : null;
   }).filter(Boolean);
 }
 /** 这道菜（所有规格加起来）在购物车里有几份 */
@@ -193,23 +256,25 @@ function dropFromCart(key) {
 /** 底部停靠条：店铺页是购物车，结算页是合计和提交按钮（见 checkout.js 的 payDock） */
 function renderCartBar() {
   const bar = $("cartbar");
-  bar.className = state.view === "checkout" ? "dock flat" : "dock";
-  if (state.view === "checkout") { const html = payDock(); bar.hidden = !html; bar.innerHTML = html; return; }
+  const flat = state.view === "checkout" || state.view === "errand";
+  bar.className = flat ? "dock flat" : "dock";
+  if (flat) { const html = state.view === "checkout" ? payDock() : errandDock(); bar.hidden = !html; bar.innerHTML = html; return; }
   const shop = shopById(state.params.id);
   const show = state.view === "shop" && shop && (state.params.tab || "menu") === "menu";
   bar.hidden = !show;
   if (!show) return;
   const mine = state.cart.shopId === shop.id, count = mine ? cartCount() : 0;
-  const p = priceOrder(mine ? cartItems() : [], shop, 0);
+  const pickup = state.mode === "pickup";
+  const p = priceOrder(mine ? cartItems() : [], shop, { pickup, freeFee: isMember() });
   bar.innerHTML = `<button type="button" class="dock-bag${count ? " on" : ""}" data-act="open-cart" aria-label="购物车">${icon("bag", 20)}${count ? `<em>${count}</em>` : ""}</button>
-    <span class="dock-sum">${count ? priceHtml(p.subtotal) : '<b class="dock-empty">还没有选商品</b>'}<small>${count && p.off ? `已减 ${yuan(p.off)} · ` : ""}另需配送费 ${shop.fee ? yuan(shop.fee) : "0"}</small></span>
+    <span class="dock-sum">${count ? priceHtml(p.subtotal) : '<b class="dock-empty">还没有选商品</b>'}<small>${count && p.off ? `已减 ${yuan(p.off)} · ` : ""}${pickup ? "到店自取 · 立减一成" : !shop.fee ? "免配送费" : isMember() ? "会员免配送费" : `另需配送费 ${yuan(shop.fee)}`}${p.pack ? ` · 包装费 ${yuan(p.pack)}` : ""}</small></span>
     <button type="button" class="btn" data-act="to-checkout"${!count || p.short > 0 ? " disabled" : ""}>${!count ? `${yuan(shop.minOrder)} 起送` : p.short > 0 ? `差 ${yuan(p.short)} 起送` : "去结算"}</button>`;
 }
 function cartSheetHtml() {
   const shop = shopById(state.cart.shopId);
   return `<div class="cart-rows">${cartItems().map(it => `<div class="line">${dishCover(itemEmoji(it.name, shop), shop.color, 34)}<span>${esc(it.name)}</span>${priceHtml(it.price * it.qty, "sm")}
       <div class="stepper"><button type="button" data-act="cart-line" data-key="${esc(it.name)}" data-d="-1" aria-label="减一份">−</button><span>${it.qty}</span><button type="button" class="plus" data-act="cart-line" data-key="${esc(it.name)}" data-d="1" aria-label="加一份">+</button></div></div>`).join("")}</div>
-    <button type="button" class="link danger" data-act="cart-clear">清空购物车</button>`;
+    <div class="cart-foot">${state.characters.length ? `<button type="button" class="link" data-act="share-open" data-kind="cart">${icon("share", 12)}让 TA 帮我看看</button>` : ""}<button type="button" class="link danger" data-act="cart-clear">清空购物车</button></div>`;
 }
 actions["open-cart"] = () => { if (cartCount()) openSheet("购物车", cartSheetHtml()); else toast("购物车还是空的"); };
 actions["cart-line"] = d => {
@@ -229,7 +294,7 @@ function dishRow(shop, d) {
     : `<div class="stepper">${qty ? `<button type="button" data-act="cart-dec" data-name="${name}" aria-label="减一份">−</button><span>${qty}</span>` : ""}<button type="button" class="plus" data-act="cart-inc" data-name="${name}" aria-label="加一份">+</button></div>`;
   return `<div class="dish">${dishCover(d.emoji, shop.color, 70, d.tag)}
     <div class="dish-main"><b>${name}</b>${d.desc ? `<small>${esc(d.desc)}</small>` : ""}<span class="dish-stat">月售 ${stat.sales} · 好评度 ${stat.good}%</span>
-      <div class="dish-buy">${priceHtml(d.price)}${buy}</div></div></div>`;
+      <div class="dish-buy">${dishPriceHtml(d, shop)}${buy}</div></div></div>`;
 }
 
 views.shop = {
@@ -266,15 +331,29 @@ views.shop = {
             <p class="shop-meta"><b>★${s.rating.toFixed(1)}</b><span>月售 ${st.salesText}</span><span>${etaHint(s)} · ${st.km}km</span></p>
             <p class="shop-meta"><span>起送 ${yuan(s.minOrder)}</span><span>配送 ${s.fee ? yuan(s.fee) : "免费"}</span></p></div>${shopCover(s, 56)}</div>
         <div class="pills">${s.off ? `<i class="pill off">${s.off[0]}减${s.off[1]}</i>` : ""}${s.fee ? "" : '<i class="pill off">免配送费</i>'}<i class="pill grey">${esc(s.category)}</i>
-          <button type="button" class="like-btn${liked ? " on" : ""}" data-act="toggle-like" data-id="${esc(s.id)}">${icon("heart", 12)}${liked ? "已收藏" : "收藏"}</button></div>
+          <span class="head-btns"><button type="button" class="like-btn" data-act="share-open" data-kind="shop" data-id="${esc(s.id)}">${icon("share", 12)}分享</button><button type="button" class="like-btn${liked ? " on" : ""}" data-act="toggle-like" data-id="${esc(s.id)}">${icon("heart", 12)}${liked ? "已收藏" : "收藏"}</button></span></div>
+        ${shopCouponHtml(s)}
         ${s.tagline ? `<p class="notice"><b>公告</b>${esc(s.tagline)}</p>` : ""}
         ${state.recipient ? `<p class="notice"><b>代点</b>这一单送给 ${esc(recipientName())}</p>` : ""}
+        <div class="modes"><button type="button" class="${state.mode !== "pickup" ? "on" : ""}" data-act="set-mode" data-mode="delivery"><b>外卖配送</b><small>${etaHint(s)} · ${st.km}km</small></button><button type="button" class="${state.mode === "pickup" ? "on" : ""}" data-act="set-mode" data-mode="pickup"><b>到店自取</b><small>${pickupHint(s)} · 立减一成</small></button></div>
       </section>
       <div class="stabs">${SHOP_TABS.map(([key, label]) => `<button type="button" class="${tab === key ? "on" : ""}" data-act="shop-tab" data-tab="${key}">${label}${key === "reviews" && reviews.length ? `<small>${reviews.length}</small>` : ""}</button>`).join("")}</div>
       ${body}`;
   },
 };
 
+/** 自取大概多久能取：只算备餐，约是配送时间的一半 */
+function pickupHint(shop) {
+  const speed = SPEEDS[state.settings.speed] || SPEEDS.fast;
+  const minutes = (speed.minutes[0] + speed.minutes[1]) / 2 * (shop.factor || 1) * 0.55;
+  return minutes < 1.5 ? "1 分钟内可取" : `约 ${Math.round(minutes)} 分钟可取`;
+}
+actions["set-mode"] = d => {
+  if (d.mode === "pickup" && isGroupRecipient()) { toast("请群聊只能送过去，不能自取"); return; }
+  state.mode = d.mode === "pickup" ? "pickup" : "delivery";
+  if (state.mode === "pickup" && state.recipient) { state.recipient = ""; toast("自取只能自己去拿，这一单改成给自己点"); }
+  render();
+};
 actions["shop-tab"] = d => { state.params = { ...state.params, tab: d.tab }; render(); };
 actions["menu-jump"] = d => {
   state.params = { ...state.params, g: Number(d.g) }; render();
@@ -292,7 +371,7 @@ let specDraft = null;
 function specSheetHtml() {
   const shop = shopById(specDraft.shopId), dish = dishOf(specDraft.name, shop);
   return `${dishSpecs(dish, shop).map((g, gi) => `<div class="spec-g"><small>${g.title}</small><div class="seg wrap">${g.options.map((o, oi) => `<button type="button" class="${specDraft.picks[gi] === oi ? "on" : ""}" data-act="spec-pick" data-g="${gi}" data-i="${oi}">${o}</button>`).join("")}</div></div>`).join("")}
-    <div class="spec-foot">${priceHtml(dish.price)}<button type="button" class="btn" data-act="spec-add">加入购物车</button></div>`;
+    <div class="spec-foot">${dishPriceHtml(dish, shop)}<button type="button" class="btn" data-act="spec-add">加入购物车</button></div>`;
 }
 actions["cart-inc"] = async d => {
   const shop = shopById(state.params.id), dish = shop && dishOf(d.name, shop);

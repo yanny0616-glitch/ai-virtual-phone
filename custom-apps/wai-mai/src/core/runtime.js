@@ -26,7 +26,9 @@ const state = {
   params: {},
   recipient: "",                      // "" = 自己，否则角色 id
   category: "全部", query: "",
-  sort: "all", onlyLiked: false, onlyOff: false,   // 首页店铺列表的排序和筛选
+  sort: "all", onlyLiked: false, onlyOff: false, onlyBought: false,   // 首页店铺列表的排序和筛选
+  mode: "delivery",                   // delivery 外卖配送 / pickup 到店自取
+  orderManage: false, orderPicked: [], // 订单页「管理」：批量删除时选中的订单 id
   orderTab: "all",                                 // 订单页的分类标签
   cart: { shopId: "", items: {}, base: {} }, // items[行名] = 份数；带规格的行名是「菜名·规格」，base[行名] = 菜名
   busy: "",                           // 正在进行的长操作说明，空 = 空闲

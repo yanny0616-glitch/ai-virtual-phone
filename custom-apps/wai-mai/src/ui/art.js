@@ -18,6 +18,11 @@ const ICON = {
   store: '<path d="M4 10 5.5 5h13L20 10M5 10v9h14v-9M4 10a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0M10 19v-4.5h4V19"/>',
   box: '<path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5zM4 8.5l8 4.5 8-4.5M12 13v7"/>',
   cog: '<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.5M12 18v2.5M3.5 12H6M18 12h2.5M6 6l1.8 1.8M16.2 16.2 18 18M18 6l-1.8 1.8M7.8 16.2 6 18"/>',
+  share: '<circle cx="17.5" cy="6" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/><path d="m8.7 10.8 6.6-3.6M8.7 13.2l6.6 3.6"/>',
+  crown: '<path d="M4 17.5 3 8l5 4 4-6 4 6 5-4-1 9.5z"/><path d="M5 20.5h14"/>',
+  phone: '<path d="M6.5 4h3l1.5 4-2 1.5a10 10 0 0 0 5.5 5.5l1.5-2 4 1.5v3a2 2 0 0 1-2.2 2A15.5 15.5 0 0 1 4.5 6.2 2 2 0 0 1 6.5 4z"/>',
+  shield: '<path d="M12 3.5 5 6v5.5c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6z"/><path d="m9 12 2.2 2.2L15.5 10"/>',
+  trash: '<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>',
   scooter: '<circle cx="6" cy="17" r="2.6"/><circle cx="18.5" cy="17" r="2.6"/><path d="M8.6 17h7.3l2.3-7.5h2.3M4 12.5h6l1.6 4.5"/><rect x="3" y="7" width="6" height="4.5" rx="1" fill="currentColor" stroke="none"/>',
 };
 const icon = (name, size) => svgIcon(ICON[name] || "", size);
@@ -70,7 +75,10 @@ function dishGroups(shop) {
     else push(MAIN_GROUP[shop.category] || "主食", d);
   }
   const order = ["招牌热销"];
-  return [...groups.entries()].sort((a, b) => (order.includes(b[0]) ? 1 : 0) - (order.includes(a[0]) ? 1 : 0)).map(([title, dishes]) => ({ title, dishes }));
+  const list = [...groups.entries()].sort((a, b) => (order.includes(b[0]) ? 1 : 0) - (order.includes(a[0]) ? 1 : 0)).map(([title, dishes]) => ({ title, dishes }));
+  const sp = specialDish(shop);
+  if (sp) list.unshift({ title: "今日特价", dishes: [sp] });
+  return list;
 }
 /** 要选规格的菜：饮品选温度和甜度，带辣的主食选辣度 */
 function dishSpecs(dish, shop) {
@@ -85,7 +93,25 @@ function dishSpecs(dish, shop) {
   return [];
 }
 function orderShop(order) {
+  if (order.mode === "errand") return { color: "#2f8f5a", emoji: "🛵", dishes: [], category: "", name: order.shopName };
   return shopById(order.shopId) || { color: "#f0703a", emoji: emojiFor((order.items && order.items[0] && order.items[0].name) || "", ""), dishes: [], category: "" };
+}
+
+/** 今日特价：每家店每天挑一道（不挑几块钱的小料），七折。按日期和店算，同一天看到的都一样 */
+function specialDish(shop) {
+  if (!shop || !shop.dishes) return null;
+  const list = shop.dishes.filter(d => d.price >= 8);
+  return list.length ? list[hashSeed(`${shop.id}|${today()}`) % list.length] : null;
+}
+/** 这道菜现在卖多少：特价菜按七折（凑到 5 角） */
+function dishPrice(dish, shop) {
+  const sp = specialDish(shop);
+  return sp && sp.name === dish.name ? Math.max(1, Math.round(dish.price * 0.7 * 2) / 2) : dish.price;
+}
+/** 价格：特价时现价旁边带划掉的原价 */
+function dishPriceHtml(dish, shop) {
+  const now = dishPrice(dish, shop);
+  return now < dish.price ? `<span class="pricebox">${priceHtml(now)}<s>${yuan(dish.price)}</s></span>` : priceHtml(now);
 }
 
 /** 预计多久送到，按当前速度档和这家店的出餐快慢估 */
@@ -134,7 +160,8 @@ function riderSpot(order, now) {
   return { x, y, done: f };
 }
 const mapAt = (x, y) => `left:${x.toFixed(1)}%;top:${(y * 2).toFixed(1)}%`;
-function mapHtml(order, shop, now, bubble, homeHtml) {
+function mapHtml(order, shop, now, bubble, homeHtml, opts) {
+  const o = opts || {};
   const spot = riderSpot(order, now);
   return `<div class="map">
     <svg viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true">
@@ -148,8 +175,8 @@ function mapHtml(order, shop, now, bubble, homeHtml) {
       <path class="m-route" d="${ROUTE_PATH}"/>
       <path class="m-done" d="${ROUTE_PATH}" pathLength="100" stroke-dasharray="${(spot.done * 100).toFixed(1)} 100"/>
     </svg>
-    <span class="m-pin from" style="${mapAt(ROUTE.p0[0], ROUTE.p0[1])};--hue:${esc(shop.color)}"><b>${esc(shop.emoji)}</b><i>商家</i></span>
+    <span class="m-pin from" style="${mapAt(ROUTE.p0[0], ROUTE.p0[1])};--hue:${esc(shop.color)}"><b>${esc(shop.emoji)}</b><i>${esc(o.fromLabel || "商家")}</i></span>
     <span class="m-pin home" style="${mapAt(ROUTE.p3[0], ROUTE.p3[1])}">${homeHtml}<i>收货</i></span>
-    <span class="m-rider" style="${mapAt(spot.x, spot.y)}"><em>${esc(bubble)}</em><b>${icon("scooter", 15)}</b></span>
+    <span class="m-rider" style="${mapAt(spot.x, spot.y)}"><em>${esc(bubble)}</em>${o.riderHtml || `<b>${icon("scooter", 15)}</b>`}</span>
   </div>`;
 }

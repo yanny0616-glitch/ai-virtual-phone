@@ -50,13 +50,15 @@ window.AiPhone = (() => {
       pay: async p => { const a = wallet.accounts.find(x => x.id === (p.accountId || "balance")); log.pays.push(p); if (!a || a.balance < p.amount) return { ok: false, error: "余额不足" }; a.balance = Math.round((a.balance - p.amount) * 100) / 100; a.balanceLabel = "¥" + a.balance.toFixed(2); return { ok: true }; } },
     ai: {
       chat: async p => { log.ai.push({ kind: "chat", ...p }); await new Promise(r => setTimeout(r, 120)); return { text: "好的，下面是店铺：\\n\`\`\`json\\n" + ${JSON.stringify(JSON.stringify(AI_SHOPS))} + "\\n\`\`\`" }; },
-      generate: async p => { log.ai.push({ kind: "generate", ...p }); await new Promise(r => setTimeout(r, 120)); return { text: "[想吃:奶茶:随便……要不你挑个不太甜的。]" }; } },
+      generate: async p => { log.ai.push({ kind: "generate", ...p }); await new Promise(r => setTimeout(r, 120));
+        if ((p.appTags || []).includes("group")) return { text: "[沈烬言:破费了，下次我请]\\n[宁妍:我那份要多加辣！]" };
+        return { text: "[想吃:奶茶:随便……要不你挑个不太甜的。]" }; } },
     chat: {
       sendCard: async p => { const r = { messageId: "m" + (++mid), sessionId: "s_" + p.characterId }; log.cards.push({ ...p, ...r }); return r; },
       updateCard: async p => { log.cardUpdates.push(p); return { ok: true }; },
       writeHistory: async p => { log.history.push(p); return { ok: true }; },
       requestReply: async p => { log.replies.push(p); return { ok: true }; },
-      setContext: async p => { log.context[p.characterId] = p.text; return { ok: true }; },
+      setContext: async p => { log.context[p.characterId || "__global__"] = p.text; return { ok: true }; },
       clearContext: async () => ({ ok: true }),
       openConversation: async () => ({ ok: true }),
       registerContextProvider: async fn => { handlers.provider = fn; return { ok: true }; } },
@@ -110,11 +112,11 @@ const emit = payload => evaluate(`Promise.all(window.__handlers.events['chat.mes
 await send("Page.enable"); await send("Runtime.enable");
 await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
 await send("Page.navigate", { url: "file://" + PREVIEW });
-await waitFor(`!!window.__wm && window.__wm.state.ready`);
+await waitFor(`!!window.__wm && window.__wm.state.ready`).catch(error => { console.error("启动失败：\n" + logs.join("\n")); throw error; });
 
 try {
-  // 1. 首页：内置 10 家店；排序、筛选、分类
-  assert.equal(await shopCount(), 10);
+  // 1. 首页：内置 39 家店；排序、筛选、分类
+  assert.equal(await shopCount(), 39);
   await shot("01-home");
   await scrollMain(470); await shot("01b-home-shops"); await scrollMain(0);
   await tap(`[data-act="set-sort"][data-sort="rating"]`);
@@ -125,9 +127,9 @@ try {
   assert.ok(await evaluate(`[...document.querySelectorAll('.shop')].every(e => window.__wm.shopById(e.dataset.id).off)`), "只看有满减的店");
   await tap(`[data-act="toggle-filter"][data-key="onlyOff"]`);
   await tap(`[data-act="set-category"][data-c="买药"]`);
-  assert.equal(await shopCount(), 1);
+  assert.equal(await shopCount(), 3);
   await tap(`[data-act="set-category"][data-c="买药"]`);
-  assert.equal(await shopCount(), 10, "再点一次回到全部");
+  assert.equal(await shopCount(), 39, "再点一次回到全部");
 
   // 2. 进店、加购
   await tap(`[data-act="open-shop"][data-id="seed_noodle"]`);
@@ -136,7 +138,9 @@ try {
   await shot("02c-spec");
   await tap(`[data-act="spec-add"]`); await sleep(80);
   await add("卤蛋"); await add("卤蛋");
-  assert.match(await text("#cartbar"), /¥30/);
+  // 今日特价每天换一道，价钱不写死，用页面自己的计价算
+  const sub0 = await evaluate(`window.__wm.cartItems().reduce((s, it) => s + it.price * it.qty, 0)`);
+  assert.ok((await text("#cartbar")).includes("¥" + sub0), "购物车条显示小计");
   assert.deepEqual(await evaluate(`window.__wm.state.cart.items`), { "红烧牛肉面·微辣": 1, "卤蛋": 2 });
   await shot("02-shop");
   // 购物车抽屉里能加减；收藏；评价和商家两个标签页
@@ -159,11 +163,14 @@ try {
   await waitFor(`window.__wm.state.view === 'checkout'`);
   await fill(`[data-key="note"]`, "少辣，不要香菜");
   await shot("03-checkout");
+  const expect0 = await evaluate(`window.__wm.checkoutState().p`);
+  assert.equal(expect0.pack, 1, "面馆收 1 元包装费");
+  assert.equal(expect0.total, Math.round((sub0 + 1 + 2.5) * 10) / 10);
   await tap(`[data-act="place-order"]`); await idle();
   await waitFor(`window.__wm.state.view === 'order'`);
   let o = await evaluate(`window.__wm.state.orders[0]`);
-  assert.equal(o.total, 32.5); assert.equal(o.status, "active"); assert.equal(o.note, "少辣，不要香菜");
-  assert.equal(await evaluate(`window.__log.pays[0].amount`), 32.5);
+  assert.equal(o.total, expect0.total); assert.equal(o.status, "active"); assert.equal(o.note, "少辣，不要香菜"); assert.equal(o.pack, 1);
+  assert.equal(await evaluate(`window.__log.pays[0].amount`), expect0.total);
   assert.ok(await evaluate(`!!window.__log.tasks['wm_arrive_${o.id}']`), "送达任务已挂上");
   assert.equal(await evaluate(`window.__log.tasks['wm_arrive_${o.id}'].actions.length`), 1, "给自己点的只有一条通知");
   assert.equal(await evaluate(`window.__log.cards.length`), 0);
@@ -241,7 +248,7 @@ try {
     await tap(`#tabs [data-tab="home"]`);
     await evaluate(`(()=>{window.__wm.state.recipient=''; window.__wm.state.query=''; window.__wm.render(); return true})()`);
     await tap(`[data-act="open-shop"][data-id="seed_bbq"]`);
-    await add("羊肉串（5 串）"); await add("烤馒头片");
+    await add("羊肉串（5 串）"); await add("羊肉串（5 串）"); await add("烤馒头片");
     await tap(`[data-act="to-checkout"]`); await waitFor(`window.__wm.state.view === 'checkout'`);
     await tap(`[data-key="payMode"][data-value="char"]`);
     if (verdict === "同意") await shot("09-checkout-payreq");
@@ -278,7 +285,7 @@ try {
 
   // 8. AI 找店：本地搜不到 → 让模型编 → 留在首页；下单时红包自动抵扣
   await tap(`#tabs [data-tab="home"]`);
-  await evaluate(`(()=>{document.querySelector('#q').value='麻辣烫'; document.querySelector('[data-form="search"]').requestSubmit(); return true})()`);
+  await evaluate(`(()=>{document.querySelector('#q').value='鸡公煲'; document.querySelector('[data-form="search"]').requestSubmit(); return true})()`);
   await sleep(100);
   assert.equal(await evaluate(`document.querySelectorAll('.shop').length`), 0);
   await shot("11-search-empty");
@@ -287,7 +294,8 @@ try {
   assert.equal(await evaluate(`document.querySelectorAll('.shop .tag.ai').length`), 2);
   await shot("12-ai-shops");
   await tap(`.shop`);
-  await add("");
+  // 第一道可能是今日特价、凑不够起送，就多加几份
+  for (let i = 0; i < 4; i++) { await add(""); if (await evaluate(`!document.querySelector('[data-act="to-checkout"]').disabled`)) break; }
   await tap(`[data-act="to-checkout"]`); await waitFor(`window.__wm.state.view === 'checkout'`);
   assert.match(await text(".line.total"), /¥0/, "红包够抵时合计为 0");
   // 送给谁在结算页选：换成角色后地址跟着换，也不能再找 TA 代付
@@ -326,6 +334,152 @@ try {
   assert.equal(await evaluate(`window.__handlers.provider({ characterId: 'c2' })`), "", "关掉后不再告诉角色");
   assert.equal(await evaluate(`window.__log.context.c2`), "", "常驻上下文也撤掉");
   await tap(`[data-act="toggle"][data-key="contextOn"]`); await sleep(150);
+
+
+  // 11. 领券中心：一键全领、抽奖一天一次；会员：开通后免配送费
+  await tap(`#tabs [data-tab="home"]`);
+  await evaluate(`(()=>{window.__wm.state.query=''; window.__wm.state.category='全部'; window.__wm.render(true); return true})()`);
+  await tap(`[data-act="open-coupons"]`);
+  await waitFor(`window.__wm.state.view === 'coupons'`);
+  await shot("16-coupons");
+  const before11 = await evaluate(`window.__wm.state.coupons.length`);
+  await tap(`[data-act="claim-all"]`); await sleep(200);
+  assert.equal(await evaluate(`window.__wm.state.coupons.length`), before11 + 10, "4 张平台券 + 6 张商家券");
+  assert.equal(await evaluate(`!!document.querySelector('[data-act="claim-all"]')`), false, "领完就没有一键全领了");
+  await tap(`[data-act="spin"]`); await sleep(2600);
+  assert.ok(await evaluate(`!!window.__wm.state.settings.lotteryDay`), "记下了今天抽过");
+  assert.ok(await evaluate(`document.querySelector('[data-act="spin"]').disabled`), "今天抽过了");
+  await scrollMain(0); await shot("16b-coupons-done");
+  await tap(`#btn-back`);
+  await tap(`[data-act="open-member"]`); await waitFor(`window.__wm.state.view === 'member'`);
+  await shot("17-member");
+  await tap(`[data-act="buy-member"][data-id="m30"]`); await idle(); await sleep(150);
+  assert.ok(await evaluate(`window.__wm.isMember()`));
+  assert.equal(await evaluate(`window.__wm.state.coupons.filter(c => /会员/.test(c.reason)).length`), 4, "开通当月送 4 张红包");
+  await tap(`#btn-back`);
+
+  // 12. 到店自取：不收配送费，再减一成，给取餐码，做好后点「我已取餐」
+  await tap(`[data-act="open-shop"][data-id="seed_tea"]`);
+  await tap(`[data-act="set-mode"][data-mode="pickup"]`);
+  await add("茉莉奶绿"); await add("茉莉奶绿");
+  await tap(`[data-act="to-checkout"]`); await waitFor(`window.__wm.state.view === 'checkout'`);
+  await evaluate(`(()=>{window.__wm.draft.couponId='none'; window.__wm.render(); return true})()`);
+  const pk = await evaluate(`window.__wm.checkoutState().p`);
+  assert.equal(pk.fee, 0); assert.ok(pk.pickupOff > 0, "自取立减");
+  await shot("18-checkout-pickup");
+  await tap(`[data-act="place-order"]`); await idle();
+  o = await evaluate(`window.__wm.state.orders[0]`);
+  assert.equal(o.mode, "pickup"); assert.match(o.code, /^A\d{3}$/); assert.equal(o.rider, "");
+  assert.equal(await evaluate(`window.__wm.state.mode`), "delivery", "下完单回到配送");
+  await shot("19-order-pickup");
+  await rewind(0, 3 * 3600000);
+  assert.match(await text(".status .code-box"), /报码取餐/);
+  await tap(`[data-act="order-picked-up"]`); await sleep(150);
+  assert.ok(await evaluate(`window.__wm.state.orders[0].pickedUpAt > 0`));
+
+  // 13. 和 TA 拼单：先付一半；TA 同意后开始配送
+  await tap(`#tabs [data-tab="home"]`);
+  await tap(`[data-act="open-shop"][data-id="seed_noodle"]`);
+  await add("葱油拌面"); await add("卤蛋"); await add("卤蛋");
+  await tap(`[data-act="to-checkout"]`); await waitFor(`window.__wm.state.view === 'checkout'`);
+  await tap(`[data-key="payMode"][data-value="split"]`);
+  const sp = await evaluate(`window.__wm.checkoutState()`);
+  assert.equal(sp.p.feeOff, sp.p.fee, "会员免配送费");
+  await shot("20-checkout-split");
+  const pays13 = await evaluate(`window.__log.pays.length`);
+  await tap(`[data-act="place-order"]`); await idle();
+  o = await evaluate(`window.__wm.state.orders[0]`);
+  assert.equal(o.status, "pending_pay"); assert.equal(o.payer, "split"); assert.equal(o.userPaid, sp.payNow);
+  assert.equal(await evaluate(`window.__log.pays.at(-1).amount`), sp.payNow); assert.equal(await evaluate(`window.__log.pays.length`), pays13 + 1);
+  assert.match(await evaluate(`window.__log.cards.at(-1).historyText`), /外卖拼单.*一人一半/);
+  assert.match(await evaluate(`window.__handlers.provider({ characterId: 'c1' })`), /想和你拼单/);
+  await emit({ characterId: "c1", sessionId: "s_c1", isGroup: false, message: { id: "m-split", role: "assistant", mediaType: "app_card", mediaData: { appDirectiveId: "wm-split", appDirectiveArgs: ["同意", "行吧，算我一半"] } } });
+  o = await evaluate(`window.__wm.state.orders[0]`);
+  assert.equal(o.status, "active"); assert.equal(o.payWords, "行吧，算我一半");
+  assert.match(await evaluate(`window.__handlers.provider({ characterId: 'c1' })`), /你和阿栀拼单/);
+
+  // 14. 请群聊：从群的「+」进来后能选这个群；每样按人数点；群里靠全局上下文知道
+  await evaluate(`(async()=>{const s=window.__wm.state; s.settings.groups=[{sessionId:'g1',name:'饭搭子',participants:[{id:'c1',name:'沈烬言'},{id:'c2',name:'宁妍'}]}]; s.recipient='g:g1'; s.view='home'; s.stack=[]; window.__wm.render(true); return true})()`);
+  assert.ok(await evaluate(`!!document.querySelector('.crave .ava.grp')`), "首页显示在请群聊");
+  await tap(`[data-act="open-shop"][data-id="seed_tea"]`);
+  await add("茉莉奶绿");
+  await tap(`[data-act="to-checkout"]`); await waitFor(`window.__wm.state.view === 'checkout'`);
+  assert.equal(await evaluate(`window.__wm.checkoutState().items[0].qty`), 3, "两个角色加自己，每样 3 份");
+  await shot("21-checkout-group");
+  await tap(`[data-act="place-order"]`); await idle(); await sleep(400);
+  o = await evaluate(`window.__wm.state.orders[0]`);
+  assert.equal(o.groupId, "g1"); assert.equal(o.recipient, ""); assert.deepEqual(o.groupMembers, ["c1", "c2"]);
+  assert.match(await evaluate(`window.__log.context.__global__`), /在群聊「饭搭子」里：阿栀请群里每个人吃/);
+  assert.equal(await evaluate(`window.__wm.state.orders[0].groupTalk.length`), 2, "群里两个人各说了一句");
+  assert.equal(await evaluate(`window.__log.ai.at(-1).sessionId`), "g1");
+  await rewind(0, Math.round((o.deliverAt - Date.now()) * 0.5));
+  await scrollMain(380); await shot("22-order-group"); await scrollMain(0);
+  await evaluate(`(()=>{window.__wm.state.recipient=''; return true})()`);
+
+  // 15. 分享给 TA：店铺
+  await tap(`#tabs [data-tab="home"]`);
+  await tap(`[data-act="open-shop"][data-id="seed_bbq"]`);
+  await tap(`[data-act="share-open"][data-kind="shop"]`); await sleep(80);
+  await tap(`#sheet [data-act="share-to"][data-id="c2"]`);
+  await evaluate(`(()=>{document.querySelector('#share-words').value='周五一起？'; return true})()`);
+  await shot("23-share");
+  await tap(`[data-act="share-send"]`); await idle(); await sleep(100);
+  const shared = await evaluate(`window.__log.cards.at(-1)`);
+  assert.equal(shared.characterId, "c2"); assert.match(shared.historyText, /给宁妍分享了一家外卖店「炭火小院」.*周五一起？/);
+  assert.equal(await evaluate(`window.__log.replies.at(-1).characterId`), "c2");
+
+  // 16. 跑腿帮买 + 角色当骑手：骑手是 TA，TA 的上下文里知道自己在送
+  await evaluate(`(async()=>{window.__wm.state.settings.riderChar='c2'; return true})()`);
+  await tap(`#tabs [data-tab="home"]`);
+  await tap(`[data-act="open-errand"]`); await waitFor(`window.__wm.state.view === 'errand'`);
+  await tap(`[data-act="errand-store"][data-key="药店"]`);
+  await fill(`.errand-item input[data-key="name"]`, "一盒创可贴");
+  await fill(`.errand-item input[data-key="price"]`, "12");
+  await tap(`[data-act="errand-add"]`); await sleep(60);
+  await fill(`.errand-item:nth-child(2) input[data-key="name"]`, "体温计");
+  await fill(`.errand-item:nth-child(2) input[data-key="price"]`, "25");
+  await shot("24-errand");
+  await tap(`[data-act="errand-place"]`); await idle();
+  o = await evaluate(`window.__wm.state.orders[0]`);
+  assert.equal(o.mode, "errand"); assert.equal(o.storeName, "药店"); assert.equal(o.riderName, "宁妍"); assert.equal(o.rider, "宁妍");
+  assert.equal(o.total, Math.round((37 + 6 + 0.9 * 2 - 3) * 10) / 10, "商品 37 + 跑腿费 7.8 − 会员减 3");
+  assert.match(o.timeline[1].text, /去药店/);
+  assert.match(await evaluate(`window.__handlers.provider({ characterId: 'c2' })`), /你今天在兼职送外卖，正在给阿栀送/);
+  await rewind(0, Math.round((o.deliverAt - Date.now()) * 0.5));
+  await tap(`[data-act="rider-note"][data-text="放门口就好"]`); await sleep(150);
+  assert.equal(await evaluate(`window.__wm.state.orders[0].notes.length`), 1);
+  await shot("25-order-errand");
+
+  // 17. 送到后：打赏骑手（写进 TA 的聊天）、售后退款（不超过实付）
+  await rewind(0, 3 * 3600000);
+  await tap(`[data-act="rider-tip"][data-amount="5"]`); await idle(); await sleep(150);
+  assert.equal(await evaluate(`window.__wm.state.orders[0].riderTip`), 5);
+  assert.match(await evaluate(`window.__log.history.at(-1).content`), /给送外卖的宁妍打赏了 ¥5/);
+  await tap(`[data-act="after-open"]`); await sleep(80);
+  await tap(`[data-act="after-type"][data-type="missing"]`);
+  await tap(`[data-act="after-item"][data-name="体温计"]`);
+  await shot("26-after-sale");
+  await tap(`[data-act="after-submit"]`); await sleep(200);
+  o = await evaluate(`window.__wm.state.orders[0]`);
+  assert.equal(o.refunded, 25); assert.equal(o.afterSales[0].type, "missing");
+  await tap(`[data-act="after-open"]`); await sleep(80);
+  await tap(`[data-act="after-type"][data-type="wrong"]`);
+  await tap(`[data-act="after-submit"]`); await sleep(200);
+  o = await evaluate(`window.__wm.state.orders[0]`);
+  assert.equal(o.refunded, o.total, "整单退也只退到实付为止");
+  await scrollMain(500); await shot("27-order-after"); await scrollMain(0);
+
+  // 18. 订单批量删除：进行中的删不了
+  await tap(`#tabs [data-tab="orders"]`);
+  await tap(`[data-act="order-manage"]`);
+  await tap(`[data-act="order-pick-all"]`);
+  const picked = await evaluate(`window.__wm.state.orderPicked.length`);
+  assert.ok(picked >= 1);
+  await shot("28-orders-manage");
+  const total18 = await evaluate(`window.__wm.state.orders.length`);
+  await tap(`[data-act="order-delete-picked"]`); await idle(); await sleep(150);
+  assert.equal(await evaluate(`window.__wm.state.orders.length`), total18 - picked);
+  assert.ok(await evaluate(`window.__wm.state.orders.every(o => ['active','pending_pay'].includes(o.status))`), "剩下的都是没完成的");
 
   // 10. 深色模式
   if (SHOTS) {

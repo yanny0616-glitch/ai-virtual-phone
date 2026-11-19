@@ -3,6 +3,9 @@
 //   recipient = 角色 id、payer = "user"   你给 TA 点
 //   recipient = ""、payer = "char"、source = "payreq"     你点、请 TA 代付
 //   recipient = ""、payer = "char"、source = "directive"  TA 主动给你点
+//   recipient = ""、payer = "split"、source = "split"     你和 TA 拼单，一人一半
+//   groupId = 群会话 id                                  你请群聊（宿主不能往群里发卡片，群里靠全局上下文知道）
+//   riderCharId = 角色 id                                 这位角色来送
 const ACCENT = "#f5a800";
 
 async function namesFor(charId) {
@@ -25,7 +28,8 @@ function isOnTheWay(order, now) { return order.status === "active" && Number(ord
 function cardSections(order, etaLabel) {
   const rows = (order.items || []).slice(0, 6).map(it => ({ label: it.name, value: `×${it.qty}${it.price ? " · " + yuan(it.price * it.qty) : ""}` }));
   const info = [{ label: "店铺", value: order.shopName }];
-  if (etaLabel) info.push({ label: "预计送达", value: etaLabel });
+  if (order.mode === "pickup" && order.code) info.push({ label: "取餐码", value: order.code });
+  if (etaLabel) info.push({ label: order.mode === "pickup" ? "做好时间" : "预计送达", value: etaLabel });
   if (order.note) info.push({ label: "备注", value: order.note });
   info.push({ label: "订单号", value: order.no });
   return [{ title: "餐品", rows }, { title: "配送", rows: info }];
@@ -36,6 +40,7 @@ async function startDelivery(order, now) {
   const built = buildTimeline({
     seed: `${order.no}|${order.shopName}|${order.createdAt}`, startAt: now, speed: order.speed || state.settings.speed,
     incidents: state.settings.incidents, items: order.items, scheduledFor: order.scheduledFor || 0, shopFactor: order.shopFactor || 1,
+    mode: order.mode || "", code: order.code || "", storeName: order.storeName || "", riderName: order.riderName || "",
   });
   await patchOrder(order, { status: "active", paidAt: now, speed: order.speed || state.settings.speed, timeline: built.timeline, deliverAt: built.deliverAt, rider: built.rider, issue: built.issue });
   await scheduleArrival(order);
@@ -46,7 +51,7 @@ async function startDelivery(order, now) {
 /** 送达那一刻要做的事交给宿主的定时任务：APP 关着也会执行，小手机整个关着则重开后补跑 */
 async function scheduleArrival(order) {
   const actions = [];
-  const title = order.recipient ? "TA 的外卖送到了" : "外卖到了";
+  const title = order.mode === "pickup" ? `餐做好了，取餐码 ${order.code}` : order.groupId ? "请群里的外卖送到了" : order.recipient ? "TA 的外卖送到了" : order.mode === "errand" ? "跑腿送到了" : "外卖到了";
   let body = `${order.shopName}：${itemsText(order)}`;
   let names = null;
   if (order.charId) names = await namesFor(order.charId);
@@ -60,6 +65,10 @@ async function scheduleArrival(order) {
     if (state.settings.contextOn) actions.push({ type: "chat.setContext", characterId: order.charId, label: "外卖", text: contextText(order.charId, order.deliverAt + 1000, false) });
     if (state.settings.replyOnArrive) actions.push({ type: "chat.reply", characterId: order.charId });
   }
+  if (order.riderCharId && order.riderCharId !== order.charId) {
+    const rn = await namesFor(order.riderCharId);
+    actions.push({ type: "chat.history", characterId: order.riderCharId, role: "user", content: `[外卖：${rn.charName}在 ${hhmm(order.deliverAt)} 把「${order.shopName}」的外卖送到了${order.recipient && names ? names.charName : rn.userName}手上。]` });
+  }
   await api.tasks.schedule({ id: `wm_arrive_${order.id}`, delayMs: Math.max(1000, order.deliverAt - Date.now()), actions });
 }
 async function cancelArrival(order) { try { await api.tasks.cancel(`wm_arrive_${order.id}`); } catch { /* 任务可能已经跑完 */ } }
@@ -68,7 +77,8 @@ function arrivalHistory(order, names) {
   const what = `「${order.shopName}」的外卖（${itemsText(order)}）`;
   const at = hhmm(order.deliverAt);
   if (order.recipient) return `[外卖：${names.userName}给${names.charName}点的${what}已在 ${at} 送到${names.charName}手上。${issueText(order)}]`;
-  const how = order.source === "payreq" ? `${names.charName}帮${names.userName}付款的` : `${names.charName}给${names.userName}点的`;
+  if (order.mode === "pickup") return `[外卖：${names.userName}和${names.charName}拼单的${what}在 ${at} 做好了，${names.userName}要去店里自取。]`;
+  const how = order.source === "payreq" ? `${names.charName}帮${names.userName}付款的` : order.source === "split" ? `${names.userName}和${names.charName}拼单（一人一半）的` : `${names.charName}给${names.userName}点的`;
   return `[外卖：${how}${what}已在 ${at} 送到${names.userName}手上。${issueText(order)}]`;
 }
 
@@ -173,6 +183,8 @@ async function onChatMessage(payload) {
     await acceptCharOrder({ messageId: msg.id, sessionId: payload.sessionId, charId: payload.characterId, args });
   } else if (data.appDirectiveId === "wm-pay") {
     await onPayReply(payload.characterId, args);
+  } else if (data.appDirectiveId === "wm-split") {
+    await onSplitReply(payload.characterId, args);
   } else return;
   if (!state.background) render();
 }
@@ -186,15 +198,25 @@ function contextText(charId, now, precise) {
   if (!names) return "";
   const u = names.userName, lines = [];
   for (const o of state.orders) {
-    if (o.charId !== charId) continue;
     const what = `「${o.shopName}」的外卖（${itemsText(o)}）`;
+    if (o.riderCharId === charId && o.charId !== charId && o.status === "active" && o.deliverAt) {
+      const to = o.recipient && state.names[o.recipient] ? state.names[o.recipient].charName : u;
+      if (now < o.deliverAt) lines.push(`你今天在兼职送外卖，正在给${to}送${what}，${precise ? `现在${stageAt(o, now).label}，${remainText(stageAt(o, now).remainMs)}` : `要在 ${hhmm(o.deliverAt)} 左右送到`}。`);
+      else if (now - o.deliverAt < 90 * 60000) lines.push(`你在 ${hhmm(o.deliverAt)} 把${what}送到了${to}手上。${o.riderTip ? `${u}给你打赏了 ${yuan(o.riderTip)}。` : ""}`);
+      continue;
+    }
+    if (o.charId !== charId) continue;
     if (o.status === "pending_pay" && o.source === "payreq") {
       lines.push(`${u}请你代付${what}，共 ${yuan(o.total)}，还在等你答复：同意写 [外卖代付:同意:想说的话]，拒绝写 [外卖代付:拒绝:想说的话]。`);
       continue;
     }
+    if (o.status === "pending_pay" && o.source === "split") {
+      lines.push(`${u}想和你拼单${what}，一共 ${yuan(o.total)}，${u}已经付了自己那一半 ${yuan(o.userPaid)}，在等你答复：愿意出另一半写 [外卖拼单:同意:想说的话]，不愿意写 [外卖拼单:拒绝:想说的话]。`);
+      continue;
+    }
     if (o.status !== "active" || !o.deliverAt) continue;
     const mine = o.recipient === charId;            // 送给角色的
-    const whose = mine ? `${u}给你点的` : o.source === "payreq" ? `你帮${u}付款的` : `你给${u}点的`;
+    const whose = mine ? `${u}给你点的` : o.source === "payreq" ? `你帮${u}付款的` : o.source === "split" ? `你和${u}拼单（一人一半）的` : `你给${u}点的`;
     if (now < o.deliverAt) {
       const stage = stageAt(o, now);
       const progress = precise ? `现在${stage.label}，${remainText(stage.remainMs)}（预计 ${hhmm(o.deliverAt)}）` : `预计 ${hhmm(o.deliverAt)} 送到，在那之前都还在路上`;
@@ -212,12 +234,25 @@ function contextText(charId, now, precise) {
 
 /** 常驻那份上下文：群聊、线下、云端主动消息用它；普通私聊由下面的 provider 当轮现算 */
 let contextChars = new Set();
+let groupContextOn = true;   // 启动时先清一次，免得留着上回的群单
+/** 请群聊的单：只在群聊里有用，写进不分角色的那份上下文 */
+function groupContextText(now) {
+  const lines = [];
+  for (const o of state.orders) {
+    if (!o.groupId || o.status !== "active" || !o.deliverAt) continue;
+    const u = o.userName || "用户";
+    const what = `「${o.shopName}」的外卖（${itemsText(o)}）`;
+    if (now < o.deliverAt) lines.push(`在群聊「${o.groupName}」里：${u}请群里每个人吃${what}，预计 ${hhmm(o.deliverAt)} 送到，在那之前大家都还没拿到。${o.note ? `${u}说：${o.note}` : ""}`);
+    else if (now - o.deliverAt < 90 * 60000) lines.push(`在群聊「${o.groupName}」里：${u}请大家吃的${what}已在 ${hhmm(o.deliverAt)} 送到每个人手上。${issueText(o)}`);
+  }
+  return lines.length ? lines.join("\n") + "\n（这件事只发生在那个群里；不在那个群里的人不知道。）" : "";
+}
 async function syncContext() {
   if (!api.chat || !api.chat.setContext) return;
   try {
     const now = Date.now(), next = new Set();
     if (state.settings.contextOn) {
-      const ids = [...new Set(state.orders.filter(o => o.charId).map(o => o.charId))];
+      const ids = [...new Set(state.orders.flatMap(o => [o.charId, o.riderCharId]).filter(Boolean))];
       for (const id of ids) {
         await namesFor(id);
         const text = contextText(id, now, false);
@@ -228,6 +263,10 @@ async function syncContext() {
     }
     for (const id of contextChars) if (!next.has(id)) await api.chat.setContext({ characterId: id, label: "外卖", text: "" });
     contextChars = next;
+    // 群聊只读不带角色的那一份上下文
+    const group = state.settings.contextOn ? groupContextText(now) : "";
+    if (group || groupContextOn) await api.chat.setContext({ label: "外卖", text: group });
+    groupContextOn = !!group;
   } catch (error) { console.warn("[外卖] 同步聊天上下文失败", error); }
 }
 

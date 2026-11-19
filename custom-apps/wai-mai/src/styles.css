@@ -35,7 +35,8 @@ svg { display: block; flex: none; }
 .topbar { flex: none; display: flex; align-items: center; gap: 4px; min-height: calc(var(--top) + 34px); padding: var(--top) var(--ai-phone-app-bar-clear-right, 96px) 0 12px; }
 .topbar h1 { margin: 0; font-size: 16px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .back { width: 28px; height: 28px; margin-left: -6px; border-radius: 50%; display: grid; place-items: center; }
-.main { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 10px 20px; -webkit-overflow-scrolling: touch; }
+/* overscroll-behavior：iOS 上滚到顶还能往下拽出一截回弹，露出标题栏和头图之间的底色。宿主只给 html / body 关了，里面的滚动容器要自己关 */
+.main { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 10px 20px; -webkit-overflow-scrolling: touch; overscroll-behavior: none; }
 #app[data-view="shop"] .main, #app[data-view="checkout"] .main { padding-bottom: 84px; }
 /* 顶栏和头图：brand 是黄色往下渐隐，hue 是店铺主色调出来的浅色 */
 #app[data-tone="brand"] .topbar { background: var(--head); color: var(--on-head); }
@@ -43,6 +44,9 @@ svg { display: block; flex: none; }
 #app[data-tone="hue"] .topbar, #app[data-tone="hue"] .hero { background: linear-gradient(rgba(255, 255, 255, .5), rgba(255, 255, 255, .5)), var(--hue); }
 @media (prefers-color-scheme: dark) { #app[data-tone="hue"] .topbar, #app[data-tone="hue"] .hero { background: linear-gradient(rgba(18, 18, 19, .62), rgba(18, 18, 19, .62)), var(--hue); } }
 .hero { position: relative; margin: 0 -10px; padding: 2px 12px 12px; }
+/* 不认 overscroll-behavior 的旧系统还是会回弹：头图上方垫一块同色，拽出来的那截和标题栏连成一片 */
+.hero::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 100vh; background: inherit; pointer-events: none; }
+#app[data-tone="brand"] .hero::before { background: var(--head); }
 
 .tabs { display: flex; flex: none; padding: 5px 16px calc(4px + var(--safe-b)); background: var(--card); box-shadow: 0 -1px 0 var(--line); }
 .tabs button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 10px; color: var(--sub); }
@@ -393,17 +397,197 @@ svg { display: block; flex: none; }
 .stats div { display: flex; flex-direction: column; }
 .stats b { font: 700 18px/1.25 var(--num); }
 .stats b i { font-size: 11px; margin-right: 1px; }
-.coupons { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -12px; padding: 0 12px 2px; }
-.coupons::-webkit-scrollbar { display: none; }
-.coupon { position: relative; flex: none; width: 150px; display: flex; align-items: center; border-radius: 8px; background: var(--red-soft); overflow: hidden; }
-.coupon::before, .coupon::after { content: ""; position: absolute; left: 50px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--card); }
-.coupon::before { top: -5px; } .coupon::after { bottom: -5px; }
-.coupon b { flex: none; width: 50px; padding: 12px 0; text-align: center; border-right: 1px dashed rgba(255, 75, 51, .35); }
-.coupon > span { flex: 1; min-width: 0; padding: 0 8px; font-size: 10px; color: var(--sub); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.me-entries { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.member-strip { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: linear-gradient(110deg, #2f2a1f, #4a3d22); color: #f7dc9a; }
+.member-strip > span { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.member-strip b { font-size: 13px; font-weight: 800; }
+.member-strip small { color: inherit; opacity: .7; font-size: 10px; }
+.me-entry { position: relative; display: flex; align-items: center; gap: 6px; padding: 9px 10px; border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 12px; font-weight: 700; }
+.me-entry i { font: 18px/1 var(--emoji); }
+.me-entry em { margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; display: grid; place-items: center; background: var(--red); color: #fff; font: 700 10px var(--num); }
+.frow[data-act] { cursor: pointer; }
+.frow[data-act] > b { text-align: right; font-weight: 400; font-size: 12px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 券：左边面额，右边说明，中间一道齿孔 ── */
+.coupon-list, .offers { display: flex; flex-direction: column; gap: 6px; }
+.coupon, .offer, .shop-coupon { position: relative; display: flex; align-items: center; min-height: 52px; border-radius: 8px; background: var(--red-soft); overflow: hidden; }
+.coupon::before, .coupon::after, .offer::before, .offer::after, .shop-coupon::before, .shop-coupon::after { content: ""; position: absolute; left: 64px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--card); }
+.coupon::before, .offer::before, .shop-coupon::before { top: -5px; } .coupon::after, .offer::after, .shop-coupon::after { bottom: -5px; }
+.coupon > b, .offer > b, .shop-coupon > b { flex: none; width: 64px; align-self: stretch; display: grid; place-items: center; border-right: 1px dashed rgba(255, 75, 51, .35); }
+.coupon > b > i, .offer > b > i { font-size: 12px; font-weight: 800; color: var(--red); }
+.coupon > span, .offer > span, .shop-coupon > span { flex: 1; min-width: 0; padding: 0 10px; display: flex; flex-direction: column; }
+.coupon em, .offer em, .shop-coupon em { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coupon small, .offer small, .shop-coupon small { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.offer .mini, .shop-coupon .mini { margin-right: 10px; }
+.offer .go { cursor: pointer; }
+.coupon.fee, .offer.fee { background: var(--ok-soft); }
+.coupon.fee > b, .offer.fee > b { border-right-color: rgba(31, 165, 111, .35); }
+.coupon.fee > b > i, .offer.fee > b > i { color: var(--ok); }
+.shop-coupon { margin-top: 8px; min-height: 44px; }
+.shop-coupon::before, .shop-coupon::after { background: var(--card); }
+.promo-hero { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 14px 26px; }
+.promo-hero > b { font-size: 18px; font-weight: 800; }
+.promo-hero small { color: inherit; opacity: .7; }
+.promo-hero .btn { min-height: 30px; margin-top: 8px; padding: 0 16px; background: #2b2b2d; color: #ffd426; font-size: 12px; }
+.promo-hero + .card { margin-top: -18px; position: relative; }
+
+/* ── 天天抽奖：八格转盘，指针朝上 ── */
+.wheel-box { position: relative; width: 210px; height: 210px; margin: 6px auto 4px; }
+.wheel { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 5px var(--y2), 0 0 0 7px var(--y-soft), 0 6px 16px rgba(0, 0, 0, .14);
+  background: conic-gradient(#fff3c4 0 45deg, #ffe08a 0 90deg, #fff3c4 0 135deg, #ffe08a 0 180deg, #fff3c4 0 225deg, #ffe08a 0 270deg, #fff3c4 0 315deg, #ffe08a 0 360deg); }
+.wheel.spinning { transition: transform 2.2s cubic-bezier(.15, .7, .2, 1); }
+.wheel span { position: absolute; left: 50%; top: 0; width: 44px; height: 50%; margin-left: -22px; transform-origin: 50% 100%; transform: rotate(calc(var(--i) * 45deg + 22.5deg)); display: flex; justify-content: center; padding-top: 14px; }
+.wheel span b { font-size: 12px; font-weight: 800; color: #7a4a00; white-space: nowrap; }
+.wheel-go { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; z-index: 2; border-radius: 50%; display: grid; place-items: center; text-align: center; background: linear-gradient(180deg, #ff6a4d, #ff3b22); color: #fff; font-size: 15px; font-weight: 800; line-height: 1.15; box-shadow: 0 0 0 4px #fff, 0 4px 10px rgba(255, 59, 34, .35); }
+.wheel-go:disabled { background: #c8c8cc; font-size: 11px; box-shadow: 0 0 0 4px #fff; }
+.wheel-pin { position: absolute; left: 50%; top: -10px; z-index: 3; margin-left: -8px; border: 8px solid transparent; border-top: 16px solid var(--red); filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .2)); }
+@media (prefers-color-scheme: dark) {
+  .wheel { background: conic-gradient(#4a3d18 0 45deg, #5c4a1a 0 90deg, #4a3d18 0 135deg, #5c4a1a 0 180deg, #4a3d18 0 225deg, #5c4a1a 0 270deg, #4a3d18 0 315deg, #5c4a1a 0 360deg); }
+  .wheel span b { color: #ffe3a0; }
+  .wheel-go, .wheel-go:disabled { box-shadow: 0 0 0 4px var(--card); }
+}
+
+/* ── 会员 ── */
+.member-hero { display: flex; align-items: center; gap: 10px; padding: 6px 14px 30px; }
+.member-hero .crown { font: 34px/1 var(--emoji); filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .18)); }
+.member-hero > span { display: flex; flex-direction: column; }
+.member-hero b { font-size: 18px; font-weight: 800; }
+.member-hero small { color: inherit; opacity: .7; }
+.member-card { position: relative; margin-top: -22px; background: linear-gradient(110deg, #2f2a1f, #4a3d22); color: #f7dc9a; }
+.member-card small { color: inherit; opacity: .7; }
+.perks { display: flex; flex-direction: column; gap: 10px; }
+.perks > div { display: grid; grid-template-columns: 30px 1fr; column-gap: 8px; align-items: center; }
+.perks i { grid-row: span 2; font: 22px/1 var(--emoji); text-align: center; }
+.perks b { font-size: 12px; }
+.perks small { font-size: 10px; }
+.plans { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.plan { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px; border-radius: 10px; background: var(--y-soft); box-shadow: inset 0 0 0 1px var(--y2); }
+.plan b { font-size: 12px; }
+.plan .price { font-size: 20px; }
+.plan small { font-size: 10px; }
+.tag.vip { background: #2f2a1f; color: #f7dc9a; }
+.tag.addr { background: var(--ok-soft); color: var(--ok); }
+.tag.bought { background: var(--y-soft); color: var(--quote); }
+
+/* ── 首页新加：五个入口、买过、AI 再找几家、店铺页的分享 / 配送自取切换、特价划线价 ── */
+.entries { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 8px; }
+.entry { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 0 6px; border-radius: 10px; background: var(--card); box-shadow: var(--shadow); font-size: 10px; color: var(--ink); }
+.entry i { font: 20px/1 var(--emoji); }
+.entry em { position: absolute; right: -2px; top: -5px; padding: 0 4px; border-radius: 7px 7px 7px 0; background: var(--red); color: #fff; font-size: 9px; line-height: 14px; white-space: nowrap; }
+.entry.on { background: var(--y-soft); box-shadow: inset 0 0 0 1px var(--y2); font-weight: 800; }
+.more-shops { width: 100%; display: flex; align-items: center; justify-content: center; gap: 4px; height: 36px; margin-bottom: 8px; border-radius: 12px; background: var(--ai-soft); color: var(--ai); font-size: 12px; font-weight: 700; }
+.pricebox { display: inline-flex; align-items: baseline; gap: 3px; }
+.pricebox s { font-size: 10px; color: var(--mute); }
+.head-btns { margin-left: auto; display: flex; gap: 6px; }
+.head-btns .like-btn { margin-left: 0; }
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+.modes button { display: flex; flex-direction: column; align-items: center; padding: 5px 4px; border-radius: 8px; background: var(--soft); color: var(--sub); line-height: 1.3; font-size: 12px; }
+.modes button b { font-size: 12px; }
+.modes button small { font-size: 10px; color: inherit; }
+.modes button.on { background: var(--y-soft); color: var(--ink); box-shadow: inset 0 0 0 1px var(--y2); }
+.modes.slim { margin: 10px 0 2px; }
+.modes.slim button { min-height: 28px; justify-content: center; font-weight: 700; }
+.ava.grp { background: var(--ok); color: #fff; }
+.addr-row { padding: 0 !important; }
+.addr-use { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 9px 4px; text-align: left; }
+.addr-use > span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr-use .tag { margin-left: 0; }
+.addr-del { flex: none; width: 26px; height: 26px; border-radius: 50%; color: var(--mute); font-size: 16px; line-height: 1; text-align: center; }
+.addr-new { margin-top: 10px; }
+.addr-new .seg { margin-bottom: 8px; }
+.cart-foot { display: flex; }
+.cart-foot .link { flex: 1; display: flex; align-items: center; justify-content: center; gap: 3px; }
+
+/* ── 结算新加：地址簿快捷、顺手带一件、开会员省运费 ── */
+.addr-chips { display: flex; gap: 6px; padding: 8px 0 2px; overflow-x: auto; scrollbar-width: none; }
+.addr-chips::-webkit-scrollbar { display: none; }
+.addr-chips button { flex: none; display: flex; align-items: center; gap: 4px; max-width: 70%; height: 24px; padding: 0 8px 0 3px; border-radius: 12px; background: var(--soft); font-size: 11px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr-chips i { padding: 0 4px; border-radius: 9px; background: var(--card); font-size: 10px; line-height: 16px; }
+.addr-chips .on { background: var(--y-soft); color: var(--ink); box-shadow: inset 0 0 0 1px var(--y2); }
+.addons { margin: 8px -12px 0; padding: 8px 12px 0; border-top: 1px solid var(--line); }
+.addons > small { display: block; margin-bottom: 6px; font-weight: 700; color: var(--ink); }
+.addons > div { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.addons > div::-webkit-scrollbar { display: none; }
+.addon { position: relative; flex: none; width: 76px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; border-radius: 8px; background: var(--soft); }
+.addon > span { max-width: 100%; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addon .plus-dot { position: absolute; right: 4px; top: 4px; width: 16px; height: 16px; font-size: 13px; }
+.upsell { width: 100%; display: flex; align-items: center; gap: 5px; margin-top: 6px; padding: 7px 9px; border-radius: 8px; background: #2f2a1f; color: #f7dc9a; font-size: 11px; }
+.upsell > span { flex: 1; min-width: 0; }
+.card.after .upsell { background: var(--soft); color: var(--ink); }
+.card.after .upsell svg { color: var(--orange); }
+.line b s { color: var(--mute); font-weight: 400; margin-right: 3px; }
+.line .tag { vertical-align: 0; }
+
+/* ── 分享给 TA ── */
+.share-card { display: flex; align-items: center; gap: 9px; padding: 9px; margin-bottom: 10px; border-radius: 10px; background: var(--soft); }
+.share-card > span:not(.cv) { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.share-card b { font-size: 13px; }
+.share-card small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-to { display: flex; gap: 10px; margin: 0 -14px 10px; padding: 0 14px; overflow-x: auto; scrollbar-width: none; }
+.share-to::-webkit-scrollbar { display: none; }
+.share-to button { flex: none; width: 52px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10px; color: var(--sub); }
+.share-to button > span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-to .ava { width: 40px; height: 40px; box-shadow: 0 0 0 2px transparent; }
+.share-to .on { color: var(--ink); font-weight: 800; }
+.share-to .on .ava { box-shadow: 0 0 0 2px var(--y2); }
+.sheet .sw-row { margin-bottom: 10px; border-bottom: 0; }
+
+/* ── 跑腿帮买 ── */
+.errand-head { display: flex; flex-direction: column; gap: 2px; background: linear-gradient(120deg, #e6f6ee, #d3efe0); box-shadow: none; }
+.errand-head b { font-size: 14px; }
+@media (prefers-color-scheme: dark) { .errand-head { background: linear-gradient(120deg, #173225, #1d3a2b); } }
+.errand-stores { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.errand-stores button { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0; border-radius: 8px; background: var(--soft); font-size: 11px; color: var(--sub); }
+.errand-stores i { font: 20px/1 var(--emoji); }
+.errand-stores small { font-size: 9px; }
+.errand-stores .on { background: var(--y-soft); color: var(--ink); font-weight: 800; box-shadow: inset 0 0 0 1px var(--y2); }
+.errand-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.errand-item > input { flex: 1; min-width: 0; height: 32px; padding: 0 9px; border: 0; outline: 0; border-radius: 6px; background: var(--soft); font-size: 12px; }
+.yuan-in { flex: none; display: flex; align-items: center; gap: 2px; width: 72px; height: 32px; padding: 0 7px; border-radius: 6px; background: var(--soft); color: var(--sub); font-size: 11px; }
+.yuan-in input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; font: 600 12px var(--num); text-align: right; }
+.add-row { width: 100%; margin-top: 6px; height: 30px; border-radius: 6px; border: 1px dashed var(--mute); color: var(--sub); font-size: 12px; text-align: center; }
+#app[data-view="errand"] .main { padding-bottom: 84px; }
+
+/* ── 订单新加：管理、自取码、给骑手捎话、打赏、群里怎么说、售后 ── */
+.stabs .manage-btn { margin-left: auto; font-size: 12px; color: var(--sub); }
+.chk { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; box-shadow: inset 0 0 0 1.2px var(--mute); color: transparent; }
+.chk.on { background: var(--y1); box-shadow: none; color: var(--on-y); }
+.order.locked { opacity: .5; }
+.orders.managing { padding-bottom: 60px; }
+.manage-bar { position: absolute; z-index: 6; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px calc(8px + var(--safe-b)) 14px; background: var(--card); box-shadow: 0 -1px 0 var(--line); }
+.manage-bar small { flex: 1; font-size: 10px; }
+.pick-all { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.btn.sm { min-height: 32px; padding: 0 16px; font-size: 12px; }
+.btn.sm.danger:not(:disabled) { background: var(--red); color: #fff; }
+.code-sm { font: 800 12px var(--num); color: var(--ink); letter-spacing: .04em; }
+.status.pickup { padding-top: 14px; }
+.code-box { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 10px 0 12px; border-radius: 10px; background: var(--y-soft); }
+.code-box b { font: 800 34px/1.1 var(--num); letter-spacing: .08em; }
+.code-box span { font-size: 11px; color: var(--sub); }
+.rider-notes { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 8px; }
+.rider-notes small { width: 100%; font-size: 10px; }
+.rider-notes button { height: 22px; padding: 0 8px; border-radius: 11px; background: var(--soft); font-size: 11px; }
+.rider-notes button:disabled { background: var(--y-soft); color: var(--sub); }
+.rider-card .rider-row { padding-top: 0; border-top: 0; gap: 6px; }
+.rider-card .rider-row > i .ava { width: 32px; height: 32px; }
+.rider-row > i .ava.sm { width: 32px; height: 32px; }
+.tips { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.tips small { margin-right: auto; }
+.tips button { height: 26px; padding: 0 12px; border-radius: 13px; background: var(--orange-soft); color: var(--orange); font: 700 12px var(--num); }
+.feed li.me { color: var(--quote); }
+.talk { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.talk > div { display: flex; align-items: flex-start; gap: 7px; }
+.talk > div > span { padding: 5px 9px; border-radius: 3px 10px 10px 10px; background: var(--soft); font-size: 12px; }
+.talk b { display: block; font-size: 10px; color: var(--sub); font-weight: 600; }
+.group-talk .hint { margin: 0 0 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+.chips button { height: 24px; padding: 0 10px; border-radius: 12px; background: var(--soft); font-size: 11px; }
+.chips .on { background: var(--y-soft); box-shadow: inset 0 0 0 1px var(--y2); font-weight: 700; }
+.m-rider .ava { width: 28px; height: 28px; box-shadow: 0 0 0 2px var(--y1), 0 4px 10px rgba(0, 0, 0, .28); animation: bob .5s ease-in-out infinite alternate; }
 
 /* ── 抽屉、忙碌、提示 ── */
 .scrim { position: absolute; inset: 0; z-index: 20; background: rgba(0, 0, 0, .45); opacity: 0; pointer-events: none; transition: opacity .2s; }
-.sheet { position: absolute; z-index: 21; left: 0; right: 0; bottom: 0; max-height: 78%; overflow-y: auto; padding: 8px 14px calc(14px + var(--safe-b)); border-radius: 16px 16px 0 0; background: var(--card); transform: translateY(105%); transition: transform .24s cubic-bezier(.2, .8, .2, 1); }
+.sheet { position: absolute; z-index: 21; left: 0; right: 0; bottom: 0; max-height: 78%; overflow-y: auto; overscroll-behavior: contain; padding: 8px 14px calc(14px + var(--safe-b)); border-radius: 16px 16px 0 0; background: var(--card); transform: translateY(105%); transition: transform .24s cubic-bezier(.2, .8, .2, 1); }
 .sheet::before { content: ""; display: block; width: 32px; height: 4px; margin: 0 auto 8px; border-radius: 2px; background: var(--line); }
 .sheet-open .scrim { opacity: 1; pointer-events: auto; }
 .sheet-open .sheet { transform: none; }

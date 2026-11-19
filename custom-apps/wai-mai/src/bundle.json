@@ -5,9 +5,12 @@
   "data/storage.js",
   "gen/ai.js",
   "chat/link.js",
+  "chat/share.js",
   "ui/art.js",
   "ui/home.js",
+  "ui/promo.js",
   "ui/checkout.js",
+  "ui/errand.js",
   "ui/orders.js",
   "ui/me.js",
   "bootstrap.js"

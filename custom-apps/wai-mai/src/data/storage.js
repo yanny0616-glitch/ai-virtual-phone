@@ -12,6 +12,12 @@ const DEFAULT_SETTINGS = {
   hiddenSeeds: [],          // 隐藏的内置店 id
   likedShops: [],           // 收藏的店 id
   claimDay: "",             // 上次领每日红包的日期（YYYY-MM-DD）
+  addresses: [],            // 我的收货地址簿 [{ id, tag, text }]；userAddress 是当前默认那条的文字
+  claimed: { day: "", ids: [] },   // 领券中心今天领过哪些
+  lotteryDay: "",           // 上次抽奖的日期
+  member: { until: 0, saved: 0, month: "", monthSaved: 0, granted: "" },  // 会员到期时刻、累计省下、本月省下（记在哪个月）、会员红包发到哪个月
+  riderChar: "",            // 让哪位角色来当骑手；空 = 平台骑手
+  groups: [],               // 见过的群聊 [{ sessionId, name, participants: [{ id, name }] }]，从群聊「+」进来时记下
 };
 
 async function listAll(collection) {
@@ -36,6 +42,12 @@ async function loadAll() {
   if (!state.settings.charAddress || typeof state.settings.charAddress !== "object") state.settings.charAddress = {};
   if (!Array.isArray(state.settings.hiddenSeeds)) state.settings.hiddenSeeds = [];
   if (!Array.isArray(state.settings.likedShops)) state.settings.likedShops = [];
+  if (!Array.isArray(state.settings.addresses)) state.settings.addresses = [];
+  if (!Array.isArray(state.settings.groups)) state.settings.groups = [];
+  if (!state.settings.claimed || typeof state.settings.claimed !== "object") state.settings.claimed = { day: "", ids: [] };
+  state.settings.member = { ...DEFAULT_SETTINGS.member, ...(state.settings.member || {}) };
+  // 老版本只有一条 userAddress：搬进地址簿
+  if (!state.settings.addresses.length && state.settings.userAddress) state.settings.addresses = [{ id: "addr_home", tag: "家", text: state.settings.userAddress }];
   state.aiShops = shops.map(s => ({ ...normalizeShop(s, s.source || "ai"), id: s.id })).filter(s => s.name && s.dishes.length);
   state.orders = orders.filter(o => o && o.id).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   state.coupons = coupons.filter(c => c && c.id);
@@ -90,18 +102,32 @@ async function deleteOrder(order) {
 }
 function orderById(id) { return state.orders.find(o => o.id === id) || null; }
 
-async function addCoupon(amount, reason) {
-  const data = { amount: Math.round(amount * 10) / 10, reason, used: false, createdAt: Date.now() };
+// ── 红包和券 ──
+// kind: "cash" 抵现金（min 是满多少可用，0 = 无门槛；shopId 非空 = 只能在这家店用）/ "fee" 运费券（免这一单的配送费）
+// expireAt 为 0 表示不过期（退款、补偿发的都不过期）
+async function addCoupon(amount, reason, extra) {
+  const data = { amount: Math.round((Number(amount) || 0) * 10) / 10, reason, used: false, createdAt: Date.now(), kind: "cash", min: 0, shopId: "", expireAt: 0, ...(extra || {}) };
   const row = await api.db.create("coupons", data);
   const coupon = { ...data, id: row.id };
   state.coupons.push(coupon);
   return coupon;
 }
-function usableCoupons() { return state.coupons.filter(c => !c.used).sort((a, b) => b.amount - a.amount); }
+const couponKind = c => c.kind === "fee" ? "fee" : "cash";
+const couponLive = (c, now) => !c.used && (!c.expireAt || c.expireAt > (now || Date.now()));
+/** 能用的红包（抵现金的）。给了 ctx 就只留这一单能用的：满额够了、店对得上 */
+function usableCoupons(ctx) {
+  const now = Date.now();
+  return state.coupons.filter(c => couponLive(c, now) && couponKind(c) === "cash"
+    && (!ctx || ((Number(c.min) || 0) <= ctx.subtotal && (!c.shopId || c.shopId === ctx.shopId))))
+    .sort((a, b) => b.amount - a.amount);
+}
+function feeCoupons() { const now = Date.now(); return state.coupons.filter(c => couponLive(c, now) && couponKind(c) === "fee").sort((a, b) => (a.expireAt || 9e15) - (b.expireAt || 9e15)); }
 async function useCoupon(coupon, orderId) {
   coupon.used = true; coupon.usedOrderId = orderId;
   await api.db.update("coupons", coupon.id, { used: true, usedOrderId: orderId });
 }
+/** 会员：到期时刻在未来就算 */
+const isMember = now => Number(state.settings.member.until) > (now || Date.now());
 
 /** 某个人最近常点的菜（从订单里数），给聊天上下文和「猜你想吃」用 */
 function favorites(recipient, limit = 4) {

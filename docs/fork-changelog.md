@@ -1629,3 +1629,27 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 聊天联动：指令 `wm-order`（角色给你点）、`wm-pay`（回应代付）、「+」面板 `wm-gift`；`chat.message.created` 后台事件建单；送达走 `tasks.schedule`（`wm_arrive_<订单 id>`）；`chat.setContext` + `registerContextProvider` 让角色知道外卖进度。
 - 验证：`waimai:check`、`check-wai-mai-domain.mjs`、`check-wai-mai-browser.mjs`（无头 Chromium + 假 SDK，390px 宽，截图在 `float/docs-draft/wai-mai-0.1.0-shots/`）、`apps:build-dist`、`check:apps-dist`、`check:sdk` 通过。zip 存到 `float/releases/wai-mai/wai-mai-0.1.0.zip`。
 - 没验证的：没有在真机和真实宿主里装过；没调过真实模型；聊天界面里送达那条历史记录的样子没看过。月售、距离、好评度是哈希出来的装饰数字。
+
+## 2026-11-19：外卖 0.1.1 关掉滚动容器的 iOS 回弹
+
+用户在 iPhone 上发现：首页明明在顶部，还能往下拽，标题栏和头图之间露出一截深色空白；并指出其他自定义 APP 也这样。
+
+- 原因：`components/app-market/custom-app-runner.tsx` 注入的样式只给 `html, body` 设了 `overscroll-behavior: none`，APP 自己的滚动容器不受影响，iOS 上照样弹。外卖的标题栏和头图有颜色，所以那截空白特别显眼。
+- `custom-apps/wai-mai/src/styles.css`：`.main` 加 `overscroll-behavior: none`，`.sheet` 加 `contain`；`.hero::before` 在头图上方垫一块同色（旧系统不认这个属性时兜底）。版本 0.1.1，zip 存到 `float/releases/wai-mai/wai-mai-0.1.1.zip`。
+- 其他 APP（挂念、小剧场、陪眠、用量）的滚动容器同样没设，这次没动。
+- 验证：`waimai:check`、浏览器主流程、`apps:build-dist`、`check:apps-dist` 通过。回弹只有 iOS 有，无头 Chromium 复现不了，没有在真机上确认。
+
+## 2026-11-19：外卖 0.2.0 补齐常见外卖功能和角色联动
+
+用户觉得 0.1 太简单、店太少，问能不能把外卖分享给别的角色；说「自己开店这里先不管，后面再弄，其他的可以补」。
+
+- 店：内置从 10 家加到 39 家（十个分类各 3–5 家），首页底部「让 AI 再找几家」。超市、水果鲜花、买药不收包装费，其余每单 1 元。
+- 点单：到店自取（不收配送费，再减一成最多 10 元，取餐码，「我已取餐」）；地址簿（家 / 公司 / 学校 / 其他，最多 12 条，旧的单条地址自动迁进来）；每家每天一道七折的今日特价；「买过的店」筛选和店铺卡上的「买过 N 次」；结算页「顺手带一件」。
+- 优惠：新增 `ui/promo.js`。领券中心每天 4 张平台券（含运费券）+ 6 家店的店铺券，券带门槛、限店、到期；天天抽奖八格转盘一天一次；会员月卡 / 季卡走 `wallet.pay`，配送免运费、跑腿减 3 元、每月 4 张红包、记录省了多少。
+- 角色：新增 `chat/share.js`。和 TA 拼单（你先付一半，指令 `wm-split` 回应）；请群聊（从群聊「+」进来一次就记住这个群，结算可每样按人数点）；把店铺 / 购物车 / 订单分享给 TA；「我的 → 谁来送」让角色当骑手。「+」面板入口改名「点外卖」。
+- 请群聊的限制：宿主的 `chat.sendCard` / `writeHistory` / `requestReply` 只认角色私聊，群聊引擎只读不分角色的那份 APP 上下文。所以群单写一份全局上下文（注明只在那个群里有效），群里每人的反应用 `ai.generate` 带群 `sessionId` 和新预设 `waimai-group` 生成，显示在订单页。宿主没改。
+- 订单：新增 `ui/errand.js` 跑腿帮买（五类店，按距离算跑腿费）；配送中给骑手捎话；送到后骑手好评差评、打赏 2 / 5 / 10 元；售后四种原因（少送、洒了、送错、太慢），累计退款不超过实付；「退款/售后」标签；「管理」批量删除已完成订单。`domain/delivery.js` 的时间线和计价加了自取、跑腿、包装费、免运费、自取立减。
+- 顺带修正：上一单选的「找 TA 代付」会留到下一单，现在每单下完都回到钱包付款。
+- 验证：`waimai:build`、`check-wai-mai-domain.mjs`、`check-wai-mai-browser.mjs`（新增 8 段流程，今日特价随日期变，金额改用页面计价算）、`waimai:check`、`apps:build-dist`、`check:apps-dist`、`check:sdk`。截图在 `float/docs-draft/wai-mai-0.2.0-shots/`。zip 存到 `float/releases/wai-mai/wai-mai-0.2.0.zip`。
+- 没验证的：没有在真机和真实宿主里装过；群聊「+」面板带进来的 `participants` 字段按宿主源码写的，没在真实群里点过；没调过真实模型（群里每人一句的解析只用假数据测过）。
+

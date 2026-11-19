@@ -87,11 +87,33 @@ assert.ok(d.urge(order, T0 + 1000).timeline.some(e => e.text.includes("商家说
 
 // 计价
 const shop = { fee: 2.5, minOrder: 12, off: [30, 4] };
-assert.deepEqual({ ...d.priceOrder(items, shop, 0) }, { subtotal: 30, fee: 2.5, off: 4, coupon: 0, total: 28.5, short: 0 });
+assert.deepEqual({ ...d.priceOrder(items, shop, 0) }, { subtotal: 30, pack: 0, fee: 2.5, feeOff: 0, off: 4, pickupOff: 0, coupon: 0, total: 28.5, short: 0 });
+// 包装费、免运费、自取
+const packed = { ...shop, pack: 1 };
+assert.equal(d.priceOrder(items, packed, 0).total, 29.5, "包装费一单 1 元");
+assert.equal(d.priceOrder(items, packed, { freeFee: true }).total, 27, "会员或运费券免配送费");
+const pick = d.priceOrder(items, packed, { pickup: true, freeFee: true });
+assert.deepEqual([pick.fee, pick.feeOff, pick.pickupOff, pick.total, pick.short], [0, 0, 3, 24, 0], "自取不收配送费、立减一成、没有起送价");
+assert.equal(d.priceOrder([{ name: "卤蛋", price: 3, qty: 1 }], shop, { pickup: true }).short, 0);
+assert.equal(d.priceOrder([{ name: "大单", price: 200, qty: 1 }], shop, { pickup: true }).pickupOff, 10, "自取立减最多 10 元");
+assert.equal(d.priceOrder(items, packed, { coupon: 5 }).coupon, 5, "对象写法的红包");
 assert.equal(d.priceOrder(items, shop, 100).total, 0, "红包不会让合计变成负数");
 assert.equal(d.priceOrder(items, shop, 100).coupon, 28.5);
 assert.equal(d.priceOrder([{ name: "卤蛋", price: 3, qty: 1 }], shop, 0).short, 9);
 assert.equal(d.priceOrder([{ name: "卤蛋", price: 3, qty: 1 }], shop, 0).off, 0);
+
+// 到店自取：没有骑手，餐好即「送达」，比配送快
+const pk = d.buildTimeline({ ...base, seed: "pk1", mode: "pickup", code: "A123", incidents: true });
+assert.equal(pk.rider, ""); assert.equal(pk.issue, null);
+assert.ok(pk.timeline.every(e => !["picked", "riding", "near"].includes(e.key)), "自取没有取餐配送这几步");
+assert.match(pk.timeline.at(-1).text, /取餐码 A123/);
+assert.ok(pk.deliverAt - T0 < a.deliverAt - T0, "自取比配送快");
+// 跑腿：骑手先去买；指定骑手名字
+const er = d.buildTimeline({ ...base, seed: "er1", mode: "errand", storeName: "邻家超市", riderName: "沈烬言" });
+assert.equal(er.rider, "沈烬言");
+assert.ok(er.timeline.some(e => e.text.includes("到邻家超市了")));
+assert.ok(!er.timeline.some(e => e.text.includes("商家")), "跑腿的动态里没有商家");
+assert.equal(d.buildTimeline({ ...base, riderName: "宁妍" }).rider, "宁妍");
 
 assert.equal(d.remainText(0), "已送达");
 assert.equal(d.remainText(30000), "约 30 秒后送达");
