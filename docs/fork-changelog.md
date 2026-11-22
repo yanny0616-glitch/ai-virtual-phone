@@ -1662,3 +1662,17 @@ APP/网关传独立 tzOffsetMin；两个 worker 严格校验偏移，从有效�
 - 把 39 家店每道菜推出来的规格逐个列出来核对过。
 - 验证：`waimai:build`、`waimai:check`、浏览器主流程、`apps:build-dist`、`check:apps-dist`。zip 存到 `float/releases/wai-mai/wai-mai-0.2.1.zip`。
 
+
+## 2026-11-22：聊天手感（插话、节奏三档、接住节奏、撤回 / 贴表情、格式自愈）
+
+用户看完小手机和糯叽叽的对比报告，让做第一档里的第 1、3、4、6、7 项。思路参考糯叽叽的功能，代码、提示词、界面都是自己写的。
+
+- 插话：`handleSendText` / `sendRichMessage` 去掉生成中的拦截；输入栏有字时发送键照常发送，空着才是停止键，「发送并回复」在生成中有字时也显示，点了就等本轮说完自动再回一次（`replyAfterRunRef`，停止生成会清掉）。插话消息带 `sentDuringReply`，`llm-prompt-assembler` 两处历史拼装都补一句旁注。消息逐条落库、界面用 `prev` 追加，生成写回不会盖掉插话。
+- 节奏：`rich-message-parser` 剥掉段首的 `[快]` / `[慢]`，挂到 `part.tempo`；三条前台路径和 `follow-up-service` 都把 `tempo` 交给 `message.beforeReveal`。payload 加可选的 `pauseMs` / `stallAtMs` / `stallMs`。前台 `paceBubbleReveal` 按拆分执行，用 `typingHold` 在沉默和停顿时藏起「对方正在输入」；`document.hidden` 时不再等。`typing-rhythm` 升 2.0.0：普通档总时长和 1.x 一样（只是先空两成时间），快档约 0.55 倍、不停顿，慢档先沉默约 1.6 秒、打字 1.3 倍、55% 概率打到一半停约 1.5 秒；字数按中日韩 1、emoji 0.8、字母数字 0.3 折算；新开关「按语气分快慢」「犹豫时打到一半停一下」。
+- 接住节奏：内置预设补丁号 3 → 4，新条目 `chat_rhythm`（标签 chat + text），改过内置预设的用户也能补到，不会被打回出厂。
+- 撤回 / 贴表情 / 引用：新文件 `lib/chat-reply-actions.ts`（指令提取、按原话反查目标，纯函数）。`ChatMessage` 加 `reactions` / `retractedByBatchId`；`updateChatMessage` 允许改这几个字段。单聊 `splitAndSaveAIMessages` 在气泡放完后执行，只贴表情不说话的一轮也执行；`handleRetry` 新回复落盘后用 `revertRoundReactions` 还原被 Roll 掉那几轮的表情和撤回。气泡下沿的表情徽章 `.chat-msg-reactions`；`QuoteBubble` 对准了目标时标「谁：」、点击滚过去闪一下。群聊和后台主动消息里的这两个指令目前直接丢弃。
+- 格式自愈：新文件 `lib/reply-format-repair.ts`，`stripFormatMetaTalk` 在切气泡前跑，`rejoinBrokenLines` 在每个文字气泡上跑（含 HTML 占位的跳过）。
+- 流式预览藏掉 `[快]` `[慢]` `[撤回:…]` `[回应:…]`（含未闭合）。
+- 顺带修了 `scripts/check-typing-rhythm-delivery.mjs`：后台回复早先加了 `takeChatDirectives`，脚本没模拟它，改动前就跑不通。
+- 验证：新增 `scripts/check-chat-reply-touch.mjs`（格式自愈 13 例、动作提取与反查、三档时长与停顿、宿主执行顺序），并入 `check:reply-delivery`；`check-typing-rhythm-delivery.mjs` 全过（普通档时长不变）；改动文件的 eslint 与改动前对比没有新增问题；`plugins:build-dist`。
+- 没验证的：没调过真实模型，模型会不会按说明用 `[快]` / `[慢]` / `[撤回]` / `[回应]`、用得多不多，要上线后看。云端推送横幅的分条（`supabase/functions/push-generate`）没改，横幅里可能露出 `[快]`、`[回应:…]`；改它要动云函数和部署包代号，用户还得重新部署，这次没做。

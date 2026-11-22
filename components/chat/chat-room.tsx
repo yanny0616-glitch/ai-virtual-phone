@@ -103,6 +103,7 @@ import {
     rollChatDiceFace,
 } from "@/lib/chat-screen-effects";
 import { abortableDelay, throwIfAborted } from "@/lib/abort-utils";
+import { addReaction, findQuoteTarget, findReactionTarget, findRecallTarget, type ReplyRoundAction } from "@/lib/chat-reply-actions";
 import { GROUP_SELF_KEY, canGroupAdminAct, applyGroupAdminAction, buildGroupAdminNoticeText, getGroupMemberDisplayName, getGroupMuteRemainingMs, getGroupRole, isGroupMuted, formatMuteRemainingLabel, resolveGroupMemberKeyByName, type GroupAdminAction } from "@/lib/group-admin";
 import { extractTextToolDirectiveText } from "@/lib/text-tool-protocol";
 import { emitChatPluginEvent, getChatPluginHookBus, runChatPluginTransform } from "@/lib/chat-plugin-hooks";
@@ -738,11 +739,12 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 
     const handleSubmit = () => {
         if (inputLocked) return;
-        if (isGenerating) {
+        const trimmed = inputText.trim();
+        // 回复途中：输入框有字就是插话照发，空着才是「停止本轮生成」
+        if (isGenerating && !trimmed) {
             onStopGeneration();
             return;
         }
-        const trimmed = inputText.trim();
         if (!trimmed) return;
         if (!onSendText(trimmed)) return;
         setInputText("");
@@ -751,6 +753,9 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     };
 
     const panelOpen = showEmojiPanel || showStickerPanel || showPlusMenu;
+    const hasInputText = inputText.trim().length > 0;
+    // 生成中且输入框空着：发送键变成停止键；有字时仍是发送（插话）
+    const showStopButton = isGenerating && !hasInputText;
     const suggestCharacterIds = useMemo(
         () => (isGroup ? (stickerCharacterIds || []) : characterId ? [characterId] : []),
         [isGroup, stickerCharacterIds, characterId],
@@ -915,10 +920,10 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     disabled={!isGenerating && (inputLocked || !inputText.trim())}
                     style={inputLocked && !isGenerating ? { opacity: 0.35 } : undefined}
                     className="ui-bare-btn text-[var(--c-text)]"
-                    aria-label={isGenerating ? "停止本轮生成" : "发送"}
-                    title={isGenerating ? "停止本轮生成" : "发送"}
+                    aria-label={showStopButton ? "停止本轮生成" : isGenerating ? "插话发送（不打断对方）" : "发送"}
+                    title={showStopButton ? "停止本轮生成" : isGenerating ? "插话发送（不打断对方）" : "发送"}
                 >
-                    {isGenerating ? (
+                    {showStopButton ? (
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="10" />
                             <rect x="9" y="9" width="6" height="6" rx="1" />
@@ -927,10 +932,10 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
                     )}
                 </button>
-                {!isGenerating && (
+                {(!isGenerating || (!inputLocked && hasInputText)) && (
                     <button
                         className="ui-bare-btn text-[var(--c-text)]"
-                        title={!inputLocked && inputText.trim() ? "发送输入框内容并触发回复" : "触发 AI 主动回复"}
+                        title={isGenerating ? "插话，等对方这轮说完再接着回" : !inputLocked && inputText.trim() ? "发送输入框内容并触发回复" : "触发 AI 主动回复"}
                         onClick={() => {
                             const trimmed = inputText.trim();
                             // 输入框已有文字：发送输入框内容并立即触发模型回复（一次按键完成），
@@ -986,7 +991,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                 <EmojiPanel
                     onSelect={(emoji) => appendText(emoji, { focus: false })}
                     onEffectSend={(text) => {
-                        if (inputLocked || isGenerating) return;
+                        if (inputLocked) return;
                         onSendText(text);
                         onClosePanels();
                     }}
@@ -1178,6 +1183,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         [storedCharacter, session.chatAvatar],
     );
     const [isGenerating, setIsGenerating] = useState(false);
+    // 气泡节奏里的「沉默 / 打到一半停下」：生成仍在进行，但「对方正在输入」暂时藏起来
+    const [typingHold, setTypingHold] = useState(false);
+    // 回复途中插话时点了「发送并回复」：这轮说完后自动再回一次（停止生成会取消）
+    const replyAfterRunRef = useRef(false);
     const [offlineMode, setOfflineMode] = useState(false);
     const [theaterMode, setTheaterMode] = useState(() => kvGet(CHAT_THEATER_MODE_PREFIX + session.id) === "1");
     const [offlineTurns, setOfflineTurns] = useState<ChatOfflineTurn[]>([]);
@@ -2555,7 +2564,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // 每条气泡放出前过一遍插件 transform（message.beforeReveal）：插件可改等待时长或取消这条。
     // 宿主默认节奏：第一条 0、其余 800ms；流式预览已展示过则全部 0。
     const paceBubbleReveal = async (
-        bubble: { responseBatchId: string; index: number; total: number; content: string; mediaType?: string; characterId?: string },
+        bubble: { responseBatchId: string; index: number; total: number; content: string; mediaType?: string; characterId?: string; tempo?: "fast" | "slow" },
         streamed: boolean,
         signal?: AbortSignal,
     ): Promise<{ cancelled: boolean }> => {
@@ -2570,13 +2579,37 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             total: bubble.total,
             content: bubble.content,
             mediaType: bubble.mediaType,
+            tempo: bubble.tempo,
             streamed,
             delayMs: defaultDelay,
             cancelled: false,
         });
         if (payload.cancelled) return { cancelled: true };
         const delay = Number.isFinite(payload.delayMs) ? Math.max(0, Math.min(payload.delayMs, 120_000)) : defaultDelay;
-        if (delay > 0) await abortableDelay(delay, signal);
+        if (delay <= 0) return { cancelled: false };
+        // 页面切到后台（锁屏、切走 App）时剩下的气泡立刻放出：后台计时器会被系统冻结，
+        // 不放的话要等回到前台才一口气补出来
+        const pageHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+        const wait = async (ms: number) => { if (ms > 0 && !pageHidden()) await abortableDelay(ms, signal); };
+        const ms = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, v) : 0);
+        const pause = ms(payload.pauseMs);
+        const stall = ms(payload.stallMs);
+        const stallAt = stall > 0 ? ms(payload.stallAtMs) : 0;
+        if (pause + stallAt + stall > delay) {
+            await wait(delay);
+            return { cancelled: false };
+        }
+        // 沉默（不显示正在输入）→ 打字 → 可能停一下（输入态消失）→ 打完
+        try {
+            if (pause > 0) { setTypingHold(true); await wait(pause); setTypingHold(false); }
+            if (stall > 0) {
+                await wait(stallAt);
+                setTypingHold(true); await wait(stall); setTypingHold(false);
+            }
+            await wait(delay - pause - stallAt - stall);
+        } finally {
+            setTypingHold(false);
+        }
         return { cancelled: false };
     };
 
@@ -2685,7 +2718,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 if (part.mediaType === "group_admin_notice") {
                     const applied = applyAIGroupAdminAction(r.characterId, part.mediaData);
                     if (!applied) continue; // 无权限/名字不合法：整个标签静默丢弃
-                    const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: applied.content, mediaType: part.mediaType, characterId: r.characterId }, !!revealOptions?.instantReveal, guard?.signal);
+                    const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: applied.content, mediaType: part.mediaType, characterId: r.characterId, tempo: part.tempo }, !!revealOptions?.instantReveal, guard?.signal);
                     throwIfGenerationStopped(guard);
                     if (reveal.cancelled) continue;
                     // 带上段落自己的 batch 元数据（与拍一拍同款）：
@@ -2711,7 +2744,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 if (part.mediaType === "poke") {
                     const pokeSender = (part.mediaData?.pokeSender === "我" ? r.characterName : part.mediaData?.pokeSender) || r.characterName;
                     const pokeTarget = part.mediaData?.pokeTarget || "某人";
-                    const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: `${pokeSender} 拍了拍 ${pokeTarget}`, mediaType: part.mediaType, characterId: r.characterId }, !!revealOptions?.instantReveal, guard?.signal);
+                    const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: `${pokeSender} 拍了拍 ${pokeTarget}`, mediaType: part.mediaType, characterId: r.characterId, tempo: part.tempo }, !!revealOptions?.instantReveal, guard?.signal);
                     throwIfGenerationStopped(guard);
                     if (reveal.cancelled) continue;
                     const msg = pushChatMessage({
@@ -2737,7 +2770,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     });
                     continue;
                 }
-                const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: part.content, mediaType: part.mediaType, characterId: r.characterId }, !!revealOptions?.instantReveal, guard?.signal);
+                const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: revealTotal, content: part.content, mediaType: part.mediaType, characterId: r.characterId, tempo: part.tempo }, !!revealOptions?.instantReveal, guard?.signal);
                 throwIfGenerationStopped(guard);
                 if (reveal.cancelled) continue;
                 const attachHere = !attachedState && canCarryFoldedPanel(part);
@@ -2873,6 +2906,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     };
 
     const clearStuckGeneration = () => {
+        replyAfterRunRef.current = false;
         const cancelledRun = cancelGenerationRun(session.id);
         cancelBackgroundGeneration(session.id);
         cancelBailoutKey(`reply:${session.id}`);
@@ -3001,6 +3035,63 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // Helper: Split AI response by \n\n into multiple messages (online chat mode)
     // Uses shared parseAIResponse for rich-media support.
     // Returns { hasVisible, stateValues, hasDecline } — hasVisible is false if the AI chose [静默].
+    // 角色 [引用:原文] 对准具体那一条：找到就记下 id 和是谁说的，预览换成那条的原文；找不到保持原样
+    const resolveQuoteMediaData = (data: ChatMessage["mediaData"]): ChatMessage["mediaData"] => {
+        const preview = data?.quotePreview || "";
+        if (!preview || data?.quoteMessageId) return data;
+        const target = findQuoteTarget(loadChatMessages(session.id), preview);
+        if (!target) return data;
+        const original = (target.content || target.mediaData?.label || preview).replace(/\s+/g, " ").trim();
+        return { ...data, quoteMessageId: target.id, quoteRole: target.role, quotePreview: original.slice(0, 50) || preview };
+    };
+
+    // 本轮气泡放完后执行撤回 / 表情回应。单聊才有；群聊的回复暂不支持，指令静默丢弃。
+    const applyReplyRoundActions = async (
+        actions: ReplyRoundAction[] | undefined,
+        responseBatchId: string,
+        guard?: GenerationRunGuard,
+    ) => {
+        if (!actions?.length || session.isGroup) return;
+        const replace = (next: ChatMessage | null) => {
+            if (next) setMessages(prev => prev.map(m => (m.id === next.id ? next : m)));
+        };
+        for (const action of actions) {
+            if (action.kind !== "react") continue;
+            const target = findReactionTarget(loadChatMessages(session.id), action.target);
+            if (!target) continue;
+            const reactions = addReaction(target.reactions, action.emoji, responseBatchId);
+            if (reactions) replace(updateChatMessage(target.id, { reactions }));
+        }
+        const recall = actions.find((a): a is Extract<ReplyRoundAction, { kind: "recall" }> => a.kind === "recall");
+        if (!recall) return;
+        // 像真人手滑：气泡出完隔一两秒再撤；页面在后台就不等
+        if (typeof document === "undefined" || document.visibilityState !== "hidden") {
+            setTypingHold(true);
+            try {
+                await abortableDelay(1200 + Math.random() * 1300, guard?.signal);
+            } finally {
+                setTypingHold(false);
+            }
+        }
+        throwIfGenerationStopped(guard);
+        const target = findRecallTarget(loadChatMessages(session.id), recall.text);
+        if (target) {
+            replace(updateChatMessage(target.id, { isRetracted: true, retractedByBatchId: responseBatchId }));
+            return;
+        }
+        if (!recall.text) return;
+        // 找不到要撤的那条：当成「发了又马上撤回」，原话留在记录里（模型下一轮看得到自己撤回了什么）
+        const ghost = pushChatMessage({
+            sessionId: session.id,
+            role: "assistant",
+            content: recall.text,
+            responseBatchId,
+            isRetracted: true,
+            retractedByBatchId: responseBatchId,
+        });
+        setMessages(prev => [...prev, ghost]);
+    };
+
     const splitAndSaveAIMessages = async (
         aiResponseText: string,
         options?: {
@@ -3020,7 +3111,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
         // [变量 …] / [拉黑:…] 这类指令行先摘掉，气泡全部落库后再生效
         const directives = takeChatDirectives(aiResponseText, session);
-        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(directives.text, previousState);
+        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue, actions: roundActions } = parseAIResponse(directives.text, previousState);
         const parts = stripInvalidStickerParts(session.singleBubble ? mergeSingleBubble(rawParts) : rawParts);
         throwIfGenerationStopped(options);
 
@@ -3093,12 +3184,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 });
                 setMessages(prev => [...prev, aiMsg]);
             }
+            // 只贴了表情 / 只撤回、不说话也算这一轮的反应
+            await applyReplyRoundActions(roundActions, responseBatchId, options);
             directives.apply();
             return { hasVisible: false, stateValues, triggerCall, hasDecline };
         }
 
         // Build rich-media drafts first, then publish them in the same order as the UI display.
-        const messageDrafts: Array<{ draft: AssistantMessageDraft; afterPublish?: (message: ChatMessage) => Promise<unknown> | void }> = [];
+        const messageDrafts: Array<{ draft: AssistantMessageDraft; afterPublish?: (message: ChatMessage) => Promise<unknown> | void; tempo?: "fast" | "slow" }> = [];
         const imageReplacementTasks: Promise<unknown>[] = [];
         // 面板挂到第一条能显示它的消息上；全是拍一拍等系统样式时补空消息驮面板
         let metaIdx = filteredParts.findIndex(canCarryFoldedPanel);
@@ -3115,7 +3208,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 role: "assistant",
                 content: part.content,
                 mediaType,
-                mediaData: part.mediaData,
+                mediaData: mediaType === "quote" ? resolveQuoteMediaData(part.mediaData) : part.mediaData,
                 responseBatchId,
                 rawResponseText,
                 statusPanel: idx === metaIdx && statusPanel ? statusPanel : undefined,
@@ -3128,6 +3221,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             throwIfGenerationStopped(options);
             messageDrafts.push({
                 draft,
+                tempo: part.tempo,
                 afterPublish: isPendingChatGeneratedImageMessage(draft)
                     ? (message) => scheduleGeneratedImageReplacement(message, session.contactId, options)
                     : afterPublishEffects[idx],
@@ -3200,11 +3294,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 total: messageDrafts.length,
                 content: entry.draft.content,
                 mediaType: entry.draft.mediaType,
+                tempo: entry.tempo,
             }, !!options?.instantReveal, options?.signal);
             throwIfGenerationStopped(options);
             if (reveal.cancelled) continue;
             publishVisibleMessage(entry);
         }
+        await applyReplyRoundActions(roundActions, responseBatchId, options);
         if (imageReplacementTasks.length > 0) {
             await Promise.allSettled(imageReplacementTasks);
             throwIfGenerationStopped(options);
@@ -3648,10 +3744,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     const sendRichMessage = (mediaType: ChatMessage["mediaType"], mediaData: ChatMessage["mediaData"], content: string = "", mediaUrl?: string): boolean => {
         if (!ensureGroupSpeakPermission()) return false;
-        if (isGenerating) {
-            showChatToast("请先等待对方回复");
-            return false;
-        }
+        // 角色回复途中也能发：这条排在已经出来的气泡后面，下一轮角色看得到
+        const duringReply = isReplyRunning();
         cancelFollowUp(session.id);
         if ((mediaType === "transfer" || mediaType === "red_packet") && !session.isGroup && readChatBlock(session.id).charBlock) {
             showChatToast("对方拒收了你的消息，钱没有转出去");
@@ -3667,6 +3761,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 content: `${pokeSender} 拍了拍 ${pokeTarget}`,
                 mediaType: "poke",
                 mediaData: { pokeSender, pokeTarget },
+                ...(duringReply ? { sentDuringReply: true } : {}),
             });
             setMessages(prev => [...prev, sysMsg]);
             setPendingGenerate(true);
@@ -3683,6 +3778,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             mediaType,
             mediaData: walletDebit.mediaData,
             ...(mediaUrl ? { mediaUrl } : {}),
+            ...(duringReply ? { sentDuringReply: true } : {}),
         });
         setMessages(prev => [...prev, newMsg]);
         setPendingGenerate(true);
@@ -3876,7 +3972,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         for (const part of parts) {
                             throwIfGenerationStopped(generationGuard);
                             if (!part.content.trim() && !part.mediaType) continue;
-                            const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: parts.length, content: part.content, mediaType: part.mediaType, characterId: senderInfo.characterId }, true, generationGuard?.signal);
+                            const reveal = await paceBubbleReveal({ responseBatchId, index: revealIndex++, total: parts.length, content: part.content, mediaType: part.mediaType, characterId: senderInfo.characterId, tempo: part.tempo }, true, generationGuard?.signal);
                             throwIfGenerationStopped(generationGuard);
                             if (reveal.cancelled) continue;
                             const draft = buildAssistantMessageDraft(part, {
@@ -4240,6 +4336,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         showChatToast(decision.reason === "sleep" ? `TA睡着了，${at} 醒来再回`
             : decision.busyCheck ? `${doing}，${at} 左右再看有没有空` : `${doing}，${at} 左右再回`, 3000);
     };
+    // 这个会话此刻有一轮回复正在生成（插话判定用）
+    const isReplyRunning = () => isGeneratingRef.current && activeGenerationRuns.has(session.id);
+
     // 「触发回复」按钮和收起键盘自动触发都走这里：和按回复键发一样过闸门，
     // 否则夜里点一下TA就得醒着回，提示词里却写着「在睡觉」。判据用你最后一句（紧急词能破门）
     const triggerGatedReply = () => {
@@ -4248,6 +4347,18 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const lastUser = [...loadChatMessages(session.id)].reverse().find(m => m.role === "user");
         scheduleGatedReply(lastUser?.content || "");
     };
+
+    // 插话时点了「发送并回复」：这轮说完稍等一下再回一次，让角色接上插的话
+    useEffect(() => {
+        if (isGenerating || !replyAfterRunRef.current) return;
+        const timer = window.setTimeout(() => {
+            if (!replyAfterRunRef.current || isGeneratingRef.current) return;
+            replyAfterRunRef.current = false;
+            triggerGatedReply();
+        }, 700);
+        return () => window.clearTimeout(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isGenerating]);
 
     // 收起键盘（或关掉表情/加号面板）并安静 N 秒后自动触发回复，
     // 等价于替用户点一次「触发回复」。判定全在 hook 内部，配置关掉后与手动模式一致。
@@ -4320,10 +4431,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     const handleSendText = (text: string, options?: { autoReply?: boolean }): boolean => {
         if (!ensureGroupSpeakPermission()) return false;
-        if (isGenerating) {
-            showChatToast("请先等待对方回复");
-            return false;
-        }
         const trimmed = text.trim();
         if (!trimmed) return false;
         if (extractXhsNoteUrls(trimmed).length > 3) {
@@ -4344,6 +4451,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setQuotingMessage(null);
 
         const commitSendText = (currentText: string) => {
+            // 角色回复途中插话：照常落库（排在已出来的气泡后面），本轮不打断，下一轮角色看得到。
+            // 点的是「发送并回复」就记下来，这轮说完自动再回一次
+            const duringReply = isReplyRunning();
+            const autoReply = !!options?.autoReply && !duringReply;
+            if (duringReply && options?.autoReply) replyAfterRunRef.current = true;
             // 掷骰子：整条消息就是骰子图标时，发骰子气泡（内容仅图标），
             // 点数由系统旁白公布——避免结果挂在 user 消息上被角色模仿格式
             const diceOnly = !isQuoting && isDiceOnlyMessage(currentText);
@@ -4355,6 +4467,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 content: currentText,
                 mediaType: diceOnly ? "dice" : isQuoting ? "quote" : undefined,
                 mediaData: diceOnly ? { diceFace } : isQuoting ? quoteData : undefined,
+                ...(duringReply ? { sentDuringReply: true } : {}),
             });
 
             setMessages(prev => [...prev, newMsg]);
@@ -4379,9 +4492,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             // 都在消息真正写入后触发，避免回复基于旧上下文）
             if (xhsCards.length) {
                 void Promise.all(xhsCards.map(hydrateXhsNote)).then(() => {
-                    if (options?.autoReply && loadChatMessages(session.id).some(m => m.id === newMsg.id)) void scheduleGatedReply(currentText);
+                    if (autoReply && loadChatMessages(session.id).some(m => m.id === newMsg.id)) void scheduleGatedReply(currentText);
                 });
-            } else if (options?.autoReply) scheduleGatedReply(currentText);
+            } else if (autoReply) scheduleGatedReply(currentText);
         };
 
         // 聊天插件织入点 user.beforeSend：无插件时走原同步路径，
@@ -4803,6 +4916,30 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setOfflineTurns(loadChatOfflineTurns(session.id));
     };
 
+    // 被重 Roll 掉的那几轮贴过的表情、撤回过的消息还原（只动留下来的消息）
+    const revertRoundReactions = (removed: ChatMessage[]) => {
+        const batchIds = new Set(removed.map(m => m.responseBatchId).filter((id): id is string => !!id));
+        if (batchIds.size === 0) return;
+        const removedIds = new Set(removed.map(m => m.id));
+        const changed: ChatMessage[] = [];
+        for (const msg of loadChatMessages(session.id)) {
+            if (removedIds.has(msg.id)) continue;
+            const keptReactions = msg.reactions?.filter(r => !r.responseBatchId || !batchIds.has(r.responseBatchId));
+            const reactionsChanged = !!msg.reactions && keptReactions?.length !== msg.reactions.length;
+            const unretract = !!msg.retractedByBatchId && batchIds.has(msg.retractedByBatchId);
+            if (!reactionsChanged && !unretract) continue;
+            const next = updateChatMessage(msg.id, {
+                ...(reactionsChanged ? { reactions: keptReactions?.length ? keptReactions : undefined } : {}),
+                ...(unretract ? { isRetracted: false, retractedByBatchId: undefined } : {}),
+            });
+            if (next) changed.push(next);
+        }
+        if (changed.length) {
+            const byId = new Map(changed.map(m => [m.id, m]));
+            setMessages(prev => prev.map(m => byId.get(m.id) || m));
+        }
+    };
+
     const handleRetry = async (msgId: string, request?: RerollRequest) => {
         if (isGeneratingRef.current && activeGenerationRuns.has(session.id)) {
             showChatToast("请先等待对方回复");
@@ -4848,6 +4985,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             errorPrefix: "重试失败",
             onSaved: () => {
                 deleteChatMessagesByIds(session.id, doomedIds);
+                revertRoundReactions(removedTail);
                 removedOldMessages = true;
             },
             onDecline: triggerReply,
@@ -5959,7 +6097,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         {session.isGroup
                             ? `${session.groupName || "群聊"}(${(session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1)})`
                             : (session.alias || character?.name || `User_${session.contactId.slice(-4)}`)}
-                        {(isGenerating || isOfflineGenerating) && (
+                        {((isGenerating && (!typingHold || offlineMode)) || isOfflineGenerating) && (
                             <span className="chat-typing-indicator">
                                 {offlineMode ? "线下生成中" : "对方正在输入"}<span className="chat-typing-dots"><i/><i/><i/></span>
                             </span>
@@ -6581,6 +6719,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 defaultTranslationExpanded={session.collapseBilingualTranslation !== false ? false : true}
                                             />
                                         </div>
+                                        {/* 角色贴的表情回应：挂在气泡下沿，放气泡外面免得被 overflow 裁掉 */}
+                                        {msg.reactions && msg.reactions.length > 0 && (
+                                            <div className="chat-msg-reactions" title={`${character?.name || "对方"}贴了表情`}>
+                                                {msg.reactions.map(r => <span key={r.emoji}>{r.emoji}</span>)}
+                                            </div>
+                                        )}
                                         {/* 插件「气泡旁边」坑位放在气泡外层：气泡本身 overflow:hidden，放里面会被裁掉 */}
                                         <ChatPluginSlot name="message.side" slotProps={{ sessionId: msg.sessionId, message: msg }} className="chat-plugin-message-side" />
                                         </div>}

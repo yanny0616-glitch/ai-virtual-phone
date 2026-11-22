@@ -1163,6 +1163,7 @@ export async function parseAndSaveResponse(
             characterId: options?.senderCharacterId || (sess?.isGroup ? undefined : sess?.contactId),
             responseBatchId, index: i, total: filteredParts.length,
             content: generatedPart.content, mediaType: generatedPart.mediaType,
+            tempo: filteredParts[i].tempo,
             streamed: false, delayMs: defaultDelay, cancelled: false,
         });
         if (reveal.cancelled) continue;

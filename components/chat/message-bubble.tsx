@@ -120,7 +120,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         case "dice":
             return <DiceBubble msg={msg} />;
         case "quote":
-            return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} />;
+            return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} charName={charName} userName={userName} />;
         case "music_share":
             return <MusicShareBubble msg={msg} onPlay={onMusicPlay} />;
         case "media_file":
@@ -1516,12 +1516,32 @@ function StickerBubble({ msg, characterId }: { msg: ChatMessage; characterId?: s
 
 // ── Quote ─────────────────────────────
 
-function QuoteBubble({ msg, displayContent, defaultTranslationExpanded = false }: { msg: ChatMessage; displayContent?: string; defaultTranslationExpanded?: boolean }) {
+function QuoteBubble({ msg, displayContent, defaultTranslationExpanded = false, charName, userName }: { msg: ChatMessage; displayContent?: string; defaultTranslationExpanded?: boolean; charName?: string; userName?: string }) {
     const d = msg.mediaData;
+    const targetId = d?.quoteMessageId;
+    // 只给角色发的引用标「谁说的」：用户自己的引用一直只显示原文，保持原样
+    const who = msg.role === "assistant" && targetId && d?.quoteRole
+        ? (d.quoteRole === "user" ? (userName || "你") : d.quoteRole === "assistant" ? (charName || "") : "")
+        : "";
+    const jumpToTarget = (e: React.MouseEvent) => {
+        if (!targetId || typeof document === "undefined") return;
+        const el = document.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(targetId)}"]`);
+        if (!el) return;
+        e.stopPropagation();
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.remove("chat-msg-flash");
+        void el.offsetWidth;
+        el.classList.add("chat-msg-flash");
+        window.setTimeout(() => el.classList.remove("chat-msg-flash"), 1300);
+    };
     return (
         <div className="chat-quote-message max-w-full">
             {d?.quotePreview && (
-                <div className="chat-quote-preview bg-black/[0.06] border-l-[3px] border-l-black/15 px-2.5 py-1.5 ts-12 text-[var(--c-icon)] mb-1.5 rounded-r-[6px] truncate max-w-full">
+                <div
+                    className="chat-quote-preview bg-black/[0.06] border-l-[3px] border-l-black/15 px-2.5 py-1.5 ts-12 text-[var(--c-icon)] mb-1.5 rounded-r-[6px] truncate max-w-full"
+                    {...(targetId ? { "data-linked": "", onClick: jumpToTarget } : {})}
+                >
+                    {who && <span className="chat-quote-who">{who}：</span>}
                     {d.quotePreview}
                 </div>
             )}

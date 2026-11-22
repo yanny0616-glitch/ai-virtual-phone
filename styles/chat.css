@@ -7811,3 +7811,41 @@
 .chat-plugin-app-panel > * {
   pointer-events: auto;
 }
+
+/* ── 角色贴在消息上的表情回应 ── */
+.chat-msg-reactions {
+  align-self: flex-end;
+  display: inline-flex;
+  gap: 1px;
+  margin: -7px 4px 0;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--c-card, #fff);
+  border: 1px solid var(--c-card-border, rgba(0,0,0,0.06));
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  font-size: 11px;
+  line-height: 15px;
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+.chat-msg-wrapper[data-role="assistant"] .chat-msg-reactions,
+.chat-msg-wrapper[data-role="character"] .chat-msg-reactions {
+  align-self: flex-start;
+}
+
+/* 引用块：对准了具体消息时可以点，前面标出是谁说的 */
+.chat-quote-preview[data-linked] {
+  cursor: pointer;
+}
+.chat-quote-preview .chat-quote-who {
+  font-weight: 500;
+  margin-right: 2px;
+}
+.chat-msg-flash {
+  animation: chat-msg-flash 1.2s ease-out;
+}
+@keyframes chat-msg-flash {
+  0%, 30% { filter: brightness(0.86); }
+  100% { filter: none; }
+}

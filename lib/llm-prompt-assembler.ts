@@ -165,6 +165,16 @@ type PromptBlock = {
 };
 
 
+/** 历史消息的旁注：用户是在角色回复途中插的话、角色给这条贴过表情。撤回另有提示，不在这里。 */
+function describeHistoryAnnotations(msg: ChatMessage, userName: string, characterName: string): string[] {
+    if (msg.isRetracted) return [];
+    const notes: string[] = [];
+    if (msg.role === "user" && msg.sentDuringReply) notes.push(`（上面这条是${userName}在${characterName}还在回复时插进来的）`);
+    const emojis = (msg.reactions || []).map(r => r.emoji).filter(Boolean);
+    if (emojis.length) notes.push(`（${characterName}给上面这条贴了表情 ${emojis.join(" ")}）`);
+    return notes;
+}
+
 function resolveHistoryPromptRole(msg: ChatMessage): Exclude<LLMMessageRole, "tool"> {
     // appHistoryRole：显示身份与记忆身份分离（自定义APP卡片与现实桥文本消息都在用）
     const appHistoryRole = msg.mediaData?.appHistoryRole;
@@ -595,6 +605,18 @@ function pushChronologicalShortTermBlocks(params: {
             imageUrl,
             imageUrls: visionEnabled ? getXhsPromptImages(msg) : undefined,
         });
+
+        for (const note of describeHistoryAnnotations(msg, resolvedUserName, characterName)) {
+            blocks.push({
+                text: note,
+                role: "system",
+                depth,
+                order: 1001,
+                marker: `History [${item.historyIndex}] (note)`,
+                fromHistory: true,
+                historyRole: msg.role,
+            });
+        }
 
         if (msg.isRetracted) {
             const who = msg.role === "user" ? resolvedUserName : (msg.role === "assistant" ? characterName : "");
@@ -1065,6 +1087,18 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 imageUrl,
                 imageUrls: visionEnabled ? getXhsPromptImages(msg) : undefined,
             });
+
+            for (const note of describeHistoryAnnotations(msg, resolvedUserName, character.name)) {
+                blocks.push({
+                    text: note,
+                    role: "system",
+                    depth: distFromBottom,
+                    order: 1001,
+                    marker: `History [${distFromBottom}] (note)`,
+                    fromHistory: true,
+                    historyRole: msg.role,
+                });
+            }
 
             // Retracted: keep the original message above, then append a system notice
             if (msg.isRetracted) {

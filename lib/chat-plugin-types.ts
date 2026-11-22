@@ -147,8 +147,16 @@ export type MessageBeforeRevealPayload = {
     mediaType?: string;
     /** 流式预览已经把内容展示过一遍（此时宿主默认不再等待） */
     streamed: boolean;
+    /** 气泡节奏：模型在这条开头写了 [快] → "fast"，[慢] → "slow"，没写为 undefined（普通） */
+    tempo?: "fast" | "slow";
     /** 展示前等待的毫秒数，可改写；宿主在 transform 之后才开始等 */
     delayMs: number;
+    /** 可选，delayMs 的拆分（前台聊天页按它显示/隐藏「对方正在输入」，后台只看 delayMs 总数）：
+     *  先沉默 pauseMs（不显示正在输入），再打字；有 stallMs 时打到 stallAtMs 处停一下（隐藏输入态）再打完。
+     *  pauseMs + stallMs 超过 delayMs 时宿主忽略拆分，只按 delayMs 等。 */
+    pauseMs?: number;
+    stallAtMs?: number;
+    stallMs?: number;
     /** 置为 true 这条气泡不展示也不落库 */
     cancelled: boolean;
 };

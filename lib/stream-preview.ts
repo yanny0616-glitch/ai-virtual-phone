@@ -67,6 +67,10 @@ export function cleanStreamText(raw: string, options?: { stripXmlTags?: readonly
     // 引用壳只隐藏标签，保留后面的实际回复。
     text = text.replace(/\[引用\s*[:：][^\]\r\n]*\]/g, "");
     text = text.replace(/\[引用\s*[:：][^\]\r\n]*$/g, "");
+    // 节奏前缀、撤回 / 表情回应指令不出现在预览里（未闭合的也藏起来）
+    text = text.replace(/\[(?:快|慢)\]/g, "");
+    text = text.replace(/\[(?:快|慢)$/g, "");
+    text = text.replace(/\[(?:撤回|回应)\s*[:：][^\]\r\n]*\]?/g, "");
     // 动作标签（朋友圈/发帖/静默等）与拍一拍通知不进入正文预览。
     text = text.replace(/\[(?:发朋友圈|发微博|发帖|静默|骰子|领取红包|拒收红包|接受转账|领取转账|拒收转账|接受代付|拒绝代付)[^\]\r\n]*\]/g, "");
     text = text.replace(/\[[^\]\r\n]{0,32}拍了拍[^\]\r\n]*\]/g, "");

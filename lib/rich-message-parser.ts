@@ -22,13 +22,19 @@ import {
     splitCustomAppDirectiveArgs,
     type RegisteredCustomAppChatDirective,
 } from "./custom-app-chat-directives";
+import { extractReplyRoundActions, type ReplyRoundAction } from "./chat-reply-actions";
+import { rejoinBrokenLines, stripFormatMetaTalk } from "./reply-format-repair";
 
 // ── Types ──────────────────────────────────────────────
+
+/** 气泡节奏：模型在气泡开头写 [快] / [慢]，没写就是普通 */
+export type BubbleTempo = "fast" | "slow";
 
 export interface ParsedMessagePart {
     content: string;
     mediaType?: ChatMessage["mediaType"];
     mediaData?: ChatMessage["mediaData"];
+    tempo?: BubbleTempo;
 }
 
 export interface ParsedAIResponse {
@@ -39,6 +45,8 @@ export interface ParsedAIResponse {
     freshStateValues: StateValue[];
     statusPanel: string;
     innerMonologue: string;
+    /** 不出气泡的动作：撤回、表情回应。没处理它的调用方等于静默丢弃，不会漏成文字 */
+    actions?: ReplyRoundAction[];
 }
 
 // ── Rich-media patterns (non-global, for single match with index) ──
@@ -639,8 +647,9 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
     const status = extractBracketBlock(actionCleaned, "状态栏");
     const mono = extractBracketBlock(status.cleaned, "内心");
 
-    // 2.1. Collapse residual blank lines left by tag extraction
-    const postCleaned = mono.cleaned.replace(/\n{3,}/g, "\n\n").trim();
+    // 2.1. 摘掉撤回 / 表情回应指令，删掉写进正文的格式说明，再压缩残留空行
+    const roundActions = extractReplyRoundActions(mono.cleaned);
+    const postCleaned = stripFormatMetaTalk(roundActions.text).replace(/\n{3,}/g, "\n\n").trim();
 
     // 2.5. Merge [引用:...] with following reply text even if separated by newlines
     const mergedText = postCleaned.replace(/(\[引用[：:][^\]]+\])\s*\n+\s*/g, "$1");
@@ -655,8 +664,17 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
 
     // 4. Parse each segment
     const parts: ParsedMessagePart[] = [];
-    for (const seg of segments) {
+    for (const rawSeg of segments) {
+        // 节奏前缀 [快] / [慢]：剥掉，挂到这一段产出的所有气泡上
+        const tempoMatch = rawSeg.match(/\[(快|慢)\]/);
+        const seg = tempoMatch ? rawSeg.replace(/\[(?:快|慢)\]\s*/g, "").trim() : rawSeg;
+        if (!seg) continue;
+        const start = parts.length;
         parseSegment(seg, parts);
+        if (tempoMatch) {
+            const tempo: BubbleTempo = tempoMatch[1] === "快" ? "fast" : "slow";
+            for (let i = start; i < parts.length; i += 1) parts[i].tempo = tempo;
+        }
     }
 
     // 5. Restore HTML block placeholders and keep unknown bracket protocols as plain text.
@@ -667,7 +685,9 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
     //    part empty → filtered out → inner monologue lands on the first real reply.
     const cleaned = parts.map(p => {
         if (p.mediaType) return p;
-        const display = stripTextToolDirectives(restore(p.content));
+        // 被换行切断的半句接回去；含 HTML 占位的段不碰
+        const joined = p.content.includes("\x00") ? p.content : rejoinBrokenLines(p.content);
+        const display = stripTextToolDirectives(restore(joined));
         const speech = extractVoiceExpression(display);
         return { ...p, content: speech.displayText, ...(speech.ttsText ? { mediaData: { ...p.mediaData, ttsText: speech.ttsText } } : {}) };
     }).filter(p => p.mediaType === "audio" && p.mediaData?.ttsText
@@ -680,5 +700,6 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
         freshStateValues: parsedSV.stateValues,
         statusPanel: restore(status.content),
         innerMonologue: restore(mono.content),
+        ...(roundActions.actions.length ? { actions: roundActions.actions } : {}),
     };
 }

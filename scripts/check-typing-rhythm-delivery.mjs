@@ -23,6 +23,7 @@ async function scenario({silent = true, durable = true, cps=3, cancel=false, fai
   parseAIResponse:()=>({parts:[{content:'第一条'},{content:'这是一条十二字的消息啊呀'}],stateValues:[],freshStateValues:[]}),
   getStatusRegionConfig:()=>({}),isCustomStatusRegionActive:()=>false,
   createPendingChatGeneratedImageData:()=>({}),isPendingChatGeneratedImageMessage:()=>false,
+  takeChatDirectives:text=>({text,apply:()=>{}}),
  });
  // Avoid the unrelated notification module import; its body is tested elsewhere.
  const code=source.replace('const { sendBrowserNotification } = await import("./browser-notification");','const sendBrowserNotification = () => {};');
@@ -62,8 +63,8 @@ async function scenario({silent = true, durable = true, cps=3, cancel=false, fai
  assert.ok(start>=0 && end>start);
  let fn;plugin.setup({system:{settings:{get:k=>({charsPerSec:3,jitter:0}[k]??plugin.manifest.settings.find(s=>s.key===k)?.default)}},hooks:{transform:(_p,f)=>{fn=f;return()=>{};}}});
  const delays=[];
- const c=vm.createContext({session:{id:'s',contactId:'c'},getChatPluginRuntime:()=>({ensureReady:async()=>{}}),runChatPluginTransform:async(_p,p)=>fn(p),abortableDelay:async ms=>delays.push(ms)});
+ const c=vm.createContext({session:{id:'s',contactId:'c'},getChatPluginRuntime:()=>({ensureReady:async()=>{}}),runChatPluginTransform:async(_p,p)=>fn(p),abortableDelay:async ms=>delays.push(ms),setTypingHold:()=>{}});
  vm.runInContext(js(src.slice(start,end))+'\nglobalThis.pace=paceBubbleReveal;',c);
  await c.pace({content:'这是一条十二字的消息啊呀',index:1,total:2,responseBatchId:'b'},false);
- assert.deepEqual(delays,[4000]);console.log('PASS real foreground non-streamed hook applies 3 chars/sec');
+ assert.equal(delays.reduce((a,b)=>a+b,0),4000);assert.deepEqual(delays,[800,3200]);console.log('PASS real foreground non-streamed hook applies 3 chars/sec (pause + typing)');
 }

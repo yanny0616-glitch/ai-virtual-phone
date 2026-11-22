@@ -145,6 +145,12 @@ export type ChatMessage = {
     toolExecutionId?: string; // Links visible tool attachments to their persisted tool result
     editableResponseText?: string; // Processed text shown in the reply editor
     isRetracted?: boolean;
+    /** 角色用 [撤回:…] 撤回这条时记下是哪一轮回复干的；那一轮被重 Roll 掉就把撤回还原 */
+    retractedByBatchId?: string;
+    /** 角色给这条消息贴的表情回应（[回应:😂|片段]），responseBatchId 指向贴表情的那一轮 */
+    reactions?: { emoji: string; responseBatchId?: string }[];
+    /** 用户在角色还在回复（生成中）时插进来的话 */
+    sentDuringReply?: boolean;
     mediaType?: "image" | "audio" | "video"
         | "red_packet" | "transfer" | "location"
         | "poke" | "sticker" | "quote" | "dice"
@@ -2115,7 +2121,7 @@ export async function persistMessageVoiceAudio(
 
 export function updateChatMessage(
     messageId: string,
-    patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData" | "stateValues" | "freshStateValues">>,
+    patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData" | "stateValues" | "freshStateValues" | "reactions" | "isRetracted" | "retractedByBatchId">>,
 ): ChatMessage | null {
     const idx = _messagesCache.findIndex(m => m.id === messageId);
     if (idx === -1) return null;

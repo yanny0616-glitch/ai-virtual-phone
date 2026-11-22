@@ -11,10 +11,10 @@ export const BUILTIN_PRESET_VERSION = 264; // 升版本会用出厂内容重写�
 /** 只增不改的出厂条目补丁号。加了新的出厂条目时 +1，并把它的 identifier 写进
  *  PATCHABLE_PROMPT_IDS。和 BUILTIN_PRESET_VERSION 的区别是它一条已有内容都不动，
  *  所以改过内置预设的用户也能拿到新条目，不会被打回出厂。 */
-export const BUILTIN_PROMPT_PATCH_VERSION = 3;
+export const BUILTIN_PROMPT_PATCH_VERSION = 4;
 
 /** 必要入口清单，供内置预设补丁和用户主动「一键补齐功能条目」共用。仅列可独立补齐的接入项。 */
-export const PATCHABLE_PROMPT_IDS = ["custom_app_context", "custom_app_context_group", "chat_variables", "chat_block_actions", "block_reconsider_prompt", "friend_verify_prompt", "reply_style", "call_extras", "call_summary_prompt"];
+export const PATCHABLE_PROMPT_IDS = ["custom_app_context", "custom_app_context_group", "chat_variables", "chat_block_actions", "block_reconsider_prompt", "friend_verify_prompt", "reply_style", "call_extras", "call_summary_prompt", "chat_rhythm"];
 
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
@@ -142,6 +142,7 @@ export function createBuiltinPreset(): PresetConfig {
             { identifier: "reply_style", enabled: true },
             { identifier: "call_extras", enabled: true },
             { identifier: "call_summary_prompt", enabled: true },
+            { identifier: "chat_rhythm", enabled: true },
         ],
 
         prompts: [
@@ -1918,6 +1919,33 @@ export function createBuiltinPreset(): PresetConfig {
                 injection_depth: 0,
                 enabled: true,
                 tags: ["chat"],
+            },
+            {
+                identifier: "chat_rhythm",
+                name: "▸ 接住节奏（撤回 / 贴表情 / 快慢）",
+                role: "system",
+                content: [
+                    "<chat_rhythm>",
+                    "## 接住对方的节奏",
+                    "- 对方回得很短（嗯、好、哈哈、一个表情）时，你也轻轻接一两句，不要突然长篇大论或连环追问。",
+                    "- 对方连着发了好几条时，可以分别回应其中几条；要回应特定那一条时用 [引用:那条里的原话]回复。",
+                    "- 对方在你还没说完时插了话（历史里会注明），先接住插的那句，再决定要不要把没说完的说完。",
+                    "- 对方在倾诉、情绪上来时，先接住情绪，别急着讲道理或转话题。",
+                    "- 日常闲聊每条气泡尽量短，一条只说一件事。",
+                    "",
+                    "## 打字快慢（可选）",
+                    "- 气泡开头可以加 [快] 或 [慢]：脱口而出、秒回、急着说的用 [快]；犹豫、斟酌、不好意思说出口的用 [慢]。大多数气泡不用加。",
+                    "",
+                    "## 撤回与贴表情（可选，少用）",
+                    "- [撤回:原话]：撤回你自己刚发的一条，原话照抄那条的文字。只在说错话、发了又后悔时用，一轮最多一次。对方会看到「撤回了一条消息」。",
+                    "- [回应:表情|对方原话片段]：给对方的某条消息贴一个 emoji，表情只能是一个 emoji；不写片段就是贴在对方最新一条上。贴表情不占气泡，可以和文字一起发；觉得不用说话时也可以只贴表情。",
+                    "- 这两个指令单独占一行，前后用空行隔开。",
+                    "</chat_rhythm>",
+                ].join("\n"),
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["chat", "text"],
             },
             {
                 identifier: "call_summary_prompt",
